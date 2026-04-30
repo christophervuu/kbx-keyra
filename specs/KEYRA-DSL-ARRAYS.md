@@ -21,16 +21,16 @@ This spec defines:
 
 ### 1.1 When Arrays Are Needed
 
-| Scenario | Example |
-|----------|---------|
-| Source array → target array (1:1 transform) | `items[]` → `lineItems[]` |
-| Source array → target array (filtered subset) | Only items with `discountAmount > 0` |
-| Source array → single value | Join `tags[]` into a comma-separated string |
-| Multiple source arrays → one target array | `domesticAddresses[]` + `internationalAddresses[]` → `allAddresses[]` |
-| Individual scalars → target array | `primaryPhone`, `mobilePhone`, `faxNumber` → `contactMethods[]` |
-| Cross-reference two arrays by key | `lineItems[]` + `taxLines[]` joined on `lineId` → `orderLines[]` |
-| Scalar injected into every array element | `orderId` stamped onto every `lineItem` |
-| Nested arrays | `departments[].employees[]` → `divisions[].staff[]` |
+| Scenario                                      | Example                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| Source array → target array (1:1 transform)   | `items[]` → `lineItems[]`                                             |
+| Source array → target array (filtered subset) | Only items with `discountAmount > 0`                                  |
+| Source array → single value                   | Join `tags[]` into a comma-separated string                           |
+| Multiple source arrays → one target array     | `domesticAddresses[]` + `internationalAddresses[]` → `allAddresses[]` |
+| Individual scalars → target array             | `primaryPhone`, `mobilePhone`, `faxNumber` → `contactMethods[]`       |
+| Cross-reference two arrays by key             | `lineItems[]` + `taxLines[]` joined on `lineId` → `orderLines[]`      |
+| Scalar injected into every array element      | `orderId` stamped onto every `lineItem`                               |
+| Nested arrays                                 | `departments[].employees[]` → `divisions[].staff[]`                   |
 
 ---
 
@@ -403,6 +403,8 @@ map(source("lineItems"), {
 
 If `find()` returns `null` (no matching tax line), `get()` propagates null, and `default()` falls back to `0`.
 
+**Performance note:** `find()` performs a linear scan (O(n)) on each invocation. When used inside `map()` for cross-array lookups (§6.7 pattern), the total cost is O(n × m) where n = outer array length and m = lookup array length. For typical integration data (hundreds of line items, hundreds of tax lines), this is well within the <2s preview target. If large-array cross-referencing becomes a real performance concern, a future `indexBy()` function (pre-builds a hash map) would reduce lookups to O(1) per element.
+
 ---
 
 ### 3.4 `get(object, path): any`
@@ -679,6 +681,8 @@ count(null)                                → 0
 count(source("emptyArray"))                → 0 (if emptyArray is [])
 ```
 
+**Performance note:** `count()` itself is O(1) (array length). However, when composed with `filter()` or nested inside `map()`, the total cost is the product of array sizes. For example, `count(filter(source("items"), ...))` inside a `map()` over 10,000 elements iterates the filter for each outer element. For v1.0, no performance guardrails are enforced — schemas of expected size (up to 500 rules, arrays of hundreds of elements) should perform well within the <2s preview target.
+
 ---
 
 ### 3.9 `first(array): any`
@@ -929,6 +933,8 @@ This section consolidates all null/empty behaviors in one reference table.
 - `array()` includes null arguments because the BA explicitly listed each element — omitting one silently changes the array's structure.
 - `join()` skips null elements because inserting the string "null" into a joined result is almost never desired.
 
+**Convenience function consideration:** The pattern `not(isNull(item("field")))` is extremely common in `filter()` conditions (see §6.4). A future minor version may introduce `isNotNull(value): boolean` as syntactic sugar. For v1.0, the verbose form is the only option — but the expression builder UI can offer "Filter out nulls" as a one-click preset that generates the `not(isNull(...))` pattern automatically.
+
 ---
 
 ## 6. Patterns and Recipes
@@ -1098,6 +1104,22 @@ map(source("items"), {
     item("name")
   )
 })
+```
+
+### 6.13 Split a String into an Array
+
+Source has a delimited string, target expects an array.
+
+```
+// source("tags") = "electronics, sale, featured"
+map(split(source("tags"), ","), trim(item("")))
+// → ["electronics", "sale", "featured"]
+```
+
+With transformation:
+```
+map(split(source("tags"), ","), upper(trim(item(""))))
+// → ["ELECTRONICS", "SALE", "FEATURED"]
 ```
 
 ---

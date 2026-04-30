@@ -23,3 +23,12 @@ This file must be kept current. When an architecture document is created or mean
 - Update the `Last Updated` date when a document is meaningfully changed.
 - Do not remove rows without an explicit architecture task authorizing the removal.
 - Documents are created by the spec agent during planning and updated by the task agent during execution of architecture tasks.
+
+---
+## Reference Specifications
+
+| Document | Path | Covers |
+|----------|------|--------|
+| Product & Technical Spec | `specs/PRODUCT-TECHNICAL.md` | Full product requirements, screen specs, engine overview, backend architecture |
+| DSL Specification | `specs/KEYRA-DSL-SPECIFICATION.md` | DSL grammar, function catalog, type system, error codes |
+| DSL Arrays | `specs/KEYRA-DSL-ARRAYS.md` | Array scoping, map/filter/find, nested contexts |

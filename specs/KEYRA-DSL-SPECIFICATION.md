@@ -146,14 +146,14 @@ concat(source("firstName"), cast(source("age"), "string"))
 
 `cast(value, targetType)` supports these conversions:
 
-| From ↓ / To → | `"string"` | `"number"` | `"boolean"` |
-|----------------|------------|------------|-------------|
-| `string` | No-op | Parses numeric string. `KEYRA-E020` if not parseable. | `"true"` → `true`, `"false"` → `false`, `""` → `false`, any other → `true` |
-| `number` | Formats as string (`42` → `"42"`, `3.14` → `"3.14"`) | No-op | `0` → `false`, any other → `true` |
-| `boolean` | `true` → `"true"`, `false` → `"false"` | `true` → `1`, `false` → `0` | No-op |
-| `null` | Returns `null` | Returns `null` | Returns `null` |
-| `array` | `KEYRA-E020` | `KEYRA-E020` | `KEYRA-E020` |
-| `object` | `KEYRA-E020` | `KEYRA-E020` | `KEYRA-E020` |
+| From ↓ / To → | `"string"`                                           | `"number"`                                            | `"boolean"`                                                                |
+| ------------- | ---------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| `string`      | No-op                                                | Parses numeric string. `KEYRA-E020` if not parseable. | `"true"` → `true`, `"false"` → `false`, `""` → `false`, any other → `true` |
+| `number`      | Formats as string (`42` → `"42"`, `3.14` → `"3.14"`) | No-op                                                 | `0` → `false`, any other → `true`                                          |
+| `boolean`     | `true` → `"true"`, `false` → `"false"`               | `true` → `1`, `false` → `0`                           | No-op                                                                      |
+| `null`        | Returns `null`                                       | Returns `null`                                        | Returns `null`                                                             |
+| `array`       | `KEYRA-E020`                                         | `KEYRA-E020`                                          | `KEYRA-E020`                                                               |
+| `object`      | `KEYRA-E020`                                         | `KEYRA-E020`                                          | `KEYRA-E020`                                                               |
 
 ### 3.4 Null Propagation
 
@@ -268,6 +268,8 @@ static(true)                               → true
 static(null)                               → null
 ```
 
+**Style guidance:** Use `static()` in the **rule list** to make intent clear — it signals "this target field always gets this value, regardless of source data." Use bare literals (e.g., `"USD"`) as **arguments to other functions** (e.g., `default(source("currency"), "USD")`). The expression builder UI enforces this convention: when a BA creates a rule with a hardcoded value and no transforms, it generates `static("value")`. When a literal is used as a function argument, it remains a bare literal.
+
 ---
 
 ### 4.2 Type Conversion
@@ -295,6 +297,8 @@ cast("not-a-number", "number")             → KEYRA-E020
 cast(source("items"), "string")            → KEYRA-E020 (array → string)
 cast(null, "string")                       → null
 ```
+
+**Implementation note:** Although `targetType` is a string literal in the DSL grammar (preserving the "everything is a literal or function call" principle), it is treated as an enum (`'string' | 'number' | 'boolean'`) in the engine's TypeScript implementation. The expression builder UI presents a dropdown for this argument — not a free-text field — making invalid values impossible through the guided interface. The raw editor relies on `KEYRA-E021` validation to catch typos instantly.
 
 ---
 
@@ -686,6 +690,30 @@ length(source("orderId"))                  → 16
 length(null)                               → null
 ```
 
+#### `split(value: string, separator: string): array`
+
+Split a string into an array of substrings, divided by `separator`.
+
+- **Parameters:**
+  - `value` — the string to split
+  - `separator` — the delimiter string (literal matching, not regex)
+- **Returns:** An array of strings.
+- **Null behavior:** Null `value` returns `null`. Null `separator` returns `null`.
+- **Errors:** `KEYRA-E005` if either non-null argument is not a string.
+
+**Examples:**
+```
+split("electronics,sale,featured", ",")     → ["electronics", "sale", "featured"]
+split("hello", ",")                         → ["hello"] (separator not found)
+split("", ",")                              → [""]
+split("a--b--c", "--")                      → ["a", "b", "c"]
+split(null, ",")                            → null
+
+// Common pattern: split then transform
+map(split(source("tags"), ","), trim(item("")))
+// "electronics, sale, featured" → ["electronics", "sale", "featured"]
+```
+
 ---
 
 ### 4.7 Date Operations
@@ -787,21 +815,22 @@ abs(42)                                    → 42
 
 Array operations are defined in the companion spec `specs/KEYRA-DSL-ARRAYS.md`. This section provides function signatures for reference.
 
-| Function | Signature | Brief Description |
-|----------|-----------|-------------------|
-| `map` | `map(array: array, template_or_expression): array` | Transform each element. `item()` available in template/expression. |
-| `filter` | `filter(array: array, condition: boolean): array` | Select elements where condition is true. |
-| `find` | `find(array: array, condition: boolean): any` | First element matching condition. Returns `null` if no match. |
-| `get` | `get(object: any, path: string): any` | Read a field from any in-memory object value. |
-| `array` | `array(...elements: any[]): array` | Build an array from individual expressions. |
-| `merge` | `merge(...arrays: array[]): array` | Combine multiple arrays into one. Null arrays treated as empty. |
-| `flatten` | `flatten(array: array): array` | Flatten one level of nesting. |
-| `count` | `count(array: array): number` | Return element count. Returns `0` for null. |
-| `first` | `first(array: array): any` | Return first element, or `null` if empty. |
-| `nth` | `nth(array: array, index: number): any` | Element at index. Negative = from end. |
-| `join` | `join(array: array, separator: string): string` | Join string elements with separator. Skips nulls. Returns `""` for empty. |
-| `item` | `item(path: string): any` | Current element in `map()`/`filter()`/`find()`. |
-| `parent` | `parent(path: string): any` | Outer element in nested array contexts. |
+| Function  | Signature                                          | Brief Description                                                         |
+| --------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
+| `map`     | `map(array: array, template_or_expression): array` | Transform each element. `item()` available in template/expression.        |
+| `filter`  | `filter(array: array, condition: boolean): array`  | Select elements where condition is true.                                  |
+| `find`    | `find(array: array, condition: boolean): any`      | First element matching condition. Returns `null` if no match.             |
+| `get`     | `get(object: any, path: string): any`              | Read a field from any in-memory object value.                             |
+| `array`   | `array(...elements: any[]): array`                 | Build an array from individual expressions.                               |
+| `merge`   | `merge(...arrays: array[]): array`                 | Combine multiple arrays into one. Null arrays treated as empty.           |
+| `flatten` | `flatten(array: array): array`                     | Flatten one level of nesting.                                             |
+| `count`   | `count(array: array): number`                      | Return element count. Returns `0` for null.                               |
+| `first`   | `first(array: array): any`                         | Return first element, or `null` if empty.                                 |
+| `nth`     | `nth(array: array, index: number): any`            | Element at index. Negative = from end.                                    |
+| `join`    | `join(array: array, separator: string): string`    | Join string elements with separator. Skips nulls. Returns `""` for empty. |
+| `item`    | `item(path: string): any`                          | Current element in `map()`/`filter()`/`find()`.                           |
+| `parent`  | `parent(path: string): any`                        | Outer element in nested array contexts.                                   |
+| `split`   | `split(value: string, separator: string): array`   | Split a string into an array by delimiter.                                |
 
 #### `join` Detail (included here because it returns `string`, not `array`)
 

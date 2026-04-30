@@ -26,6 +26,7 @@ src/
     dsl/              DSL parser and expression evaluator
     types/            Shared TypeScript types used by engine and consumers
     diagnostics/      Error codes, diagnostic formatting, trace output
+    registry/         Function registration and lookup mechanism
   lambda/             AWS Lambda function handlers
     schema/           Schema CRUD lambdas (ingestSchema, getSchema, deleteSchema, querySchemaNodes)
     mapping/          Mapping CRUD lambdas
