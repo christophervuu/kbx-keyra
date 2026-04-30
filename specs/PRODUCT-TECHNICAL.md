@@ -1353,21 +1353,21 @@ This section describes how deployed mapping configurations are consumed at runti
 
 #### Key Properties
 
-| Property | Detail |
-|----------|--------|
-| **The Lambda is generic** | It contains no domain logic — no knowledge of invoices, shipments, or any specific data format. All domain knowledge lives in the mapping configuration. One Lambda function serves all mappings. |
-| **The engine is identical** | The same `@keyra/engine` library runs in the browser (preview) and in this Lambda (production). If a mapping works in preview, it works in production. |
+| Property                                             | Detail                                                                                                                                                                                                                                         |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The Lambda is generic**                            | It contains no domain logic — no knowledge of invoices, shipments, or any specific data format. All domain knowledge lives in the mapping configuration. One Lambda function serves all mappings.                                              |
+| **The engine is identical**                          | The same `@keyra/engine` library runs in the browser (preview) and in this Lambda (production). If a mapping works in preview, it works in production.                                                                                         |
 | **Step Functions don't change when mappings change** | The state machine only knows it needs to call the mapping Lambda with a `mappingId`. When a BA updates mapping rules and deploys, the Step Function picks up the new snapshot automatically — no code change, no redeployment of the workflow. |
-| **Environment isolation is automatic** | A Step Function in the QA environment passes `environment: "QA"`. The Lambda reads the QA-active snapshot. DEV and PROD snapshots are unaffected. |
-| **Rollback is instant** | Rolling back a mapping (Section 12.1) changes the active snapshot pointer in DynamoDB. The next Step Function execution immediately uses the previous snapshot. No Lambda redeployment needed. |
+| **Environment isolation is automatic**               | A Step Function in the QA environment passes `environment: "QA"`. The Lambda reads the QA-active snapshot. DEV and PROD snapshots are unaffected.                                                                                              |
+| **Rollback is instant**                              | Rolling back a mapping (Section 12.1) changes the active snapshot pointer in DynamoDB. The next Step Function execution immediately uses the previous snapshot. No Lambda redeployment needed.                                                 |
 
-#### What This Means for BAs
+#### What This Means for Users
 
-BAs using KeyRa are directly updating the transformation logic that runs in production workflows. The deploy/promote/rollback workflow (Sections 12.1–12.4) controls which version of their mapping is active in each environment. This is why:
+Users using KeyRa are directly updating the transformation logic that runs in production workflows. The deploy/promote/rollback workflow (Sections 12.1–12.4) controls which version of their mapping is active in each environment. This is why:
 
 - **Immutable snapshots matter** — production reads a locked artifact, not a mutable config that could change mid-execution.
 - **Schema references are pinned to commit SHAs** — the snapshot includes the exact schema versions, so a CDM update doesn't silently change production behavior.
-- **Preview parity matters** — the browser preview uses the same engine, so what BAs test is what runs in production.
+- **Preview parity matters** — the browser preview uses the same engine, so what users test is what runs in production.
 - **Environment promotion is safe** — promoting DEV → QA reuses the exact same snapshot artifact. No re-generation, no drift.
 
 ---

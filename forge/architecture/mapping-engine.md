@@ -30,9 +30,9 @@ The engine exposes two primary entry points:
 
 Both functions are pure — same inputs always produce same outputs.
 
-### Future Entry Points
+### Additional Entry Points
 
-- `parse(expression)` — Parse a single DSL expression into an AST. Will be added when the parser is implemented.
+- `parse(expression, options?)` — Parse a single DSL expression into an AST + diagnostics.
 
 ---
 
@@ -40,7 +40,7 @@ Both functions are pure — same inputs always produce same outputs.
 
 ```
 src/engine/
-  index.ts              Public API entry point — exports validate, execute, types, registry
+  index.ts              Public API entry point — exports validate, execute, parse, types, registry
   validate.ts           validate() implementation
   execute.ts            execute() implementation
   types/
@@ -56,7 +56,11 @@ src/engine/
   registry/
     index.ts            Barrel export for registry
     function-registry.ts  FunctionRegistry class — registration, lookup, listing
-  dsl/                  (future) DSL parser and expression evaluator
+  dsl/
+    index.ts            Barrel export + parse() public API
+    types.ts            AST node types, token types, ParseOptions, ParseResult
+    tokenizer.ts        Lexer: expression string → Token[] + diagnostics
+    parser.ts           Recursive descent parser: Token[] → AstNode + diagnostics
 ```
 
 ---
@@ -68,9 +72,9 @@ src/engine/
 | `types/` | Type definitions only. No runtime code. | Nothing (leaf module) |
 | `diagnostics/` | Error/warning code constants and message formatting | `types/` |
 | `registry/` | Function registration and lookup | `types/` |
-| `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` (future) |
-| `execute.ts` | Mapping execution | `types/`, `diagnostics/`, `registry/`, `dsl/` (future) |
-| `dsl/` (future) | DSL parsing, expression evaluation | `types/`, `diagnostics/`, `registry/` |
+| `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` |
+| `execute.ts` | Mapping execution | `types/`, `diagnostics/`, `registry/`, `dsl/` |
+| `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics | `types/`, `diagnostics/`, `registry/` |
 
 **Import rules:**
 - No circular dependencies between modules
@@ -124,6 +128,7 @@ Engine Input: MappingConfig + SourceData + SourceSchema + TargetSchema + Options
          ▼
     ┌─────────┐
     │  Parse   │  Parse each rule's DSL expression into an AST
+    │          │  (dsl/tokenizer.ts → dsl/parser.ts → optional registry checks)
     └────┬────┘
          │
          ▼
@@ -149,6 +154,66 @@ Engine Input: MappingConfig + SourceData + SourceSchema + TargetSchema + Options
          ▼
     Output: ExecutionResult { output, diagnostics, trace? }
 ```
+
+---
+
+## DSL Parser
+
+The parser lives in `src/engine/dsl/` and is the first executable stage in the engine pipeline.
+
+### Pipeline
+
+`parse(expression, options?)` runs in three stages:
+
+1. **Tokenize** (`tokenizer.ts`) — converts raw expression text into tokens with start/end character offsets
+2. **Parse** (`parser.ts`) — recursive descent parse from `Token[]` into typed `AstNode`
+3. **Validate (optional)** (`index.ts`) — if a `FunctionRegistry` is supplied, emit:
+   - `KEYRA-E002` for unknown function names
+   - `KEYRA-E003` for arity mismatches
+
+Fatal parse diagnostics (`KEYRA-E001`, `KEYRA-E004`) nullify the returned AST.
+
+### AST Node Hierarchy
+
+The AST is a discriminated union on `type`:
+
+- `StringLiteral` — `{ type, value, start, end }`
+- `NumberLiteral` — `{ type, value, start, end }`
+- `BooleanLiteral` — `{ type, value, start, end }`
+- `NullLiteral` — `{ type, start, end }`
+- `FunctionCall` — `{ type, name, arguments, start, end }`
+- `ObjectTemplate` — `{ type, properties, start, end }`
+
+`ObjectTemplate` properties use `{ key, value, start, end }` where `value` is another `AstNode`.
+
+All positions are character offsets in the original expression string (0-indexed, start-inclusive, end-exclusive).
+
+### `parse()` API Contract
+
+```ts
+parse(expression: string, options?: ParseOptions): ParseResult
+```
+
+- `ParseOptions`:
+  - `registry?: FunctionRegistry`
+  - `maxDepth?: number` (default: `32`)
+- `ParseResult`:
+  - `success: boolean`
+  - `ast: AstNode | null`
+  - `diagnostics: Diagnostic[]`
+
+Current behavior:
+- `success` reflects parse-validity (`ast !== null`)
+- E002/E003 may be present while `success === true` if syntax is valid
+- E001/E004 produce `ast: null` and `success: false`
+
+### Error Production by Stage
+
+| Stage | Codes | Meaning |
+|------|-------|---------|
+| Tokenize | `KEYRA-E001` | Invalid syntax at lexical level (unexpected char, invalid escape, unterminated string) |
+| Parse | `KEYRA-E001`, `KEYRA-E004` | Structural syntax errors and max-depth violations |
+| Registry validation (optional) | `KEYRA-E002`, `KEYRA-E003` | Unknown function names and arity mismatch |
 
 ---
 
