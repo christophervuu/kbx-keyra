@@ -19,6 +19,7 @@ export type {
 export { Environment } from './options.js';
 export type {
   EngineOptions,
+  TraceVerbosity,
   UnmappedTargetStrategy,
   ValueType,
 } from './options.js';

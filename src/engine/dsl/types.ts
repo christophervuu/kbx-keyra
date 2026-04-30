@@ -1,4 +1,5 @@
 import type { FunctionRegistry } from '../registry/function-registry.js';
+import type { EngineOptions } from '../types/options.js';
 import type { Diagnostic } from '../types/results.js';
 
 export interface StringLiteralNode {
@@ -88,4 +89,31 @@ export interface ParseResult {
   readonly success: boolean;
   readonly ast: AstNode | null;
   readonly diagnostics: readonly Diagnostic[];
+}
+
+export type ScopeEntry = unknown;
+
+export interface EvaluatorTraceEntry {
+  readonly nodeType: AstNode['type'];
+  readonly functionName?: string;
+  readonly inputValue?: unknown;
+  readonly outputValue: unknown;
+}
+
+export interface EvaluationResult {
+  readonly value: unknown;
+  readonly diagnostics: Diagnostic[];
+  readonly trace?: EvaluatorTraceEntry[];
+}
+
+export interface EvaluationContext {
+  readonly sourceData: unknown;
+  readonly scopeStack: readonly ScopeEntry[];
+  readonly constants: Readonly<Record<string, unknown>>;
+  readonly externalSources: Readonly<Record<string, unknown>>;
+  readonly registry: FunctionRegistry;
+  readonly options: EngineOptions;
+  readonly currentItem?: unknown;
+  readonly parentItem?: unknown;
+  readonly evaluate: (node: AstNode, context: EvaluationContext) => EvaluationResult;
 }

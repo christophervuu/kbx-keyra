@@ -12,6 +12,8 @@ import type {
 } from './types.js';
 
 export type * from './types.js';
+export { evaluate } from './evaluator.js';
+export { resolvePath } from './resolve-path.js';
 
 const DEFAULT_MAX_DEPTH = 32;
 

@@ -772,13 +772,14 @@ Actions depend on origin and status:
 
 #### Sections
 
-| Section                 | Content                                                                                                    |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Backend connection**  | API base URL. Connection status indicator.                                                                 |
-| **GitHub connection**   | CDM repo path. Non-CDM repo path. Connection status.                                                       |
-| **AI configuration**    | Model preferences (if overridable). No API keys stored in the UI — keys are backend environment variables. |
-| **Display preferences** | Theme (future), default preview format (JSON/XML), editor font size.                                       |
-| **About**               | Application version, engine version, build info.                                                           |
+| Section                 | Content                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Backend connection**  | API base URL. Connection status indicator.                                                                                               |
+| **Environment URLs**    | DEV mapping Lambda URL. QA mapping Lambda URL. PROD mapping Lambda URL. Used for server-side preview. Connection status per environment. |
+| **GitHub connection**   | CDM repo path. Non-CDM repo path. Connection status.                                                                                     |
+| **AI configuration**    | Model preferences (if overridable). No API keys stored in the UI — keys are backend environment variables.                               |
+| **Display preferences** | Theme (future), default preview format (JSON/XML), editor font size.                                                                     |
+| **About**               | Application version, engine version, build info.                                                                                         |
 
 ---
 
@@ -844,9 +845,9 @@ This section defines what the UI owns versus what the backend owns. The boundary
 | **Persistent storage** | Save/load projects, mappings, schemas to/from DynamoDB + S3 via API calls. |
 | **Schema retrieval** | Fetch schemas, mappings, project metadata, and templates from the backend. |
 | **Schema ingestion** | Upload a schema to the backend for parsing into tree nodes, embedding, and indexing. |
-| **Server-side preview & testing** | Execute sample data against a deployed mapping snapshot in a specific environment. The user selects an environment (DEV / QA / PROD) and provides sample source data. The backend retrieves the active snapshot for that environment and runs it through the production mapping engine. Returns the transformed output + diagnostics. This lets users answer: "What would this payload look like if it went through the mapping currently deployed in QA?" — without deploying or modifying anything. Available from the Mapping Editor's Preview & Testing panel via the "Run on Server" action with an environment selector. |
+| **Server-side preview & testing** | Execute sample data against a deployed mapping in a specific environment by invoking that environment's generic mapping Lambda directly. The user selects an environment (DEV / QA / PROD) and provides sample source data. KeyRa's backend calls the target environment's URL with the `mappingId` + `sourceData`. The environment's Lambda retrieves its own active snapshot and executes the mapping engine — the exact same code path that production traffic follows. Returns the transformed output + diagnostics. This lets users answer: "What would this payload look like if it went through the mapping currently deployed in QA?" — without deploying or modifying anything. |
 | **AI features** | All AI calls go through API Gateway → Lambda → GitHub Models. The UI never calls GitHub Models directly. Includes: auto-map, NL → DSL, explain rule, smart fix, AI validation, and AI-assisted field descriptions. |
-| **Deployment** | Deploy, promote, and rollback actions call the backend to create/manage immutable snapshots. |
+| **Deployment** | Deploy, promote, and rollback actions call the backend to create/manage immutable snapshots and write them to target environment resources. |
 | **GitHub operations** | List CDM/non-CDM repo files, link schemas, sync schemas, publish schemas. All via backend Lambdas that call the GitHub API. |
 | **Activity feed** | Fetch activity entries from the backend. Activity entries are written by backend Lambdas when actions occur (deployments, schema syncs, project creation, etc.) — the UI does not write activity entries directly. |
 
@@ -854,20 +855,25 @@ This section defines what the UI owns versus what the backend owns. The boundary
 
 The Mapping Editor offers two preview modes. Both are accessible from Panel 5 (Preview & Testing).
 
-| Mode | What it runs | Data source | When to use |
-|------|-------------|-------------|-------------|
-| **Client-side preview** | The mapping engine in-browser against the **current working config** (including unsaved changes). | Current editor state | Fast iteration during authoring. Default mode. < 2 seconds. |
-| **Server-side preview** | The mapping engine on the backend against the **deployed snapshot** for a selected environment. | Active snapshot in DEV / QA / PROD | Validating that a specific environment produces the expected output. Verifying parity between what's deployed and what you expect. Debugging production issues with real payloads. |
+| Mode | What it runs | Where it runs | Data source | When to use |
+|------|-------------|---------------|-------------|-------------|
+| **Client-side preview** | The mapping engine in-browser against the **current working config** (including unsaved changes). | Browser | Current editor state | Fast iteration during authoring. Default mode. < 2 seconds. |
+| **Server-side preview** | The **actual environment's generic mapping Lambda** — the same Lambda that production traffic hits. | Target environment's infrastructure | Active snapshot in DEV / QA / PROD | Validating that a specific environment produces the expected output. Verifying parity between what's deployed and what you expect. Debugging production issues with real payloads. |
 
 **Server-side preview UX:**
 1. User clicks "Run on Server" in the Preview & Testing panel.
 2. An environment selector appears: DEV / QA / PROD (only environments with an active deployment are selectable).
 3. User provides sample source data (paste, upload, or load test case).
-4. The backend retrieves the active snapshot for the selected environment, executes the mapping engine, and returns the transformed output + diagnostics.
+4. KeyRa's backend invokes the selected environment's generic mapping Lambda URL with `{ mappingId, sourceData }`. This is the exact same code path that production Step Functions use.
 5. Output appears alongside the source data, with the same diff and diagnostics views as client-side preview.
 6. A label indicates which environment and snapshot version produced the output: "Output from QA (v5, deployed 2026-04-20)."
 
-**Key distinction:** Client-side preview tests what you're *building*. Server-side preview tests what's *deployed*. They may produce different results if the working config has diverged from the deployed snapshot.
+**Key distinction:** Client-side preview tests what you're *building*. Server-side preview tests what's *deployed* — by calling the actual production infrastructure. They may produce different results if the working config has diverged from the deployed snapshot.
+
+**Why invoke the environment Lambda directly (not a separate copy):**
+- Validates the real production path: same Lambda, same DynamoDB, same S3, same engine version.
+- No parity risk from a separate copy of the engine with potentially different configuration.
+- If the environment's Lambda has a bug or misconfiguration, the preview catches it.
 
 ### 7.4 Absolute Constraints
 
@@ -951,8 +957,23 @@ interface ApiAdapter {
   // ── Activity ─────────────────────────────────
   listActivity(projectId?: string, limit?: number): Promise<ActivityEntry[]>;
   
-    // ── Preview ─────────────────────────────��────────
+  // ── Preview ──────────────────────────────────────
   previewOnServer(mappingId: string, input: ServerPreviewInput): Promise<ServerPreviewResult>;
+
+interface ServerPreviewInput {
+  environment: Environment;        // "DEV" | "QA" | "PROD"
+  sourceData: Record<string, any>; // Sample payload
+}
+
+interface ServerPreviewResult {
+  output: Record<string, any>;     // Transformed data
+  diagnostics: Diagnostic[];       // Warnings and errors
+  metadata: {
+    environment: Environment;
+    snapshotVersion: number;
+    deployedAt: string;            // ISO 8601
+    engineVersion: string;
+  };
 }
 ```
 
@@ -1289,23 +1310,24 @@ QA now runs the exact same artifact as DEV.
 
 ### 12.4 Production Execution
 
-At runtime, when a system needs to transform data using a deployed mapping:
+At runtime, when a Step Function step requires data transformation:
 
-1. A request arrives: `{ mappingId, environment: "PROD", sourceData: {...} }`
-2. Lambda reads the active snapshot ID from the Deployments table (`mappingId#PROD`).
-3. Lambda reads the snapshot from S3.
-4. Lambda runs the KeyRa mapping engine with the snapshot's config.
-5. Lambda returns the transformed output.
-   
+1. The Step Function invokes the **generic mapping Lambda** with: `{ mappingId, sourceData }`
+2. The Lambda reads the active snapshot key from its environment's ActiveSnapshots table (`PK: mappingId`).
+3. The Lambda fetches the snapshot from its environment's S3 bucket.
+4. The Lambda resolves schema refs from the snapshot → fetches schema content from its environment's S3.
+5. The Lambda runs the KeyRa mapping engine with the snapshot's config + resolved schemas + source data.
+6. The Lambda returns the transformed output.
+
+**No environment parameter is needed.** The Lambda is deployed within a specific environment and only has access to that environment's DynamoDB and S3. Environment isolation is handled by infrastructure (separate URLs, separate resources), not by application logic.
+
 ### 12.5 Production Integration Model
-
-This section describes how deployed mapping configurations are consumed at runtime by the broader integration infrastructure. Understanding this model is important because it justifies several architectural decisions: immutable snapshots, environment pointers, engine portability, and the separation of mapping logic from orchestration logic.
 
 #### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  AWS Step Function (business workflow)                       │
+│  AWS Step Function (business workflow) — e.g., QA env       │
 │                                                              │
 │  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐   │
 │  │ Step A    │───▶│ Step B:      │───▶│ Step C           │   │
@@ -1313,62 +1335,67 @@ This section describes how deployed mapping configurations are consumed at runti
 │  │  payload) │    │ Data         │    │  target system)  │   │
 │  └──────────┘    └──────┬───────┘    └──────────────────┘   │
 │                         │                                    │
-└───────────────────���─────┼────────────────────────────────────┘
+└─────────────────────────┼────────────────────────────────────┘
                           │
                           ▼
               ┌───────────────────────┐
               │ Generic Mapping Lambda │
+              │ (deployed in QA)      │
               │                       │
               │ 1. Receive:           │
               │    - mappingId        │
-              │    - environment      │
               │    - sourceData       │
               │                       │
               │ 2. Read active        │
               │    snapshot from      │
-              │    DynamoDB/S3        │
+              │    QA's DynamoDB/S3   │
               │                       │
-              │ 3. Execute KeyRa      │
+              │ 3. Resolve schemas    │
+              │    from QA's S3       │
+              │                       │
+              │ 4. Execute KeyRa      │
               │    mapping engine     │
               │                       │
-              │ 4. Return             │
+              │ 5. Return             │
               │    transformed output │
               └───────────────────────┘
 ```
 
-#### How It Works
-
-1. **Step Functions orchestrate business workflows** — invoice processing, shipment routing, order fulfillment, etc. Each workflow is defined as a state machine with discrete steps.
-
-2. **When a step requires data transformation**, the Step Function invokes a **generic mapping Lambda** with three inputs:
-   - `mappingId` — identifies which mapping configuration to use
-   - `environment` — which environment pointer to read (`DEV`, `QA`, or `PROD`)
-   - `sourceData` — the payload to transform
-
-3. **The Lambda reads the active snapshot.** It looks up the active snapshot ID from the Deployments table (`mappingId#environment`), then fetches the immutable snapshot JSON from S3.
-
-4. **The Lambda runs the KeyRa mapping engine** — the same pure TypeScript library bundled into the browser for preview. The engine evaluates the snapshot's DSL rules against the source data and produces transformed output.
-
-5. **The Lambda returns the transformed output** to the Step Function, which continues to the next step (e.g., delivering the data to a target system).
-
 #### Key Properties
 
-| Property                                             | Detail                                                                                                                                                                                                                                         |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **The Lambda is generic**                            | It contains no domain logic — no knowledge of invoices, shipments, or any specific data format. All domain knowledge lives in the mapping configuration. One Lambda function serves all mappings.                                              |
-| **The engine is identical**                          | The same `@keyra/engine` library runs in the browser (preview) and in this Lambda (production). If a mapping works in preview, it works in production.                                                                                         |
-| **Step Functions don't change when mappings change** | The state machine only knows it needs to call the mapping Lambda with a `mappingId`. When a BA updates mapping rules and deploys, the Step Function picks up the new snapshot automatically — no code change, no redeployment of the workflow. |
-| **Environment isolation is automatic**               | A Step Function in the QA environment passes `environment: "QA"`. The Lambda reads the QA-active snapshot. DEV and PROD snapshots are unaffected.                                                                                              |
-| **Rollback is instant**                              | Rolling back a mapping (Section 12.1) changes the active snapshot pointer in DynamoDB. The next Step Function execution immediately uses the previous snapshot. No Lambda redeployment needed.                                                 |
+| Property | Detail |
+|----------|--------|
+| **The Lambda is generic** | Contains no domain logic. One Lambda function serves all mappings within its environment. |
+| **The Lambda is environment-unaware** | It doesn't know it's "in QA." It simply reads from the DynamoDB table and S3 bucket configured in its environment variables. Infrastructure handles isolation. |
+| **Each environment is a different URL** | DEV, QA, and PROD each have their own API Gateway endpoint / Lambda ARN. Selecting an environment means calling a different URL. |
+| **The engine is identical** | Same `@keyra/engine` library runs in the browser (preview) and in this Lambda (production). |
+| **Step Functions don't change when mappings change** | The state machine only knows it needs to call the mapping Lambda with a `mappingId`. When a user deploys a new version, the ActiveSnapshots table is updated — the next execution picks it up automatically. |
+| **Rollback is instant** | Rolling back changes the snapshot pointer in the environment's DynamoDB. The next execution uses the previous snapshot. No Lambda redeployment needed. |
 
-#### What This Means for Users
+#### Per-Environment Infrastructure
 
-Users using KeyRa are directly updating the transformation logic that runs in production workflows. The deploy/promote/rollback workflow (Sections 12.1–12.4) controls which version of their mapping is active in each environment. This is why:
+Each environment maintains its own isolated deployment:
 
-- **Immutable snapshots matter** — production reads a locked artifact, not a mutable config that could change mid-execution.
-- **Schema references are pinned to commit SHAs** — the snapshot includes the exact schema versions, so a CDM update doesn't silently change production behavior.
-- **Preview parity matters** — the browser preview uses the same engine, so what users test is what runs in production.
-- **Environment promotion is safe** — promoting DEV → QA reuses the exact same snapshot artifact. No re-generation, no drift.
+| Resource | Purpose |
+|----------|---------|
+| **API Gateway endpoint** | Environment-specific URL for invoking the generic mapping Lambda |
+| **Generic Mapping Lambda** | Reads from its own DynamoDB/S3. Executes the engine. Returns output. |
+| **ActiveSnapshots DynamoDB table** | Maps `mappingId` → active `snapshotS3Key`. Single item per mapping. |
+| **Snapshots S3 bucket (or prefix)** | Stores immutable snapshot JSON files. |
+| **Schema content S3 (or prefix)** | Stores resolved schema content referenced by snapshots. |
+
+#### How KeyRa Writes to Environments
+
+The KeyRa application backend has cross-environment write access to deploy snapshots:
+
+| KeyRa Action | What it writes | Where |
+|-------------|----------------|-------|
+| **Deploy to DEV** | Snapshot JSON + schema content + ActiveSnapshots pointer | DEV's S3 + DEV's DynamoDB |
+| **Promote DEV → QA** | Copies snapshot JSON + schema content + writes ActiveSnapshots pointer | QA's S3 + QA's DynamoDB |
+| **Promote QA → PROD** | Copies snapshot JSON + schema content + writes ActiveSnapshots pointer | PROD's S3 + PROD's DynamoDB |
+| **Rollback in PROD** | Updates ActiveSnapshots pointer to previous snapshot | PROD's DynamoDB |
+
+Cross-environment access is handled via IAM roles — the KeyRa deploy Lambda assumes a role with write permissions to the target environment's resources.
 
 ---
 
@@ -1571,28 +1598,28 @@ Storage: DynamoDB table (`PromptRegistry`) or a versioned JSON file in S3. For P
 
 ### 14.2 Service Responsibilities
 
-| Service | Role |
-|---------|------|
-| **AWS Amplify** | Hosts the React/TS/Vite frontend. Static site deployment. |
-| **API Gateway** | Single entry point. Routes requests to Lambdas. Request validation, throttling, CORS. Future: Cognito authorizer for auth. |
-| **Lambda** | Business logic. One function per concern. Handles: schema CRUD, mapping CRUD, project CRUD, AI orchestration, deployment management, GitHub API calls. |
-| **DynamoDB** | Primary data store. Tree structure for schema nodes, project/mapping metadata, deployment records, mapping memory (for RAG reuse). On-demand pricing. |
-| **S3** | Bulk storage for objects exceeding DynamoDB's 400KB limit: full schema content, deployment snapshots, project export bundles, large test case data. |
-| **OpenSearch Serverless** | Search index for schema nodes. Supports k-NN vector search and BM25 keyword search. Used by the AI pipeline for RAG retrieval. Rebuilt from DynamoDB if needed. |
-| **Step Functions** | Orchestrates long-running operations that exceed Lambda's 29s API Gateway timeout: large schema ingestion (23k fields → parse → embed → store) and full auto-map on large schemas (parallel chunk processing). |
-| **GitHub Models** | LLM inference and embeddings. Called by Lambdas only. Provides Tier 1 (gpt-4.1-mini), Tier 2 (gpt-4.1), and embeddings (text-embedding-3-small). |
-| **GitHub API** | Accessed by Lambdas to read/write schema files in `KBXT/CDM-Schemas` (read-only) and `KBXT/KeyRa-Schemas` (read-write). Authentication via GitHub App token or PAT stored in Secrets Manager. |
+| Service                   | Role                                                                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AWS Amplify**           | Hosts the React/TS/Vite frontend. Static site deployment.                                                                                                                                                      |
+| **API Gateway**           | Single entry point. Routes requests to Lambdas. Request validation, throttling, CORS. Future: Cognito authorizer for auth.                                                                                     |
+| **Lambda**                | Business logic. One function per concern. Handles: schema CRUD, mapping CRUD, project CRUD, AI orchestration, deployment management, GitHub API calls.                                                         |
+| **DynamoDB**              | Primary data store. Tree structure for schema nodes, project/mapping metadata, deployment records, mapping memory (for RAG reuse). On-demand pricing.                                                          |
+| **S3**                    | Bulk storage for objects exceeding DynamoDB's 400KB limit: full schema content, deployment snapshots, project export bundles, large test case data.                                                            |
+| **OpenSearch Serverless** | Search index for schema nodes. Supports k-NN vector search and BM25 keyword search. Used by the AI pipeline for RAG retrieval. Rebuilt from DynamoDB if needed.                                                |
+| **Step Functions**        | Orchestrates long-running operations that exceed Lambda's 29s API Gateway timeout: large schema ingestion (23k fields → parse → embed → store) and full auto-map on large schemas (parallel chunk processing). |
+| **GitHub Models**         | LLM inference and embeddings. Called by Lambdas only. Provides Tier 1 (gpt-4.1-mini), Tier 2 (gpt-4.1), and embeddings (text-embedding-3-small).                                                               |
+| **GitHub API**            | Accessed by Lambdas to read/write schema files in `KBXT/CDM-Schemas` (read-only) and `KBXT/KeyRa-Schemas` (read-write). Authentication via GitHub App token or PAT stored in Secrets Manager.                  |
 
 ### 14.3 Lambda Functions
 
 #### Schema Lambdas
 
-| Lambda | Trigger | Responsibility |
-|--------|---------|---------------|
-| `ingestSchema` | `POST /schemas` | Receives schema content. Parses into tree nodes. For small schemas (< 500 fields): processes inline, writes to DynamoDB + OpenSearch. For large schemas: starts Step Function, returns execution ARN. |
-| `getSchema` | `GET /schemas/:id` | Returns schema metadata + content from DynamoDB/S3. |
-| `deleteSchema` | `DELETE /schemas/:id` | Removes schema nodes from DynamoDB + OpenSearch. Removes content from S3. |
-| `querySchemaNodes` | `POST /schemas/:id/query` | Hybrid search: vector + keyword via OpenSearch. Enriches results with structural context from DynamoDB (parent chain, siblings). |
+| Lambda             | Trigger                   | Responsibility                                                                                                                                                                                        |
+| ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ingestSchema`     | `POST /schemas`           | Receives schema content. Parses into tree nodes. For small schemas (< 500 fields): processes inline, writes to DynamoDB + OpenSearch. For large schemas: starts Step Function, returns execution ARN. |
+| `getSchema`        | `GET /schemas/:id`        | Returns schema metadata + content from DynamoDB/S3.                                                                                                                                                   |
+| `deleteSchema`     | `DELETE /schemas/:id`     | Removes schema nodes from DynamoDB + OpenSearch. Removes content from S3.                                                                                                                             |
+| `querySchemaNodes` | `POST /schemas/:id/query` | Hybrid search: vector + keyword via OpenSearch. Enriches results with structural context from DynamoDB (parent chain, siblings).                                                                      |
 
 #### AI Lambdas
 
@@ -1643,9 +1670,11 @@ All AI Lambdas read their prompt configuration (system message, user message tem
 
 #### Preview Lambdas
 
-| Lambda           | Trigger                      | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `previewMapping` | `POST /mappings/:id/preview` | Receives sample source data and a target environment (DEV / QA / PROD). Retrieves the active snapshot for that environment from the Deployments table + S3. Runs the mapping engine against the snapshot's config with the provided source data. Returns transformed output + diagnostics. Does not modify any deployment state — this is a read-only operation. Returns `404` if no active deployment exists for the selected environment. |
+#### Preview Lambdas
+
+| Lambda           | Trigger                      | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `previewMapping` | `POST /mappings/:id/preview` | Receives sample source data and a target environment (DEV / QA / PROD). Looks up the target environment's generic mapping Lambda URL from configuration. Invokes that environment's Lambda with `{ mappingId, sourceData }` — the exact same invocation that production Step Functions use. Returns the environment Lambda's response (transformed output + diagnostics) back to the UI. Also returns metadata: environment name, snapshot version, deployed timestamp. Returns `404` if no active deployment exists for the selected environment. This is a pass-through that validates the real production path. |
 
 ---
 

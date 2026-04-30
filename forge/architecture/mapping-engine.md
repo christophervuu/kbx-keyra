@@ -33,6 +33,8 @@ Both functions are pure — same inputs always produce same outputs.
 ### Additional Entry Points
 
 - `parse(expression, options?)` — Parse a single DSL expression into an AST + diagnostics.
+- `evaluate(node, context)` — Evaluate a parsed AST node against runtime context and return value + diagnostics (+ optional trace).
+- `resolvePath(obj, path)` — Resolve DSL dot/bracket paths against runtime objects (used by context-reading functions).
 
 ---
 
@@ -40,7 +42,7 @@ Both functions are pure — same inputs always produce same outputs.
 
 ```
 src/engine/
-  index.ts              Public API entry point — exports validate, execute, parse, types, registry
+  index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, types, registry
   validate.ts           validate() implementation
   execute.ts            execute() implementation
   types/
@@ -48,7 +50,7 @@ src/engine/
     config.ts           MappingConfig, MappingRule, SchemaRef, MappingConfigBlock
     results.ts          ExecutionResult, ValidationResult, Diagnostic, TraceEntry
     registry.ts         FunctionSignature, FunctionImplementation, RegisteredFunction
-    options.ts          EngineOptions, Environment, UnmappedTargetStrategy, ValueType
+    options.ts          EngineOptions, TraceVerbosity, Environment, UnmappedTargetStrategy, ValueType
   diagnostics/
     index.ts            Barrel export for diagnostics
     codes.ts            All KEYRA-E### and KEYRA-W### constants with message templates
@@ -57,10 +59,12 @@ src/engine/
     index.ts            Barrel export for registry
     function-registry.ts  FunctionRegistry class — registration, lookup, listing
   dsl/
-    index.ts            Barrel export + parse() public API
-    types.ts            AST node types, token types, ParseOptions, ParseResult
+    index.ts            Barrel export + parse()/evaluate()/resolvePath() public APIs
+    types.ts            AST node types, parse/evaluator context/result types
     tokenizer.ts        Lexer: expression string → Token[] + diagnostics
     parser.ts           Recursive descent parser: Token[] → AstNode + diagnostics
+    evaluator.ts        Recursive evaluator: AstNode + EvaluationContext → EvaluationResult
+    resolve-path.ts     Dot/bracket path resolver used by source/item/parent/get functions
 ```
 
 ---
@@ -74,7 +78,7 @@ src/engine/
 | `registry/` | Function registration and lookup | `types/` |
 | `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 | `execute.ts` | Mapping execution | `types/`, `diagnostics/`, `registry/`, `dsl/` |
-| `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics | `types/`, `diagnostics/`, `registry/` |
+| `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics, expression evaluation, path resolution | `types/`, `diagnostics/`, `registry/` |
 
 **Import rules:**
 - No circular dependencies between modules
@@ -140,6 +144,7 @@ Engine Input: MappingConfig + SourceData + SourceSchema + TargetSchema + Options
          ▼
     ┌──────────┐
     │ Execute   │  Evaluate rules in order against source data
+    │           │  parse() → evaluate() each expression AST
     │           │  Resolve function calls via registry
     │           │  Manage array scope stack for item()/parent()
     └────┬─────┘
@@ -214,6 +219,110 @@ Current behavior:
 | Tokenize | `KEYRA-E001` | Invalid syntax at lexical level (unexpected char, invalid escape, unterminated string) |
 | Parse | `KEYRA-E001`, `KEYRA-E004` | Structural syntax errors and max-depth violations |
 | Registry validation (optional) | `KEYRA-E002`, `KEYRA-E003` | Unknown function names and arity mismatch |
+
+---
+
+## Expression Evaluator
+
+The evaluator lives in `src/engine/dsl/evaluator.ts` and is the execution core for parsed DSL expressions.
+
+### `evaluate()` API Contract
+
+```ts
+evaluate(node: AstNode, context: EvaluationContext): EvaluationResult
+```
+
+- Input:
+  - `node: AstNode` — any parsed expression node (`StringLiteral`, `NumberLiteral`, `BooleanLiteral`, `NullLiteral`, `FunctionCall`, `ObjectTemplate`)
+  - `context: EvaluationContext` — runtime data and execution helpers
+- Output:
+  - `EvaluationResult` — `{ value, diagnostics, trace? }`
+
+`evaluate()` is pure and deterministic: same `node + context` always yields the same result.
+
+### EvaluationContext Structure
+
+`EvaluationContext` carries all runtime data the evaluator and registered functions need:
+
+- `sourceData` — root source document (`source()` reads from this)
+- `scopeStack` — array context stack used by `item()` / `parent()`
+- `constants` — mapping constants map (`constant()` reads from this)
+- `externalSources` — runtime externals (`external()` reads from this)
+- `registry` — function registry for function lookup/dispatch
+- `options` — evaluator options (`trace`, `traceVerbosity`, `maxRecursionDepth`, etc.)
+- `evaluate` — callback for re-entrant evaluation from array functions (`map`, `filter`, `find`)
+- `currentItem` / `parentItem` — populated by evaluator from scope stack before dispatch
+
+### Scope Stack and ExecutionContext Construction
+
+Array functions own stack lifecycle (`pushScope`/`popScope`) and call back into `evaluate()` per element.
+
+Before every function dispatch, evaluator derives execution context from the stack:
+
+- `currentItem` = top of stack
+- `parentItem` = second-to-top
+
+If missing:
+- `item()` emits `KEYRA-E010`
+- `parent()` emits `KEYRA-E013`
+
+This keeps scope mechanics centralized in evaluator internals while function implementations consume pre-resolved context.
+
+### Function Dispatch and Null Propagation
+
+For `FunctionCall` nodes, evaluator executes:
+
+1. Registry lookup (`KEYRA-E002` if missing)
+2. Arity check (`KEYRA-E003` on mismatch)
+3. Recursive argument evaluation
+4. Null propagation check
+5. Runtime type check
+6. Implementation invocation
+
+Null propagation is centralized:
+
+- Default: required `null` argument short-circuits to `null` + `KEYRA-W001`
+- Bypass: functions with `FunctionSignature.handlesNull === true` receive null arguments normally
+- Exception list is defined by DSL spec and implemented via registration metadata (not hardcoded in evaluator)
+
+Type mismatch behavior is strict and deterministic:
+
+- `KEYRA-E005` halts the function call (returns `null`)
+- No implicit type coercion
+
+### Recursion and Diagnostic/Trace Collection
+
+- Recursion depth is bounded by `options.maxRecursionDepth` (default `32`)
+- Depth exceed emits `KEYRA-E004` and returns `null` at overflow node
+- Diagnostics accumulate across recursive sub-evaluations; evaluator never throws for data errors
+- Function implementation throws are caught and converted to diagnostics
+
+Trace collection:
+
+- Enabled by `options.trace === true`
+- `traceVerbosity: "functions"` (default) → trace `FunctionCall` nodes only
+- `traceVerbosity: "all"` → trace all AST nodes including literals
+
+### Path Resolution Utility
+
+`resolvePath()` lives in `src/engine/dsl/resolve-path.ts`.
+
+```ts
+resolvePath(obj: unknown, path: string): unknown
+```
+
+Supported path forms:
+
+- Dot notation: `a.b.c`
+- Bracket key notation: `items['sku']`
+- Numeric indices: `items[0]`
+- Mixed forms: `orders[0].items['sku']`
+
+Behavior:
+
+- Empty path returns root object
+- Missing/null intermediate returns `null`
+- Out-of-bounds array index returns `undefined`
 
 ---
 

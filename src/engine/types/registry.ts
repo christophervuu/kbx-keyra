@@ -1,3 +1,4 @@
+import type { EvaluationContext } from '../dsl/types.js';
 import type { ValueType } from './options.js';
 
 export interface ExecutionContext {
@@ -18,11 +19,12 @@ export interface FunctionParameter {
 export interface FunctionSignature {
   readonly parameters: readonly FunctionParameter[];
   readonly returnType: ValueType;
+  readonly handlesNull?: boolean;
 }
 
 export type FunctionImplementation = (
   args: readonly unknown[],
-  context: ExecutionContext,
+  context: EvaluationContext,
 ) => unknown;
 
 export interface RegisteredFunction {
