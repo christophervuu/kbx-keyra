@@ -22,4 +22,6 @@ export interface EngineOptions {
   readonly traceVerbosity?: TraceVerbosity;
   readonly maxRecursionDepth?: number;
   readonly environment?: Environment;
+  readonly externalSources?: Readonly<Record<string, unknown>>;
+  readonly validateBeforeExecute?: boolean;
 }

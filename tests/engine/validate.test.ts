@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   validate,
   type CoverageResult,
+  type EngineOptions,
+  type ExecutionStats,
   type MappingConfig,
   type ValidationResult,
 } from '../../src/engine/index.js';
@@ -213,5 +215,25 @@ describe('validation result coverage type', () => {
     };
 
     expect(result.coverage).toEqual(coverage);
+  });
+
+  it('exports ExecutionStats and extended EngineOptions from public types', () => {
+    const stats: ExecutionStats = {
+      rulesEvaluated: 10,
+      rulesSucceeded: 8,
+      rulesFailed: 2,
+      durationMs: 123,
+    };
+
+    const options: EngineOptions = {
+      externalSources: {
+        rate: 1.25,
+      },
+      validateBeforeExecute: true,
+    };
+
+    expect(stats.rulesSucceeded + stats.rulesFailed).toBe(stats.rulesEvaluated);
+    expect(options.externalSources).toEqual({ rate: 1.25 });
+    expect(options.validateBeforeExecute).toBe(true);
   });
 });

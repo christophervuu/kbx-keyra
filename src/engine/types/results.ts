@@ -22,6 +22,14 @@ export interface TraceEntry {
   readonly inputValue: unknown;
   readonly outputValue: unknown;
   readonly diagnostics?: readonly Diagnostic[];
+  readonly durationMs?: number;
+}
+
+export interface ExecutionStats {
+  readonly rulesEvaluated: number;
+  readonly rulesSucceeded: number;
+  readonly rulesFailed: number;
+  readonly durationMs: number;
 }
 
 export interface CoverageResult {
@@ -41,4 +49,5 @@ export interface ExecutionResult {
   readonly output: unknown;
   readonly diagnostics: readonly Diagnostic[];
   readonly trace?: readonly TraceEntry[];
+  readonly stats?: ExecutionStats;
 }

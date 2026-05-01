@@ -43,6 +43,11 @@ Both functions are pure — same inputs always produce same outputs.
 ```
 src/engine/
   index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, registerAllFunctions, types, registry
+  execute.ts            execute() implementation
+  execute/
+    index.ts            Barrel export for execute utilities
+    set-at-path.ts      Dot-notation target-path assembly helper
+    ast-cache.ts        Per-execution expression→AST cache utility
   validate.ts           validate() implementation
   validate/
     index.ts            Barrel export for validation sub-modules
@@ -55,13 +60,12 @@ src/engine/
     constants-externals.ts constant()/external() reference checks (E011/E012)
     coverage.ts         Required target field coverage computation
     ast-utils.ts        Shared AST traversal helpers for validation passes
-  execute.ts            execute() implementation
   types/
     index.ts            Barrel export for all types
     config.ts           MappingConfig, MappingRule, SchemaRef, MappingConfigBlock
-    results.ts          ExecutionResult, ValidationResult, Diagnostic, TraceEntry
+    results.ts          ExecutionResult, ValidationResult, Diagnostic, TraceEntry, ExecutionStats
     registry.ts         FunctionSignature, FunctionImplementation, RegisteredFunction
-    options.ts          EngineOptions, TraceVerbosity, Environment, UnmappedTargetStrategy, ValueType
+    options.ts          EngineOptions, TraceVerbosity, Environment, UnmappedTargetStrategy, ValueType, externalSources, validateBeforeExecute
   diagnostics/
     index.ts            Barrel export for diagnostics
     codes.ts            All KEYRA-E### and KEYRA-W### constants with message templates
@@ -98,9 +102,10 @@ src/engine/
 | `types/` | Type definitions only. No runtime code. | Nothing (leaf module) |
 | `diagnostics/` | Error/warning code constants and message formatting | `types/` |
 | `registry/` | Function registration and lookup | `types/` |
+| `execute/` | Execute helper utilities (`setAtPath`, `AstCache`) | `types/`, `dsl/` |
 | `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 | `validate/` | Validation sub-pass implementations (schema abstraction, path checks, type/context checks, references, coverage) | `types/`, `diagnostics/`, `registry/`, `dsl/` |
-| `execute.ts` | Mapping execution | `types/`, `diagnostics/`, `registry/`, `dsl/` |
+| `execute.ts` | Execute orchestrator (pre-flight validation, parse/evaluate loop, bulk behaviors, result assembly) | `types/`, `diagnostics/`, `registry/`, `dsl/`, `execute/`, `validate.ts`, `validate/` |
 | `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics, expression evaluation, path resolution | `types/`, `diagnostics/`, `registry/` |
 | `functions/` | Built-in DSL function implementations and grouped registration | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 
@@ -148,41 +153,162 @@ if (fn) {
 
 ---
 
-## Execution Pipeline (Target Architecture)
+## Execute Pipeline
+
+`execute()` is implemented as the runtime transformation pipeline for mapping configs. It orchestrates parse → evaluate → output assembly and applies post-rule bulk behaviors with deterministic diagnostics.
+
+### Phase Sequence
 
 ```
 Engine Input: MappingConfig + SourceData + SourceSchema + TargetSchema + Options
          │
          ▼
-    ┌─────────┐
-    │  Parse   │  Parse each rule's DSL expression into an AST
-    │          │  (dsl/tokenizer.ts → dsl/parser.ts → optional registry checks)
-    └────┬────┘
-         │
-         ▼
-    ┌──────────┐
-    │ Validate  │  Check syntax, paths, types, array contexts
-    │           │  Produce diagnostics with stable error codes
-    └────┬─────┘
-         │
-         ▼
-    ┌──────────┐
-    │ Execute   │  Evaluate rules in order against source data
-    │           │  parse() → evaluate() each expression AST
-    │           │  Resolve function calls via registry
-    │           │  Manage array scope stack for item()/parent()
-    └────┬─────┘
-         │
-         ▼
-    ┌───────────────────┐
-    │ Post-Process       │  Apply unmapped target strategy
-    │                    │  Check nullSubtrees
-    │                    │  Emit W005 / E031 as needed
-    └────┬──────────────┘
-         │
-         ▼
-Output: ExecutionResult { output, diagnostics, trace? }
+   ┌────────────────────┐
+   │ Phase 1            │  Optional pre-flight validation gate
+   │ validateBefore...  │  validate(...) and abort on errors
+   └─────────┬──────────┘
+             ▼
+   ┌────────────────────┐
+   │ Phase 2            │  Parse all rule expressions
+   │ Parse + AST Cache  │  expression-string keyed cache
+   └─────────┬──────────┘
+             ▼
+   ┌────────────────────┐
+   │ Phase 3            │  Build EvaluationContext
+   │ Build Context      │  source/constants/externals/registry/scope
+   └─────────┬──────────┘
+             ▼
+   ┌────────────────────┐
+   │ Phase 4            │  Iterate rules in order and evaluate ASTs
+   │ Iterate + Evaluate │  per-rule isolation and diagnostics
+   └─────────┬──────────┘
+             ▼
+   ┌────────────────────┐
+   │ Phase 5            │  Target path assembly via setAtPath
+   │ Path Assembly      │  dot-notation + intermediate object creation
+   └─────────┬──────────┘
+             ▼
+   ┌────────────────────┐
+   │ Phase 6            │  Bulk behaviors
+   │ Bulk Behaviors     │  unmappedTargets → nullSubtrees
+   └─────────┬──────────┘
+             ▼
+   ┌────────────────────┐
+   │ Phase 7            │  Sort diagnostics and assemble result
+   │ Assemble Output    │  output + diagnostics + trace? + stats
+   └─────────┬──────────┘
+             ▼
+Output: ExecutionResult { output, diagnostics, trace?, stats }
 ```
+
+### Rule Iteration Model
+
+- Rules execute sequentially in config order (`rules[0] ... rules[n-1]`).
+- Order is observable: later rules can overwrite earlier target writes (last-write-wins).
+- Parse and evaluation failures are isolated to the rule being processed.
+- Rule failures coerce that rule's target output value to `null`; pipeline continues.
+
+### EvaluationContext Construction (Execute Stage)
+
+Execute creates a runtime `EvaluationContext` once per execute call with:
+
+- `sourceData`
+- `constants` from `config.config.constants`
+- `externalSources` from `options.externalSources ?? {}`
+- `registry` (`defaultRegistry`)
+- `options`
+- `scopeStack` (mutable per-evaluation stack)
+- callbacks: `evaluate`, `addDiagnostic`, `pushScope`, `popScope`
+
+Each rule resets `scopeStack` before evaluation to prevent cross-rule scope leakage.
+
+### Target Path Assembly (`setAtPath`)
+
+`setAtPath` (`src/engine/execute/set-at-path.ts`) handles output assembly:
+
+- dot-notation path support (`Order.Header.Type`)
+- auto-creates intermediate objects
+- overwrites scalar intermediates when deeper object paths are required
+- deterministic last-write-wins behavior for conflicts
+
+### AST Caching (`AstCache`)
+
+`AstCache` (`src/engine/execute/ast-cache.ts`) is a per-execution `Map<string, AstNode | null>`:
+
+- key: expression string
+- value: parsed AST or `null` for parse-failures
+- avoids repeated parsing for duplicate expressions
+- caches failed parses to avoid repeated invalid-expression parse cost
+
+### Bulk Behavior Application Order
+
+Bulk behaviors execute after rule iteration:
+
+1. **unmappedTargets**
+   - `omit`: no-op
+   - `null`: set required unmapped target leaves to `null`
+   - `error`: emit `KEYRA-W005` diagnostics for required unmapped target leaves
+2. **nullSubtrees**
+   - force configured paths to `null`
+   - applied after unmapped behavior so it overrides prior values
+
+Unmapped behavior uses `SchemaTree.getRequiredLeafPaths()` from `validate/schema-tree.ts`.
+
+### Trace Recording
+
+When `options.trace === true`, execute emits one `TraceEntry` per rule with:
+
+- `ruleIndex`, `targetPath`, `expression`
+- `inputValue` (source snapshot/reference)
+- `outputValue` (rule-level output after failure coercion)
+- `diagnostics` for that rule
+- `durationMs` (per-rule elapsed time)
+
+Trace preserves rule order and includes failed rules.
+
+### Stats Computation
+
+Execute computes `ExecutionStats` for every call:
+
+- `rulesEvaluated`
+- `rulesSucceeded`
+- `rulesFailed`
+- `durationMs` (full pipeline)
+
+Invariant: `rulesSucceeded + rulesFailed = rulesEvaluated`.
+
+### `validateBeforeExecute` Gate
+
+When `options.validateBeforeExecute === true`:
+
+- execute runs `validate(config, sourceSchema, targetSchema, options)` before parsing rules
+- if validation fails (`valid === false`), execute aborts early with:
+  - `output: null`
+  - validation diagnostics
+  - zero rule counts
+  - measured duration
+
+### Error Handling in Execute
+
+- Data and expression issues return diagnostics; they do not throw.
+- One rule failure never aborts full rule iteration.
+- Parse failures and error diagnostics nullify only the affected rule output.
+- Diagnostics are sorted by `ruleIndex` then severity for deterministic output.
+
+### Performance Characteristics
+
+- synchronous, single-pass rule loop
+- in-memory pure execution (no I/O)
+- AST caching amortizes repeated expression parse costs
+- target benchmark covered by integration test: 500 rules / 1000 fields under 2s
+
+### parse → evaluate → execute → output Connection
+
+- `parse()` turns expression text into AST + parse diagnostics
+- `evaluate()` computes runtime value + rule diagnostics
+- `execute()` orchestrates parse/evaluate, path assembly, bulk behaviors, trace/stats, and returns `ExecutionResult`
+
+This is the capstone runtime chain from DSL expression text to transformed output object.
 
 ---
 

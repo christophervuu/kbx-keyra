@@ -12,6 +12,7 @@ export type {
   Diagnostic,
   DiagnosticLocation,
   DiagnosticSeverity,
+  ExecutionStats,
   ExecutionResult,
   TraceEntry,
   ValidationResult,
