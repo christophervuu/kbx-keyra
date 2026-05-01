@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "properties": {
+    "Order": {
+      "type": "object",
+      "properties": {
+        "Header": {
+          "type": "object",
+          "properties": {
+            "OrderId": { "type": "string" },
+            "OrderType": { "type": "string" },
+            "SourceSystem": { "type": "string" }
+          },
+          "required": ["OrderId", "OrderType", "SourceSystem"]
+        },
+        "Parties": {
+          "type": "object",
+          "properties": {
+            "BillTo": {
+              "type": "object",
+              "properties": {
+                "Name": { "type": "string" },
+                "City": { "type": "string" }
+              },
+              "required": ["Name", "City"]
+            },
+            "ShipTo": {
+              "type": "object",
+              "properties": {
+                "Name": { "type": "string" }
+              },
+              "required": ["Name"]
+            }
+          },
+          "required": ["BillTo", "ShipTo"]
+        },
+        "Totals": {
+          "type": "object",
+          "properties": {
+            "GrandTotal": { "type": "number" },
+            "Currency": { "type": "string" }
+          },
+          "required": ["GrandTotal", "Currency"]
+        }
+      },
+      "required": ["Header", "Parties", "Totals"]
+    }
+  },
+  "required": ["Order"]
+}

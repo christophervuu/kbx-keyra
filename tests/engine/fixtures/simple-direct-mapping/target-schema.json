@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "customer": { "type": "string" },
+    "date": { "type": "string" },
+    "total": { "type": "number" },
+    "currencyCode": { "type": "string" }
+  },
+  "required": ["id", "customer", "date", "total", "currencyCode"]
+}

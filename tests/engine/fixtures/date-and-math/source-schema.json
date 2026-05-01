@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "issuedOn": { "type": "string" },
+    "postedAt": { "type": "string" },
+    "subtotal": { "type": "number" },
+    "tax": { "type": "number" },
+    "discount": { "type": "number" },
+    "unitPrice": { "type": "number" },
+    "units": { "type": "number" },
+    "fee": { "type": "number" }
+  }
+}

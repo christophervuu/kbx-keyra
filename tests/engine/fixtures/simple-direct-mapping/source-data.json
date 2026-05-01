@@ -1,0 +1,7 @@
+{
+  "orderId": "ORD-001",
+  "customerName": "Alice Doe",
+  "orderDate": "2026-04-01",
+  "amount": 199.95,
+  "currency": "USD"
+}

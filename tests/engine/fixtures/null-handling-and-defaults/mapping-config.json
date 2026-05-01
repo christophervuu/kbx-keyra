@@ -1,0 +1,40 @@
+{
+  "name": "null-handling-and-defaults",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "null-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "null-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "displayName",
+      "type": "string",
+      "expression": "default(source(\"nickname\"), concat(trim(source(\"profile.firstName\")), static(\" \"), default(source(\"profile.lastName\"), static(\"Unknown\"))))"
+    },
+    {
+      "target": "primaryEmail",
+      "type": "string",
+      "expression": "coalesce(source(\"contact.email\"), source(\"contact.altEmail\"), static(\"no-email@example.com\"))"
+    },
+    {
+      "target": "hasPreferences",
+      "type": "boolean",
+      "expression": "if(isNull(source(\"preferences\")), false, true)"
+    },
+    {
+      "target": "lastInitial",
+      "type": "string",
+      "expression": "if(isNull(source(\"profile.lastName\")), static(\"N/A\"), upper(substring(source(\"profile.lastName\"), 0, 1)))"
+    },
+    {
+      "target": "statusLabel",
+      "type": "string",
+      "expression": "default(source(\"status\"), static(\"NEW\"))"
+    }
+  ]
+}

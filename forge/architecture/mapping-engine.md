@@ -97,17 +97,17 @@ src/engine/
 
 ## Internal Module Boundaries
 
-| Module | Responsibility | May Import From |
-|--------|---------------|-----------------|
-| `types/` | Type definitions only. No runtime code. | Nothing (leaf module) |
-| `diagnostics/` | Error/warning code constants and message formatting | `types/` |
-| `registry/` | Function registration and lookup | `types/` |
-| `execute/` | Execute helper utilities (`setAtPath`, `AstCache`) | `types/`, `dsl/` |
-| `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` |
-| `validate/` | Validation sub-pass implementations (schema abstraction, path checks, type/context checks, references, coverage) | `types/`, `diagnostics/`, `registry/`, `dsl/` |
-| `execute.ts` | Execute orchestrator (pre-flight validation, parse/evaluate loop, bulk behaviors, result assembly) | `types/`, `diagnostics/`, `registry/`, `dsl/`, `execute/`, `validate.ts`, `validate/` |
-| `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics, expression evaluation, path resolution | `types/`, `diagnostics/`, `registry/` |
-| `functions/` | Built-in DSL function implementations and grouped registration | `types/`, `diagnostics/`, `registry/`, `dsl/` |
+| Module         | Responsibility                                                                                                        | May Import From                                                                       |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `types/`       | Type definitions only. No runtime code.                                                                               | Nothing (leaf module)                                                                 |
+| `diagnostics/` | Error/warning code constants and message formatting                                                                   | `types/`                                                                              |
+| `registry/`    | Function registration and lookup                                                                                      | `types/`                                                                              |
+| `execute/`     | Execute helper utilities (`setAtPath`, `AstCache`)                                                                    | `types/`, `dsl/`                                                                      |
+| `validate.ts`  | Mapping config validation                                                                                             | `types/`, `diagnostics/`, `registry/`, `dsl/`                                         |
+| `validate/`    | Validation sub-pass implementations (schema abstraction, path checks, type/context checks, references, coverage)      | `types/`, `diagnostics/`, `registry/`, `dsl/`                                         |
+| `execute.ts`   | Execute orchestrator (pre-flight validation, parse/evaluate loop, bulk behaviors, result assembly)                    | `types/`, `diagnostics/`, `registry/`, `dsl/`, `execute/`, `validate.ts`, `validate/` |
+| `dsl/`         | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics, expression evaluation, path resolution | `types/`, `diagnostics/`, `registry/`                                                 |
+| `functions/`   | Built-in DSL function implementations and grouped registration                                                        | `types/`, `diagnostics/`, `registry/`, `dsl/`                                         |
 
 **Import rules:**
 - No circular dependencies between modules

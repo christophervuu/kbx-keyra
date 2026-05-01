@@ -1,0 +1,10 @@
+{
+  "issuedOn": "2026/04/15",
+  "postedAt": "2026-04-16T10:20:30Z",
+  "subtotal": 120,
+  "tax": 10,
+  "discount": 5,
+  "unitPrice": 12.5,
+  "units": 4,
+  "fee": -2.75
+}

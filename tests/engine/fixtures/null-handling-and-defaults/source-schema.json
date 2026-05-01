@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "nickname": { "type": ["string", "null"] },
+    "profile": { "type": "object" },
+    "contact": { "type": "object" },
+    "preferences": { "type": ["object", "null"] }
+  }
+}

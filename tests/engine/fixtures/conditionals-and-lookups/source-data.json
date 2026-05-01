@@ -1,0 +1,6 @@
+{
+  "amount": 1800,
+  "status": "pending",
+  "channel": "web",
+  "paymentMethod": "wire"
+}

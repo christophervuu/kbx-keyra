@@ -1,0 +1,12 @@
+{
+  "nickname": null,
+  "profile": {
+    "firstName": "  Ada  ",
+    "lastName": null
+  },
+  "contact": {
+    "email": null,
+    "altEmail": "ada.alt@example.com"
+  },
+  "preferences": null
+}

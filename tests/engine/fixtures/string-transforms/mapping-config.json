@@ -1,0 +1,40 @@
+{
+  "name": "string-transforms",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "string-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "string-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "fullName",
+      "type": "string",
+      "expression": "concat(trim(source(\"firstName\")), static(\" \"), trim(source(\"lastName\")))"
+    },
+    {
+      "target": "tierUpper",
+      "type": "string",
+      "expression": "upper(source(\"loyaltyTier\"))"
+    },
+    {
+      "target": "normalizedEmail",
+      "type": "string",
+      "expression": "lower(trim(source(\"email\")))"
+    },
+    {
+      "target": "phoneDigits",
+      "type": "string",
+      "expression": "replaceAll(replaceAll(replaceAll(replaceAll(trim(source(\"phone\")), static(\"(\"), static(\"\")), static(\")\"), static(\"\")), static(\"-\"), static(\"\")), static(\" \"), static(\"\"))"
+    },
+    {
+      "target": "emailDomain",
+      "type": "string",
+      "expression": "substring(lower(trim(source(\"email\"))), 13)"
+    }
+  ]
+}

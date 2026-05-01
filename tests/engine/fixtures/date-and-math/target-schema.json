@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "issuedDate": { "type": "string" },
+    "postedDate": { "type": "string" },
+    "gross": { "type": "number" },
+    "net": { "type": "number" },
+    "extended": { "type": "number" },
+    "ratio": { "type": "number" },
+    "feeAbs": { "type": "number" }
+  },
+  "required": ["issuedDate", "postedDate", "gross", "net", "extended", "ratio", "feeAbs"]
+}

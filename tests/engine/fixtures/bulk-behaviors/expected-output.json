@@ -1,0 +1,19 @@
+{
+  "Order": {
+    "Header": {
+      "OrderId": "ORD-900",
+      "SourceSystem": "TERMINAL-RUNNER",
+      "OrderType": null
+    },
+    "Parties": {
+      "ShipTo": {
+        "Name": "Warehouse 7"
+      },
+      "BillTo": null
+    },
+    "Totals": {
+      "GrandTotal": 250,
+      "Currency": null
+    }
+  }
+}

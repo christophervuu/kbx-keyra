@@ -1,0 +1,20 @@
+{
+  "name": "simple-direct-mapping",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "simple-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "simple-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    { "target": "id", "type": "string", "expression": "source(\"orderId\")" },
+    { "target": "customer", "type": "string", "expression": "source(\"customerName\")" },
+    { "target": "date", "type": "string", "expression": "source(\"orderDate\")" },
+    { "target": "total", "type": "number", "expression": "source(\"amount\")" },
+    { "target": "currencyCode", "type": "string", "expression": "source(\"currency\")" }
+  ]
+}

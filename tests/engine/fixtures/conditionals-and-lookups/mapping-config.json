@@ -1,0 +1,40 @@
+{
+  "name": "conditionals-and-lookups",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "conditional-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "conditional-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "documentType",
+      "type": "string",
+      "expression": "if(gt(source(\"amount\"), 1000), static(\"INVOICE\"), static(\"RECEIPT\"))"
+    },
+    {
+      "target": "statusCode",
+      "type": "string",
+      "expression": "valueMap(source(\"status\"), {\"pending\": \"PND\", \"paid\": \"PAD\", \"overdue\": \"OVD\"}, static(\"UNK\"))"
+    },
+    {
+      "target": "channelDescription",
+      "type": "string",
+      "expression": "valueMap(source(\"channel\"), {\"web\": \"Website\", \"store\": \"Storefront\", \"partner\": \"Partner API\"}, static(\"Unknown\"))"
+    },
+    {
+      "target": "isHighValue",
+      "type": "boolean",
+      "expression": "or(gt(source(\"amount\"), 5000), and(eq(source(\"paymentMethod\"), static(\"wire\")), gt(source(\"amount\"), 1500)))"
+    },
+    {
+      "target": "riskBand",
+      "type": "string",
+      "expression": "if(lt(source(\"amount\"), 100), static(\"LOW\"), static(\"STANDARD\"))"
+    }
+  ]
+}

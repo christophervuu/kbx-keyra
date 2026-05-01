@@ -1,0 +1,20 @@
+{
+  "name": "array-mapping",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "array-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "array-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "orderLines",
+      "type": "array",
+      "expression": "map(source(\"lineItems\"), {\"sku\": item(\"sku\"), \"description\": item(\"name\"), \"quantity\": item(\"qty\"), \"netPrice\": subtract(item(\"unitPrice\"), item(\"discount\")), \"hasDiscount\": gt(item(\"discount\"), 0), \"lineTotal\": multiply(item(\"qty\"), subtract(item(\"unitPrice\"), item(\"discount\")))})"
+    }
+  ]
+}

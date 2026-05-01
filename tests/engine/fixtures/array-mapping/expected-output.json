@@ -1,0 +1,20 @@
+{
+  "orderLines": [
+    {
+      "sku": "KB-100",
+      "description": "Keyboard",
+      "quantity": 2,
+      "netPrice": 45,
+      "hasDiscount": true,
+      "lineTotal": 90
+    },
+    {
+      "sku": "MS-200",
+      "description": "Mouse",
+      "quantity": 1,
+      "netPrice": 25,
+      "hasDiscount": false,
+      "lineTotal": 25
+    }
+  ]
+}

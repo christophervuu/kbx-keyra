@@ -1,0 +1,20 @@
+{
+  "name": "nested-arrays-and-cross-ref",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "nested-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "nested-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "divisions",
+      "type": "array",
+      "expression": "map(source(\"departments\"), {\"divisionId\": item(\"id\"), \"divisionName\": item(\"name\"), \"staff\": map(item(\"employees\"), {\"employeeId\": item(\"employeeId\"), \"employeeName\": item(\"name\"), \"departmentName\": parent(\"name\"), \"taxRate\": get(find(source(\"taxRates\"), eq(item(\"code\"), parent(\"taxCode\"))), \"rate\")})})"
+    }
+  ]
+}

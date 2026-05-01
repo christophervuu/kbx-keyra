@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "documentType": { "type": "string" },
+    "statusCode": { "type": "string" },
+    "channelDescription": { "type": "string" },
+    "isHighValue": { "type": "boolean" },
+    "riskBand": { "type": "string" }
+  },
+  "required": ["documentType", "statusCode", "channelDescription", "isHighValue", "riskBand"]
+}

@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "divisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "divisionId": { "type": "string" },
+          "divisionName": { "type": "string" },
+          "staff": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "employeeId": { "type": "string" },
+                "employeeName": { "type": "string" },
+                "departmentName": { "type": "string" },
+                "taxRate": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["divisions"]
+}

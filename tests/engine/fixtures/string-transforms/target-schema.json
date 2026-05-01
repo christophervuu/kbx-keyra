@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "fullName": { "type": "string" },
+    "tierUpper": { "type": "string" },
+    "normalizedEmail": { "type": "string" },
+    "phoneDigits": { "type": "string" },
+    "emailDomain": { "type": "string" }
+  },
+  "required": ["fullName", "tierUpper", "normalizedEmail", "phoneDigits", "emailDomain"]
+}

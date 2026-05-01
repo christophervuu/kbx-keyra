@@ -10,10 +10,10 @@ This file must be kept current. When an architecture document is created or mean
 
 ## Documents
 
-| Document | Covers | Last Updated |
-|---|---|---|
-| [project-structure.md](./project-structure.md) | Repository layout — where source code, UI code, and tests live. File and folder conventions within `src/`, `ui/`, and `tests/`. | 2026-04-30 |
-| [mapping-engine.md](./mapping-engine.md) | Mapping engine public API, internal module boundaries, function registry pattern, execution + validate pipelines, parser/evaluator architecture, type system, constraints, and error handling philosophy. | 2026-05-01 |
+| Document                                       | Covers                                                                                                                                                                                                    | Last Updated |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| [project-structure.md](./project-structure.md) | Repository layout — where source code, UI code, and tests live. File and folder conventions within `src/`, `ui/`, and `tests/`.                                                                           | 2026-04-30   |
+| [mapping-engine.md](./mapping-engine.md)       | Mapping engine public API, internal module boundaries, function registry pattern, execution + validate pipelines, parser/evaluator architecture, type system, constraints, and error handling philosophy. | 2026-05-01   |
 
 ---
 

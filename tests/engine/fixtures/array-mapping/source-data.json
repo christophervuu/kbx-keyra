@@ -1,0 +1,7 @@
+{
+  "orderId": "SO-445",
+  "lineItems": [
+    { "sku": "KB-100", "name": "Keyboard", "qty": 2, "unitPrice": 50, "discount": 5 },
+    { "sku": "MS-200", "name": "Mouse", "qty": 1, "unitPrice": 25, "discount": 0 }
+  ]
+}

@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "engine:run": "tsx scripts/run-engine.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@eslint/js": "^9.26.0",
     "eslint": "^9.26.0",
+    "tsx": "^4.20.6",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.31.1",

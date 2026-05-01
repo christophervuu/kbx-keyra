@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "orderId": { "type": "string" },
+    "shipToName": { "type": "string" },
+    "amount": { "type": "number" }
+  },
+  "required": ["orderId", "shipToName", "amount"]
+}

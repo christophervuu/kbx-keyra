@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "amount": { "type": "number" },
+    "status": { "type": "string" },
+    "channel": { "type": "string" },
+    "paymentMethod": { "type": "string" }
+  }
+}

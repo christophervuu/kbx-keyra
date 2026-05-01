@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "displayName": { "type": "string" },
+    "primaryEmail": { "type": "string" },
+    "hasPreferences": { "type": "boolean" },
+    "lastInitial": { "type": "string" },
+    "statusLabel": { "type": "string" }
+  },
+  "required": ["displayName", "primaryEmail", "hasPreferences", "lastInitial", "statusLabel"]
+}

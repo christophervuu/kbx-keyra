@@ -1,0 +1,19 @@
+{
+  "divisions": [
+    {
+      "divisionId": "D1",
+      "divisionName": "Engineering",
+      "staff": [
+        { "employeeId": "E1", "employeeName": "Ada", "departmentName": "Engineering", "taxRate": 0.1 },
+        { "employeeId": "E2", "employeeName": "Grace", "departmentName": "Engineering", "taxRate": 0.2 }
+      ]
+    },
+    {
+      "divisionId": "D2",
+      "divisionName": "Finance",
+      "staff": [
+        { "employeeId": "E3", "employeeName": "Linus", "departmentName": "Finance", "taxRate": 0.1 }
+      ]
+    }
+  ]
+}

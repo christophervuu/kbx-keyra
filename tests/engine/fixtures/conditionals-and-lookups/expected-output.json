@@ -1,0 +1,7 @@
+{
+  "documentType": "INVOICE",
+  "statusCode": "PND",
+  "channelDescription": "Website",
+  "isHighValue": true,
+  "riskBand": "STANDARD"
+}

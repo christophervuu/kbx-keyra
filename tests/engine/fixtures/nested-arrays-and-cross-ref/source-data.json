@@ -1,0 +1,23 @@
+{
+  "departments": [
+    {
+      "id": "D1",
+      "name": "Engineering",
+      "employees": [
+        { "employeeId": "E1", "name": "Ada", "taxCode": "A" },
+        { "employeeId": "E2", "name": "Grace", "taxCode": "B" }
+      ]
+    },
+    {
+      "id": "D2",
+      "name": "Finance",
+      "employees": [
+        { "employeeId": "E3", "name": "Linus", "taxCode": "A" }
+      ]
+    }
+  ],
+  "taxRates": [
+    { "code": "A", "rate": 0.1 },
+    { "code": "B", "rate": 0.2 }
+  ]
+}

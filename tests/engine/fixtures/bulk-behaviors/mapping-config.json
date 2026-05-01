@@ -1,0 +1,37 @@
+{
+  "name": "bulk-behaviors",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "bulk-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "bulk-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "null",
+    "nullSubtrees": ["Order.Parties.BillTo"],
+    "constants": {
+      "sourceSystem": "TERMINAL-RUNNER"
+    },
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "Order.Header.OrderId",
+      "type": "string",
+      "expression": "source(\"orderId\")"
+    },
+    {
+      "target": "Order.Header.SourceSystem",
+      "type": "string",
+      "expression": "constant(\"sourceSystem\")"
+    },
+    {
+      "target": "Order.Parties.ShipTo.Name",
+      "type": "string",
+      "expression": "source(\"shipToName\")"
+    },
+    {
+      "target": "Order.Totals.GrandTotal",
+      "type": "number",
+      "expression": "source(\"amount\")"
+    }
+  ]
+}

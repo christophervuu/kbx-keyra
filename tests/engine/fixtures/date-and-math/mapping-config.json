@@ -1,0 +1,50 @@
+{
+  "name": "date-and-math",
+  "version": 1,
+  "engineVersion": "1.1.0",
+  "sourceSchemaRef": { "schemaId": "date-math-source", "type": "local" },
+  "targetSchemaRef": { "schemaId": "date-math-target", "type": "local" },
+  "config": {
+    "unmappedTargets": "omit",
+    "nullSubtrees": [],
+    "constants": {},
+    "externalSources": []
+  },
+  "rules": [
+    {
+      "target": "issuedDate",
+      "type": "string",
+      "expression": "formatDate(source(\"issuedOn\"), static(\"YYYY/MM/DD\"), static(\"YYYY-MM-DD\"))"
+    },
+    {
+      "target": "postedDate",
+      "type": "string",
+      "expression": "formatDate(source(\"postedAt\"), static(\"ISO8601\"), static(\"MM/DD/YYYY\"))"
+    },
+    {
+      "target": "gross",
+      "type": "number",
+      "expression": "add(source(\"subtotal\"), source(\"tax\"))"
+    },
+    {
+      "target": "net",
+      "type": "number",
+      "expression": "subtract(add(source(\"subtotal\"), source(\"tax\")), source(\"discount\"))"
+    },
+    {
+      "target": "extended",
+      "type": "number",
+      "expression": "multiply(source(\"unitPrice\"), source(\"units\"))"
+    },
+    {
+      "target": "ratio",
+      "type": "number",
+      "expression": "round(divide(source(\"subtotal\"), source(\"units\")), 2)"
+    },
+    {
+      "target": "feeAbs",
+      "type": "number",
+      "expression": "abs(source(\"fee\"))"
+    }
+  ]
+}

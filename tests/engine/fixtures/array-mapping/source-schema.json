@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "orderId": { "type": "string" },
+    "lineItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sku": { "type": "string" },
+          "name": { "type": "string" },
+          "qty": { "type": "number" },
+          "unitPrice": { "type": "number" },
+          "discount": { "type": "number" }
+        }
+      }
+    }
+  }
+}

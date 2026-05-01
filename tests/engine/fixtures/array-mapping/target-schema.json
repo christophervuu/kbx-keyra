@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "orderLines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sku": { "type": "string" },
+          "description": { "type": "string" },
+          "quantity": { "type": "number" },
+          "netPrice": { "type": "number" },
+          "hasDiscount": { "type": "boolean" },
+          "lineTotal": { "type": "number" }
+        }
+      }
+    }
+  },
+  "required": ["orderLines"]
+}
