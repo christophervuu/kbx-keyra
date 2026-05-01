@@ -24,10 +24,17 @@ export interface TraceEntry {
   readonly diagnostics?: readonly Diagnostic[];
 }
 
+export interface CoverageResult {
+  readonly total: number;
+  readonly mapped: number;
+  readonly percentage: number;
+  readonly unmappedFields?: readonly string[];
+}
+
 export interface ValidationResult {
   readonly valid: boolean;
   readonly diagnostics: readonly Diagnostic[];
-  readonly coverage?: number;
+  readonly coverage?: CoverageResult;
 }
 
 export interface ExecutionResult {

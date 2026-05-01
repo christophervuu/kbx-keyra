@@ -142,6 +142,11 @@ export const DIAGNOSTIC_CODES = {
     messageTemplate:
       'Required target field `{path}` has no mapping rule — defaulting to null',
   },
+  'KEYRA-W006': {
+    code: 'KEYRA-W006',
+    severity: 'warning',
+    messageTemplate: 'Duplicate target path: `{path}` is mapped by rules at indices {indices}',
+  },
 } as const satisfies Record<string, DiagnosticCodeDefinition>;
 
 export type DiagnosticCode = keyof typeof DIAGNOSTIC_CODES;

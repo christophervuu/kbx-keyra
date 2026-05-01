@@ -1,0 +1,12 @@
+export type { SchemaNode, SchemaTree } from './schema-tree.js';
+export { buildSchemaTree, getOrBuildSchemaTree } from './schema-tree.js';
+export { findFunctionCalls } from './ast-utils.js';
+export type { ParsedRuleAst } from './source-paths.js';
+export { validateSourcePaths } from './source-paths.js';
+export { detectDuplicateTargets, validateTargetPaths } from './target-paths.js';
+export type { TypeInferenceContext } from './type-inference.js';
+export { inferType } from './type-inference.js';
+export { validateTypeCompatibility } from './type-compatibility.js';
+export { validateArrayContext } from './array-context.js';
+export { validateConstantsAndExternals } from './constants-externals.js';
+export { computeCoverage } from './coverage.js';

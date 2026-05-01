@@ -44,6 +44,17 @@ Both functions are pure — same inputs always produce same outputs.
 src/engine/
   index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, registerAllFunctions, types, registry
   validate.ts           validate() implementation
+  validate/
+    index.ts            Barrel export for validation sub-modules
+    schema-tree.ts      SchemaTree contract + JSON Schema adapter + XSD permissive stub
+    source-paths.ts     source("...") path existence checks (E030)
+    target-paths.ts     rule.target path checks (E031) + duplicate target detection warning
+    type-inference.ts   Best-effort static expression type inference utility
+    type-compatibility.ts Rule output type vs target schema type checks (E005)
+    array-context.ts    item()/parent()/filter/find context checks (E010/E013/E017)
+    constants-externals.ts constant()/external() reference checks (E011/E012)
+    coverage.ts         Required target field coverage computation
+    ast-utils.ts        Shared AST traversal helpers for validation passes
   execute.ts            execute() implementation
   types/
     index.ts            Barrel export for all types
@@ -88,6 +99,7 @@ src/engine/
 | `diagnostics/` | Error/warning code constants and message formatting | `types/` |
 | `registry/` | Function registration and lookup | `types/` |
 | `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` |
+| `validate/` | Validation sub-pass implementations (schema abstraction, path checks, type/context checks, references, coverage) | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 | `execute.ts` | Mapping execution | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 | `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics, expression evaluation, path resolution | `types/`, `diagnostics/`, `registry/` |
 | `functions/` | Built-in DSL function implementations and grouped registration | `types/`, `diagnostics/`, `registry/`, `dsl/` |
@@ -169,8 +181,112 @@ Engine Input: MappingConfig + SourceData + SourceSchema + TargetSchema + Options
     └────┬──────────────┘
          │
          ▼
-    Output: ExecutionResult { output, diagnostics, trace? }
+Output: ExecutionResult { output, diagnostics, trace? }
 ```
+
+---
+
+## Validate Pipeline
+
+`validate()` is implemented as a deterministic, multi-pass static-analysis pipeline. It validates mapping rules against schema structure and function signatures without executing rules against source data.
+
+### Pass Sequence
+
+```
+Engine Input: MappingConfig + SourceSchema + TargetSchema + Options
+         │
+         ▼
+   ┌─────────┐
+   │ Parse    │  Parse each rule expression and collect parser diagnostics
+   └────┬─────┘
+        ▼
+   ┌──────────┐
+   │ Paths     │  Validate source("...") calls and rule.target paths
+   └────┬─────┘
+        ▼
+   ┌──────────┐
+   │ Types     │  Infer expression output types and compare to target field types
+   └────┬─────┘
+        ▼
+   ┌──────────┐
+   │ Context   │  Validate array-scope semantics (item/parent/filter/find)
+   └────┬─────┘
+        ▼
+   ┌──────────┐
+   │ References│ Validate constant/external references
+   └────┬─────┘
+        ▼
+   ┌──────────┐
+   │ Coverage  │  Compute required-target coverage metrics
+   └────┬─────┘
+        ▼
+   ┌──────────┐
+   │ Aggregate │  Merge diagnostics + compute valid + attach coverage
+   └────┬─────┘
+        ▼
+Output: ValidationResult { valid, diagnostics, coverage? }
+```
+
+### Pass Behavior
+
+1. **Parse** — parses every rule expression and preserves parse diagnostics with rule location metadata (`ruleIndex`, `targetPath`, `expression`). Rules with no AST are excluded from downstream AST-based passes.
+2. **Paths** — checks source path references against source schema and rule targets against target schema. Duplicate targets are emitted as warnings.
+3. **Types** — infers expression output type and compares with target field type for static compatibility checks.
+4. **Context** — enforces array-context rules for `item()`, `parent()`, and boolean requirements for `filter()/find()` predicates.
+5. **References** — validates `constant()` and `external()` names against mapping config declarations.
+6. **Coverage** — computes required-leaf target coverage statistics.
+7. **Aggregate** — concatenates pass diagnostics and computes `valid` from severity (`false` if any `error`, warnings/info do not invalidate).
+
+Passes are intentionally independent: a failure in one pass does not short-circuit the rest. This improves editor feedback density by surfacing all detectable issues from a single validate call.
+
+### SchemaTree (Validation Schema Abstraction)
+
+`SchemaTree` is the internal schema contract used by validation passes.
+
+```ts
+interface SchemaTree {
+  readonly diagnostics: readonly Diagnostic[];
+  hasPath(path: string): boolean;
+  getTypeAtPath(path: string): ValueType | undefined;
+  getRequiredLeafPaths(): string[];
+  isArrayPath(path: string): boolean;
+}
+```
+
+What it represents:
+- A simplified, validation-focused view of a schema's structural shape.
+- Fast path/type lookups needed by static analysis passes.
+
+How it is built:
+- **JSON Schema adapter** builds a traversable tree for object/array structure, required fields, and path/type checks.
+- **XSD adapter (current stub)** returns a permissive tree (`hasPath() => true`, unknown types, no required leaves) plus an info diagnostic to avoid false-positive schema errors while XSD parsing is not implemented.
+
+Boundary (explicit): **the validator uses schemas for static checks; it does not parse, ingest, store, version, or manage schemas.** Schema lifecycle ownership remains outside the engine (backend/domain services).
+
+### Type Inference Model
+
+Validation type inference is best-effort, not a full type system. It infers types from:
+- literals
+- known function signatures
+- schema-backed path reads (`source()`, `item()`, etc.) when statically resolvable
+
+When inference is uncertain, it returns `undefined`. Callers treat `undefined` as "cannot prove mismatch" and skip that check to avoid false positives.
+
+### Coverage Model
+
+Coverage is structural and target-required-field oriented:
+- `total`: required target leaf fields
+- `mapped`: required leaves with at least one rule targeting them
+- `percentage`: mapped / total
+- `unmappedFields`: required leaves with no mapping rule
+
+If no required target leaves exist, coverage is `100%` (vacuous truth). Coverage indicates rule presence, not semantic correctness of expressions.
+
+### Performance Characteristics and Design Choices
+
+- Validate is synchronous and deterministic for interactive editor use.
+- Public API accepts raw schema inputs; internal schema conversion is cached by object reference (WeakMap) to amortize repeated validations in keystroke-driven flows.
+- Sub-validators are small modules with focused responsibilities to keep the hot path testable and maintainable.
 
 ---
 

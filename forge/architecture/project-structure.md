@@ -24,6 +24,7 @@ src/
   engine/             Pure TypeScript mapping engine (zero dependencies on UI or cloud)
     index.ts          Engine entry point — exports execute(), validate(), parse()
     dsl/              DSL parser and expression evaluator
+    validate/         Validation submodules (schema-tree, path/type/context checks, coverage)
     types/            Shared TypeScript types used by engine and consumers
     diagnostics/      Error codes, diagnostic formatting, trace output
     registry/         Function registration and lookup mechanism

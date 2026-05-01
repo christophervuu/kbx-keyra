@@ -8,6 +8,7 @@ export type {
 } from './config.js';
 
 export type {
+  CoverageResult,
   Diagnostic,
   DiagnosticLocation,
   DiagnosticSeverity,

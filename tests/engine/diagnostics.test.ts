@@ -10,10 +10,11 @@ describe('diagnostic codes', () => {
   it('includes all expected diagnostic codes with expected count', () => {
     const codes = Object.keys(DIAGNOSTIC_CODES);
 
-    expect(codes).toHaveLength(26);
+    expect(codes).toHaveLength(27);
     expect(codes).toContain('KEYRA-E001');
     expect(codes).toContain('KEYRA-E060');
     expect(codes).toContain('KEYRA-W005');
+    expect(codes).toContain('KEYRA-W006');
   });
 
   it('uses warning severity for E012, E016, and E019', () => {
