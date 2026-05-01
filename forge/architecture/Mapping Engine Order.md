@@ -1,0 +1,8 @@
+| #          | Spec                              | Why This Order                                                                                                                                                    |
+| ---------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FS-002** | **DSL Parser**                    | Everything downstream needs parsed expressions. Tokenizer + AST generation from DSL strings.                                                                      |
+| **FS-003** | **Expression Evaluator**          | Takes an AST node + runtime context → produces a value. Implements null propagation, scope stack, and function dispatch via the registry.                         |
+| **FS-004** | **Core Function Implementations** | Register the ~30 DSL functions (source, concat, cast, if, valueMap, formatDate, math, etc.) into the registry. Can be split into sub-specs by category if needed. |
+| **FS-005** | **Array Functions & Scoping**     | `map()`, `filter()`, `find()`, `get()`, `merge()`, `flatten()`, `array()` — the scope stack (`item()`/`parent()`) is the hard part.                               |
+| **FS-006** | **Validate Pipeline**             | Full `validate()` implementation — schema path checking (E030/E031), type compatibility, array context validation, coverage computation.                          |
+| **FS-007** | **Execute Pipeline**              | Full `execute()` implementation — rule iteration, bulk behaviors (unmapped targets, null subtrees), trace mode, diagnostic collection.                            |

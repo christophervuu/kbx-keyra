@@ -11,6 +11,19 @@ const EXPECTED_FUNCTIONS = [
   'external',
   'static',
 
+  // Arrays
+  'map',
+  'filter',
+  'find',
+  'array',
+  'merge',
+  'flatten',
+  'first',
+  'nth',
+  'join',
+  'count',
+  'get',
+
   // Type conversion
   'cast',
 
@@ -61,7 +74,7 @@ describe('built-in function registration', () => {
   it('AE-25: default registry includes all expected built-in functions', () => {
     const names = defaultRegistry.listFunctions();
 
-    expect(names).toHaveLength(37);
+    expect(names).toHaveLength(48);
 
     for (const functionName of EXPECTED_FUNCTIONS) {
       expect(defaultRegistry.hasFunction(functionName)).toBe(true);
@@ -73,7 +86,7 @@ describe('built-in function registration', () => {
 
     registerAllFunctions(registry);
 
-    expect(registry.listFunctions()).toHaveLength(37);
+    expect(registry.listFunctions()).toHaveLength(48);
     for (const functionName of EXPECTED_FUNCTIONS) {
       expect(registry.hasFunction(functionName)).toBe(true);
     }

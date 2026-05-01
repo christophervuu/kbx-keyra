@@ -108,7 +108,7 @@ export interface EvaluationResult {
 
 export interface EvaluationContext {
   readonly sourceData: unknown;
-  readonly scopeStack: readonly ScopeEntry[];
+  readonly scopeStack: ScopeEntry[];
   readonly constants: Readonly<Record<string, unknown>>;
   readonly externalSources: Readonly<Record<string, unknown>>;
   readonly registry: FunctionRegistry;
@@ -117,4 +117,6 @@ export interface EvaluationContext {
   readonly parentItem?: unknown;
   readonly evaluate: (node: AstNode, context: EvaluationContext) => EvaluationResult;
   readonly addDiagnostic: (diagnostic: Diagnostic) => void;
+  readonly pushScope: (scope: ScopeEntry) => void;
+  readonly popScope: () => ScopeEntry | undefined;
 }

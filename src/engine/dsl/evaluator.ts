@@ -219,10 +219,21 @@ function evaluateFunctionCall(
     return null;
   }
 
-  const args = node.arguments.map((argument) => evaluateNode(argument, context, state));
+  const lazyArgs = new Set(registered.signature.lazyArgs ?? []);
+  const args = node.arguments.map((argument, index) => {
+    if (lazyArgs.has(index)) {
+      return argument;
+    }
+
+    return evaluateNode(argument, context, state);
+  });
 
   if (registered.signature.handlesNull !== true) {
     for (let index = 0; index < registered.signature.parameters.length; index += 1) {
+      if (lazyArgs.has(index)) {
+        continue;
+      }
+
       const parameter = registered.signature.parameters[index];
       const arg = args[index];
 
@@ -245,7 +256,7 @@ function evaluateFunctionCall(
     }
   }
 
-  const typeMismatch = findTypeMismatch(registered, args);
+  const typeMismatch = findTypeMismatch(registered, args, lazyArgs);
   if (typeMismatch !== null) {
     addDiagnostic(state, {
       code: DIAGNOSTIC_CODES['KEYRA-E005'].code,
@@ -310,6 +321,7 @@ function evaluateFunctionCall(
 function findTypeMismatch(
   registered: RegisteredFunction,
   args: readonly unknown[],
+  lazyArgs: ReadonlySet<number>,
 ): {
   argumentIndex: number;
   expected: string;
@@ -319,6 +331,10 @@ function findTypeMismatch(
   const parameters = registered.signature.parameters;
 
   for (let index = 0; index < parameters.length; index += 1) {
+    if (lazyArgs.has(index)) {
+      continue;
+    }
+
     const parameter = parameters[index];
     if (parameter === undefined) {
       continue;
@@ -355,9 +371,16 @@ export function evaluate(node: AstNode, context: EvaluationContext): EvaluationR
 
   const rootContext: EvaluationContext = {
     ...context,
+    scopeStack: context.scopeStack,
     evaluate,
     addDiagnostic: (diagnostic: Diagnostic): void => {
       diagnostics.push(diagnostic);
+    },
+    pushScope: (scope): void => {
+      context.scopeStack.push(scope);
+    },
+    popScope: (): unknown => {
+      return context.scopeStack.pop();
     },
   };
 

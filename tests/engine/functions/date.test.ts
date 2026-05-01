@@ -9,7 +9,7 @@ function createContext(): EvaluationContext {
   const registry = createRegistry();
   registerDateFunctions(registry);
 
-  return {
+  const context: EvaluationContext = {
     sourceData: {},
     scopeStack: [],
     constants: {},
@@ -20,7 +20,13 @@ function createContext(): EvaluationContext {
     addDiagnostic: () => {
       // Overridden by evaluator root context.
     },
+    pushScope: (scope) => {
+      context.scopeStack.push(scope);
+    },
+    popScope: () => context.scopeStack.pop(),
   };
+
+  return context;
 }
 
 function callFormatDate(value: string, inputFormat: string, outputFormat: string): AstNode {

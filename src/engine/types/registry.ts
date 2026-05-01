@@ -20,6 +20,7 @@ export interface FunctionSignature {
   readonly parameters: readonly FunctionParameter[];
   readonly returnType: ValueType;
   readonly handlesNull?: boolean;
+  readonly lazyArgs?: readonly number[];
 }
 
 export type FunctionImplementation = (

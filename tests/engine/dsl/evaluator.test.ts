@@ -19,6 +19,10 @@ function createContext(options?: EngineOptions, scopeStack: unknown[] = []): Eva
     addDiagnostic: () => {
       // Overridden by evaluator root context; test context provides a valid default.
     },
+    pushScope: (scope) => {
+      context.scopeStack.push(scope);
+    },
+    popScope: () => context.scopeStack.pop(),
   };
 
   return context;
@@ -519,6 +523,175 @@ describe('evaluate() comprehensive coverage', () => {
 
     expect(result.trace?.some((entry) => entry.nodeType === 'StringLiteral')).toBe(true);
     expect(result.trace?.some((entry) => entry.nodeType === 'FunctionCall')).toBe(true);
+  });
+
+  it('passes lazy arguments as raw AstNode while evaluating non-lazy args', () => {
+    const context = createContext();
+    let capturedArgs: readonly unknown[] = [];
+
+    register(
+      context,
+      'captureLazy',
+      {
+        parameters: [
+          { name: 'value', type: 'string', required: true },
+          { name: 'template', type: 'any', required: true },
+        ],
+        returnType: 'string',
+        lazyArgs: [1],
+      },
+      (args) => {
+        capturedArgs = args;
+        return String(args[0]);
+      },
+    );
+
+    const result = evaluate(
+      {
+        type: 'FunctionCall',
+        name: 'captureLazy',
+        arguments: [
+          { type: 'StringLiteral', value: 'value', start: 0, end: 7 },
+          {
+            type: 'FunctionCall',
+            name: 'unknownFn',
+            arguments: [],
+            start: 0,
+            end: 9,
+          },
+        ],
+        start: 0,
+        end: 30,
+      },
+      context,
+    );
+
+    expect(result.value).toBe('value');
+    expect(capturedArgs[0]).toBe('value');
+    expect(capturedArgs[1]).toEqual(
+      expect.objectContaining({
+        type: 'FunctionCall',
+        name: 'unknownFn',
+      }),
+    );
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E002')).toBe(false);
+  });
+
+  it('keeps eager argument evaluation behavior when lazyArgs is not defined', () => {
+    const context = createContext();
+    let capturedArg: unknown;
+
+    register(
+      context,
+      'capture',
+      {
+        parameters: [{ name: 'value', type: 'string', required: true }],
+        returnType: 'string',
+      },
+      (args) => {
+        capturedArg = args[0];
+        return String(args[0]);
+      },
+    );
+
+    register(
+      context,
+      'upper',
+      {
+        parameters: [{ name: 'value', type: 'string', required: true }],
+        returnType: 'string',
+      },
+      (args) => String(args[0]).toUpperCase(),
+    );
+
+    const result = evaluate(
+      {
+        type: 'FunctionCall',
+        name: 'capture',
+        arguments: [
+          {
+            type: 'FunctionCall',
+            name: 'upper',
+            arguments: [{ type: 'StringLiteral', value: 'abc', start: 0, end: 5 }],
+            start: 0,
+            end: 9,
+          },
+        ],
+        start: 0,
+        end: 20,
+      },
+      context,
+    );
+
+    expect(result.value).toBe('ABC');
+    expect(capturedArg).toBe('ABC');
+  });
+
+  it('supports pushScope/popScope and derives currentItem/parentItem correctly', () => {
+    const context = createContext();
+
+    register(
+      context,
+      'item',
+      {
+        parameters: [{ name: 'path', type: 'string', required: true }],
+        returnType: 'any',
+      },
+      (args, ctx) => resolvePath(ctx.currentItem, String(args[0])),
+    );
+
+    context.pushScope({ id: 'outer' });
+    let result = evaluate(
+      {
+        type: 'FunctionCall',
+        name: 'item',
+        arguments: [{ type: 'StringLiteral', value: 'id', start: 0, end: 4 }],
+        start: 0,
+        end: 8,
+      },
+      context,
+    );
+    expect(result.value).toBe('outer');
+
+    context.pushScope({ id: 'inner' });
+    result = evaluate(
+      {
+        type: 'FunctionCall',
+        name: 'item',
+        arguments: [{ type: 'StringLiteral', value: 'id', start: 0, end: 4 }],
+        start: 0,
+        end: 8,
+      },
+      context,
+    );
+    expect(result.value).toBe('inner');
+
+    context.popScope();
+    result = evaluate(
+      {
+        type: 'FunctionCall',
+        name: 'item',
+        arguments: [{ type: 'StringLiteral', value: 'id', start: 0, end: 4 }],
+        start: 0,
+        end: 8,
+      },
+      context,
+    );
+    expect(result.value).toBe('outer');
+
+    context.popScope();
+    result = evaluate(
+      {
+        type: 'FunctionCall',
+        name: 'item',
+        arguments: [{ type: 'StringLiteral', value: 'id', start: 0, end: 4 }],
+        start: 0,
+        end: 8,
+      },
+      context,
+    );
+    expect(result.value).toBeNull();
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E010')).toBe(true);
   });
 
   it('edge: variadic arity allows 2+ arguments and rejects too few', () => {

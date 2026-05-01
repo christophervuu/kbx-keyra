@@ -10,13 +10,13 @@ function createContext(params?: {
   sourceData?: unknown;
   constants?: Readonly<Record<string, unknown>>;
   externalSources?: Readonly<Record<string, unknown>>;
-  scopeStack?: readonly unknown[];
+  scopeStack?: unknown[];
   options?: EngineOptions;
 }): EvaluationContext {
   const registry = createRegistry();
   registerSourceAccessFunctions(registry);
 
-  return {
+  const context: EvaluationContext = {
     sourceData: params?.sourceData ?? {},
     scopeStack: params?.scopeStack ?? [],
     constants: params?.constants ?? {},
@@ -27,7 +27,13 @@ function createContext(params?: {
     addDiagnostic: () => {
       // Overridden by evaluator root context.
     },
+    pushScope: (scope) => {
+      context.scopeStack.push(scope);
+    },
+    popScope: () => context.scopeStack.pop(),
   };
+
+  return context;
 }
 
 function call(name: string, args: readonly AstNode[]): AstNode {

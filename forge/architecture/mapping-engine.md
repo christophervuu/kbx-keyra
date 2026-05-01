@@ -67,6 +67,7 @@ src/engine/
     resolve-path.ts     Dot/bracket path resolver used by source/item/parent/get functions
   functions/
     index.ts            Barrel — registerAllFunctions() populates a registry with built-in functions
+    arrays.ts           map, filter, find, array, merge, flatten, first, nth, join, count, get
     source-access.ts    source, item, parent, constant, external, static
     type-conversion.ts  cast
     null-handling.ts    default, coalesce, isNull
@@ -262,6 +263,7 @@ evaluate(node: AstNode, context: EvaluationContext): EvaluationResult
 - `registry` — function registry for function lookup/dispatch
 - `options` — evaluator options (`trace`, `traceVerbosity`, `maxRecursionDepth`, etc.)
 - `evaluate` — callback for re-entrant evaluation from array functions (`map`, `filter`, `find`)
+- `pushScope` / `popScope` — scope stack lifecycle operations used by scope-creating functions
 - `currentItem` / `parentItem` — populated by evaluator from scope stack before dispatch
 - `addDiagnostic` — callback for function implementations to append diagnostics to current evaluation result
 
@@ -286,9 +288,11 @@ For `FunctionCall` nodes, evaluator executes:
 
 1. Registry lookup (`KEYRA-E002` if missing)
 2. Arity check (`KEYRA-E003` on mismatch)
-3. Recursive argument evaluation
-4. Null propagation check
-5. Runtime type check
+3. Argument preparation:
+   - evaluate eager arguments recursively
+   - pass lazy arguments (`FunctionSignature.lazyArgs`) as raw AST nodes
+4. Null propagation check (eager arguments only)
+5. Runtime type check (eager arguments only)
 6. Implementation invocation
 
 Null propagation is centralized:
@@ -296,6 +300,12 @@ Null propagation is centralized:
 - Default: required `null` argument short-circuits to `null` + `KEYRA-W001`
 - Bypass: functions with `FunctionSignature.handlesNull === true` receive null arguments normally
 - Exception list is defined by DSL spec and implemented via registration metadata (not hardcoded in evaluator)
+
+Deferred argument evaluation is declarative:
+
+- `FunctionSignature.lazyArgs?: number[]` lists argument indices that must be passed as raw AST nodes
+- Scope-creating functions (`map`, `filter`, `find`) use `lazyArgs: [1]` for template/condition expressions
+- This avoids function-name special-casing in evaluator dispatch and keeps the pattern extensible for future functions
 
 Type mismatch behavior is strict and deterministic:
 
@@ -325,6 +335,26 @@ Implementation contract:
 2. Define a `FunctionImplementation` receiving evaluated args + `EvaluationContext`.
 3. Register via category registration function and `registerAllFunctions(registry)`.
 
+#### Scope-Creating Functions
+
+Scope-creating array functions (`map`, `filter`, `find`) have additional responsibilities:
+
+- Receive mixed args (evaluated values + raw AST nodes via `lazyArgs`)
+- Manage scope stack lifecycle per element (`pushScope` / `popScope`)
+- Re-enter evaluator with `context.evaluate(astNode, context)` for each iteration
+- Guarantee scope cleanup with `try/finally`
+- Merge diagnostics emitted by sub-evaluations into the parent evaluation
+
+Canonical lifecycle:
+
+1. Receive evaluated array arg + lazy AST arg
+2. For each element:
+   - `pushScope(element)`
+   - evaluate deferred AST node
+   - collect value/diagnostics
+   - `popScope()` in `finally`
+3. Return aggregated result (`map` values, `filter` originals, `find` first match)
+
 Function implementations are intentionally focused on core logic:
 
 - They do **not** perform arity checks (handled by evaluator).
@@ -334,6 +364,76 @@ Function implementations are intentionally focused on core logic:
 - They emit function-specific diagnostics via `context.addDiagnostic(...)` (e.g., `source` W002, `cast` E020/E021, `divide` E050, `valueMap` E060/W003, `formatDate` E040).
 
 `registerAllFunctions(registry)` composes all category registration functions and is called during engine initialization to populate `defaultRegistry` with all built-ins.
+
+---
+
+## Array Functions and Scope Stack
+
+Array functions are the only evaluator consumers that mutate scope stack state during expression execution. They enable nested context access for `item()` and `parent()` while preserving `source()` as a root-only accessor.
+
+### Why Deferred Arguments Are Required
+
+The evaluator normally evaluates function arguments before invocation. That behavior is incorrect for scope-creating functions because `map/filter/find` must evaluate their second argument **per element**, not once.
+
+- `map(array, template)`
+- `filter(array, condition)`
+- `find(array, condition)`
+
+Each function declares `lazyArgs: [1]` so argument 2 is passed as an AST node and re-evaluated inside the iteration scope.
+
+### Scope-Creating Runtime Contract
+
+Per element, scope-creating functions follow:
+
+1. `pushScope(element)`
+2. `context.evaluate(deferredAst, context)`
+3. collect result and diagnostics
+4. `popScope()` in `finally`
+
+This guarantees scope correctness even on evaluation errors.
+
+### Scope Resolution Model
+
+Before each function dispatch, evaluator derives:
+
+- `currentItem` = top of stack
+- `parentItem` = second-to-top
+
+Functions then resolve as follows:
+
+- `item(path)` → `currentItem`
+- `parent(path)` → `parentItem`
+- `source(path)` → `sourceData` (ignores scope stack)
+
+### Scope Stack State Diagram
+
+```
+root sourceData
+  └─ map(source("departments"))     stack: [department]
+      └─ map(item("employees"))      stack: [department, employee]
+          └─ find(source("tax"), ...) stack: [department, employee, taxCandidate]
+```
+
+At each depth:
+
+- `item()` reads nearest scope (stack top)
+- `parent()` reads one level up (stack top - 1)
+- `source()` remains root-scoped
+
+### Null / Empty Behavior Reference
+
+| Input | `map()` | `filter()` | `find()` | `count()` | `first()` | `nth()` | `join()` | `flatten()` | `merge()` arg | `array()` arg |
+|------|---------|------------|----------|-----------|-----------|---------|----------|-------------|---------------|---------------|
+| `null` | `null` | `null` | `null` | `0` | `null` | `null` | `null` | `null` | skipped | included as `null` |
+| `[]` | `[]` | `[]` | `null` | `0` | `null` | `null` | `""` | `[]` | contributes nothing | N/A |
+| array with `null` elements | processed normally | null condition excludes element | null condition skips element | counted | may return null element | may return null element | null elements skipped | null elements preserved | N/A | N/A |
+
+Design notes:
+
+- `count(null) = 0` (explicit exception to null propagation)
+- `merge()` treats null args as empty for resilient multi-source composition
+- `array()` preserves null args to keep positional intent
+- `join()` skips null elements rather than rendering `"null"`
 
 ### Path Resolution Utility
 

@@ -1,4 +1,5 @@
 import type { FunctionRegistry } from '../registry/function-registry.js';
+import { registerArrayFunctions } from './arrays.js';
 import { registerConditionalFunctions } from './conditional.js';
 import { registerDateFunctions } from './date.js';
 import { registerLookupFunctions } from './lookup.js';
@@ -10,6 +11,7 @@ import { registerTypeConversionFunctions } from './type-conversion.js';
 
 export function registerAllFunctions(registry: FunctionRegistry): void {
   registerSourceAccessFunctions(registry);
+  registerArrayFunctions(registry);
   registerTypeConversionFunctions(registry);
   registerNullHandlingFunctions(registry);
   registerConditionalFunctions(registry);
