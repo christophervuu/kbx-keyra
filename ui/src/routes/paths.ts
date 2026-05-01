@@ -1,0 +1,14 @@
+export const PATHS = {
+  HOME: '/',
+  CREATE_PROJECT: '/projects/new',
+  PROJECT_OVERVIEW: '/projects/:projectId',
+  PROJECT_SETTINGS: '/projects/:projectId/settings',
+  PROJECT_DEPLOYMENTS: '/projects/:projectId/deployments',
+  CREATE_MAPPING: '/projects/:projectId/mappings/new',
+  MAPPING_EDITOR: '/projects/:projectId/mappings/:mappingId',
+  MAPPING_DEPLOYMENT: '/projects/:projectId/mappings/:mappingId/deploy',
+  SCHEMA_LIBRARY: '/schemas',
+  SCHEMA_DETAIL: '/schemas/:schemaId',
+  TEMPLATE_LIBRARY: '/templates',
+  SETTINGS: '/settings',
+} as const;

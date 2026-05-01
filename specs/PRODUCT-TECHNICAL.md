@@ -17,7 +17,7 @@
 6. [Screen Specifications](#6-screen-specifications)
    - 6.1 Home Dashboard
    - 6.2 Project Overview
-   - 6.3 Mapping Editor / Studio
+   - 6.3 Mapping Editor
    - 6.4 Deployment Page
    - 6.5 Schema Library
    - 6.6 Template Library

@@ -56,7 +56,23 @@ ui/
   src/
     main.tsx              App entry point
     App.tsx               Root component and router setup
-    routes/               One file per route, maps to screen specs
+    routes/               Route path constants and placeholder pages
+      index.ts            Barrel export for route constants
+      paths.ts            Route path string constants (PATHS object)
+      pages/              Placeholder page components (one per route)
+        HomeDashboard.tsx
+        CreateProject.tsx
+        ProjectOverview.tsx
+        ProjectSettings.tsx
+        ProjectDeployments.tsx
+        CreateMapping.tsx
+        MappingEditor.tsx
+        MappingDeployment.tsx
+        SchemaLibrary.tsx
+        SchemaDetail.tsx
+        TemplateLibrary.tsx
+        Settings.tsx
+        NotFound.tsx
     features/             Feature-scoped code — one folder per major screen or domain
       home/               Home Dashboard
       projects/           Project Overview and Project Settings
@@ -66,6 +82,16 @@ ui/
       templates/          Template Library
       settings/           Global Settings
     components/           Shared UI components used across features
+      index.ts            Barrel export for all shared components
+      Button.tsx          Button with variants (primary/secondary/ghost/danger) and sizes
+      Card.tsx            Container component with optional title/description header
+      PageHeader.tsx      Page title + optional description + action slot
+      StatusBadge.tsx     Deploy status colored badge (dot + label)
+      layout/             App shell components
+        AppLayout.tsx     Layout wrapper (NavBar + Breadcrumbs + Outlet)
+        NavBar.tsx        Top navigation bar with app name + nav links
+        Breadcrumbs.tsx   Route-derived breadcrumb bar
+        index.ts          Barrel export
     hooks/                Shared React hooks
     lib/
       api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter

@@ -1,0 +1,18 @@
+import { Outlet } from 'react-router-dom';
+
+import { Breadcrumbs } from './Breadcrumbs';
+import { NavBar } from './NavBar';
+
+export function AppLayout() {
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <NavBar />
+      <Breadcrumbs />
+      <main className="flex-1 px-6 py-6">
+        <div className="mx-auto max-w-7xl">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  );
+}
