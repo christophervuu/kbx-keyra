@@ -4,7 +4,8 @@ export type ValueType =
   | 'boolean'
   | 'null'
   | 'array'
-  | 'object';
+  | 'object'
+  | 'any';
 
 export type UnmappedTargetStrategy = 'null' | 'omit' | 'error';
 

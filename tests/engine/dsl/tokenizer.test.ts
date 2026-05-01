@@ -49,7 +49,7 @@ describe('tokenize()', () => {
   });
 
   it('resolves valid escapes in string literals', () => {
-    const result = tokenize('"a\\n\\t\\\\\\\"b"');
+    const result = tokenize('"a\\n\\t\\\\\\"b"');
 
     expect(result.diagnostics).toEqual([]);
     expect(result.tokens[0]).toMatchObject({

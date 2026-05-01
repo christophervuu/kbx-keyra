@@ -42,7 +42,7 @@ Both functions are pure — same inputs always produce same outputs.
 
 ```
 src/engine/
-  index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, types, registry
+  index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, registerAllFunctions, types, registry
   validate.ts           validate() implementation
   execute.ts            execute() implementation
   types/
@@ -65,6 +65,16 @@ src/engine/
     parser.ts           Recursive descent parser: Token[] → AstNode + diagnostics
     evaluator.ts        Recursive evaluator: AstNode + EvaluationContext → EvaluationResult
     resolve-path.ts     Dot/bracket path resolver used by source/item/parent/get functions
+  functions/
+    index.ts            Barrel — registerAllFunctions() populates a registry with built-in functions
+    source-access.ts    source, item, parent, constant, external, static
+    type-conversion.ts  cast
+    null-handling.ts    default, coalesce, isNull
+    conditional.ts      if, eq, neq, gt, gte, lt, lte, and, or, not
+    lookup.ts           valueMap
+    string.ts           concat, substring, upper, lower, trim, replace, replaceAll, contains, length
+    date.ts             formatDate
+    math.ts             add, subtract, multiply, divide, round, abs
 ```
 
 ---
@@ -79,6 +89,7 @@ src/engine/
 | `validate.ts` | Mapping config validation | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 | `execute.ts` | Mapping execution | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 | `dsl/` | DSL tokenization, parsing, AST construction, registry-aware parse diagnostics, expression evaluation, path resolution | `types/`, `diagnostics/`, `registry/` |
+| `functions/` | Built-in DSL function implementations and grouped registration | `types/`, `diagnostics/`, `registry/`, `dsl/` |
 
 **Import rules:**
 - No circular dependencies between modules
@@ -252,6 +263,7 @@ evaluate(node: AstNode, context: EvaluationContext): EvaluationResult
 - `options` — evaluator options (`trace`, `traceVerbosity`, `maxRecursionDepth`, etc.)
 - `evaluate` — callback for re-entrant evaluation from array functions (`map`, `filter`, `find`)
 - `currentItem` / `parentItem` — populated by evaluator from scope stack before dispatch
+- `addDiagnostic` — callback for function implementations to append diagnostics to current evaluation result
 
 ### Scope Stack and ExecutionContext Construction
 
@@ -302,6 +314,26 @@ Trace collection:
 - Enabled by `options.trace === true`
 - `traceVerbosity: "functions"` (default) → trace `FunctionCall` nodes only
 - `traceVerbosity: "all"` → trace all AST nodes including literals
+
+### Function Implementation Pattern
+
+Built-in DSL functions are implemented under `src/engine/functions/` with one file per category plus a barrel.
+
+Implementation contract:
+
+1. Define a `FunctionSignature` (parameter names/types, optional/variadic flags, `handlesNull` behavior).
+2. Define a `FunctionImplementation` receiving evaluated args + `EvaluationContext`.
+3. Register via category registration function and `registerAllFunctions(registry)`.
+
+Function implementations are intentionally focused on core logic:
+
+- They do **not** perform arity checks (handled by evaluator).
+- They do **not** perform standard type checks (handled by evaluator).
+- They do **not** perform standard null propagation (handled by evaluator).
+- They **do** implement special null behavior for `handlesNull: true` functions.
+- They emit function-specific diagnostics via `context.addDiagnostic(...)` (e.g., `source` W002, `cast` E020/E021, `divide` E050, `valueMap` E060/W003, `formatDate` E040).
+
+`registerAllFunctions(registry)` composes all category registration functions and is called during engine initialization to populate `defaultRegistry` with all built-ins.
 
 ### Path Resolution Utility
 

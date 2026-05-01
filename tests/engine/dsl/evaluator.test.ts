@@ -16,6 +16,9 @@ function createContext(options?: EngineOptions, scopeStack: unknown[] = []): Eva
     registry,
     options: options ?? {},
     evaluate,
+    addDiagnostic: () => {
+      // Overridden by evaluator root context; test context provides a valid default.
+    },
   };
 
   return context;
@@ -106,6 +109,40 @@ describe('evaluate() comprehensive coverage', () => {
 
     expect(result.value).toBeNull();
     expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E002')).toBe(true);
+  });
+
+  it('emits diagnostics from function implementations via context.addDiagnostic', () => {
+    const context = createContext();
+
+    register(
+      context,
+      'emitDiagnostic',
+      { parameters: [], returnType: 'null' },
+      (_args, ctx) => {
+        ctx.addDiagnostic({
+          code: 'KEYRA-W999',
+          severity: 'warning',
+          message: 'Implementation warning',
+          location: { function: 'emitDiagnostic' },
+        });
+
+        return null;
+      },
+    );
+
+    const result = evaluate(
+      { type: 'FunctionCall', name: 'emitDiagnostic', arguments: [], start: 0, end: 14 },
+      context,
+    );
+
+    expect(result.value).toBeNull();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'KEYRA-W999',
+        severity: 'warning',
+        message: 'Implementation warning',
+      }),
+    );
   });
 
   it('AE-04: returns E003 for arity mismatch', () => {

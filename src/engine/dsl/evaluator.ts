@@ -96,6 +96,10 @@ function formatExpectedArity(min: number, max: number): string {
 }
 
 function matchesType(value: unknown, expectedType: FunctionParameter['type']): boolean {
+  if (expectedType === 'any') {
+    return true;
+  }
+
   if (expectedType === 'null') {
     return value === null;
   }
@@ -352,6 +356,9 @@ export function evaluate(node: AstNode, context: EvaluationContext): EvaluationR
   const rootContext: EvaluationContext = {
     ...context,
     evaluate,
+    addDiagnostic: (diagnostic: Diagnostic): void => {
+      diagnostics.push(diagnostic);
+    },
   };
 
   const value = evaluateNode(node, rootContext, state);

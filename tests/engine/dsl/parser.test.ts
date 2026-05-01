@@ -141,7 +141,7 @@ describe('parse()', () => {
   });
 
   it('AE-06: resolves escape sequences in string literals', () => {
-    const result = parse('"line1\\nline2\\ttab\\\\slash\\\"quote"');
+    const result = parse('"line1\\nline2\\ttab\\\\slash\\"quote"');
 
     expect(result.success).toBe(true);
     expect(result.ast).toEqual({

@@ -116,4 +116,5 @@ export interface EvaluationContext {
   readonly currentItem?: unknown;
   readonly parentItem?: unknown;
   readonly evaluate: (node: AstNode, context: EvaluationContext) => EvaluationResult;
+  readonly addDiagnostic: (diagnostic: Diagnostic) => void;
 }

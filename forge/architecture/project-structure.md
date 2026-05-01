@@ -27,6 +27,7 @@ src/
     types/            Shared TypeScript types used by engine and consumers
     diagnostics/      Error codes, diagnostic formatting, trace output
     registry/         Function registration and lookup mechanism
+    functions/        Built-in DSL function implementations (grouped by category)
   lambda/             AWS Lambda function handlers
     schema/           Schema CRUD lambdas (ingestSchema, getSchema, deleteSchema, querySchemaNodes)
     mapping/          Mapping CRUD lambdas
@@ -91,6 +92,7 @@ ui/
 tests/
   engine/             Unit and integration tests for src/engine/
     dsl/              DSL parser and evaluator tests
+    functions/        DSL function implementation tests
     execute/          Engine execution tests with fixture mapping configs
     validate/         Engine validation tests
   lambda/             Lambda handler tests
