@@ -74,11 +74,38 @@ ui/
         Settings.tsx
         NotFound.tsx
     features/             Feature-scoped code — one folder per major screen or domain
+      schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
+        index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
+        types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types)
+        components/       Schema tree view components (T-05+)
+          index.ts        Components barrel
+          MappingStatusIcon.tsx    Mapping status icon (mapped/unmapped/warning) with aria-labels
+          SchemaSearchInput.tsx    Search input with clear button (debounced, result count)
+          SchemaTreeNodeIcon.tsx   Type→icon mapping component (color-coded Lucide icons)
+          SchemaTreeNodeRow.tsx    Single tree row (expand/collapse, guides, badges, tooltip, highlight, selection, status, focus ring, ARIA)
+          SchemaTreeToolbar.tsx    Toolbar: Expand All, Collapse All, Expand to depth (1/2/3)
+          SchemaTreeView.tsx       Virtualized container with search, toolbar, selection, keyboard nav, states, and tree rendering
+          SchemaTreeView.test.tsx  Component tests (72 tests: rendering, virtualization, search, selection, mapping status, toolbar, keyboard nav)
+        hooks/            Feature-specific React hooks
+          index.ts        Hooks barrel
+          use-flattened-tree.ts       DFS flatten of tree based on expand state (virtualizer input)
+          use-flattened-tree.test.ts  Hook unit tests (7 tests)
+          use-tree-keyboard-nav.ts    Keyboard navigation hook (arrow keys, Home/End, Enter/Space, aria-activedescendant)
+          use-tree-search.ts          Search state management (debounce, filter, expand preservation)
+        lib/              Schema parsing logic and utilities
+          index.ts        Lib barrel
+          tree-filter.ts  Pure filter function (case-insensitive substring, ancestor propagation)
+          tree-filter.test.ts  Filter unit tests (11 tests including performance)
+          parsers/        Parser implementations
+            index.ts      Parsers barrel
+            parse-json-schema.ts
+            parse-xsd.ts
+            parse-inferred-schema.ts
+        schemas.test.ts   Feature-level unit tests
       home/               Home Dashboard
       projects/           Project Overview and Project Settings
       mappings/           Mapping Editor (panels, expression builder, preview, AI features)
       deployments/        Deployment Page (mapping-level and project-level)
-      schemas/            Schema Library and Schema Detail
       templates/          Template Library
       settings/           Global Settings
     components/           Shared UI components used across features
@@ -98,9 +125,12 @@ ui/
       engine/             Browser bundle of src/engine (imported as a package)
       state/              Global state (Context + useReducer)
       types/              UI-specific TypeScript types
+        domain.ts         Shared domain model types (includes SchemaTreeNode, ParsedSchema, SchemaNodeType, MappingNodeStatus)
+        index.ts          Types barrel
     assets/               Static assets
   index.html
   vite.config.ts
+  vitest.config.ts
   tailwind.config.ts
   tsconfig.json
 ```

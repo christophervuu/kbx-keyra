@@ -346,3 +346,46 @@ export interface ServerPreviewResult {
     readonly engineVersion: string;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Schema Tree Types (FS-009)
+// ---------------------------------------------------------------------------
+
+export type SchemaNodeType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'object'
+  | 'array'
+  | 'enum'
+  | 'null'
+  | 'any'
+  | 'union';
+
+export type MappingNodeStatus = 'mapped' | 'unmapped' | 'warning';
+
+export interface SchemaTreeNode {
+  path: string;
+  fieldName: string;
+  type: SchemaNodeType;
+  description?: string;
+  depth: number;
+  isArray: boolean;
+  isRequired: boolean;
+  parentPath: string | null;
+  childCount: number;
+  children: SchemaTreeNode[];
+  enumValues?: string[];
+  inferred?: boolean;
+  unionTypes?: string[];
+  minOccurs?: number;
+  maxOccurs?: number | 'unbounded';
+}
+
+export interface ParsedSchema {
+  readonly nodes: SchemaTreeNode[];
+  readonly totalFieldCount: number;
+  readonly format: SchemaFormat;
+  readonly parseTimeMs: number;
+  readonly inferred: boolean;
+}
