@@ -60,6 +60,16 @@ export interface RuleListProps {
   onBulkDuplicate?: (indices: number[]) => void;
   /** Callback when rules are pasted from clipboard */
   onPasteRules?: (rules: Array<Pick<MappingRule, 'target' | 'type' | 'expression' | 'description'>>) => void;
+  /**
+   * Index of the currently active/selected rule for the expression builder.
+   * Highlighted with a left border. Null when no rule is active.
+   */
+  selectedRuleIndex?: number | null;
+  /**
+   * Callback fired when a rule row is clicked to activate it in the expression builder.
+   * Called with null to deselect (clicking the already-active row).
+   */
+  onRuleSelect?: (index: number | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,10 +112,12 @@ interface SortableRuleRowProps {
   diagnostics: readonly Diagnostic[];
   schemasLoaded: boolean;
   selected: boolean;
+  isActive?: boolean;
   isFocused?: boolean;
   isFirst: boolean;
   isLast: boolean;
   onSelectionChange?: (index: number, selected: boolean) => void;
+  onActivate?: (index: number) => void;
   onEdit?: (index: number) => void;
   onDelete?: (index: number) => void;
   onCopy?: (index: number) => void;
@@ -120,10 +132,12 @@ function SortableRuleRow({
   diagnostics,
   schemasLoaded,
   selected,
+  isActive,
   isFocused,
   isFirst,
   isLast,
   onSelectionChange,
+  onActivate,
   onEdit,
   onDelete,
   onCopy,
@@ -154,10 +168,12 @@ function SortableRuleRow({
       diagnostics={diagnostics}
       schemasLoaded={schemasLoaded}
       selected={selected}
+      isActive={isActive}
       isFocused={isFocused}
       isFirst={isFirst}
       isLast={isLast}
       onSelectionChange={onSelectionChange}
+      onActivate={onActivate ? () => onActivate(index) : undefined}
       onEdit={onEdit}
       onDelete={onDelete}
       onCopy={onCopy}
@@ -200,6 +216,8 @@ export function RuleList({
   onBulkDelete,
   onBulkDuplicate,
   onPasteRules,
+  selectedRuleIndex = null,
+  onRuleSelect,
 }: RuleListProps) {
   // Local UI state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -650,10 +668,12 @@ export function RuleList({
                   diagnostics={diagnosticsForRule(index)}
                   schemasLoaded={schemasLoaded}
                   selected={selection.has(index)}
+                  isActive={selectedRuleIndex === index}
                   isFocused={focusedIndex === index}
                   isFirst={index === 0}
                   isLast={index === rules.length - 1}
                   onSelectionChange={handleSelectionChange}
+                  onActivate={onRuleSelect ? (i) => onRuleSelect(selectedRuleIndex === i ? null : i) : undefined}
                   onEdit={handleEditClick}
                   onDelete={handleDeleteClick}
                   onCopy={handleCopyRule}

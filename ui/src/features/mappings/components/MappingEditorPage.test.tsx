@@ -163,6 +163,42 @@ describe('MappingEditorPage', () => {
     expect(screen.queryByText('Rule List (Panel 3)')).not.toBeInTheDocument();
   });
 
+  it('renders placeholder in Panel 4 when no expressionBuilderContent is provided', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const panel4 = screen.getByTestId('panel-slot-4');
+    expect(panel4).toHaveTextContent('Expression Builder (Panel 4)');
+  });
+
+  it('renders custom content in Panel 4 slot when expressionBuilderContent is provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        expressionBuilderContent={<div data-testid="custom-expression-builder">Expression Builder</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-expression-builder')).toBeInTheDocument();
+    expect(screen.queryByText('Expression Builder (Panel 4)')).not.toBeInTheDocument();
+  });
+
+  it('renders placeholder in Panel 1 when no panelOneContent is provided', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const panel1 = screen.getByTestId('panel-slot-1');
+    expect(panel1).toHaveTextContent('Source Schema (Panel 1)');
+  });
+
+  it('renders custom content in Panel 1 slot when panelOneContent is provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelOneContent={<div data-testid="custom-schema-tree">Schema Tree</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-schema-tree')).toBeInTheDocument();
+    expect(screen.queryByText('Source Schema (Panel 1)')).not.toBeInTheDocument();
+  });
+
   it('renders deploy page link with correct route params', () => {
     renderWithRouter(
       <MappingEditorPage projectId="my-project" mappingId="my-mapping" />,

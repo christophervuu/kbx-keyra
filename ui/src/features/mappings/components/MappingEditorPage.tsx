@@ -27,6 +27,10 @@ export interface MappingEditorPageProps {
   targetSchemaName?: string | null;
   /** Content for Panel 3 (Rule List) slot — accepts children from T-03+ */
   ruleListContent?: ReactNode;
+  /** Content for Panel 1 (Source Schema) slot */
+  panelOneContent?: ReactNode;
+  /** Content for Panel 4 (Expression Builder) slot */
+  expressionBuilderContent?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +85,8 @@ export function MappingEditorPage({
   sourceSchemaName = null,
   targetSchemaName = null,
   ruleListContent,
+  panelOneContent,
+  expressionBuilderContent,
 }: MappingEditorPageProps) {
   return (
     <div
@@ -103,7 +109,7 @@ export function MappingEditorPage({
       <div className="grid min-h-0 flex-1 grid-cols-[200px_1fr_240px] grid-rows-[1fr_1fr_180px] gap-px bg-slate-800 lg:grid-cols-[220px_1fr_280px]">
         {/* Panel 1: Source Schema — top-left */}
         <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-1">
-          <PanelPlaceholder name={PANEL_NAMES[1]} />
+          {panelOneContent ?? <PanelPlaceholder name={PANEL_NAMES[1]} />}
         </div>
 
         {/* Panel 3: Rule List — center, spans 2 rows */}
@@ -112,8 +118,8 @@ export function MappingEditorPage({
         </div>
 
         {/* Panel 4: Expression Builder — top-right */}
-        <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-4">
-          <PanelPlaceholder name={PANEL_NAMES[4]} />
+        <div className="row-span-1 overflow-hidden bg-slate-950 p-1" data-testid="panel-slot-4">
+          {expressionBuilderContent ?? <PanelPlaceholder name={PANEL_NAMES[4]} />}
         </div>
 
         {/* Panel 2: Target Schema — middle-left */}

@@ -1,8 +1,14 @@
+import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
+import { ExpressionBuilderPanel } from '@/features/mappings/components';
+import type { ExpressionBuilderPanelRef } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { useMappingEditor } from '@/features/mappings/hooks';
+import { useExpressionBuilder } from '@/features/mappings/hooks';
+import { SchemaTreeView } from '@/features/schemas';
+import type { SchemaTreeNode } from '@/lib/types/domain';
 import { Button } from '@/components';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +57,27 @@ export default function MappingEditor() {
 
   const editor = useMappingEditor(mappingId);
 
+  // ---------------------------------------------------------------------------
+  // Selected rule state — shared between RuleList (highlight) and ExpressionBuilder
+  // ---------------------------------------------------------------------------
+  const [selectedRuleIndex, setSelectedRuleIndex] = useState<number | null>(null);
+
+  // Expression builder for the selected rule
+  const builderResult = useExpressionBuilder({
+    selectedRuleIndex,
+    rules: editor.rules,
+    updateRule: editor.actions.updateRule,
+    parsedSourceSchema: editor.parsedSourceSchema,
+  });
+
+  // Ref for imperative insertSourceField from Panel 1
+  const expressionBuilderRef = useRef<ExpressionBuilderPanelRef>(null);
+
+  // When a source schema node is clicked in Panel 1, insert into the expression builder
+  const handleSelectSourceNode = useCallback((node: SchemaTreeNode) => {
+    expressionBuilderRef.current?.insertSourceField(node.path);
+  }, []);
+
   // Loading state
   if (editor.loadState === 'loading') {
     return <LoadingSkeleton />;
@@ -66,7 +93,10 @@ export default function MappingEditor() {
     );
   }
 
-  // Build the RuleList content
+  // ---------------------------------------------------------------------------
+  // Panel slot content
+  // ---------------------------------------------------------------------------
+
   const ruleListContent = (
     <RuleList
       rules={editor.rules}
@@ -75,6 +105,8 @@ export default function MappingEditor() {
       coveragePercent={editor.validation.coveragePercent}
       isValidating={editor.validation.isValidating}
       diagnosticsForRule={editor.validation.diagnosticsForRule}
+      selectedRuleIndex={selectedRuleIndex}
+      onRuleSelect={setSelectedRuleIndex}
       onAddRule={editor.actions.addRule}
       onEditRule={editor.actions.updateRule}
       onDeleteRule={editor.actions.deleteRule}
@@ -83,6 +115,34 @@ export default function MappingEditor() {
       onBulkDuplicate={editor.actions.bulkDuplicate}
       onPasteRules={editor.actions.pasteRules}
     />
+  );
+
+  const panelOneContent = editor.parsedSourceSchema ? (
+    <SchemaTreeView
+      schema={editor.parsedSourceSchema}
+      onSelectNode={handleSelectSourceNode}
+    />
+  ) : undefined;
+
+  const expressionBuilderContent = (
+    <div
+      className="h-full"
+      onKeyDown={(e) => {
+        // Ctrl+Enter / Cmd+Enter: flush commit immediately
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          builderResult.flushCommit();
+        }
+      }}
+      data-testid="expression-builder-container"
+    >
+      <ExpressionBuilderPanel
+        ref={expressionBuilderRef}
+        builderState={builderResult}
+        parsedSourceSchema={editor.parsedSourceSchema}
+        sampleSourceData={null}
+      />
+    </div>
   );
 
   return (
@@ -95,6 +155,8 @@ export default function MappingEditor() {
       sourceSchemaName={editor.sourceSchemaName}
       targetSchemaName={editor.targetSchemaName}
       ruleListContent={ruleListContent}
+      panelOneContent={panelOneContent}
+      expressionBuilderContent={expressionBuilderContent}
     />
   );
 }

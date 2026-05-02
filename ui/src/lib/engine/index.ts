@@ -20,7 +20,7 @@
  * - The FS-009 ParsedSchema is for UI tree display only; it is NOT passed to the engine
  */
 
-import { validate, execute } from '@keyra/engine';
+import { validate, execute, parse, defaultRegistry, evaluate, resolvePath } from '@keyra/engine';
 import type {
   ValidationResult,
   Diagnostic,
@@ -34,7 +34,17 @@ import type {
   MappingConfig as EngineMappingConfig,
   MappingConfigBlock,
   MappingRule as EngineMappingRule,
+  ParseResult,
+  AstNode,
+  FunctionCallNode,
+  ParseOptions,
+  FunctionSignature,
+  FunctionParameter,
+  RegisteredFunction,
+  EvaluationContext,
+  EvaluationResult,
 } from '@keyra/engine';
+import { FunctionRegistry } from '@keyra/engine';
 
 import type { MappingConfig, MappingRule } from '@/lib/types/domain';
 
@@ -148,7 +158,69 @@ export function executeMapping(
 // Re-exports: Raw engine functions and types for advanced usage
 // ---------------------------------------------------------------------------
 
-export { validate, execute };
+export { validate, execute, parse, defaultRegistry, FunctionRegistry, evaluate, resolvePath };
+
+/**
+ * Convenience helper: parse and evaluate a DSL expression against source data.
+ *
+ * Wraps the two-step parse → evaluate flow into a single call for UI use cases
+ * (e.g. the expression preview panel). Returns `{ value, error }`.
+ *
+ * @param expression - The DSL expression string to evaluate
+ * @param sourceData - Source data object (or null — returns null result immediately)
+ * @param constants - Optional mapping constants (key-value pairs)
+ * @param externalSources - Optional external sources map
+ */
+export function evaluateExpression(
+  expression: string,
+  sourceData: unknown,
+  constants: Record<string, unknown> = {},
+  externalSources: Record<string, unknown> = {},
+): { value: unknown; error: string | null } {
+  if (expression === '' || expression.trim() === '') {
+    return { value: null, error: null };
+  }
+  if (sourceData === null || sourceData === undefined) {
+    return { value: null, error: null };
+  }
+
+  try {
+    const parseResult = parse(expression, { registry: defaultRegistry });
+    if (!parseResult.success || parseResult.ast === null) {
+      const msg = parseResult.diagnostics[0]?.message ?? 'Syntax error in expression';
+      return { value: null, error: msg };
+    }
+
+    const scopeStack: unknown[] = [];
+    const diagnostics: Diagnostic[] = [];
+
+    const ctx: EvaluationContext = {
+      sourceData,
+      scopeStack,
+      constants,
+      externalSources,
+      registry: defaultRegistry,
+      options: {},
+      evaluate: (node, c) => evaluate(node, c),
+      addDiagnostic: (d) => { diagnostics.push(d); },
+      pushScope: (s) => { scopeStack.push(s); },
+      popScope: () => scopeStack.pop() as unknown,
+    };
+
+    const result = evaluate(parseResult.ast, ctx);
+
+    // Check for evaluation diagnostics (e.g. unknown function, arity error)
+    const evalDiagnostics = [...diagnostics, ...result.diagnostics];
+    const errorDiagnostic = evalDiagnostics.find((d) => d.severity === 'error');
+    if (errorDiagnostic !== undefined) {
+      return { value: result.value, error: errorDiagnostic.message };
+    }
+
+    return { value: result.value, error: null };
+  } catch (err) {
+    return { value: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export type {
   ValidationResult,
@@ -162,4 +234,21 @@ export type {
   EngineOptions,
   EngineMappingConfig,
   MappingConfigBlock,
+  ParseResult,
+  AstNode,
+  FunctionCallNode,
+  // Additional AST node types (T-08)
+  StringLiteralNode,
+  NumberLiteralNode,
+  BooleanLiteralNode,
+  NullLiteralNode,
+  ObjectTemplateNode,
+  ObjectTemplateProperty,
+  ParseOptions,
+  FunctionSignature,
+  FunctionParameter,
+  RegisteredFunction,
+  // Evaluation types (T-10)
+  EvaluationContext,
+  EvaluationResult,
 };

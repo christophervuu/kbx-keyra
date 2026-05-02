@@ -1092,3 +1092,51 @@ describe('RuleList Multi-select & Bulk Actions', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// RuleList — selected rule integration (T-11)
+// ---------------------------------------------------------------------------
+
+describe('RuleList selected rule', () => {
+  const defaultProps = {
+    rules: MOCK_RULES,
+    schemasLoaded: true,
+    summary: MOCK_SUMMARY,
+    coveragePercent: 80,
+    isValidating: false,
+    diagnosticsForRule: noDiagnostics,
+  };
+
+  it('highlights the row at selectedRuleIndex with data-active attribute', () => {
+    render(<RuleList {...defaultProps} selectedRuleIndex={1} />);
+    const row = screen.getByTestId('rule-row-1');
+    expect(row).toHaveAttribute('data-active');
+  });
+
+  it('does not mark other rows as active', () => {
+    render(<RuleList {...defaultProps} selectedRuleIndex={1} />);
+    expect(screen.getByTestId('rule-row-0')).not.toHaveAttribute('data-active');
+    expect(screen.getByTestId('rule-row-2')).not.toHaveAttribute('data-active');
+  });
+
+  it('calls onRuleSelect with the index when clicking an inactive row', () => {
+    const onRuleSelect = vi.fn();
+    render(<RuleList {...defaultProps} selectedRuleIndex={null} onRuleSelect={onRuleSelect} />);
+    fireEvent.click(screen.getByTestId('rule-row-0'));
+    expect(onRuleSelect).toHaveBeenCalledWith(0);
+  });
+
+  it('calls onRuleSelect with null when clicking the already-active row (deselect)', () => {
+    const onRuleSelect = vi.fn();
+    render(<RuleList {...defaultProps} selectedRuleIndex={0} onRuleSelect={onRuleSelect} />);
+    fireEvent.click(screen.getByTestId('rule-row-0'));
+    expect(onRuleSelect).toHaveBeenCalledWith(null);
+  });
+
+  it('does not mark any row active when selectedRuleIndex is null', () => {
+    render(<RuleList {...defaultProps} selectedRuleIndex={null} />);
+    for (let i = 0; i < MOCK_RULES.length; i++) {
+      expect(screen.getByTestId(`rule-row-${i}`)).not.toHaveAttribute('data-active');
+    }
+  });
+});

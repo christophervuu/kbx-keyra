@@ -67,18 +67,32 @@ ui/src/
     use-async-state.ts        Async state lifecycle hook
 
   features/
-    mappings/                 Mapping Editor feature module (FS-010)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011)
       index.ts                Feature barrel (components + hooks + utilities)
       components/
         MappingEditorPage.tsx Multi-panel editor shell (8 named panel slots)
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
         RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics)
+        ExpressionBuilderPanel.tsx  Panel 4 expression shell (mode toggle + composition)
+        RawDslEditor.tsx      Raw DSL textarea editor (overlay highlighting + autocomplete)
+        GuidedBuilder.tsx     Step-based builder (source -> transform -> arguments -> preview)
+        ExpressionPreview.tsx Live expression preview/result surface
+        FunctionReferencePanel.tsx  Collapsible searchable DSL function reference
+        AutocompleteDropdown.tsx    Portal dropdown for DSL autocomplete suggestions
       hooks/
         use-engine-validation.ts  Debounced engine validate() integration hook
         use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring)
+        use-expression-builder.ts  Panel 4 expression state orchestration + debounced commit
+        use-expression-preview.ts  Single-expression parse/evaluate preview hook
+        use-dsl-autocomplete.ts    Context-aware DSL autocomplete state hook
+        use-dsl-validation.ts      Inline parse diagnostics + editor error decorations
       lib/
         infer-rule-type.ts    Expression outer-function -> display label mapping
+        dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
+        expression-generator.ts  Guided-builder state -> DSL expression generator
+        ast-decomposer.ts     Editor expression -> guided-builder decomposition utility
+        autocomplete-utils.ts Context detection + suggestion filtering utilities
 
   lib/
     api/
@@ -87,7 +101,9 @@ ui/src/
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL
     engine/
-      index.ts                Browser integration boundary for `@keyra/engine`
+      index.ts                Browser integration boundary for `@keyra/engine` (validate/execute/parse/evaluate/registry helpers)
+    data/
+      dsl-functions.ts        Shared DSL function catalog (cross-feature static metadata)
     state/
       async-state.ts
       app-error.ts
@@ -164,8 +180,10 @@ The UI consumes the mapping engine through a browser integration layer in `ui/sr
 
 - `ui/src/lib/engine/index.ts` is the canonical UI-facing engine entrypoint.
 - It imports from `@keyra/engine` (aliased to `src/engine/index.ts`) and re-exports:
-  - raw engine functions (`validate`, `execute`) for advanced usage
+  - raw engine functions (`validate`, `execute`, `parse`, `evaluate`, `resolvePath`) for advanced usage
+  - `defaultRegistry` and related registry/types for DSL metadata consumers
   - UI adapters (`validateMapping`, `executeMapping`) that convert UI `MappingConfig` to engine-native config shape
+  - helper `evaluateExpression()` for single-expression preview evaluation
   - engine result/types used by hooks and feature components
 
 ### Import + Bundling Pattern (Vite)
@@ -203,6 +221,28 @@ Future hooks (for example, `useEngineExecution()`) should follow the same patter
 3. call `ui/src/lib/engine/` adapter or raw engine API
 4. return strongly typed result + derived UI summary state
 5. isolate and surface integration errors without crashing UI surfaces
+
+### Canonical Hook Pattern: `useExpressionPreview()` (FS-011)
+
+Location: `ui/src/features/mappings/hooks/use-expression-preview.ts`
+
+Contract:
+
+- Inputs:
+  - `expression: string`
+  - `sourceData: unknown | null`
+  - optional `constants` and `externalSources`
+- Behavior:
+  - short-circuits to empty preview state when expression is empty or sourceData is null
+  - debounces parse/evaluate by 300ms after expression changes
+  - uses `evaluateExpression()` from `ui/src/lib/engine/`
+  - catches parser/evaluator integration failures and maps to `error` state
+- Outputs:
+  - `result: unknown | null`
+  - `error: string | null`
+  - `isEvaluating: boolean`
+
+This pattern is the canonical single-expression engine usage for UI surfaces that need local preview behavior without executing a full mapping.
 
 ### Tree-Shaking + Bundle Notes
 
@@ -272,13 +312,14 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ## Mapping Editor Architecture
 
-FS-010 establishes the editor shell pattern in `ui/src/features/mappings/`.
+FS-010 establishes the editor shell pattern in `ui/src/features/mappings/`. FS-011 extends the shell with a full Panel 4 expression authoring architecture.
 
 ### Multi-Panel Layout + Slot Pattern
 
 - `MappingEditorPage` owns the editor grid and defines stable named panel slots (Panels 1-8).
 - Each slot renders a dedicated child panel (or `PanelPlaceholder` when deferred).
 - Panel 3 (`Rule List`) is injected as child content (`ruleListContent`) so rule-list behavior can evolve without layout refactors.
+- Panel 1 and Panel 4 can also be injected via slot content (`panelOneContent`, `expressionBuilderContent`) to keep page layout stable while feature composition evolves.
 
 Pattern for adding new panels:
 
@@ -303,6 +344,82 @@ Its contract includes:
 - `useMappingEditor(mappingId)` is the feature orchestration boundary.
 - It loads mapping + schemas through `ApiAdapter`, owns local rule mutations, and wires validation through `useEngineValidation()`.
 - It returns state + action callbacks (`addRule`, `updateRule`, `deleteRule`, `reorderRules`, bulk actions, `save`, `retry`) as the panel-facing contract.
+
+FS-011 expression flow adds a page-level selection bridge:
+
+1. `selectedRuleIndex` is owned at route/page composition level (`routes/pages/MappingEditor.tsx`)
+2. `RuleList` uses this value for active-row highlighting and selection toggle callbacks (`onRuleSelect`)
+3. `useExpressionBuilder({ selectedRuleIndex, rules, updateRule, parsedSourceSchema })` loads the selected rule expression into local working state
+4. local expression edits run inline parse validation (`useDslValidation`) and only commit syntactically valid updates
+5. valid expression updates are debounced and committed through `updateRule()`
+6. committed rule updates retrigger mapping-level validation (`useEngineValidation`)
+
+This keeps selection concerns outside the data-loading hook while preserving a stable `useMappingEditor` contract.
+
+### Expression Builder Architecture (FS-011)
+
+Panel 4 is implemented as a dual-mode authoring surface:
+
+- **Editor mode:** raw DSL input for power users
+- **Builder mode:** guided step flow for common mapping patterns
+
+#### Component hierarchy
+
+`ExpressionBuilderPanel`
+- mode toggle (Builder / Editor)
+- conditional main surface:
+  - `RawDslEditor` (editor mode)
+  - `GuidedBuilder` (builder mode)
+- `ExpressionPreview`
+- `FunctionReferencePanel`
+
+#### Hook contracts
+
+- `useExpressionBuilder()`
+  - Inputs: `selectedRuleIndex`, `rules`, `updateRule`, `parsedSourceSchema`
+  - Outputs: mode state, expression state, switch handlers, decomposition warning state, parse validity/decorations, flush commit API
+  - Responsibilities: load selected-rule expression, preserve local in-progress edits, debounce valid commits
+
+- `useExpressionPreview()`
+  - Inputs: expression + optional sample data/context
+  - Outputs: `{ result, error, isEvaluating }`
+  - Responsibilities: debounced parse/evaluate preview flow via engine boundary helpers
+
+#### Mode-toggle rules
+
+- Builder -> Editor: direct projection of current expression string into raw editor (no decomposition required)
+- Editor -> Builder: attempt AST decomposition (`ast-decomposer.ts`)
+  - success: hydrate guided-builder initial state
+  - failure: stay in editor mode and surface `ComplexExpressionWarning`
+
+#### Raw editor overlay pattern
+
+`RawDslEditor` uses the textarea + synchronized overlay pattern:
+
+- native `<textarea>` owns input/cursor/selection behavior
+- overlay `<div>` renders syntax-highlight tokens + error decorations
+- overlay uses `pointer-events: none`
+- no `contenteditable`, Monaco, or CodeMirror in Phase 0
+
+#### Autocomplete pattern
+
+Autocomplete uses context detection + suggestion filtering utilities (`autocomplete-utils.ts`) and stateful orchestration in `use-dsl-autocomplete.ts`:
+
+- context scanner determines if cursor is in function/source-path/constant/external context
+- suggestions are derived from function catalog and schema paths
+- dropdown is rendered via portal (`AutocompleteDropdown`)
+
+#### Function catalog pattern
+
+Function metadata is provided by static shared data in `ui/src/lib/data/dsl-functions.ts` (`DSL_FUNCTION_CATALOG`).
+
+- catalog is consumed by guided picker, autocomplete, and function reference surfaces
+- runtime parsing/evaluation still uses live engine registry and parser/evaluator through `ui/src/lib/engine/`
+
+#### Cross-panel integration points
+
+- **Panel 3 -> Panel 4:** rule selection controls which rule expression is loaded/edited
+- **Panel 1 -> Panel 4:** schema-tree `onSelectNode` inserts `source("path")` in editor mode or fills source slots in builder mode via `ExpressionBuilderPanel` ref API
 
 State management note:
 

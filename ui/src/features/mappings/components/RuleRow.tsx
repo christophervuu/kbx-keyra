@@ -36,6 +36,10 @@ export interface RuleRowProps {
   diagnostics: readonly Diagnostic[];
   /** Whether schemas are loaded (false = show gray neutral icon) */
   schemasLoaded: boolean;
+  /** Whether this row is the currently active/selected rule for the expression builder */
+  isActive?: boolean;
+  /** Callback fired when the row body is clicked to activate/deactivate this rule */
+  onActivate?: () => void;
   /** Whether the checkbox is selected */
   selected: boolean;
   /** Whether this row has keyboard focus (for aria-activedescendant pattern) */
@@ -144,6 +148,8 @@ export const RuleRow = forwardRef<HTMLDivElement, RuleRowProps>(function RuleRow
     schemasLoaded,
     selected,
     isFocused = false,
+    isActive = false,
+    onActivate,
     onSelectionChange,
     onEdit,
     onDelete,
@@ -174,11 +180,15 @@ export const RuleRow = forwardRef<HTMLDivElement, RuleRowProps>(function RuleRow
         'border-b border-slate-800 last:border-b-0',
         isDragging ? 'opacity-50 shadow-lg' : '',
         isFocused ? 'ring-2 ring-inset ring-blue-500' : '',
+        isActive ? 'border-l-2 border-l-emerald-500 bg-emerald-950/20' : '',
       ].join(' ')}
       style={sortableStyle}
+      onClick={onActivate}
+      data-active={isActive || undefined}
     >
       <div className="group flex items-center gap-2 px-3 py-2 hover:bg-slate-800/50">
-        {/* Checkbox — first in tab order per accessibility spec */}
+        {/* Checkbox — stop propagation so row activation isn't triggered by checkbox click */}
+        <span onClick={(e) => e.stopPropagation()} className="contents">
         <input
           type="checkbox"
           checked={selected}
@@ -186,6 +196,7 @@ export const RuleRow = forwardRef<HTMLDivElement, RuleRowProps>(function RuleRow
           className="h-3.5 w-3.5 shrink-0 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
           aria-label={`Select rule ${index + 1}`}
         />
+        </span>
 
         {/* Drag handle */}
         <button
