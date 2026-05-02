@@ -18,6 +18,7 @@ Owner: @keyra-ui-team
 Reviewers: TBD
 Created: 2026-05-01
 Last Updated: 2026-05-01
+Rev Updated: 2026-05-01
 Type: ui
 
 ---
@@ -30,7 +31,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -68,8 +69,9 @@ A dual-mode expression authoring panel that:
 - The engine's `FunctionRegistry` is available via `defaultRegistry` with `listFunctions()` and `getFunction()` for autocomplete metadata
 - `useMappingEditor()` currently exposes `rules`, `updateRule(index, rule)`, `parsedSourceSchema`, and `validation` — the expression builder needs a "selected rule index" concept to be added or managed at the panel integration level
 - Phase 0: no external state management libraries; no code editor libraries unless bundle impact is justified
-- A lightweight custom approach (regex-based tokenizer + textarea/contenteditable overlay) is acceptable for the raw editor in Phase 0
+- The raw editor uses a textarea with a synchronized overlay div for syntax highlighting (textarea + overlay pattern, as used by CodeMirror 5). The overlay sits on top with `pointer-events: none` and renders highlighted tokens while the textarea handles all input, cursor, and selection natively. This is simpler, more accessible, and avoids contenteditable cursor/selection issues.
 - The guided builder does not need to support every DSL pattern — it covers direct copy, static, concat, cast, default, coalesce, if, valueMap, formatDate, map, filter, and math operations
+- The guided builder can decompose expressions up to 3 levels of nesting when all functions are in the builder's supported set (~15 functions). This covers patterns like `default(upper(source("name")), "N/A")` (2 levels) and `if(gt(source("amount"), 1000), upper(source("tier")), static("Standard"))` (3 levels).
 - Sample data for live preview is an optional dependency (FS-012 provides the test data context); the expression builder shows a placeholder when unavailable
 
 ---
@@ -169,8 +171,9 @@ Per `forge/architecture/mapping-engine.md`:
 
 - `ui/src/features/mappings/components/` — ExpressionBuilderPanel, RawDslEditor, GuidedBuilder, ExpressionPreview, FunctionReference, AutocompleteDropdown
 - `ui/src/features/mappings/hooks/` — useExpressionBuilder, useExpressionPreview, useDslAutocomplete, useDslValidation
-- `ui/src/features/mappings/lib/` — dsl-tokenizer (syntax highlighting), function-registry-metadata, ast-decomposer (editor→builder)
+- `ui/src/features/mappings/lib/` — dsl-tokenizer (syntax highlighting), ast-decomposer (editor→builder)
 - `ui/src/features/mappings/components/MappingEditorPage.tsx` — Panel 4 slot replacement
+- `ui/src/lib/data/dsl-functions.ts` — shared DSL_FUNCTION_CATALOG static data (cross-feature)
 - `ui/src/lib/engine/index.ts` — additional re-exports needed (parse, evaluate, defaultRegistry, FunctionRegistry types)
 - `ui/src/lib/types/domain.ts` — SchemaTreeNode, ParsedSchema consumed for autocomplete
 - `src/engine/dsl/index.ts` — parse() API consumed via @keyra/engine
@@ -204,7 +207,10 @@ Per `forge/architecture/mapping-engine.md`:
 - Validation debounce: 300ms after last keystroke.
 - Desktop-first: 1280px+ target, 1024px minimum.
 - Expression updates to rule state should be real-time with debounce (preferred per TTFSM optimization).
+- Only syntactically valid expressions are committed to rule state. Empty string is committable (clearing is valid). Invalid in-progress edits stay in local state only, with a visual "not saved" indicator.
+- The expression builder panel uses CSS `resize: vertical` with default height ~200px, min-height 120px, max-height 50vh.
 - The guided builder covers the common 80% of patterns: direct copy, static, concat, cast, default, coalesce, if, valueMap, formatDate, map, filter, math operations. Complex nesting defers to raw editor.
+- The guided builder decomposition supports up to 3 levels of function nesting with supported functions only. Beyond that → `canDecompose = false`.
 - Bundle size impact should be measured and documented (baseline from FS-010: ~343 kB / 106 kB gzip).
 
 ---
@@ -308,16 +314,18 @@ function useExpressionPreview(options: {
 
 **Guided builder AST decomposition (Editor → Builder):**
 - Parses expression with `parse()`
-- Checks if root AST node matches a supported builder pattern:
+- Checks if all functions in the AST are in the builder's supported set (~15 functions)
+- Checks nesting depth does not exceed 3 levels
+- Supported patterns:
   - `FunctionCall("source", [StringLiteral])` → Direct Copy
   - `FunctionCall("static", [Literal])` → Static Value
-  - `FunctionCall(knownFunction, [...])` → Transform with args
-  - Nested max 1 level → decomposable
-  - Deeper nesting or unsupported patterns → not decomposable
+  - `FunctionCall(supportedFunction, [...args])` → Transform with args
+  - Nested up to 3 levels deep when all functions are supported → decomposable
+  - Any unsupported function or nesting > 3 levels → not decomposable
 - If not decomposable: `canDecompose = false`, show warning on mode switch
 
 **Function registry metadata for UI:**
-- A static `DSL_FUNCTION_CATALOG` registry (derived from engine's registered functions) providing:
+- A static `DSL_FUNCTION_CATALOG` in `ui/src/lib/data/dsl-functions.ts` (shared cross-feature location) providing:
   - Function name
   - Category (String, Date, Math, Conditional, Lookup, Array, Null Handling, Type Conversion)
   - One-line description
@@ -325,6 +333,7 @@ function useExpressionPreview(options: {
   - Example usage string
 - This is a build-time static data structure, not dynamically queried from the registry at runtime (for performance and bundle-size reasons)
 - However, function existence validation uses the live registry for accuracy
+- Consumed by: FS-011 (builder, autocomplete, function reference), FS-012 (diagnostics), FS-010 (rule type inference)
 
 ### Failure / Edge Behavior
 
@@ -530,6 +539,7 @@ function useExpressionPreview(options: {
 - The error location is underlined in red
 - Hovering shows tooltip: "KEYRA-E001: Unexpected end of expression"
 - The expression is not applied to the rule (invalid expressions are not committed)
+- A visual indicator appears below the editor: "⚠ Expression has syntax errors — not saved to rule"
 
 ### AE-13 — Static value shortcut
 
@@ -550,11 +560,17 @@ function useExpressionPreview(options: {
 
 ## Open Questions
 
-- `Q1.` Should the expression builder use a textarea + overlay approach for the raw editor, or a contenteditable div? The textarea approach is simpler and more accessible but limits inline decoration. Contenteditable provides richer rendering but introduces complexity with cursor management. Implementer's judgment — document the choice and rationale.
-- `Q2.` Should invalid expressions (parse failures) be committed to the rule state? The spec says "real-time with debounce" but committing broken expressions would cause validation errors in the rule list. Proposed: only commit syntactically valid expressions; show a local "uncommitted" indicator for invalid in-progress edits.
-- `Q3.` What is the exact decomposition depth limit for Editor → Builder mode? The spec says "too complex" but doesn't define the threshold precisely. Proposed: single outermost function with at most 1 level of nesting (arguments can be source/static/literal but not nested function calls).
-- `Q4.` Should the expression builder panel be resizable or have a fixed height within the grid? Current grid assigns one row height to Panel 4. Complex expressions may need more vertical space.
-- `Q5.` For the function catalog static data, should it be co-located with the expression builder feature or placed in a shared location (since FS-012 may also reference function metadata)?
+All questions resolved in Rev 2.
+
+- `Q1.` ~~Should the expression builder use a textarea + overlay approach for the raw editor, or a contenteditable div?~~ **RESOLVED (Rev 2):** Use textarea + synchronized overlay. The overlay div sits on top with `pointer-events: none` and renders highlighted tokens; the textarea handles all input, cursor, and selection natively. This is simpler, more accessible, and avoids contenteditable cursor/selection issues.
+
+- `Q2.` ~~Should invalid expressions (parse failures) be committed to the rule state?~~ **RESOLVED (Rev 2):** Only commit syntactically valid expressions to rule state. Empty string is committable (clearing an expression is valid). Partial/invalid expressions stay in local working state only. Show a visual indicator: "⚠ Expression has syntax errors — not saved to rule" below the editor when the local expression differs from the committed rule expression due to parse failure.
+
+- `Q3.` ~~What is the exact decomposition depth limit for Editor → Builder mode?~~ **RESOLVED (Rev 2):** The guided builder can decompose expressions up to 3 levels of nesting when all functions in the expression tree are in the builder's supported set (~15 functions: source, static, concat, cast, default, coalesce, if, valueMap, formatDate, map, filter, upper, lower, trim, add, subtract, multiply, divide, eq, neq, gt, gte, lt, lte). Examples: `default(upper(source("name")), "N/A")` (2 levels) ✓, `if(gt(source("amount"), 1000), upper(source("tier")), static("Standard"))` (3 levels) ✓. Beyond 3 levels or any unsupported function in the tree → `canDecompose = false`.
+
+- `Q4.` ~~Should the expression builder panel be resizable or have a fixed height within the grid?~~ **RESOLVED (Rev 2):** The panel uses CSS `resize: vertical` with default height ~200px, min-height 120px, max-height 50vh. This allows users to expand the editor for complex multi-line expressions without permanently consuming screen space.
+
+- `Q5.` ~~For the function catalog static data, should it be co-located with the expression builder feature or placed in a shared location?~~ **RESOLVED (Rev 2):** Place the function catalog in `ui/src/lib/data/dsl-functions.ts` as shared cross-feature static data. It will be consumed by FS-011 (builder, autocomplete, function reference), FS-012 (diagnostics display), and potentially FS-010 (rule type inference). The file exports `DSL_FUNCTION_CATALOG: readonly FunctionCatalogEntry[]` and associated types.
 
 ---
 
@@ -592,13 +608,13 @@ function useExpressionPreview(options: {
 
 Decompose into 12 tasks:
 
-1. **T-01: Expression builder types, state hook, and panel shell** — Define types (ExpressionBuilderMode, BuilderStep, FunctionCatalogEntry, etc.), create `useExpressionBuilder()` hook with selected rule loading and debounced updates, build panel shell with mode toggle UI. Foundation for all other tasks. Agent: `ui-task`.
+1. **T-01: Expression builder types, state hook, and panel shell** — Define types (ExpressionBuilderMode, BuilderStep, FunctionCatalogEntry, etc.), create `useExpressionBuilder()` hook with selected rule loading and debounced updates (commit-only-valid logic), build panel shell with mode toggle UI and resizable container. Create `DSL_FUNCTION_CATALOG` in shared `ui/src/lib/data/dsl-functions.ts`. Foundation for all other tasks. Agent: `ui-task`.
 
-2. **T-02: Raw DSL editor with syntax highlighting** — Build the raw editor component (textarea + overlay approach or contenteditable), implement regex-based DSL tokenizer for visual token classification, render colored overlay. Bracket matching. Multi-line support. Depends on T-01. Agent: `ui-task`.
+2. **T-02: Raw DSL editor with syntax highlighting** — Build the raw editor component using textarea + synchronized overlay div for syntax highlighting. Implement regex-based DSL tokenizer for visual token classification, render colored overlay with `pointer-events: none`. Bracket matching. Multi-line support. Resizable panel container (200px default, 120px min, 50vh max). Depends on T-01. Agent: `ui-task`.
 
 3. **T-03: Autocomplete system** — Build context-aware autocomplete: detect cursor context (inside source(), at function position, etc.), generate suggestions from ParsedSchema + config constants + function registry, render dropdown, handle selection/keyboard. Depends on T-02. Agent: `ui-task`.
 
-4. **T-04: Inline validation via engine parse()** — Wire engine's `parse()` into the raw editor with 300ms debounce. Map diagnostic positions to editor offsets. Render error underlines + tooltips. Only commit valid expressions to rule state. Depends on T-02. Agent: `ui-task`.
+4. **T-04: Inline validation via engine parse()** — Wire engine's `parse()` into the raw editor with 300ms debounce. Map diagnostic positions to editor offsets. Render error underlines + tooltips. Only commit valid expressions to rule state. Show "⚠ Expression has syntax errors — not saved to rule" indicator for invalid in-progress edits. Empty expression is committable. Depends on T-02. Agent: `ui-task`.
 
 5. **T-05: Guided builder — source selection and transform picker** — Build Step 1 (source field selection with inline picker, multi-field support, direct copy shortcut, static value shortcut) and Step 2 (categorized function picker with descriptions and parameter counts). Depends on T-01. Agent: `ui-task`.
 
@@ -606,9 +622,9 @@ Decompose into 12 tasks:
 
 7. **T-07: Array expression support in guided builder** — Add `map()` object template scaffolding, `filter()` condition builder, `item()`/`parent()` as source options in array context, visual array context indicator. Depends on T-06. Agent: `ui-task`.
 
-8. **T-08: Mode toggle and bidirectional conversion** — Implement Builder→Editor (trivial: show generated string) and Editor→Builder (AST decomposition into builder steps, complexity detection, warning display). Depends on T-02, T-05. Agent: `ui-task`.
+8. **T-08: Mode toggle and bidirectional conversion** — Implement Builder→Editor (trivial: show generated string) and Editor→Builder (AST decomposition into builder steps, 3-level nesting support with supported function set, complexity detection, warning display). Depends on T-02, T-05. Agent: `ui-task`.
 
-9. **T-09: Function reference panel** — Build collapsible searchable function catalog panel. Static data source with categories, descriptions, signatures, examples. Click-to-insert for both modes. Depends on T-01. Agent: `ui-task`.
+9. **T-09: Function reference panel** — Build collapsible searchable function catalog panel. Import `DSL_FUNCTION_CATALOG` from `ui/src/lib/data/dsl-functions.ts` (shared location). Categories, descriptions, signatures, examples. Click-to-insert for both modes. Depends on T-01. Agent: `ui-task`.
 
 10. **T-10: Expression preview area** — Build preview component showing final DSL string, create `useExpressionPreview()` hook for live evaluation against sample data, handle evaluation errors and loading state. Depends on T-01. Agent: `ui-task`.
 
@@ -631,5 +647,12 @@ Parallelization:
 
 ## Change Log
 
+- Rev 2 — 2026-05-01
+  - Resolved Q1: Raw editor uses textarea + synchronized overlay (not contenteditable)
+  - Resolved Q2: Only valid expressions committed to rule state; empty is committable; "not saved" indicator for invalid edits
+  - Resolved Q3: Guided builder decomposition supports up to 3 levels of nesting (was 1 level); supported function set ~15 functions
+  - Resolved Q4: Panel uses `resize: vertical`, default 200px, min 120px, max 50vh
+  - Resolved Q5: Function catalog placed in shared `ui/src/lib/data/dsl-functions.ts` (cross-feature)
+  - Updated Assumptions, Constraints, Proposed Behavior, AE-12, Relevant Areas to reflect resolutions
 - Rev 1 — 2026-05-01
   - Initial draft

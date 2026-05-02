@@ -18,6 +18,7 @@ Owner: TBD
 Reviewers: TBD
 Created: 2026-05-01
 Last Updated: 2026-05-01
+Rev Updated: 2026-05-01
 Type: ui
 
 ---
@@ -30,7 +31,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -68,6 +69,8 @@ Deliver a fully functional project management layer that:
 - The engine's `validate()` (via `validateMapping()`) is available for computing mapping coverage and status.
 - Shared primitives `Button`, `Card`, `PageHeader`, `StatusBadge` from `ui/src/components/` are available.
 - The `Project` domain type has `schemaRefs: SchemaRef[]` for tracking attached schemas.
+- `MappingConfig.sourceSchemaRef` and `MappingConfig.targetSchemaRef` are optional (`SchemaRef | undefined`). When undefined, schemas are not yet assigned. This spec introduces this type change.
+- `MappingMetadata.sourceSchemaId` and `MappingMetadata.targetSchemaId` are optional (`string | undefined`). Derived from the optional config refs.
 - Deploy badges are read-only placeholders in Phase 0 (all show "Not deployed").
 
 ---
@@ -174,6 +177,7 @@ Schema parsers from FS-009: `parseJsonSchema(content)`, `parseXsd(xmlString)`, `
 - Tailwind CSS 4 for all styling.
 - No external state management library (Phase 0 rules — `useState`/`useReducer` only).
 - Deploy badges are read-only placeholders showing "Not deployed" in Phase 0.
+- Mappings with undefined schema refs (`sourceSchemaRef` or `targetSchemaRef` absent) cannot be deployed. The Deployment Page (Phase 4) must check this constraint. In Phase 0, this is informational only (deploy is not yet functional).
 - Desktop-first (1024px minimum viewport).
 - No cross-feature direct imports — shared code via `components/`, `hooks/`, or `lib/`.
 
@@ -233,7 +237,7 @@ Schema parsers from FS-009: `parseJsonSchema(content)`, `parseXsd(xmlString)`, `
 - **Invalid upload file**: If file cannot be read or is empty, show inline error. If format detection is ambiguous, default to sample data inference.
 - **Schema parsing failure during upload**: Show warning "Schema uploaded but field count could not be determined" — still save with `fieldCount: 0`.
 - **Create project validation**: Name is required. Show inline error if submitted empty.
-- **Create mapping with skipped schemas**: Use a sentinel `SchemaRef` with empty `schemaId` or handle in adapter. The mapping is created in `draft` status with no schema references.
+- **Create mapping with skipped schemas**: `sourceSchemaRef` and/or `targetSchemaRef` are omitted (`undefined`) from `CreateMappingInput`. The mapping is created in `draft` status with no schema references. `MappingConfig.sourceSchemaRef` and `MappingConfig.targetSchemaRef` are optional — `undefined` means "not yet assigned."
 - **Duplicate naming**: Duplicated items get " (Copy)" suffix appended to name.
 - **Storage quota exceeded**: Show error toast if `writeArray` throws quota error.
 
@@ -343,7 +347,7 @@ Schema parsers from FS-009: `parseJsonSchema(content)`, `parseXsd(xmlString)`, `
 - User clicks "Create"
 
 **Then**
-- Mapping created with empty/placeholder schema refs
+- Mapping created with `sourceSchemaRef: undefined`, `targetSchemaRef: undefined`
 - Status is "draft"
 - Mapping Editor opens with banner "Attach source and target schemas to enable validation and preview"
 
@@ -433,7 +437,9 @@ Schema parsers from FS-009: `parseJsonSchema(content)`, `parseXsd(xmlString)`, `
 
 ## Open Questions
 
-- `Q1.` When creating a mapping with skipped schemas, what `SchemaRef` value should be stored? Options: (a) empty string schemaId with type "local", (b) a dedicated "none" sentinel, (c) make `sourceSchemaRef`/`targetSchemaRef` optional in `CreateMappingInput`. Current type requires both as non-optional — may need type change.
+All questions resolved in Rev 2.
+
+- `Q1.` ~~When creating a mapping with skipped schemas, what `SchemaRef` value should be stored?~~ **RESOLVED (Rev 2):** Option (c) — make `sourceSchemaRef` and `targetSchemaRef` optional on both `MappingConfig` and `CreateMappingInput`. TypeScript enforces that every consumer handles the missing case. No magic empty strings or sentinel values. `MappingMetadata.sourceSchemaId` and `MappingMetadata.targetSchemaId` also become optional (`string | undefined`). The engine's `validate()` already handles the "no schema" case (skips path validation when schemas aren't provided). The Mapping Editor already shows a banner when schemas are missing. Downstream consumers of `MappingConfig` (e.g., `useMappingEditor`, `toEngineMappingConfig()`, `LocalStorageAdapter`) must add `?.` guards. Constraint added: mappings with undefined schema refs cannot be deployed (Phase 4 gate).
 
 ---
 
@@ -478,5 +484,10 @@ Sequencing: T-01 first, then T-02/T-03 in parallel, then T-04–T-07 (depend on 
 
 ## Change Log
 
+- Rev 2 — 2026-05-01
+  - Resolved Q1: Make `sourceSchemaRef`/`targetSchemaRef` optional on both `MappingConfig` and `CreateMappingInput` (option c). `MappingMetadata.sourceSchemaId`/`targetSchemaId` also optional.
+  - Added constraint: mappings with undefined schema refs cannot be deployed (Phase 4 gate)
+  - Updated AE-07 to use `undefined` instead of placeholder refs
+  - Updated edge behavior for skipped schemas
 - Rev 1 — 2026-05-01
   - Initial draft
