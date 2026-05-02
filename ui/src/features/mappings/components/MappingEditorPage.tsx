@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { EditorTopBar } from './EditorTopBar';
 import type { DeployBadgeInfo, SaveStatus } from './EditorTopBar';
 import { PanelPlaceholder } from './PanelPlaceholder';
+import { PreviewProvider } from '../context/preview-context';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +32,8 @@ export interface MappingEditorPageProps {
   panelOneContent?: ReactNode;
   /** Content for Panel 4 (Expression Builder) slot */
   expressionBuilderContent?: ReactNode;
+  /** Content for Panel 5 (Preview) slot */
+  previewContent?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +90,7 @@ export function MappingEditorPage({
   ruleListContent,
   panelOneContent,
   expressionBuilderContent,
+  previewContent,
 }: MappingEditorPageProps) {
   return (
     <div
@@ -105,7 +109,8 @@ export function MappingEditorPage({
         mappingId={mappingId}
       />
 
-      {/* Panel grid */}
+      {/* Panel grid — wrapped in PreviewProvider so all panels share preview state */}
+      <PreviewProvider>
       <div className="grid min-h-0 flex-1 grid-cols-[200px_1fr_240px] grid-rows-[1fr_1fr_180px] gap-px bg-slate-800 lg:grid-cols-[220px_1fr_280px]">
         {/* Panel 1: Source Schema — top-left */}
         <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-1">
@@ -128,8 +133,8 @@ export function MappingEditorPage({
         </div>
 
         {/* Panel 5: Preview — middle-right */}
-        <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-5">
-          <PanelPlaceholder name={PANEL_NAMES[5]} />
+        <div className="row-span-1 overflow-hidden bg-slate-950 p-1" data-testid="panel-slot-5">
+          {previewContent ?? <PanelPlaceholder name={PANEL_NAMES[5]} />}
         </div>
 
         {/* Bottom row: Diagnostics, AI Assist, History — spans full width (3 columns) */}
@@ -145,6 +150,7 @@ export function MappingEditorPage({
           <PanelPlaceholder name={PANEL_NAMES[8]} />
         </div>
       </div>
+      </PreviewProvider>
     </div>
   );
 }

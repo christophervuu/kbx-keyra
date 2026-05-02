@@ -154,6 +154,22 @@ ui/
           TransformPicker.test.tsx   Component tests (9 tests: categories, search, click handler, SourceAccess excluded)
           ValidationSummaryBar.tsx   Validation summary (role=status, aria-live=polite, aria-atomic=true, aria-label, rule count, valid/warning/error counts, coverage %)
           accessibility.test.tsx     Accessibility tests (T-08: ARIA attrs, keyboard nav, focus trap, focus return, tab order, aria-controls/expanded)
+          preview/          Preview & Testing Panel components (FS-012)
+            index.ts              Preview barrel (re-exports all preview components)
+            PreviewPanel.tsx      Panel 5 shell: toolbar (Run/auto-run/trace), Test Case Manager, 4-tab bar (Output/Diagnostics/Trace/Diff), stats bar, empty/loading states, wired to usePreviewExecution (FS-012 T-06); accepts mappingId prop for test case scoping
+            PreviewPanel.test.tsx Component tests (render, tabs, toolbar disabled states, ARIA)
+            SourceDataInput.tsx   JSON textarea with 150ms debounced validation, inline error, publishes to PreviewContext, accepts initialValue for test case loading (FS-012 T-07)
+            SourceDataInput.test.tsx Component tests (valid/invalid/empty states, debounce, aria-invalid, error clear)
+            OutputDisplay.tsx     Output tab content: syntax-highlighted JSON (keys/strings/numbers/booleans/null in distinct Tailwind colors) with per-state empty/error/timeout views (FS-012 T-08)
+            OutputDisplay.test.tsx Component tests (all state variants, token colors, aria-label, overflow-auto)
+            DiagnosticsDisplay.tsx Diagnostics tab content: severity-categorised list (error/warning/info) with icons, targetPath, expression; empty success state (FS-012 T-09)
+            DiagnosticsDisplay.test.tsx Component tests (all state variants, severity colors, aria, scrollability)
+            TraceDisplay.tsx      Trace tab content: collapsible execution trace entries (sequence, targetPath, duration, expression, value); disabled/empty states (FS-012 T-10)
+            TraceDisplay.test.tsx Component tests (expand/collapse, aria-expanded, aria-label, disabled/empty states)
+            DiffDisplay.tsx       Diff tab content: expected output textarea + structural diff rendering (added/removed/changed color-coded rows); accepts initialExpectedOutput + onExpectedRawChange for test case integration (FS-012 T-11)
+            DiffDisplay.test.tsx  Component tests (all states, AE-05 scenario, invalid JSON error, aria)
+            TestCaseManager.tsx   Test case save/load/delete UI: native select dropdown, inline save form with name input, delete-per-row button, quota error display (FS-012 T-12)
+            TestCaseManager.test.tsx Component tests (save/load/delete flows, quota error, accessibility)
         hooks/            Feature-specific React hooks
           index.ts        Hooks barrel
           use-engine-validation.ts       Debounced validation hook (300ms, wraps engine validate())
@@ -166,6 +182,12 @@ ui/
           use-dsl-validation.test.ts     Hook unit tests (13 tests: valid/invalid expressions, debounce, decoration mapping, severity, AST position resolution)
           use-mapping-editor.ts          Orchestration hook: load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection
           use-mapping-editor.test.tsx    Hook unit tests (26 tests: loading, save, unsaved detection, keyboard, beforeunload, actions)
+          use-preview-execution.ts       Preview execution lifecycle hook: manual run(), auto-run (500ms debounce), 2s timeout guard, trace toggle, publishes to PreviewContext (FS-012 T-04)
+          use-preview-execution.test.ts  Hook unit tests (idle state, guards, success, error, trace flag, auto-run debounce, timeout)
+          use-test-cases.ts              Test case CRUD hook: save/load/delete, localStorage persistence keyed by mappingId (keyra:testcases:{id}), quota error handling (FS-012 T-05)
+          use-test-cases.test.ts         Hook unit tests (save, persist, load, delete, mappingId reload, corrupted storage, quota error)
+        context/          Feature-scoped React contexts
+          preview-context.tsx  PreviewContext (read) + PreviewSettersContext (write) + PreviewProvider + usePreviewContext() + usePreviewSetters() (FS-012 T-03)
         lib/              Pure utility functions
           index.ts        Lib barrel
           dsl-tokenizer.ts           Regex-based DSL tokenizer: tokenizeDsl(), findMatchingBracket(), DslToken, DslTokenType (T-02)
@@ -201,7 +223,12 @@ ui/
       state/              Global state (Context + useReducer)
       types/              UI-specific TypeScript types
         domain.ts         Shared domain model types (includes SchemaTreeNode, ParsedSchema, SchemaNodeType, MappingNodeStatus)
+        diff.ts           Preview/testing diff types (DiffChangeType, DiffEntry, DiffResult)
         index.ts          Types barrel
+      utils/              Shared pure utility functions used across UI features
+        json-diff.ts      Structural JSON diff utility for preview expected-vs-actual comparisons (FS-012)
+        __tests__/        Utility unit tests
+          json-diff.test.ts  Unit tests for computeDiff() coverage and edge cases
     assets/               Static assets
   index.html
   vite.config.ts

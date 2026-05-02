@@ -1,7 +1,8 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useContext, useImperativeHandle, useRef } from 'react';
 import type { ExpressionBuilderResult, ExpressionBuilderMode } from '../hooks/use-expression-builder';
 import type { ParsedSchema } from '@/lib/types/domain';
 import { useExpressionPreview } from '../hooks/use-expression-preview';
+import { PreviewContext } from '../context/preview-context';
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { ExpressionPreview } from './ExpressionPreview';
 import { FunctionReferencePanel } from './FunctionReferencePanel';
@@ -36,7 +37,8 @@ export interface ExpressionBuilderPanelProps {
   readonly parsedSourceSchema?: ParsedSchema | null;
   /**
    * Sample source data for live expression preview (AE-08, T-10).
-   * Pass null until FS-012 supplies real test data.
+   * When rendered inside `<PreviewProvider>`, context sourceData takes precedence
+   * over this prop. This prop is used as a fallback for isolated usage (e.g. tests).
    */
   readonly sampleSourceData?: unknown;
 }
@@ -122,11 +124,17 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
     },
   }), [builderState]);
 
+  // Read sourceData from PreviewContext when available (FS-012 T-13).
+  // Falls back to the sampleSourceData prop so the component remains usable
+  // outside <PreviewProvider> (e.g. isolated unit tests).
+  const previewCtx = useContext(PreviewContext);
+  const resolvedSourceData = previewCtx?.sourceData ?? sampleSourceData ?? null;
+
   // Derive expression for preview — safe even when no rule is selected
   const previewExpression = builderState?.expression ?? '';
   const preview = useExpressionPreview({
     expression: previewExpression,
-    sourceData: sampleSourceData,
+    sourceData: resolvedSourceData,
   });
 
   // No rule selected — show empty state
@@ -220,7 +228,7 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
           result={preview.result}
           error={preview.error}
           isEvaluating={preview.isEvaluating}
-          hasSourceData={sampleSourceData !== null && sampleSourceData !== undefined}
+          hasSourceData={resolvedSourceData !== null && resolvedSourceData !== undefined}
         />
       </div>
 

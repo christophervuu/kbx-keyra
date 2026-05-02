@@ -1,3 +1,5 @@
+import type { ExecutionResult } from '@keyra/engine';
+
 export type ISODateString = string;
 
 export type Environment = 'DEV' | 'QA' | 'PROD';
@@ -347,6 +349,27 @@ export interface ServerPreviewResult {
     readonly engineVersion: string;
   };
 }
+
+export interface TestCase {
+  readonly id: string;
+  readonly name: string;
+  readonly sourceData: string;
+  readonly expectedOutput?: string;
+  readonly createdAt: ISODateString;
+}
+
+export interface PreviewContextValue {
+  readonly sourceData: unknown | null;
+  readonly isExecuting: boolean;
+  readonly lastResult: ExecutionResult | null;
+}
+
+export type PreviewExecutionState =
+  | { readonly status: 'idle' }
+  | { readonly status: 'executing' }
+  | { readonly status: 'success'; readonly result: ExecutionResult }
+  | { readonly status: 'error'; readonly error: string }
+  | { readonly status: 'timeout' };
 
 // ---------------------------------------------------------------------------
 // Schema Tree Types (FS-009)

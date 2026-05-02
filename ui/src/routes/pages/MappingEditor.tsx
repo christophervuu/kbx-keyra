@@ -5,6 +5,7 @@ import { ExpressionBuilderPanel } from '@/features/mappings/components';
 import type { ExpressionBuilderPanelRef } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
+import { PreviewPanel } from '@/features/mappings/components/preview';
 import { useMappingEditor } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import { SchemaTreeView } from '@/features/schemas';
@@ -145,6 +146,14 @@ export default function MappingEditor() {
     </div>
   );
 
+  const previewContent = (
+    <PreviewPanel
+      config={editor.config}
+      sourceSchemaDetail={editor.sourceSchemaDetail}
+      targetSchemaDetail={editor.targetSchemaDetail}
+    />
+  );
+
   return (
     <MappingEditorPage
       projectId={projectId}
@@ -157,6 +166,7 @@ export default function MappingEditor() {
       ruleListContent={ruleListContent}
       panelOneContent={panelOneContent}
       expressionBuilderContent={expressionBuilderContent}
+      previewContent={previewContent}
     />
   );
 }

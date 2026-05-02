@@ -53,6 +53,18 @@ export interface UseMappingEditorResult {
   /** Current rules array (local, mutable) */
   rules: readonly MappingRule[];
 
+  /**
+   * Current mapping config with live (potentially unsaved) rules applied.
+   * Suitable for passing to engine execution or validation hooks.
+   * Null while the mapping is still loading.
+   */
+  config: MappingConfig | null;
+
+  /** Raw source schema detail (content + metadata). Null until loaded. */
+  sourceSchemaDetail: SchemaDetail | null;
+  /** Raw target schema detail (content + metadata). Null until loaded. */
+  targetSchemaDetail: SchemaDetail | null;
+
   /** Parsed source schema for UI tree display */
   parsedSourceSchema: ParsedSchema | null;
   /** Parsed target schema for UI tree display */
@@ -443,6 +455,9 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     sourceSchemaName,
     targetSchemaName,
     rules,
+    config: validationConfig,
+    sourceSchemaDetail: sourceSchema,
+    targetSchemaDetail: targetSchema,
     parsedSourceSchema,
     parsedTargetSchema,
     schemasLoaded,
