@@ -60,7 +60,7 @@ ui/
       index.ts            Barrel export for route constants
       paths.ts            Route path string constants (PATHS object)
       pages/              Placeholder page components (one per route)
-        HomeDashboard.tsx
+        HomeDashboard.tsx   Renders HomeDashboardPage from features/home (FS-014 T-11)
         CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
         ProjectOverview.tsx       Renders ProjectOverviewPage from features/projects (FS-013 T-08)
         ProjectSettings.tsx
@@ -102,7 +102,44 @@ ui/
             parse-xsd.ts
             parse-inferred-schema.ts
         schemas.test.ts   Feature-level unit tests
-      home/               Home Dashboard
+      home/               Home Dashboard (FS-014)
+        index.ts          Feature barrel (re-exports types, hooks, components)
+        types.ts          Feature-local types (DashboardMetrics, ProjectListItem, DashboardLoadState, ViewMode, SortField, SortDirection, StatusFilter)
+        components/
+          index.ts        Components barrel
+          MetricsBar.tsx  Summary metric cards: Projects/Mappings/Schemas counts, status breakdown (Ready/Draft/Has Errors), deployments; loading skeleton (FS-014 T-03)
+          ProjectCard.tsx     Grid card: name, description (line-clamp-2), mapping count, worst-status badge, DEV/QA/PROD deploy badges, date; full-card click (FS-014 T-05)
+          ProjectCardGrid.tsx Grid container: responsive 1/2/3-column CSS grid of ProjectCard (FS-014 T-05) — co-located in ProjectCard.tsx
+          ProjectTable.tsx    Semantic table: 8-column thead (Name/Desc/Mappings/Status/DEV/QA/PROD/Last Modified), clickable/keyboard-navigable rows, worst-status badge, StatusBadge per env (FS-014 T-06)
+          ProjectList.tsx     Search/sort/filter/view-toggle container; delegates to ProjectCardGrid or ProjectTable; "Showing X of Y" count; localStorage view-mode persistence (FS-014 T-04)
+          DashboardEmptyState.tsx  Centered empty state: FolderOpen icon, "No projects yet" heading, subtext, "Create Your First Project" primary button → /projects/new (FS-014 T-08)
+          DashboardSkeleton.tsx    Animated pulse skeleton: 5 metrics-bar card shapes + 6 project-card grid shapes; role=status + sr-only text (FS-014 T-09)
+          DashboardErrorBanner.tsx Alert banner: role=alert, AlertTriangle icon, message prop (default "Failed to load dashboard data"), Retry button → onRetry (FS-014 T-09)
+          DashboardTabs.tsx   Three-tab shell: Projects (renders children), Deployments (placeholder), Activity (placeholder); ARIA tablist/tab/tabpanel; useState local (FS-014 T-10)
+          HomeDashboardPage.tsx  Final assembled page: PageHeader + DashboardTabs + MetricsBar + ProjectList + SchemaLibraryCard; wires useDashboardData + useViewMode; loading/error/empty/loaded states; data-testid="page-home-dashboard" (FS-014 T-11)
+          ViewToggle.tsx      Grid/table toggle button group: aria-label + aria-pressed, active highlight, Lucide icons (FS-014 T-07)
+          __tests__/
+            MetricsBar.test.tsx  Component tests (9 tests: skeleton variants, counts, status breakdown, zero metrics)
+            ProjectCard.test.tsx  Component tests (16 tests: name, description, mapping count singular/plural, worst-status badges, no-badge for no-mappings, DEV/QA/PROD labels, click, keyboard Enter/Space, empty description, tabIndex; grid renders all cards, empty grid, onClick delegation)
+            ProjectTable.test.tsx Component tests (14 tests: all 8 column headers, row-per-project, description, mapping count, has-errors/ready/draft badges, no-mappings dash, 3× Not-deployed badges, click/Enter/Space row activation, tabIndex, empty tbody)
+            ProjectList.test.tsx  Component tests (13 tests: render all, search input, filter by query, Showing X of Y, empty state, status filter, sort direction toggle, table view switch, grid view switch, localStorage persist, localStorage read, card click)
+            DashboardEmptyState.test.tsx  Component tests (5 tests: heading, subtext, button, navigate to /projects/new, centered layout)
+            DashboardStateComponents.test.tsx  Component tests (9 tests: skeleton status role, sr-only text, 6 card blocks, metrics blocks; error banner default message, custom message, role=alert, retry button, onRetry callback)
+            DashboardTabs.test.tsx  Component tests (10 tests: tablist role, 3 tabs rendered, Projects active by default, children shown, aria-labelledby, Deployments/Activity placeholder messages, aria-selected toggling, Projects restoration, aria-controls)
+            HomeDashboardPage.test.tsx  Integration tests (8 tests: data-testid, skeleton while loading, error banner, empty state, full dashboard, PageHeader, Schema Library card, retry re-fetch)
+            ViewToggle.test.tsx   Component tests (6 tests: button rendering, aria-pressed active/inactive, onChange grid/table/re-click)
+        hooks/
+          index.ts        Hooks barrel
+          use-dashboard-data.ts  Loads projects/schemas/mappings, computes DashboardMetrics, builds ProjectListItem[], retry support (FS-014 T-02)
+          use-view-mode.ts       localStorage-persisted ViewMode hook; invalid value defaults to grid (FS-014 T-07)
+          __tests__/
+            use-dashboard-data.test.ts  Hook unit tests (13 tests: loading state, metrics aggregation, worst-status derivation, empty projects, error state, retry, parallel loading)
+            use-view-mode.test.ts       Hook unit tests (7 tests: default grid, read grid/table, invalid value, setViewMode state+persist, switch back)
+        lib/
+          index.ts        Lib barrel
+          filter-sort.ts  Pure filterProjects() and sortProjects() functions (FS-014 T-04)
+          __tests__/
+            filter-sort.test.ts  Unit tests (20 tests: search by name/desc, case-insensitivity, trim, status filter, combined, immutability; sort name/date/count asc+desc, empty/single)
       projects/           Project Overview, Project Settings, and project management (FS-013)
         index.ts          Feature barrel (re-exports types, hooks, components)
         types.ts          Feature-local types (SchemaScope, ProjectLoadState, SchemaCardData, MappingRowData, form data types)
