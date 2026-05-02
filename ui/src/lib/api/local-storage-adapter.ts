@@ -10,6 +10,7 @@ import type {
   DeploymentContext,
   DeploymentDiff,
   DeploymentRecord,
+  DeployStatus,
   Environment,
   ExplainRuleInput,
   GitHubFile,
@@ -398,7 +399,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
       return {
         environment: env,
-        status: latest ? 'deployed' : 'not-deployed',
+        status: (latest ? 'deployed' : 'not-deployed') as DeployStatus,
         deployedVersion: latest?.version,
         deployedAt: latest?.deployedAt,
       };

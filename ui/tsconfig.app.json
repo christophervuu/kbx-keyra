@@ -15,7 +15,8 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@keyra/engine": ["../src/engine/index.ts"]
     },
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },

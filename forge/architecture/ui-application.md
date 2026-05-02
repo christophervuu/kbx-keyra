@@ -66,12 +66,28 @@ ui/src/
   hooks/
     use-async-state.ts        Async state lifecycle hook
 
+  features/
+    mappings/                 Mapping Editor feature module (FS-010)
+      index.ts                Feature barrel (components + hooks + utilities)
+      components/
+        MappingEditorPage.tsx Multi-panel editor shell (8 named panel slots)
+        EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs)
+        PanelPlaceholder.tsx  Placeholder renderer for inactive panels
+        RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics)
+      hooks/
+        use-engine-validation.ts  Debounced engine validate() integration hook
+        use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring)
+      lib/
+        infer-rule-type.ts    Expression outer-function -> display label mapping
+
   lib/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL
+    engine/
+      index.ts                Browser integration boundary for `@keyra/engine`
     state/
       async-state.ts
       app-error.ts
@@ -140,6 +156,63 @@ type AsyncState<T> =
 
 ---
 
+## Engine Integration
+
+The UI consumes the mapping engine through a browser integration layer in `ui/src/lib/engine/`.
+
+### Module Purpose
+
+- `ui/src/lib/engine/index.ts` is the canonical UI-facing engine entrypoint.
+- It imports from `@keyra/engine` (aliased to `src/engine/index.ts`) and re-exports:
+  - raw engine functions (`validate`, `execute`) for advanced usage
+  - UI adapters (`validateMapping`, `executeMapping`) that convert UI `MappingConfig` to engine-native config shape
+  - engine result/types used by hooks and feature components
+
+### Import + Bundling Pattern (Vite)
+
+- `@keyra/engine` is resolved via Vite/TypeScript path alias to source (`src/engine/index.ts`), not a pre-built package artifact.
+- Vite transpiles engine TypeScript directly and resolves engine internal `.js` import specifiers.
+- The engine is pure, synchronous, and deterministic; it is safe to invoke inside React hooks.
+- The engine self-initializes its function registry on first import; UI code does not perform setup.
+
+### Canonical Hook Pattern: `useEngineValidation()`
+
+Location: `ui/src/features/mappings/hooks/use-engine-validation.ts`
+
+Contract:
+
+- Inputs:
+  - `config: MappingConfig | null`
+  - `sourceSchema: unknown | null`
+  - `targetSchema: unknown | null`
+- Behavior:
+  - debounces validation by 300ms after input changes
+  - skips validation when any required input is `null`
+  - catches unexpected engine errors and exposes hook-level `error` state
+- Outputs:
+  - `result: ValidationResult | null`
+  - `isValidating: boolean`
+  - `diagnosticsForRule(ruleIndex): Diagnostic[]`
+  - `coveragePercent: number`
+  - `summary: { total; valid; warnings; errors }`
+
+Future hooks (for example, `useEngineExecution()`) should follow the same pattern:
+
+1. accept nullable editor inputs
+2. debounce invocation
+3. call `ui/src/lib/engine/` adapter or raw engine API
+4. return strongly typed result + derived UI summary state
+5. isolate and surface integration errors without crashing UI surfaces
+
+### Tree-Shaking + Bundle Notes
+
+- Feature code should import engine access via `ui/src/lib/engine/` (single boundary) instead of importing engine internals directly.
+- FS-010 production baseline with engine integration active (`pnpm build` in `ui/`):
+  - `dist/assets/index-*.js`: ~`343.42 kB` (gzip: ~`106.61 kB`)
+- Use this as the baseline for tracking bundle growth when adding additional engine-backed hooks/features.
+
+---
+
 ## Routing
 
 ### Registered Routes (FS-008)
@@ -197,6 +270,47 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ---
 
+## Mapping Editor Architecture
+
+FS-010 establishes the editor shell pattern in `ui/src/features/mappings/`.
+
+### Multi-Panel Layout + Slot Pattern
+
+- `MappingEditorPage` owns the editor grid and defines stable named panel slots (Panels 1-8).
+- Each slot renders a dedicated child panel (or `PanelPlaceholder` when deferred).
+- Panel 3 (`Rule List`) is injected as child content (`ruleListContent`) so rule-list behavior can evolve without layout refactors.
+
+Pattern for adding new panels:
+
+1. implement panel component under `features/mappings/components/`
+2. replace placeholder in corresponding slot
+3. preserve slot identity and grid coordinates to avoid cross-panel regressions
+
+### Top Bar Contract
+
+`EditorTopBar` is the canonical metadata strip for Mapping Editor pages.
+
+Its contract includes:
+
+- mapping identity: `mappingName`, `version`
+- persistence state: `saveStatus` (`saved | unsaved | saving | error`)
+- deployment context: environment status badges
+- schema context: `sourceSchemaName`, `targetSchemaName`
+- navigation context: `projectId`, `mappingId` (used to build deploy-route link)
+
+### Editor Data Flow
+
+- `useMappingEditor(mappingId)` is the feature orchestration boundary.
+- It loads mapping + schemas through `ApiAdapter`, owns local rule mutations, and wires validation through `useEngineValidation()`.
+- It returns state + action callbacks (`addRule`, `updateRule`, `deleteRule`, `reorderRules`, bulk actions, `save`, `retry`) as the panel-facing contract.
+
+State management note:
+
+- FS-010 currently uses hook-local `useState` with dispatch-style action callbacks.
+- If panel interaction complexity grows in FS-011/FS-012, this boundary is the place to consolidate into a `useReducer` store without changing panel contracts.
+
+---
+
 ## Constraints
 
 - TypeScript strict mode is mandatory
@@ -211,6 +325,6 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 ## Future Considerations
 
 - Implement `HttpAdapter` when backend services become available
-- Add `ui/src/lib/engine/` browser integration for mapping engine consumption
+- Extend engine hooks beyond validation (for example `useEngineExecution()`) using the same debounce + typed-result pattern
 - Re-evaluate state/data libraries after FS-010 through FS-012 if complexity justifies adoption
 - Expand primitives toward a fuller internal design system only when feature pressure warrants it

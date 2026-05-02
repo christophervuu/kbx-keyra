@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(dirname, './src'),
+      '@keyra/engine': path.resolve(dirname, '../src/engine/index.ts'),
     },
   },
   test: {

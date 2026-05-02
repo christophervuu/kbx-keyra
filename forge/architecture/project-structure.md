@@ -105,6 +105,34 @@ ui/
       home/               Home Dashboard
       projects/           Project Overview and Project Settings
       mappings/           Mapping Editor (panels, expression builder, preview, AI features)
+        index.ts          Feature barrel (re-exports hooks + components)
+        components/       Editor page shell components
+          index.ts        Components barrel
+          BulkActionBar.tsx          Bulk action toolbar (appears when rules are selected: copy, duplicate, delete)
+          ConfirmDialog.tsx          Reusable focus-trapped confirmation dialog (modal overlay, Escape to close)
+          ConfirmDialog.test.tsx     Component tests (12 tests: rendering, focus trap, keyboard, callbacks)
+          DiagnosticDetail.tsx       Expandable diagnostic panel (code, severity badge, message, expression snippet)
+          EditorTopBar.tsx           Top bar (name, version, save status, deploy badges, schema names, deploy link)
+          MappingEditorPage.tsx      Multi-panel grid layout container (8 named panel slots)
+          MappingEditorPage.test.tsx Component tests (22 tests: top bar, panels, slots, routing)
+          PanelPlaceholder.tsx       Generic placeholder for inactive panels
+          RuleForm.tsx               Add/edit rule form (target, expression, description fields, validation)
+          RuleForm.test.tsx          Component tests (14 tests: add/edit modes, validation, callbacks)
+          RuleList.tsx               Rule list container (DnD reorder, CRUD state, multi-select, bulk actions, copy/paste, summary bar, keyboard nav, aria-activedescendant, empty/missing states)
+          RuleList.test.tsx          Component tests (107 tests: rendering, CRUD, DnD reorder, move buttons, multi-select, bulk ops, copy/paste, announcements)
+          RuleRow.tsx                Individual rule row (checkbox-first tab order, drag handle, move up/down, target, expression, type badge, validation icon, edit/copy/delete, isFocused ring, id for aria-activedescendant)
+          ValidationSummaryBar.tsx   Validation summary (role=status, aria-live=polite, aria-atomic=true, aria-label, rule count, valid/warning/error counts, coverage %)
+          accessibility.test.tsx     Accessibility tests (T-08: ARIA attrs, keyboard nav, focus trap, focus return, tab order, aria-controls/expanded)
+        hooks/            Feature-specific React hooks
+          index.ts        Hooks barrel
+          use-engine-validation.ts       Debounced validation hook (300ms, wraps engine validate())
+          use-engine-validation.test.ts  Hook unit tests (14 tests: debounce, summary, coverage, error handling)
+          use-mapping-editor.ts          Orchestration hook: load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection
+          use-mapping-editor.test.tsx    Hook unit tests (26 tests: loading, save, unsaved detection, keyboard, beforeunload, actions)
+        lib/              Pure utility functions
+          index.ts        Lib barrel
+          infer-rule-type.ts         Maps outermost expression function name to display label
+          infer-rule-type.test.ts    Unit tests (14 tests: all rule type patterns)
       deployments/        Deployment Page (mapping-level and project-level)
       templates/          Template Library
       settings/           Global Settings
@@ -122,7 +150,8 @@ ui/
     hooks/                Shared React hooks
     lib/
       api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter
-      engine/             Browser bundle of src/engine (imported as a package)
+      engine/             Browser integration layer for src/engine (imported via @keyra/engine alias)
+        index.ts          Exports validateMapping(), executeMapping(), toEngineConfig adapter, and re-exports engine types
       state/              Global state (Context + useReducer)
       types/              UI-specific TypeScript types
         domain.ts         Shared domain model types (includes SchemaTreeNode, ParsedSchema, SchemaNodeType, MappingNodeStatus)

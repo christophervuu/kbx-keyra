@@ -26,6 +26,7 @@ export interface MappingRule {
   readonly target: string;
   readonly type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | 'any';
   readonly expression: string;
+  readonly description?: string;
 }
 
 export interface MappingConfigOptions {

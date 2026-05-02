@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { vi } from 'vitest';
 
 import CreateMapping from '@/routes/pages/CreateMapping';
 import CreateProject from '@/routes/pages/CreateProject';
@@ -14,29 +15,73 @@ import SchemaDetail from '@/routes/pages/SchemaDetail';
 import SchemaLibrary from '@/routes/pages/SchemaLibrary';
 import Settings from '@/routes/pages/Settings';
 import TemplateLibrary from '@/routes/pages/TemplateLibrary';
+import { AdapterProvider } from '@/lib/api';
+import type { ApiAdapter } from '@/lib/api';
+
+// Mock adapter that never resolves (keeps component in loading state)
+const mockAdapter: ApiAdapter = {
+  listSchemas: vi.fn(),
+  getSchema: vi.fn().mockReturnValue(new Promise(() => {})),
+  createSchema: vi.fn(),
+  deleteSchema: vi.fn(),
+  listMappings: vi.fn(),
+  getMapping: vi.fn().mockReturnValue(new Promise(() => {})),
+  createMapping: vi.fn(),
+  updateMapping: vi.fn(),
+  deleteMapping: vi.fn(),
+  duplicateMapping: vi.fn(),
+  listProjects: vi.fn(),
+  getProject: vi.fn(),
+  createProject: vi.fn(),
+  updateProject: vi.fn(),
+  deleteProject: vi.fn(),
+  listTemplates: vi.fn(),
+  getTemplate: vi.fn(),
+  getDeploymentContext: vi.fn(),
+  deploy: vi.fn(),
+  promote: vi.fn(),
+  rollback: vi.fn(),
+  getDeploymentDiff: vi.fn(),
+  listCdmSchemas: vi.fn(),
+  linkCdmSchema: vi.fn(),
+  syncCdmSchema: vi.fn(),
+  listPublishedSchemas: vi.fn(),
+  publishSchemaToGitHub: vi.fn(),
+  linkPublishedSchema: vi.fn(),
+  autoMap: vi.fn(),
+  suggestExpression: vi.fn(),
+  explainRule: vi.fn(),
+  smartFix: vi.fn(),
+  validateMappings: vi.fn(),
+  querySchemaNodes: vi.fn(),
+  listActivity: vi.fn(),
+  previewOnServer: vi.fn(),
+} as ApiAdapter;
 
 function renderWithRouter(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/" element={<HomeDashboard />} />
-        <Route path="/projects/new" element={<CreateProject />} />
-        <Route path="/projects/:projectId" element={<ProjectOverview />} />
-        <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
-        <Route path="/projects/:projectId/deployments" element={<ProjectDeployments />} />
-        <Route path="/projects/:projectId/mappings/new" element={<CreateMapping />} />
-        <Route path="/projects/:projectId/mappings/:mappingId" element={<MappingEditor />} />
-        <Route
-          path="/projects/:projectId/mappings/:mappingId/deploy"
-          element={<MappingDeployment />}
-        />
-        <Route path="/schemas" element={<SchemaLibrary />} />
-        <Route path="/schemas/:schemaId" element={<SchemaDetail />} />
-        <Route path="/templates" element={<TemplateLibrary />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </MemoryRouter>,
+    <AdapterProvider adapter={mockAdapter}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/" element={<HomeDashboard />} />
+          <Route path="/projects/new" element={<CreateProject />} />
+          <Route path="/projects/:projectId" element={<ProjectOverview />} />
+          <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
+          <Route path="/projects/:projectId/deployments" element={<ProjectDeployments />} />
+          <Route path="/projects/:projectId/mappings/new" element={<CreateMapping />} />
+          <Route path="/projects/:projectId/mappings/:mappingId" element={<MappingEditor />} />
+          <Route
+            path="/projects/:projectId/mappings/:mappingId/deploy"
+            element={<MappingDeployment />}
+          />
+          <Route path="/schemas" element={<SchemaLibrary />} />
+          <Route path="/schemas/:schemaId" element={<SchemaDetail />} />
+          <Route path="/templates" element={<TemplateLibrary />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </MemoryRouter>
+    </AdapterProvider>,
   );
 }
 
@@ -92,9 +137,8 @@ describe('Route rendering', () => {
   it('renders Mapping Editor at /projects/:projectId/mappings/:mappingId', () => {
     renderWithRouter('/projects/abc-123/mappings/map-456');
 
-    expect(screen.getByTestId('page-mapping-editor')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Mapping Editor' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    // MappingEditor now starts in loading state (useMappingEditor fetches data on mount)
+    expect(screen.getByTestId('editor-loading')).toBeInTheDocument();
   });
 
   it('renders Mapping Deployment at /projects/:projectId/mappings/:mappingId/deploy', () => {
