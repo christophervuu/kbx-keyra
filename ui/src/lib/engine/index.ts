@@ -59,8 +59,12 @@ import type { MappingConfig, MappingRule } from '@/lib/types/domain';
  * - UI config has optional fields in MappingConfigOptions; engine requires all fields in MappingConfigBlock
  * - UI MappingRule.type includes 'null' | 'any'; engine RuleType omits these
  * - UI has extra fields (id, projectId) that the engine ignores
+ * - UI sourceSchemaRef/targetSchemaRef may be undefined; engine requires them —
+ *   a DEFAULT_SCHEMA_REF with empty schemaId is substituted (engine treats it as "no schema")
  */
 function toEngineConfig(config: MappingConfig): EngineMappingConfig {
+  const DEFAULT_SCHEMA_REF = { schemaId: '', type: 'local' as const };
+
   const engineRules: EngineMappingRule[] = config.rules.map((rule) => ({
     target: rule.target,
     type: normalizeRuleType(rule.type),
@@ -69,30 +73,34 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
   }));
 
   const engineConfigBlock: MappingConfigBlock = {
-    unmappedTargets: config.config.unmappedTargets ?? 'omit',
-    nullSubtrees: config.config.nullSubtrees ?? [],
-    constants: config.config.constants ?? {},
-    externalSources: config.config.externalSources ?? [],
+    unmappedTargets: config.config?.unmappedTargets ?? 'omit',
+    nullSubtrees: config.config?.nullSubtrees ?? [],
+    constants: config.config?.constants ?? {},
+    externalSources: config.config?.externalSources ?? [],
   };
 
   return {
     name: config.name,
     version: config.version,
     engineVersion: config.engineVersion,
-    sourceSchemaRef: {
-      schemaId: config.sourceSchemaRef.schemaId,
-      type: config.sourceSchemaRef.type === 'published' ? 'local' : config.sourceSchemaRef.type,
-      ...(config.sourceSchemaRef.commitSha !== undefined && {
-        commitSha: config.sourceSchemaRef.commitSha,
-      }),
-    },
-    targetSchemaRef: {
-      schemaId: config.targetSchemaRef.schemaId,
-      type: config.targetSchemaRef.type === 'published' ? 'local' : config.targetSchemaRef.type,
-      ...(config.targetSchemaRef.commitSha !== undefined && {
-        commitSha: config.targetSchemaRef.commitSha,
-      }),
-    },
+    sourceSchemaRef: config.sourceSchemaRef
+      ? {
+          schemaId: config.sourceSchemaRef.schemaId,
+          type: config.sourceSchemaRef.type === 'published' ? 'local' : config.sourceSchemaRef.type,
+          ...(config.sourceSchemaRef.commitSha !== undefined && {
+            commitSha: config.sourceSchemaRef.commitSha,
+          }),
+        }
+      : DEFAULT_SCHEMA_REF,
+    targetSchemaRef: config.targetSchemaRef
+      ? {
+          schemaId: config.targetSchemaRef.schemaId,
+          type: config.targetSchemaRef.type === 'published' ? 'local' : config.targetSchemaRef.type,
+          ...(config.targetSchemaRef.commitSha !== undefined && {
+            commitSha: config.targetSchemaRef.commitSha,
+          }),
+        }
+      : DEFAULT_SCHEMA_REF,
     config: engineConfigBlock,
     rules: engineRules,
   };

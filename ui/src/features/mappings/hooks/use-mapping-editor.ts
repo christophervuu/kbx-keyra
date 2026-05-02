@@ -188,10 +188,16 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       setVersion(mappingConfig.version);
 
       // Load schemas in parallel (graceful failure per AE-10)
-      const [sourceResult, targetResult] = await Promise.allSettled([
-        adapter.getSchema(mappingConfig.sourceSchemaRef.schemaId),
-        adapter.getSchema(mappingConfig.targetSchemaRef.schemaId),
-      ]);
+      // Explicitly skip getSchema() when schemaRef is undefined (schema-optional mappings)
+      const schemaPromises = [
+        mappingConfig.sourceSchemaRef
+          ? adapter.getSchema(mappingConfig.sourceSchemaRef.schemaId)
+          : Promise.reject('no source schema'),
+        mappingConfig.targetSchemaRef
+          ? adapter.getSchema(mappingConfig.targetSchemaRef.schemaId)
+          : Promise.reject('no target schema'),
+      ];
+      const [sourceResult, targetResult] = await Promise.allSettled(schemaPromises);
 
       if (!mountedRef.current) return;
 

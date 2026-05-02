@@ -44,8 +44,8 @@ export interface MappingConfig {
   readonly name: string;
   readonly version: number;
   readonly engineVersion: string;
-  readonly sourceSchemaRef: SchemaRef;
-  readonly targetSchemaRef: SchemaRef;
+  readonly sourceSchemaRef?: SchemaRef;
+  readonly targetSchemaRef?: SchemaRef;
   readonly config: MappingConfigOptions;
   readonly rules: readonly MappingRule[];
 }
@@ -81,8 +81,8 @@ export interface MappingMetadata {
   readonly name: string;
   readonly version: number;
   readonly status: MappingStatus;
-  readonly sourceSchemaId: string;
-  readonly targetSchemaId: string;
+  readonly sourceSchemaId?: string;
+  readonly targetSchemaId?: string;
   readonly ruleCount: number;
   readonly coverage: number;
   readonly updatedAt: ISODateString;
@@ -223,8 +223,8 @@ export interface UpdateProjectInput {
 export interface CreateMappingInput {
   readonly projectId: string;
   readonly name: string;
-  readonly sourceSchemaRef: SchemaRef;
-  readonly targetSchemaRef: SchemaRef;
+  readonly sourceSchemaRef?: SchemaRef;
+  readonly targetSchemaRef?: SchemaRef;
   readonly config?: MappingConfigOptions;
   readonly rules?: readonly MappingRule[];
 }

@@ -61,11 +61,11 @@ ui/
       paths.ts            Route path string constants (PATHS object)
       pages/              Placeholder page components (one per route)
         HomeDashboard.tsx
-        CreateProject.tsx
-        ProjectOverview.tsx
+        CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
+        ProjectOverview.tsx       Renders ProjectOverviewPage from features/projects (FS-013 T-08)
         ProjectSettings.tsx
         ProjectDeployments.tsx
-        CreateMapping.tsx
+        CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
         MappingDeployment.tsx
         SchemaLibrary.tsx
@@ -103,7 +103,52 @@ ui/
             parse-inferred-schema.ts
         schemas.test.ts   Feature-level unit tests
       home/               Home Dashboard
-      projects/           Project Overview and Project Settings
+      projects/           Project Overview, Project Settings, and project management (FS-013)
+        index.ts          Feature barrel (re-exports types, hooks, components)
+        types.ts          Feature-local types (SchemaScope, ProjectLoadState, SchemaCardData, MappingRowData, form data types)
+        components/
+          index.ts        Components barrel
+          InlineEditableText.tsx    Toggles between display and text input/textarea on click; saves on Enter or blur (FS-013 T-04)
+          InlineEditableTags.tsx    Tag pill display with inline edit: comma/Enter adds tags, Backspace removes, blur saves (FS-013 T-04)
+          ProjectMetadataSection.tsx  Section A — project name/description/tags inline editing + read-only dates (FS-013 T-04)
+          SchemaCard.tsx            Schema metadata card: name, format/origin/scope badges, field count, sync status, inferred warning, View/Remove actions (FS-013 T-05)
+          SchemaLinkPicker.tsx      Modal picker: loads available schemas via adapter, filters attached, radio-style select + confirm (FS-013 T-05)
+          SchemaManagementSection.tsx  Section B — schema grid/empty state, Upload/Link buttons, inline remove confirmation with mapping-reference warning (FS-013 T-05)
+          MappingRow.tsx            Single table row: name link, source→target, rules, coverage%, status badge, DEV/QA/PROD deploy badges, edit/deploy/duplicate/delete actions (FS-013 T-06)
+          MappingListSection.tsx    Section C — sortable mapping table, Create Mapping button, empty state, inline delete confirmation (FS-013 T-06)
+          ProjectActionsSection.tsx Section D — primary actions (Create Mapping, Add Schema, Duplicate), placeholder actions (Export/Import disabled), Project Settings link, Delete Project with confirmation (FS-013 T-07)
+          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states, composes sections A–D (FS-013 T-08)
+          CreateProjectPage.tsx     Create Project form: name/description/tags fields, slug derivation, createProject() call, navigate to new project on success (FS-013 T-09)
+          CreateMappingPage.tsx     Create Mapping 3-step wizard: name → source schema → target schema; skip option; createMapping() call; navigate to editor on success (FS-013 T-10)
+          SchemaUploadDialog.tsx    Modal dialog: file picker (.json/.xsd/.xml), format detection, field count, inferred warning, scope selection, createSchema() + addSchemaRef() on confirm (FS-013 T-11)
+          ProjectOverviewSkeleton.tsx  Animated pulse skeleton mimicking Sections A–D layout (FS-013 T-13)
+          ProjectErrorState.tsx     Error state: alert icon, "Failed to load project", optional error detail, Retry button (FS-013 T-13)
+          ProjectNotFoundState.tsx  Not-found state: icon, "Project not found", "Go to Dashboard" link (FS-013 T-13)
+          __tests__/
+            InlineEditableText.test.tsx         Component tests (8 tests)
+            InlineEditableTags.test.tsx         Component tests (7 tests)
+            ProjectMetadataSection.test.tsx     Component tests (9 tests)
+            SchemaCard.test.tsx                 Component tests (11 tests)
+            SchemaLinkPicker.test.tsx           Component tests (6 tests)
+            SchemaManagementSection.test.tsx    Component tests (10 tests)
+            MappingRow.test.tsx                 Component tests (12 tests: link, schema names, coverage, status badges, deploy badges, duplicate/delete callbacks)
+            MappingListSection.test.tsx         Component tests (12 tests: heading, empty state, rows, default sort, sort toggle, create/delete/duplicate callbacks, column headers)
+            ProjectActionsSection.test.tsx      Component tests (16 tests: button variants, disabled states, delete confirm counts, plural/singular, confirm/cancel callbacks, settings link route)
+            ProjectOverviewPage.test.tsx        Component tests (6 tests: testid preservation, loading skeleton, all sections loaded, not-found state, error state, retry)
+            CreateProjectPage.test.tsx          Component tests (10 tests: fields, required indicator, validation, createProject call, navigation, cancel, submit error, tag parsing)
+            CreateMappingPage.test.tsx          Component tests (12 tests: step navigation, name validation, schema dropdowns, skip option, schema refs, navigate to editor, cancel, submit error)
+            SchemaUploadDialog.test.tsx         Component tests (11 tests: open/closed, file input extensions, upload disabled before file, format badge, inferred warning, empty file error, FileReader error, createSchema+addSchemaRef, cancel, scope radios)
+            ProjectStateComponents.test.tsx     Component tests (12 tests: skeleton pulse blocks, error state heading/detail/retry/role, not-found heading/message/link)
+        hooks/
+          index.ts        Hooks barrel
+          use-project-overview.ts   Orchestration hook: load project + schemas + mappings, inline editing, schema/mapping/project actions (FS-013 T-03)
+          __tests__/
+            use-project-overview.test.ts  Hook unit tests (10 tests: load states, updateName, removeSchema, deleteMappingAction, duplicateMappingAction, deleteProjectAction, retry, schemasReferencingMapping)
+        lib/
+          index.ts        Lib barrel
+          detect-schema-format.ts  Schema upload format detection utility (json-schema/xsd/sample-json/sample-xml/unknown)
+          __tests__/
+            detect-schema-format.test.ts  Unit tests for schema format detection heuristics (FS-013 T-02)
       mappings/           Mapping Editor (panels, expression builder, preview, AI features)
         index.ts          Feature barrel (re-exports hooks + components)
         components/       Editor page shell components
@@ -205,6 +250,7 @@ ui/
       index.ts            Barrel export for all shared components
       Button.tsx          Button with variants (primary/secondary/ghost/danger) and sizes
       Card.tsx            Container component with optional title/description header
+      ConfirmDialog.tsx   Focus-trapped confirmation dialog (modal overlay, Escape to close, message: string|ReactNode) — lifted from mappings feature (FS-013 T-07)
       PageHeader.tsx      Page title + optional description + action slot
       StatusBadge.tsx     Deploy status colored badge (dot + label)
       layout/             App shell components
