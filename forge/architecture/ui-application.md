@@ -343,6 +343,7 @@ FS-010 establishes the editor shell pattern in `ui/src/features/mappings/`. FS-0
 - Panel 1 and Panel 4 can also be injected via slot content (`panelOneContent`, `expressionBuilderContent`) to keep page layout stable while feature composition evolves.
 - Panel 5 (`Preview`) is injected via `previewContent`.
 - Panel 7 (`Configuration`) is injected via `configPanelContent` (FS-017). When not provided, the slot renders a `PanelPlaceholder` labeled "Configuration (Panel 7)". Panel 7 was previously labeled "AI Assist" — that label is retired; AI Assist will be a floating overlay in Phase 2.
+- Panel 8 (`History`) is injected via `historyPanelContent` (FS-018). It renders a compact summary of the current version and an "Open History" button. The full version history UI is a drawer overlay, not a grid panel — see Version History Drawer below.
 
 Pattern for adding new panels:
 
@@ -361,13 +362,43 @@ Its contract includes:
 - deployment context: environment status badges
 - schema context: `sourceSchemaName`, `targetSchemaName`
 - navigation context: `projectId`, `mappingId` (used to build deploy-route link)
+- history toggle: optional `onHistoryToggle` callback — when provided, renders a "History" button (clock icon) in the right action area that opens the version history drawer (FS-018)
+
+### Version History Drawer (FS-018)
+
+Version history is implemented as a **right-side overlay drawer**, not a grid panel. The drawer sits outside the `MappingEditorPage` grid and is composed at the route page level (`routes/pages/MappingEditor.tsx`).
+
+**Storage model:**
+- Each successful save triggers `adapter.saveMappingVersion(mappingId, entry)` (fire-and-forget, errors logged only).
+- Entries are stored under `keyra:versions:{mappingId}` in localStorage, capped at 50 entries (oldest pruned).
+- Each `MappingVersionEntry` stores: `version`, `savedAt` (ISO string), `savedBy`, `ruleCount`, and the full `MappingConfig` snapshot.
+
+**`useVersionHistory(mappingId, currentConfig)` hook:**
+- Loads version list from `adapter.listMappingVersions(mappingId)` on mount.
+- Sorts versions descending (most recent first).
+- Computes a `summary` string per entry: `"Initial version — N rules"` for the first, or a diff-based summary (`"+N added, ~M modified"`) for subsequent versions.
+- Exposes `selectedVersion`, `selectVersion(n)`, `selectedDiff` (diff from selected version to current), `getRestoreConfig(version)`, and `refresh()`.
+
+**Restore flow:**
+1. User selects a version in `VersionHistoryDrawer` → `VersionDiffView` renders the diff.
+2. User clicks "Restore v{N}" → `ConfirmDialog` confirms (warns about unsaved changes if applicable).
+3. On confirm: `history.getRestoreConfig(version)` retrieves the full `MappingConfig` snapshot.
+4. `editor.actions.restore(config)` replaces working state, increments version, and persists immediately.
+5. Drawer closes; `history.refresh()` is called after a brief delay to reload the updated version list.
+
+**Component hierarchy:**
+- `VersionHistoryDrawer` — slide-in panel with backdrop, version list, loading/empty states.
+- `VersionListItem` — per-entry row with version badge, relative timestamp, rule count, summary, "Current" badge.
+- `VersionDiffView` — diff detail view injected into the drawer's `children` slot when a version is selected; includes restore button and confirmation modal.
+- `VersionDiffView` reuses the existing `ConfirmDialog` component for restore confirmation.
 
 ### Editor Data Flow
 
 - `useMappingEditor(mappingId)` is the feature orchestration boundary.
 - It loads mapping + schemas through `ApiAdapter`, owns local rule mutations, and wires validation through `useEngineValidation()`.
-- It returns state + action callbacks (`addRule`, `updateRule`, `deleteRule`, `reorderRules`, bulk actions, `updateConfig`, `save`, `retry`) as the panel-facing contract.
+- It returns state + action callbacks (`addRule`, `updateRule`, `deleteRule`, `reorderRules`, bulk actions, `updateConfig`, `restore`, `save`, `retry`) as the panel-facing contract.
 - `updateConfig(partial: Partial<MappingConfigOptions>)` merges partial config option changes into local state (FS-017). Config changes flow through the `validationConfig` memo → `useEngineValidation()` → re-validation (debounced 300ms). Config changes also set `hasUnsavedChanges` to `true` and are persisted on `save()` alongside rules.
+- `restore(restoreConfig: MappingConfig)` replaces the entire working state (rules + config options) with the provided config, increments the version, and immediately persists via `adapter.updateMapping()`. On success it also fires a version snapshot via `adapter.saveMappingVersion()` (fire-and-forget). This is the end-to-end restore path for version history (FS-018).
 
 FS-011 expression flow adds a page-level selection bridge:
 

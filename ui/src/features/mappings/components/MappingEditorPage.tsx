@@ -36,6 +36,10 @@ export interface MappingEditorPageProps {
   previewContent?: ReactNode;
   /** Content for Panel 7 (Configuration) slot */
   configPanelContent?: ReactNode;
+  /** Content for Panel 8 (History) slot */
+  historyPanelContent?: ReactNode;
+  /** Callback to toggle the version history drawer */
+  onHistoryToggle?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,8 @@ export function MappingEditorPage({
   expressionBuilderContent,
   previewContent,
   configPanelContent,
+  historyPanelContent,
+  onHistoryToggle,
 }: MappingEditorPageProps) {
   return (
     <div
@@ -110,6 +116,7 @@ export function MappingEditorPage({
         targetSchemaName={targetSchemaName}
         projectId={projectId}
         mappingId={mappingId}
+        onHistoryToggle={onHistoryToggle}
       />
 
       {/* Panel grid — wrapped in PreviewProvider so all panels share preview state */}
@@ -150,7 +157,7 @@ export function MappingEditorPage({
         </div>
 
         <div className="bg-slate-950 p-1" data-testid="panel-slot-8">
-          <PanelPlaceholder name={PANEL_NAMES[8]} />
+          {historyPanelContent ?? <PanelPlaceholder name={PANEL_NAMES[8]} />}
         </div>
       </div>
       </PreviewProvider>

@@ -120,6 +120,9 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     querySchemaNodes: vi.fn(),
     listActivity: vi.fn(),
     previewOnServer: vi.fn(),
+    listMappingVersions: vi.fn().mockResolvedValue([]),
+    getMappingVersion: vi.fn(),
+    saveMappingVersion: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as ApiAdapter;
 }
@@ -848,6 +851,7 @@ describe('useMappingEditor', () => {
     });
 
     it('multiple updateConfig calls merge correctly', async () => {
+
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -868,6 +872,112 @@ describe('useMappingEditor', () => {
       const opts: MappingConfigOptions = result.current.configOptions;
       expect(opts.unmappedTargets).toBe('error');
       expect(opts.constants).toEqual({ KEY: 'val' });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Version persistence (AE-01)
+  // ---------------------------------------------------------------------------
+
+  describe('version persistence', () => {
+    it('calls saveMappingVersion after successful save with correct entry', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.addRule({ target: 'A.D', expression: 'static("x")', description: undefined });
+      });
+
+      await act(async () => {
+        result.current.actions.save();
+      });
+
+      await waitFor(() => {
+        expect(result.current.saveStatus).toBe('saved');
+      });
+
+      expect(adapter.saveMappingVersion).toHaveBeenCalledTimes(1);
+      const [calledMappingId, entry] = (adapter.saveMappingVersion as ReturnType<typeof vi.fn>).mock.calls[0] as [string, import('@/lib/types/domain').MappingVersionEntry];
+      expect(calledMappingId).toBe('mapping-1');
+      expect(entry.version).toBe(4); // MOCK_CONFIG.version (3) + 1
+      expect(entry.savedBy).toBe('You');
+      expect(entry.ruleCount).toBe(3); // 2 original + 1 added
+      expect(entry.savedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      expect(entry.config).toMatchObject({ version: 4 });
+    });
+
+    it('save still reports success when saveMappingVersion rejects (fire-and-forget)', async () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const adapter = createMockAdapter({
+        saveMappingVersion: vi.fn().mockRejectedValue(new Error('storage full')),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.addRule({ target: 'A.D', expression: 'static("x")', description: undefined });
+      });
+
+      await act(async () => {
+        result.current.actions.save();
+      });
+
+      await waitFor(() => {
+        expect(result.current.saveStatus).toBe('saved');
+      });
+
+      // Give the fire-and-forget rejection time to settle
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(result.current.saveStatus).toBe('saved');
+      expect(result.current.saveError).toBeNull();
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Failed to save version history entry:',
+        expect.any(Error),
+      );
+
+      consoleWarnSpy.mockRestore();
+    });
+
+    it('saveMappingVersion is NOT called when updateMapping fails', async () => {
+      const adapter = createMockAdapter({
+        updateMapping: vi.fn().mockRejectedValue(new Error('network error')),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.addRule({ target: 'A.D', expression: 'static("x")', description: undefined });
+      });
+
+      await act(async () => {
+        result.current.actions.save();
+      });
+
+      await waitFor(() => {
+        expect(result.current.saveStatus).toBe('error');
+      });
+
+      expect(adapter.saveMappingVersion).not.toHaveBeenCalled();
     });
   });
 });

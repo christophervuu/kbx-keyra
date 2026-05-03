@@ -66,3 +66,7 @@ export { UnmappedTargetsSection } from './UnmappedTargetsSection';
 export type { UnmappedTargetsSectionProps } from './UnmappedTargetsSection';
 export { ValidationSummaryBar } from './ValidationSummaryBar';
 export type { ValidationSummaryBarProps } from './ValidationSummaryBar';
+export { VersionHistoryDrawer, VersionListItem, formatRelativeTime } from './VersionHistoryDrawer';
+export type { VersionHistoryDrawerProps, VersionListItemProps } from './VersionHistoryDrawer';
+export { VersionDiffView } from './VersionDiffView';
+export type { VersionDiffViewProps } from './VersionDiffView';

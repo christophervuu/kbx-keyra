@@ -17,6 +17,7 @@ import type {
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
   MappingConfig,
+  MappingVersionEntry,
   MappingMetadata,
   Project,
   ProjectDetail,
@@ -49,6 +50,8 @@ const STORAGE_KEYS = {
   activity: 'keyra:activity',
 } as const;
 
+const MAX_MAPPING_VERSIONS = 50;
+
 interface StoredSchema {
   metadata: SchemaMetadata;
   detail: SchemaDetail;
@@ -62,6 +65,10 @@ interface StoredMapping {
 const OFFLINE_MODE_MESSAGE = 'Not available in offline mode';
 
 export class LocalStorageAdapter implements ApiAdapter {
+  private versionKey(mappingId: string): string {
+    return `keyra:versions:${mappingId}`;
+  }
+
   private readArray<T>(key: string): T[] {
     const raw = localStorage.getItem(key);
     if (!raw) {
@@ -325,6 +332,37 @@ export class LocalStorageAdapter implements ApiAdapter {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
     const next = mappings.filter((item) => item.metadata.mappingId !== id);
     this.writeArray(STORAGE_KEYS.mappings, next);
+    localStorage.removeItem(this.versionKey(id));
+  }
+
+  async listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]> {
+    const entries = this.readArray<MappingVersionEntry>(this.versionKey(mappingId));
+    return entries.sort((a, b) => b.version - a.version);
+  }
+
+  async getMappingVersion(mappingId: string, version: number): Promise<MappingVersionEntry> {
+    const entries = this.readArray<MappingVersionEntry>(this.versionKey(mappingId));
+    const found = entries.find((entry) => entry.version === version);
+
+    if (!found) {
+      throw this.notFound('MappingVersion', `${mappingId}@v${version}`);
+    }
+
+    return found;
+  }
+
+  async saveMappingVersion(mappingId: string, entry: MappingVersionEntry): Promise<void> {
+    const key = this.versionKey(mappingId);
+    const entries = this.readArray<MappingVersionEntry>(key);
+    const next = [...entries, entry];
+
+    const pruned = next.length > MAX_MAPPING_VERSIONS
+      ? [...next]
+        .sort((a, b) => a.version - b.version)
+        .slice(next.length - MAX_MAPPING_VERSIONS)
+      : next;
+
+    this.writeArray(key, pruned);
   }
 
   async duplicateMapping(id: string, newName: string): Promise<MappingMetadata> {

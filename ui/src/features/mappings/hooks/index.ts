@@ -21,3 +21,6 @@ export type {
   UseExpressionPreviewOptions,
   ExpressionPreviewState,
 } from './use-expression-preview';
+export { useVersionHistory } from './use-version-history';
+export type { VersionHistoryEntry, UseVersionHistoryResult } from './use-version-history';
+

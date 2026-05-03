@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalStorageAdapter } from '@/lib/api';
-import type { CreateProjectInput, MappingConfig, SchemaRef } from '@/lib/types';
+import type { CreateProjectInput, MappingConfig, MappingVersionEntry, SchemaRef } from '@/lib/types';
 
 const SOURCE_SCHEMA_REF: SchemaRef = {
   schemaId: 'source-schema',
@@ -36,6 +36,26 @@ function createStorageMock(): StorageLike {
     clear() {
       store.clear();
     },
+  };
+}
+
+function makeMappingVersionEntry(mappingId: string, version: number): MappingVersionEntry {
+  const config: MappingConfig = {
+    id: mappingId,
+    projectId: 'project-1',
+    name: `Mapping v${version}`,
+    version,
+    engineVersion: '2.0.0',
+    config: {},
+    rules: [{ target: `Target.${version}`, type: 'string', expression: `static("${version}")` }],
+  };
+
+  return {
+    version,
+    savedAt: `2026-01-01T00:${String(version).padStart(2, '0')}:00.000Z`,
+    savedBy: 'You',
+    ruleCount: config.rules.length,
+    config,
   };
 }
 
@@ -306,5 +326,106 @@ describe('LocalStorageAdapter', () => {
     const limited = await adapter.listActivity(undefined, 1);
     expect(limited).toHaveLength(1);
     expect(limited[0].id).toBe('2');
+  });
+
+  it('saveMappingVersion stores an entry retrievable by getMappingVersion', async () => {
+    const adapter = new LocalStorageAdapter();
+    const entry = makeMappingVersionEntry('mapping-1', 1);
+
+    await adapter.saveMappingVersion('mapping-1', entry);
+
+    await expect(adapter.getMappingVersion('mapping-1', 1)).resolves.toEqual(entry);
+  });
+
+  it('saveMappingVersion appends without overwriting previous entries', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', 1));
+    await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', 2));
+
+    const versions = await adapter.listMappingVersions('mapping-1');
+    expect(versions).toHaveLength(2);
+    expect(versions.map((v) => v.version)).toEqual([2, 1]);
+  });
+
+  it('listMappingVersions returns entries sorted by version descending', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', 3));
+    await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', 1));
+    await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', 2));
+
+    const versions = await adapter.listMappingVersions('mapping-1');
+    expect(versions.map((v) => v.version)).toEqual([3, 2, 1]);
+  });
+
+  it('prunes oldest entries when more than 50 versions are stored', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    for (let version = 1; version <= 51; version += 1) {
+      await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', version));
+    }
+
+    const versions = await adapter.listMappingVersions('mapping-1');
+    expect(versions).toHaveLength(50);
+    expect(versions[0].version).toBe(51);
+    expect(versions[49].version).toBe(2);
+    await expect(adapter.getMappingVersion('mapping-1', 1)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('getMappingVersion throws NOT_FOUND for non-existent version', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await adapter.saveMappingVersion('mapping-1', makeMappingVersionEntry('mapping-1', 1));
+
+    await expect(adapter.getMappingVersion('mapping-1', 99)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('listMappingVersions returns empty array when no history exists', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await expect(adapter.listMappingVersions('mapping-unknown')).resolves.toEqual([]);
+  });
+
+  it('version entries are isolated per mapping', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await adapter.saveMappingVersion('mapping-A', makeMappingVersionEntry('mapping-A', 1));
+    await adapter.saveMappingVersion('mapping-B', makeMappingVersionEntry('mapping-B', 1));
+    await adapter.saveMappingVersion('mapping-B', makeMappingVersionEntry('mapping-B', 2));
+
+    const versionsA = await adapter.listMappingVersions('mapping-A');
+    const versionsB = await adapter.listMappingVersions('mapping-B');
+
+    expect(versionsA.map((v) => v.version)).toEqual([1]);
+    expect(versionsB.map((v) => v.version)).toEqual([2, 1]);
+  });
+
+  it('deleteMapping removes associated version history key', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+    });
+
+    await adapter.saveMappingVersion(
+      created.mappingId,
+      makeMappingVersionEntry(created.mappingId, 1),
+    );
+
+    await adapter.deleteMapping(created.mappingId);
+    await expect(adapter.listMappingVersions(created.mappingId)).resolves.toEqual([]);
   });
 });

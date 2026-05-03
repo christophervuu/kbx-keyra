@@ -4,7 +4,7 @@ import { useEngineValidation } from './use-engine-validation';
 import type { EngineValidationState } from './use-engine-validation';
 
 import { useAdapter } from '@/lib/api';
-import type { MappingConfig, MappingConfigOptions, MappingRule, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
+import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 import type { SaveStatus } from '../components/EditorTopBar';
 import { parseJsonSchema, parseXsd } from '@/features/schemas';
 
@@ -31,6 +31,8 @@ export interface MappingEditorActions {
   pasteRules: (rules: Array<Pick<MappingRule, 'target' | 'type' | 'expression' | 'description'>>) => void;
   /** Merge partial config options into local state */
   updateConfig: (partial: Partial<MappingConfigOptions>) => void;
+  /** Restore a previous version config — replaces working state and immediately saves */
+  restore: (restoreConfig: MappingConfig) => void;
   /** Persist current state to adapter */
   save: () => void;
   /** Retry a failed load */
@@ -344,6 +346,18 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       setLastSavedConfigOptions(configOptions);
       setVersion(newVersion);
       setSaveState('saved');
+
+      // Fire-and-forget version snapshot (AE-01)
+      const versionEntry: MappingVersionEntry = {
+        version: newVersion,
+        savedAt: new Date().toISOString(),
+        savedBy: 'You',
+        ruleCount: updatedConfig.rules.length,
+        config: updatedConfig,
+      };
+      adapter.saveMappingVersion(mappingId, versionEntry).catch((err) => {
+        console.warn('Failed to save version history entry:', err);
+      });
     } catch (err) {
       if (!mountedRef.current) return;
       setSaveError(err instanceof Error ? err.message : 'Save failed');
@@ -446,6 +460,53 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     setSaveState('idle');
   }, []);
 
+  const restore = useCallback(async (restoreConfig: MappingConfig) => {
+    if (!config || saveInProgressRef.current) return;
+
+    saveInProgressRef.current = true;
+    setSaveState('saving');
+    setSaveError(null);
+
+    const newVersion = version + 1;
+    const fullConfig: MappingConfig = {
+      ...restoreConfig,
+      id: config.id,
+      projectId: config.projectId,
+      version: newVersion,
+    };
+
+    try {
+      await adapter.updateMapping(mappingId, fullConfig);
+      if (!mountedRef.current) return;
+
+      setConfig(fullConfig);
+      setRules(fullConfig.rules);
+      setLastSavedRules(fullConfig.rules);
+      setConfigOptions(fullConfig.config);
+      setLastSavedConfigOptions(fullConfig.config);
+      setVersion(newVersion);
+      setSaveState('saved');
+
+      // Fire-and-forget version snapshot
+      const versionEntry: MappingVersionEntry = {
+        version: newVersion,
+        savedAt: new Date().toISOString(),
+        savedBy: 'You',
+        ruleCount: fullConfig.rules.length,
+        config: fullConfig,
+      };
+      adapter.saveMappingVersion(mappingId, versionEntry).catch((err) => {
+        console.warn('Failed to save version history entry:', err);
+      });
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setSaveError(err instanceof Error ? err.message : 'Restore failed');
+      setSaveState('error');
+    } finally {
+      saveInProgressRef.current = false;
+    }
+  }, [config, version, adapter, mappingId]);
+
   const retry = useCallback(() => {
     void loadData();
   }, [loadData]);
@@ -464,10 +525,11 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       bulkDuplicate,
       pasteRules,
       updateConfig,
+      restore,
       save,
       retry,
     }),
-    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, save, retry],
+    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore, save, retry],
   );
 
   // ---------------------------------------------------------------------------

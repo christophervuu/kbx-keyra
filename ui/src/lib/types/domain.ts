@@ -54,6 +54,14 @@ export interface MappingConfig {
   readonly rules: readonly MappingRule[];
 }
 
+export interface MappingVersionEntry {
+  readonly version: number;
+  readonly savedAt: string;
+  readonly savedBy: string;
+  readonly ruleCount: number;
+  readonly config: MappingConfig;
+}
+
 export interface Project {
   readonly projectId: string;
   readonly name: string;

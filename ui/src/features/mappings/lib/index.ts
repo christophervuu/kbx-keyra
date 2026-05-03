@@ -17,3 +17,5 @@ export {
 export type { BuilderArgument, BuilderState, ObjectTemplateField } from './expression-generator';
 export { decomposeExpression, BUILDER_SUPPORTED_FUNCTIONS } from './ast-decomposer';
 export type { DecompositionResult } from './ast-decomposer';
+export { computeVersionDiff, generateChangeSummary } from './version-diff';
+export type { RuleDiff, ConfigDiff, VersionDiff } from './version-diff';

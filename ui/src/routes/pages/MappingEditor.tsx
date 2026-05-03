@@ -1,12 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { ConfigurationPanel, ExpressionBuilderPanel } from '@/features/mappings/components';
+import {
+  ConfigurationPanel,
+  ExpressionBuilderPanel,
+  VersionDiffView,
+  VersionHistoryDrawer,
+} from '@/features/mappings/components';
 import type { ExpressionBuilderPanelRef } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { PreviewPanel } from '@/features/mappings/components/preview';
-import { useMappingEditor } from '@/features/mappings/hooks';
+import { useMappingEditor, useVersionHistory } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import { SchemaTreeView } from '@/features/schemas';
 import type { SchemaTreeNode } from '@/lib/types/domain';
@@ -57,6 +62,30 @@ export default function MappingEditor() {
   }>();
 
   const editor = useMappingEditor(mappingId);
+  const history = useVersionHistory(mappingId, editor.config);
+
+  // ---------------------------------------------------------------------------
+  // History drawer state
+  // ---------------------------------------------------------------------------
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // ---------------------------------------------------------------------------
+  // Restore handler
+  // ---------------------------------------------------------------------------
+  const handleRestore = useCallback(
+    (version: number) => {
+      const restoreConfig = history.getRestoreConfig(version);
+      if (restoreConfig) {
+        editor.actions.restore(restoreConfig);
+        setIsHistoryOpen(false);
+        // Refresh history after a brief delay to allow the save to complete
+        setTimeout(() => {
+          history.refresh();
+        }, 500);
+      }
+    },
+    [history, editor.actions],
+  );
 
   // ---------------------------------------------------------------------------
   // Selected rule state — shared between RuleList (highlight) and ExpressionBuilder
@@ -162,20 +191,63 @@ export default function MappingEditor() {
     />
   );
 
+  const historyPanelContent = (
+    <div className="flex h-full flex-col items-start justify-start gap-2 p-2">
+      <p className="text-xs text-slate-400">
+        <span className="font-mono font-semibold text-slate-200">v{editor.version}</span>
+        {' — current version'}
+      </p>
+      <button
+        type="button"
+        onClick={() => setIsHistoryOpen(true)}
+        className="rounded px-2 py-1 text-xs font-medium text-blue-400 transition-colors hover:bg-slate-800 hover:text-blue-300"
+        data-testid="open-history-button"
+      >
+        Open History
+      </button>
+    </div>
+  );
+
   return (
-    <MappingEditorPage
-      projectId={projectId}
-      mappingId={mappingId}
-      mappingName={editor.mappingName}
-      version={editor.version}
-      saveStatus={editor.saveStatus}
-      sourceSchemaName={editor.sourceSchemaName}
-      targetSchemaName={editor.targetSchemaName}
-      ruleListContent={ruleListContent}
-      panelOneContent={panelOneContent}
-      expressionBuilderContent={expressionBuilderContent}
-      previewContent={previewContent}
-      configPanelContent={configPanelContent}
-    />
+    <>
+      <MappingEditorPage
+        projectId={projectId}
+        mappingId={mappingId}
+        mappingName={editor.mappingName}
+        version={editor.version}
+        saveStatus={editor.saveStatus}
+        sourceSchemaName={editor.sourceSchemaName}
+        targetSchemaName={editor.targetSchemaName}
+        ruleListContent={ruleListContent}
+        panelOneContent={panelOneContent}
+        expressionBuilderContent={expressionBuilderContent}
+        previewContent={previewContent}
+        configPanelContent={configPanelContent}
+        historyPanelContent={historyPanelContent}
+        onHistoryToggle={() => setIsHistoryOpen((prev) => !prev)}
+      />
+
+      <VersionHistoryDrawer
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        versions={history.versions}
+        isLoading={history.isLoading}
+        isEmpty={history.isEmpty}
+        selectedVersion={history.selectedVersion}
+        onSelectVersion={history.selectVersion}
+        currentVersion={editor.version}
+      >
+        {history.selectedDiff && history.selectedVersion !== null && (
+          <VersionDiffView
+            diff={history.selectedDiff}
+            selectedVersion={history.selectedVersion}
+            currentVersion={editor.version}
+            hasUnsavedChanges={editor.hasUnsavedChanges}
+            onRestore={handleRestore}
+            onBack={() => history.selectVersion(null)}
+          />
+        )}
+      </VersionHistoryDrawer>
+    </>
   );
 }

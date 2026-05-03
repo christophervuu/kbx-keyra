@@ -18,5 +18,18 @@ export type {
   RawDslEditorProps,
   RawDslEditorRef,
 } from './components';
-export { inferRuleType, tokenizeDsl, findMatchingBracket } from './lib';
-export type { RuleTypeLabel, DslToken, DslTokenType } from './lib';
+export {
+  inferRuleType,
+  tokenizeDsl,
+  findMatchingBracket,
+  computeVersionDiff,
+  generateChangeSummary,
+} from './lib';
+export type {
+  RuleTypeLabel,
+  DslToken,
+  DslTokenType,
+  RuleDiff,
+  ConfigDiff,
+  VersionDiff,
+} from './lib';
