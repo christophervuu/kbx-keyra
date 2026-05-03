@@ -67,6 +67,27 @@ ui/src/
     use-async-state.ts        Async state lifecycle hook
 
   features/
+    schemas/                  Schema Library + Schema Detail feature module (FS-009, FS-015)
+      index.ts                Feature barrel (types + parsers + hooks + components)
+      types.ts                Feature-specific tree/editing types (SchemaTreeViewProps, EditNodeCallbacks, SchemaParseError)
+      components/
+        SchemaDetailPage.tsx  Feature page composition for `/schemas/:schemaId`
+        SchemaGitStatus.tsx   Git/source status section (upload vs GitHub source metadata)
+        SchemaUsageSection.tsx Usage section (projects + mappings that reference schema)
+        SchemaActions.tsx     Context-dependent actions + confirm-dialog flows
+        InferredSchemaBanner.tsx Dismissible inferred-schema warning (localStorage-backed UI preference)
+        ViewRawModal.tsx      Read-only raw schema modal with lightweight syntax highlighting + copy
+        ReplaceFileDialog.tsx Replace-file flow: confirm -> pick -> parse -> persist -> refresh
+        SchemaTreeView.tsx    Virtualized schema tree renderer (editable + read-only modes)
+      hooks/
+        use-schema-detail.ts  Schema load/parse/error + inline metadata update contract
+        use-schema-editor.ts  JSON-Schema edit-mode orchestration and save pipeline
+        use-schema-usage.ts   Usage derivation across projects + mappings for section/actions
+      lib/
+        schema-editor-ops.ts  Immutable tree operations for field-level edits
+        tree-to-json-schema.ts Tree reconstruction + field counting utilities
+        parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
+
     mappings/                 Mapping Editor feature module (FS-010, FS-011)
       index.ts                Feature barrel (components + hooks + utilities)
       components/
@@ -425,6 +446,126 @@ State management note:
 
 - FS-010 currently uses hook-local `useState` with dispatch-style action callbacks.
 - If panel interaction complexity grows in FS-011/FS-012, this boundary is the place to consolidate into a `useReducer` store without changing panel contracts.
+
+---
+
+## Schema Detail Page Architecture
+
+FS-015 establishes the feature-page architecture for `/schemas/:schemaId` under `ui/src/features/schemas/`.
+
+### Page composition pattern
+
+- Route-level wrapper (`ui/src/routes/pages/SchemaDetail.tsx`) is intentionally thin and only resolves route params.
+- Feature page (`SchemaDetailPage`) owns orchestration and section layout.
+- Stable section order:
+  1. inferred-schema banner (conditional)
+  2. metadata
+  3. git/source status
+  4. tree view (+ edit toolbar/banner)
+  5. usage
+  6. actions
+  7. modal/dialog overlays (View Raw + Replace File)
+
+This keeps routing concerns separate from feature logic and allows section-level evolution without route refactors.
+
+### Hook contracts
+
+#### `useSchemaDetail(schemaId)`
+
+Responsibilities:
+
+- loads `SchemaDetail` via `ApiAdapter.getSchema(schemaId)`
+- parses content based on metadata format/inferred flag (`parseJsonSchema`, `parseXsd`, `parseInferredSchema`)
+- exposes async lifecycle state: loading, error, not-found, retry
+- exposes metadata mutation action: `updateMetadata(input)`
+- exposes `setParsedSchema(parsed)` so external save flows can push refreshed parse state without forcing full reload
+
+Contract shape:
+
+- `schema: SchemaDetail | null`
+- `parsedSchema: ParsedSchema | null`
+- `setParsedSchema(parsed)`
+- `isLoading`, `error`, `notFound`, `retry()`
+- `updateMetadata(input)`
+
+#### `useSchemaEditor(parsedSchema, schemaId, originalContent, onSaved)`
+
+Responsibilities:
+
+- manages edit mode boundary for JSON Schema tree editing
+- snapshots `parsedSchema.nodes` into local editable state on entry
+- dispatches all row-level edit operations through immutable helpers
+- exposes save/cancel behavior and callback bundle for `SchemaTreeView`
+
+Contract shape:
+
+- state: `isEditing`, `editedNodes`, `editedParsedSchema`, `isDirty`
+- actions: `startEditing()`, `cancelEditing()`, `saveEdits()`
+- callbacks: `editCallbacks` (`toggleRequired`, `changeType`, `renameField`, `updateDescription`, `addField`, `removeField`, `addNestedObject`, `addArrayField`)
+
+Editing state machine (conceptual):
+
+1. **idle** -> `startEditing()` -> **editing(clean)**
+2. operation dispatch -> **editing(dirty)**
+3. `cancelEditing()` -> **idle** (discard local edits)
+4. `saveEdits()` -> reconstruct + persist + re-parse -> **idle** (emit `onSaved` on parse success)
+
+#### `useSchemaUsage(schemaId)`
+
+Responsibilities:
+
+- derives usage data for both display (`SchemaUsageSection`) and action gating (`SchemaActions` remove blocking)
+- Phase 0 algorithm:
+  - `listProjects()`
+  - hydrate each with `getProject(projectId)` to inspect `schemaRefs`
+  - keep referencing projects
+  - `listMappings(projectId)` for each referencing project
+  - classify mapping role as `source` or `target`
+
+Contract shape:
+
+- `projects: UsageProject[]`
+- `mappings: UsageMapping[]`
+- `isLoading: boolean`
+
+### Tree editing pattern (immutable operations + reconstruction)
+
+Schema editing is intentionally split into three layers:
+
+1. **Operation layer** (`schema-editor-ops.ts`)
+   - pure immutable transforms over `SchemaTreeNode[]`
+   - no adapter/IO side effects
+2. **Reconstruction layer** (`tree-to-json-schema.ts`)
+   - converts edited tree back to raw JSON Schema payload
+   - preserves top-level keys from original content where possible
+   - derives `fieldCount` via `countAllNodes()`
+3. **Persistence/orchestration layer** (`useSchemaEditor.saveEdits()`)
+   - reconstruct -> `adapter.updateSchema(schemaId, { content, fieldCount })` -> re-parse -> exit edit mode
+
+This separation keeps row-level interactions deterministic/testable while concentrating persistence concerns in a single hook.
+
+### Action visibility rules (origin x scope x format)
+
+Current implementation in `SchemaActions` uses metadata-driven conditional rendering:
+
+- CDM schemas: Re-sync (placeholder), View Raw
+- Non-CDM schemas:
+  - Edit when `format === 'json-schema'` and not already editing
+  - Auto-describe (placeholder)
+  - Sync to GitHub (placeholder)
+  - Replace file
+  - Remove (blocked if usage mappings exist)
+  - View Raw
+- `scope === 'project'`: additional Promote to Global action + confirm flow
+
+Promote/Remove flows use shared `ConfirmDialog` and adapter mutations (`updateSchema`, `deleteSchema`) with post-action page refresh/navigation.
+
+### UI preference storage vs domain storage
+
+- Domain data (schema content/metadata, delete/promote, usage source records) always flows through `ApiAdapter`.
+- UI preference state that is explicitly local-only (inferred-banner dismissal) is stored directly in `localStorage` under key `keyra:schema-banner-dismissed:{schemaId}`.
+
+This preserves adapter boundaries for domain consistency while allowing lightweight client-only UX preferences.
 
 ---
 

@@ -74,28 +74,51 @@ ui/
         Settings.tsx
         NotFound.tsx
     features/             Feature-scoped code — one folder per major screen or domain
-      schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
+        schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
         index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
         types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types)
         components/       Schema tree view components (T-05+)
           index.ts        Components barrel
+          SchemaActions.tsx        Context-dependent action buttons: Edit, Auto-describe (placeholder), Sync (placeholder), Re-sync (CDM placeholder), Promote to Global, Replace file, Remove, View Raw; confirm modals for Promote and Remove; Remove blocked by usage mappings (FS-015 T-07)
+          InferredSchemaBanner.tsx Amber warning banner shown when schema.inferred === true; dismiss persisted to localStorage key keyra:schema-banner-dismissed:{schemaId} (FS-015 T-08)
+          ViewRawModal.tsx         Modal with regex-based syntax-highlighted JSON/XSD content in <pre>; clipboard copy button with "Copied!" feedback; focus trap + ESC close (FS-015 T-08)
+          ReplaceFileDialog.tsx    Two-step dialog: confirm message → file picker (.json/.xsd) → parse → adapter.updateSchema → onReplaced callback; inline error on parse failure (FS-015 T-08)
           MappingStatusIcon.tsx    Mapping status icon (mapped/unmapped/warning) with aria-labels
+          SchemaDetailPage.tsx     Schema Detail feature page: metadata display, inline editing (non-CDM), edit mode tree controls, save/cancel toolbar, loading/error/not-found states (FS-015 T-02/T-04/T-05)
+          SchemaGitStatus.tsx      Git/repository status section: upload-source "local only" notice, GitHub source card with repo/branch/path/SHA/timestamp, synced/not-synced/local-changes indicator (FS-015 T-03)
+          SchemaUsageSection.tsx   Usage section: lists referencing projects (links to Project Overview) and mappings (links to Mapping Editor) with role badges; empty state; loading skeleton (FS-015 T-06)
           SchemaSearchInput.tsx    Search input with clear button (debounced, result count)
           SchemaTreeNodeIcon.tsx   Type→icon mapping component (color-coded Lucide icons)
-          SchemaTreeNodeRow.tsx    Single tree row (expand/collapse, guides, badges, tooltip, highlight, selection, status, focus ring, ARIA)
+          SchemaTreeNodeRow.tsx    Single tree row; editable mode adds inline rename input + EditableNodeControls action strip (FS-015 T-05)
+          EditableNodeControls.tsx Inline edit control strip: type select, required toggle, rename, description, add child, delete with confirm (FS-015 T-05)
           SchemaTreeToolbar.tsx    Toolbar: Expand All, Collapse All, Expand to depth (1/2/3)
-          SchemaTreeView.tsx       Virtualized container with search, toolbar, selection, keyboard nav, states, and tree rendering
+          SchemaTreeView.tsx       Virtualized container with search, toolbar, selection, keyboard nav, states, and tree rendering; threads editable+onNodeEdit to rows (FS-015 T-05)
           SchemaTreeView.test.tsx  Component tests (72 tests: rendering, virtualization, search, selection, mapping status, toolbar, keyboard nav)
+          __tests__/
+            SchemaDetailPage.test.tsx     Component tests (13 tests: T-02 + T-04 tree section + edit mode)
+            SchemaDetailEditing.test.tsx  Component tests (4 tests: save flow, confirm delete, edit mode controls) (FS-015 T-05)
+            SchemaGitStatus.test.tsx      Component tests (8 tests: upload local-only, GitHub fields, synced/not-synced/local-changes indicators, absent SHA dash, no last-synced row, accessible label)
+            SchemaUsageSection.test.tsx   Component tests (5 tests: loading skeleton, empty state, project link, source mapping, target mapping) (FS-015 T-06)
+            SchemaActions.test.tsx        Component tests (12 tests: CDM vs non-CDM visibility, Edit hidden while editing, placeholder tooltips, Promote flow, Remove blocked/confirm/delete) (FS-015 T-07)
+            SchemaT08Features.test.tsx    Component tests: InferredSchemaBanner (4 tests), ViewRawModal (5 tests), ReplaceFileDialog (5 tests) (FS-015 T-08)
         hooks/            Feature-specific React hooks
           index.ts        Hooks barrel
           use-flattened-tree.ts       DFS flatten of tree based on expand state (virtualizer input)
           use-flattened-tree.test.ts  Hook unit tests (7 tests)
           use-tree-keyboard-nav.ts    Keyboard navigation hook (arrow keys, Home/End, Enter/Space, aria-activedescendant)
           use-tree-search.ts          Search state management (debounce, filter, expand preservation)
+          use-schema-detail.ts        Loads schema by ID, parses content, exposes loading/error/not-found/updateMetadata/setParsedSchema (FS-015 T-02)
+          use-schema-editor.ts        Edit-mode state + all tree operations + save flow wired to adapter (FS-015 T-05)
+          use-schema-usage.ts         Derives referencing projects and mappings for a schema; returns UsageProject[], UsageMapping[], isLoading (FS-015 T-06)
         lib/              Schema parsing logic and utilities
           index.ts        Lib barrel
           tree-filter.ts  Pure filter function (case-insensitive substring, ancestor propagation)
           tree-filter.test.ts  Filter unit tests (11 tests including performance)
+          schema-editor-ops.ts        Immutable tree manipulation: toggleRequired, changeType, renameField, updateDescription, addField, removeField, addNestedObject, addArrayField (FS-015 T-05)
+          tree-to-json-schema.ts      Reconstruct JSON Schema from SchemaTreeNode[] tree; preserves top-level keys from original; countAllNodes helper (FS-015 T-05)
+          __tests__/
+            schema-editor-ops.test.ts   Unit tests for all 8 tree operations
+            tree-to-json-schema.test.ts Unit tests including round-trip test
           parsers/        Parser implementations
             index.ts      Parsers barrel
             parse-json-schema.ts
@@ -288,6 +311,7 @@ ui/
       Button.tsx          Button with variants (primary/secondary/ghost/danger) and sizes
       Card.tsx            Container component with optional title/description header
       ConfirmDialog.tsx   Focus-trapped confirmation dialog (modal overlay, Escape to close, message: string|ReactNode) — lifted from mappings feature (FS-013 T-07)
+      InlineEditableText.tsx  Click-to-edit text/textarea: saves on Enter or blur, Escape cancels, display/edit mode toggle (lifted from projects feature in FS-015 T-02)
       PageHeader.tsx      Page title + optional description + action slot
       StatusBadge.tsx     Deploy status colored badge (dot + label)
       layout/             App shell components

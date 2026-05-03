@@ -98,6 +98,8 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
     mappingStatus,
     onSelectNode,
     selectedPath: controlledSelectedPath,
+    editable = false,
+    onNodeEdit,
   }: SchemaTreeViewComponentProps,
   ref: ForwardedRef<SchemaTreeViewHandle>,
 ) {
@@ -314,19 +316,21 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <SchemaTreeNodeRow
-                  node={node}
-                  isExpanded={isExpanded}
-                  onToggle={handleToggle}
-                  highlightQuery={search.isSearchActive ? search.debouncedQuery : undefined}
-                  isSelected={effectiveSelectedPath === node.path}
-                  isFocused={keyboardNav.focusedIndex === virtualRow.index}
-                  onSelect={handleSelect}
-                  mappingStatus={getMappingStatus(node.path)}
-                  id={getNodeDomId(node.path)}
-                  posInSet={siblingInfo?.posInSet}
-                  setSize={siblingInfo?.setSize}
-                />
+                 <SchemaTreeNodeRow
+                   node={node}
+                   isExpanded={isExpanded}
+                   onToggle={handleToggle}
+                   highlightQuery={search.isSearchActive ? search.debouncedQuery : undefined}
+                   isSelected={effectiveSelectedPath === node.path}
+                   isFocused={keyboardNav.focusedIndex === virtualRow.index}
+                   onSelect={handleSelect}
+                   mappingStatus={getMappingStatus(node.path)}
+                   id={getNodeDomId(node.path)}
+                   posInSet={siblingInfo?.posInSet}
+                   setSize={siblingInfo?.setSize}
+                   editable={editable}
+                   onNodeEdit={onNodeEdit}
+                 />
               </div>
             );
           })}

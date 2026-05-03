@@ -1,8 +1,11 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useRef, useState } from 'react';
 
 import { MappingStatusIcon } from './MappingStatusIcon';
 import { SchemaTreeNodeIcon } from './SchemaTreeNodeIcon';
+import { EditableNodeControls } from './EditableNodeControls';
 
+import type { EditNodeCallbacks } from '../types';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types';
 
 interface SchemaTreeNodeRowProps {
@@ -25,6 +28,10 @@ interface SchemaTreeNodeRowProps {
   posInSet?: number;
   /** Total number of siblings at this level */
   setSize?: number;
+  /** Whether the tree is in edit mode */
+  editable?: boolean;
+  /** Edit operation callbacks (provided when editable=true) */
+  onNodeEdit?: EditNodeCallbacks;
 }
 
 export function SchemaTreeNodeRow({
@@ -39,12 +46,31 @@ export function SchemaTreeNodeRow({
   id,
   posInSet,
   setSize,
+  editable = false,
+  onNodeEdit,
 }: SchemaTreeNodeRowProps) {
   const isExpandable = node.childCount > 0;
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(node.fieldName);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const handleRowClick = () => {
     onSelect?.(node);
   };
+
+  function commitRename() {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== node.fieldName) {
+      onNodeEdit?.onRenameField(node.path, trimmed);
+    }
+    setIsRenaming(false);
+  }
+
+  function startRename() {
+    setRenameValue(node.fieldName);
+    setIsRenaming(true);
+    setTimeout(() => renameInputRef.current?.focus(), 0);
+  }
 
   const selectedClass = isSelected ? 'bg-blue-950/60 ring-1 ring-blue-500/30' : '';
   const focusedClass = isFocused ? 'ring-2 ring-blue-400 ring-inset' : '';
@@ -58,7 +84,7 @@ export function SchemaTreeNodeRow({
       aria-selected={isSelected}
       aria-posinset={posInSet}
       aria-setsize={setSize}
-      className={`group flex items-center h-8 px-2 hover:bg-slate-800/50 cursor-default select-none ${selectedClass} ${focusedClass}`}
+      className={`group relative flex items-center h-8 px-2 hover:bg-slate-800/50 cursor-default select-none ${selectedClass} ${focusedClass}`}
       onClick={handleRowClick}
     >
       {/* Tree line guides */}
@@ -89,31 +115,52 @@ export function SchemaTreeNodeRow({
       {/* Type icon */}
       <SchemaTreeNodeIcon type={node.type} className="mr-1.5" />
 
-      {/* Field name (with optional highlight) */}
-      <span className="text-sm text-slate-200 truncate">
-        {highlightQuery ? (
-          <HighlightedText text={node.fieldName} query={highlightQuery} />
-        ) : (
-          node.fieldName
-        )}
-      </span>
+      {/* Field name — inline rename input or static text */}
+      {editable && isRenaming ? (
+        <input
+          ref={renameInputRef}
+          type="text"
+          aria-label={`Rename field ${node.fieldName}`}
+          data-testid="node-rename-input"
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitRename();
+            if (e.key === 'Escape') {
+              setRenameValue(node.fieldName);
+              setIsRenaming(false);
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-32 rounded border border-blue-500 bg-slate-800 px-1 py-0 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+      ) : (
+        <span className="text-sm text-slate-200 truncate">
+          {highlightQuery ? (
+            <HighlightedText text={node.fieldName} query={highlightQuery} />
+          ) : (
+            node.fieldName
+          )}
+        </span>
+      )}
 
-      {/* Required indicator */}
-      {node.isRequired && (
+      {/* Required indicator (read-only mode) */}
+      {!editable && node.isRequired && (
         <span className="ml-1 text-red-400 text-xs font-bold" aria-label="required">
           *
         </span>
       )}
 
-      {/* Child count badge */}
-      {isExpandable && (
+      {/* Child count badge (read-only mode) */}
+      {!editable && isExpandable && (
         <span className="ml-2 text-xs text-slate-500">
           ({node.childCount} {node.childCount === 1 ? 'field' : 'fields'})
         </span>
       )}
 
       {/* Union types indicator */}
-      {node.unionTypes && node.unionTypes.length > 0 && (
+      {!editable && node.unionTypes && node.unionTypes.length > 0 && (
         <span className="ml-2 text-xs text-pink-400/70">
           ({node.unionTypes.join(' | ')})
         </span>
@@ -126,8 +173,8 @@ export function SchemaTreeNodeRow({
         </span>
       )}
 
-      {/* Description tooltip */}
-      {node.description && (
+      {/* Description tooltip (read-only mode) */}
+      {!editable && node.description && (
         <span className="relative ml-auto">
           <span className="text-xs text-slate-500 cursor-help" title={node.description}>
             ℹ
@@ -136,6 +183,15 @@ export function SchemaTreeNodeRow({
             {node.description}
           </span>
         </span>
+      )}
+
+      {/* Editable controls — rendered when in edit mode */}
+      {editable && onNodeEdit && (
+        <EditableNodeControls
+          node={node}
+          callbacks={onNodeEdit}
+          onStartRename={startRename}
+        />
       )}
     </div>
   );

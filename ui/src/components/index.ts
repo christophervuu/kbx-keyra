@@ -1,5 +1,7 @@
 export { Button } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant } from './Button';
+export { InlineEditableText } from './InlineEditableText';
+export type { InlineEditableTextProps } from './InlineEditableText';
 export { Card } from './Card';
 export type { CardProps } from './Card';
 export { ConfirmDialog } from './ConfirmDialog';

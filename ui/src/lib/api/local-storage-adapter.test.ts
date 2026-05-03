@@ -79,7 +79,16 @@ describe('LocalStorageAdapter', () => {
       format: 'json-schema',
       origin: 'local',
       content: { type: 'object' },
+      scope: 'project',
+      description: 'Schema for invoice payloads',
+      inferred: true,
+      syncStatus: 'synced',
     });
+
+    expect(metadata.scope).toBe('project');
+    expect(metadata.description).toBe('Schema for invoice payloads');
+    expect(metadata.inferred).toBe(true);
+    expect(metadata.syncStatus).toBe('synced');
 
     const schemas = await adapter.listSchemas();
     expect(schemas).toHaveLength(1);
@@ -91,6 +100,104 @@ describe('LocalStorageAdapter', () => {
     await expect(adapter.getSchema(metadata.schemaId)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
+  });
+
+  it('updateSchema merges partial updates for name, content, and scope', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createSchema({
+      name: 'Original Name',
+      format: 'json-schema',
+      origin: 'local',
+      content: { type: 'object', properties: { firstName: { type: 'string' } } },
+    });
+
+    const nameUpdated = await adapter.updateSchema(created.schemaId, {
+      name: 'Renamed Schema',
+    });
+
+    expect(nameUpdated.name).toBe('Renamed Schema');
+    expect(nameUpdated.scope).toBe('global');
+
+    const scopeUpdated = await adapter.updateSchema(created.schemaId, {
+      scope: 'project',
+      description: 'Project-scoped schema',
+    });
+
+    expect(scopeUpdated.scope).toBe('project');
+    expect(scopeUpdated.description).toBe('Project-scoped schema');
+
+    const nextContent = {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string' },
+        age: { type: 'number' },
+      },
+    };
+
+    const contentUpdated = await adapter.updateSchema(created.schemaId, {
+      content: nextContent,
+      fieldCount: 2,
+    });
+
+    expect(contentUpdated.fieldCount).toBe(2);
+
+    const detail = await adapter.getSchema(created.schemaId);
+    expect(detail.content).toEqual(nextContent);
+    expect(detail.metadata.name).toBe('Renamed Schema');
+    expect(detail.metadata.scope).toBe('project');
+  });
+
+  it('updateSchema throws NOT_FOUND for unknown schema id', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    await expect(
+      adapter.updateSchema('missing-schema', { name: 'Does not exist' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('updateSchema refreshes updatedAt and sets updatedBy', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const adapter = new LocalStorageAdapter();
+
+      const created = await adapter.createSchema({
+        name: 'Timestamp Schema',
+        format: 'json-schema',
+        origin: 'local',
+        content: { type: 'object' },
+      });
+
+      vi.setSystemTime(new Date('2026-01-01T00:01:00.000Z'));
+      const updated = await adapter.updateSchema(created.schemaId, {
+        description: 'Updated description',
+      });
+
+      expect(updated.updatedBy).toBe('local-user');
+      expect(updated.updatedAt).toBe('2026-01-01T00:01:00.000Z');
+      expect(updated.updatedAt).not.toBe(created.updatedAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("updateSchema content changes move synced schema to 'local-changes'", async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createSchema({
+      name: 'Synced Schema',
+      format: 'json-schema',
+      origin: 'published',
+      content: { type: 'object', properties: { id: { type: 'string' } } },
+      syncStatus: 'synced',
+    });
+
+    const updated = await adapter.updateSchema(created.schemaId, {
+      content: { type: 'object', properties: { id: { type: 'number' } } },
+    });
+
+    expect(updated.syncStatus).toBe('local-changes');
   });
 
   it('performs mapping create/list/get/update/delete and duplicate', async () => {

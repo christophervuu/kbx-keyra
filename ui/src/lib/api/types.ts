@@ -30,6 +30,7 @@ import type {
   SuggestExpressionResult,
   TemplateDetail,
   TemplateMetadata,
+  UpdateSchemaInput,
   UpdateProjectInput,
   ValidateMappingsInput,
   ValidationReport,
@@ -40,6 +41,7 @@ export interface ApiAdapter {
   listSchemas(): Promise<SchemaMetadata[]>;
   getSchema(id: string): Promise<SchemaDetail>;
   createSchema(input: CreateSchemaInput): Promise<SchemaMetadata>;
+  updateSchema(id: string, input: UpdateSchemaInput): Promise<SchemaMetadata>;
   deleteSchema(id: string): Promise<void>;
 
   // Mappings

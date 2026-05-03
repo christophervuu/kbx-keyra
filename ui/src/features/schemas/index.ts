@@ -9,6 +9,7 @@ export type {
 // Feature-specific types
 export { SchemaParseError } from './types';
 export type {
+  EditNodeCallbacks,
   ParseInferredSchemaFn,
   ParseJsonSchemaFn,
   ParseXsdFn,

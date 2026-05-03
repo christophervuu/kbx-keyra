@@ -1,4 +1,4 @@
-import type { MappingNodeStatus, ParsedSchema, SchemaFormat, SchemaTreeNode } from '@/lib/types';
+import type { MappingNodeStatus, ParsedSchema, SchemaFormat, SchemaNodeType, SchemaTreeNode } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Component Props
@@ -17,8 +17,32 @@ export interface SchemaTreeViewProps {
   readonly selectedPath?: string;
   /** Whether to show the search/filter input (default: true) */
   readonly searchable?: boolean;
-  /** Placeholder for future edit mode (default: false) */
+  /** Whether the tree is in editable mode (default: false) */
   readonly editable?: boolean;
+  /** Edit operation callbacks — required when editable is true */
+  readonly onNodeEdit?: EditNodeCallbacks;
+}
+
+// ---------------------------------------------------------------------------
+// Edit mode callbacks
+// ---------------------------------------------------------------------------
+
+/**
+ * Callbacks for all in-place tree editing operations.
+ * Passed from `useSchemaEditor` through `SchemaTreeView` to individual rows.
+ */
+export interface EditNodeCallbacks {
+  onToggleRequired: (path: string) => void;
+  onChangeType: (path: string, newType: SchemaNodeType) => void;
+  onRenameField: (path: string, newName: string) => void;
+  onUpdateDescription: (path: string, description: string) => void;
+  /** Add a plain field as a child of `parentPath` (null = root level) */
+  onAddField: (parentPath: string | null) => void;
+  onRemoveField: (path: string) => void;
+  /** Add a nested object with a placeholder child */
+  onAddNestedObject: (parentPath: string | null) => void;
+  /** Add an array field */
+  onAddArrayField: (parentPath: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------

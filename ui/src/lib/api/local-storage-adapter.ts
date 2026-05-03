@@ -34,6 +34,7 @@ import type {
   SuggestExpressionResult,
   TemplateDetail,
   TemplateMetadata,
+  UpdateSchemaInput,
   UpdateProjectInput,
   ValidateMappingsInput,
   ValidationReport,
@@ -114,7 +115,13 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   // Schemas
   async listSchemas(): Promise<SchemaMetadata[]> {
-    return this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => item.metadata);
+    return this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => ({
+      ...item.metadata,
+      scope: item.metadata.scope ?? 'global',
+      description: item.metadata.description ?? '',
+      inferred: item.metadata.inferred ?? false,
+      syncStatus: item.metadata.syncStatus ?? 'not-synced',
+    }));
   }
 
   async getSchema(id: string): Promise<SchemaDetail> {
@@ -124,7 +131,18 @@ export class LocalStorageAdapter implements ApiAdapter {
       throw this.notFound('Schema', id);
     }
 
-    return found.detail;
+    const metadata: SchemaMetadata = {
+      ...found.metadata,
+      scope: found.metadata.scope ?? 'global',
+      description: found.metadata.description ?? '',
+      inferred: found.metadata.inferred ?? false,
+      syncStatus: found.metadata.syncStatus ?? 'not-synced',
+    };
+
+    return {
+      ...found.detail,
+      metadata,
+    };
   }
 
   async createSchema(input: CreateSchemaInput): Promise<SchemaMetadata> {
@@ -139,6 +157,11 @@ export class LocalStorageAdapter implements ApiAdapter {
       fieldCount: 0,
       origin: input.origin,
       status: 'ready',
+      scope: input.scope ?? 'global',
+      description: input.description ?? '',
+      updatedBy: 'local-user',
+      inferred: input.inferred ?? false,
+      syncStatus: input.syncStatus ?? 'not-synced',
       source: input.source ?? { type: 'upload' },
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -153,6 +176,58 @@ export class LocalStorageAdapter implements ApiAdapter {
     this.writeArray(STORAGE_KEYS.schemas, schemas);
 
     return metadata;
+  }
+
+  async updateSchema(id: string, input: UpdateSchemaInput): Promise<SchemaMetadata> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index < 0) {
+      throw this.notFound('Schema', id);
+    }
+
+    const current = schemas[index];
+    const timestamp = this.nowIso();
+    const currentMetadata = {
+      ...current.metadata,
+      scope: current.metadata.scope ?? 'global',
+      description: current.metadata.description ?? '',
+      inferred: current.metadata.inferred ?? false,
+      syncStatus: current.metadata.syncStatus ?? 'not-synced',
+    };
+
+    const didUpdateContent = input.content !== undefined;
+    const nextSyncStatus =
+      didUpdateContent && currentMetadata.syncStatus === 'synced'
+        ? 'local-changes'
+        : currentMetadata.syncStatus;
+
+    const nextMetadata: SchemaMetadata = {
+      ...currentMetadata,
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.scope !== undefined ? { scope: input.scope } : {}),
+      ...(input.format !== undefined ? { format: input.format } : {}),
+      ...(input.fieldCount !== undefined ? { fieldCount: input.fieldCount } : {}),
+      syncStatus: nextSyncStatus,
+      updatedAt: timestamp,
+      updatedBy: 'local-user',
+    };
+
+    const nextContent = didUpdateContent ? input.content : current.detail.content;
+
+    const nextDetail: SchemaDetail = {
+      ...current.detail,
+      metadata: nextMetadata,
+      content: nextContent,
+    };
+
+    schemas[index] = {
+      metadata: nextMetadata,
+      detail: nextDetail,
+    };
+
+    this.writeArray(STORAGE_KEYS.schemas, schemas);
+    return nextMetadata;
   }
 
   async deleteSchema(id: string): Promise<void> {

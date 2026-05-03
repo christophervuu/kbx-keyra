@@ -12,6 +12,10 @@ export type SchemaOrigin = 'cdm' | 'published' | 'local';
 
 export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 
+export type SchemaScope = 'global' | 'project';
+
+export type SchemaSyncStatus = 'synced' | 'not-synced' | 'local-changes';
+
 export type MappingStatus = 'draft' | 'ready' | 'has-errors';
 
 export type DeploymentRecordStatus = 'active' | 'superseded' | 'rolled-back';
@@ -109,6 +113,11 @@ export interface SchemaMetadata {
   readonly fieldCount: number;
   readonly origin: SchemaOrigin;
   readonly status: SchemaIngestStatus;
+  readonly scope: SchemaScope;
+  readonly description?: string;
+  readonly updatedBy?: string;
+  readonly inferred?: boolean;
+  readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
@@ -235,6 +244,19 @@ export interface CreateSchemaInput {
   readonly origin: SchemaOrigin;
   readonly content: Readonly<Record<string, unknown>> | string;
   readonly source?: SchemaSourceInfo;
+  readonly scope?: SchemaScope;
+  readonly description?: string;
+  readonly inferred?: boolean;
+  readonly syncStatus?: SchemaSyncStatus;
+}
+
+export interface UpdateSchemaInput {
+  readonly name?: string;
+  readonly description?: string;
+  readonly scope?: SchemaScope;
+  readonly content?: Readonly<Record<string, unknown>> | string;
+  readonly fieldCount?: number;
+  readonly format?: SchemaFormat;
 }
 
 export interface GitHubFile {
