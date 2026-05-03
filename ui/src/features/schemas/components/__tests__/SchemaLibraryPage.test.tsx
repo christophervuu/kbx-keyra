@@ -244,6 +244,26 @@ describe('SchemaLibraryPage', () => {
     });
   });
 
+  it('renders cards when adapter returns malformed origin values', async () => {
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([
+        makeSchemaMeta({
+          schemaId: 's-legacy',
+          name: 'Legacy Schema',
+          origin: 'legacy-origin' as unknown as SchemaMetadata['origin'],
+        }),
+      ]),
+      listProjects: vi.fn().mockResolvedValue([]),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-library-card')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+  });
+
   // -------------------------------------------------------------------------
   // No-results state
   // -------------------------------------------------------------------------

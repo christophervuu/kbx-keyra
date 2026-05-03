@@ -30,6 +30,8 @@ export interface MappingEditorPageProps {
   ruleListContent?: ReactNode;
   /** Content for Panel 1 (Source Schema) slot */
   panelOneContent?: ReactNode;
+  /** Content for Panel 2 (Target Schema) slot */
+  panelTwoContent?: ReactNode;
   /** Content for Panel 4 (Expression Builder) slot */
   expressionBuilderContent?: ReactNode;
   /** Content for Panel 5 (Preview) slot */
@@ -95,6 +97,7 @@ export function MappingEditorPage({
   targetSchemaName = null,
   ruleListContent,
   panelOneContent,
+  panelTwoContent,
   expressionBuilderContent,
   previewContent,
   configPanelContent,
@@ -139,7 +142,7 @@ export function MappingEditorPage({
 
         {/* Panel 2: Target Schema — middle-left */}
         <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-2">
-          <PanelPlaceholder name={PANEL_NAMES[2]} />
+          {panelTwoContent ?? <PanelPlaceholder name={PANEL_NAMES[2]} />}
         </div>
 
         {/* Panel 5: Preview — middle-right */}

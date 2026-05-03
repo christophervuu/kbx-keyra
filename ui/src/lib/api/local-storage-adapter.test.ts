@@ -289,6 +289,74 @@ describe('LocalStorageAdapter', () => {
     expect(schemas).toEqual([]);
   });
 
+  it('normalizes missing schema origin to local when listing schemas', async () => {
+    const baseMetadata = {
+      schemaId: 'schema-legacy-missing-origin',
+      name: 'Legacy Missing Origin',
+      format: 'json-schema',
+      fieldCount: 1,
+      status: 'ready',
+      scope: 'global',
+      syncStatus: 'not-synced',
+      source: { type: 'upload' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    localStorage.setItem(
+      'keyra:schemas',
+      JSON.stringify([
+        {
+          metadata: baseMetadata,
+          detail: {
+            metadata: baseMetadata,
+            content: { type: 'object' },
+          },
+        },
+      ]),
+    );
+
+    const adapter = new LocalStorageAdapter();
+    const schemas = await adapter.listSchemas();
+
+    expect(schemas).toHaveLength(1);
+    expect(schemas[0].origin).toBe('local');
+  });
+
+  it('normalizes invalid schema origin to local when loading schema detail', async () => {
+    const metadataWithInvalidOrigin = {
+      schemaId: 'schema-legacy-invalid-origin',
+      name: 'Legacy Invalid Origin',
+      format: 'json-schema',
+      fieldCount: 1,
+      origin: 'legacy-origin',
+      status: 'ready',
+      scope: 'global',
+      syncStatus: 'not-synced',
+      source: { type: 'upload' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    localStorage.setItem(
+      'keyra:schemas',
+      JSON.stringify([
+        {
+          metadata: metadataWithInvalidOrigin,
+          detail: {
+            metadata: metadataWithInvalidOrigin,
+            content: { type: 'object' },
+          },
+        },
+      ]),
+    );
+
+    const adapter = new LocalStorageAdapter();
+    const detail = await adapter.getSchema('schema-legacy-invalid-origin');
+
+    expect(detail.metadata.origin).toBe('local');
+  });
+
   it('querySchemaNodes returns empty array in offline mode', async () => {
     const adapter = new LocalStorageAdapter();
     const result = await adapter.querySchemaNodes('schema', 'field');

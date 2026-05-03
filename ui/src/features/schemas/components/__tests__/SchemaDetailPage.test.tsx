@@ -195,6 +195,29 @@ describe('SchemaDetailPage', () => {
     expect(nameButton).toBeInTheDocument();
   });
 
+  it('renders Unknown origin badge for malformed origin values', async () => {
+    const legacyOriginSchema: SchemaDetail = {
+      ...LOCAL_SCHEMA,
+      metadata: {
+        ...LOCAL_SCHEMA.metadata,
+        schemaId: 'schema-legacy-origin',
+        origin: 'legacy-origin' as unknown as SchemaDetail['metadata']['origin'],
+      },
+    };
+
+    adapter = createMockAdapter({
+      getSchema: vi.fn().mockResolvedValue(legacyOriginSchema),
+    });
+
+    renderPage(adapter, 'schema-legacy-origin');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-detail-metadata')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+  });
+
   it('inline name edit calls updateSchema on blur', async () => {
     const user = userEvent.setup();
     renderPage(adapter);
@@ -276,7 +299,7 @@ describe('SchemaDetailPage', () => {
       expect(screen.getByTestId('schema-detail-metadata')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('schema-detail-git-status')).toBeInTheDocument();
+    expect(screen.getByTestId('schema-git-status')).toBeInTheDocument();
     expect(screen.getByTestId('schema-detail-tree')).toBeInTheDocument();
     expect(screen.getByTestId('schema-detail-usage')).toBeInTheDocument();
     expect(screen.getByTestId('schema-detail-actions')).toBeInTheDocument();

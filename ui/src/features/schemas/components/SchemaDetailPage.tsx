@@ -40,11 +40,15 @@ function OriginBadge({ origin }: { origin: SchemaMetadata['origin'] }) {
     published: 'Published',
     local: 'Local',
   };
+  const className =
+    styles[origin] ?? 'bg-slate-700 text-slate-300 border border-slate-600';
+  const label = labels[origin] ?? 'Unknown';
+
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[origin]}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${className}`}
     >
-      {labels[origin]}
+      {label}
     </span>
   );
 }

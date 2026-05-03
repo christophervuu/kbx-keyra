@@ -199,6 +199,24 @@ describe('MappingEditorPage', () => {
     expect(screen.queryByText('Source Schema (Panel 1)')).not.toBeInTheDocument();
   });
 
+  it('renders placeholder in Panel 2 when no panelTwoContent is provided', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const panel2 = screen.getByTestId('panel-slot-2');
+    expect(panel2).toHaveTextContent('Target Schema (Panel 2)');
+  });
+
+  it('renders custom content in Panel 2 slot when panelTwoContent is provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelTwoContent={<div data-testid="custom-target-schema-tree">Target Tree</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-target-schema-tree')).toBeInTheDocument();
+    expect(screen.queryByText('Target Schema (Panel 2)')).not.toBeInTheDocument();
+  });
+
   it('renders deploy page link with correct route params', () => {
     renderWithRouter(
       <MappingEditorPage projectId="my-project" mappingId="my-mapping" />,

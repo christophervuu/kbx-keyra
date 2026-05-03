@@ -25,6 +25,7 @@ import type {
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
+  SchemaOrigin,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -51,6 +52,14 @@ const STORAGE_KEYS = {
 } as const;
 
 const MAX_MAPPING_VERSIONS = 50;
+
+const VALID_SCHEMA_ORIGINS: readonly SchemaOrigin[] = ['cdm', 'published', 'local'];
+
+function normalizeSchemaOrigin(origin: unknown): SchemaOrigin {
+  return typeof origin === 'string' && VALID_SCHEMA_ORIGINS.includes(origin as SchemaOrigin)
+    ? (origin as SchemaOrigin)
+    : 'local';
+}
 
 interface StoredSchema {
   metadata: SchemaMetadata;
@@ -124,6 +133,7 @@ export class LocalStorageAdapter implements ApiAdapter {
   async listSchemas(): Promise<SchemaMetadata[]> {
     return this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => ({
       ...item.metadata,
+      origin: normalizeSchemaOrigin(item.metadata.origin),
       scope: item.metadata.scope ?? 'global',
       description: item.metadata.description ?? '',
       inferred: item.metadata.inferred ?? false,
@@ -140,6 +150,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const metadata: SchemaMetadata = {
       ...found.metadata,
+      origin: normalizeSchemaOrigin(found.metadata.origin),
       scope: found.metadata.scope ?? 'global',
       description: found.metadata.description ?? '',
       inferred: found.metadata.inferred ?? false,
@@ -162,7 +173,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       name: input.name,
       format: input.format,
       fieldCount: 0,
-      origin: input.origin,
+      origin: normalizeSchemaOrigin(input.origin),
       status: 'ready',
       scope: input.scope ?? 'global',
       description: input.description ?? '',
@@ -196,6 +207,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     const timestamp = this.nowIso();
     const currentMetadata = {
       ...current.metadata,
+      origin: normalizeSchemaOrigin(current.metadata.origin),
       scope: current.metadata.scope ?? 'global',
       description: current.metadata.description ?? '',
       inferred: current.metadata.inferred ?? false,

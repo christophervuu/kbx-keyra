@@ -131,6 +131,15 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByText('Local')).toBeInTheDocument();
   });
 
+  it('renders Unknown origin badge for malformed origin values', () => {
+    renderCard(
+      makeItem({
+        origin: 'legacy-origin' as unknown as SchemaLibraryItem['origin'],
+      }),
+    );
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+  });
+
   it('CDM badge has purple styling', () => {
     renderCard(makeItem({ origin: 'cdm' }));
     const badge = screen.getByText('CDM').closest('span');

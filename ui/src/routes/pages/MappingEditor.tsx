@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import {
@@ -14,8 +14,24 @@ import { PreviewPanel } from '@/features/mappings/components/preview';
 import { useMappingEditor, useVersionHistory } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import { SchemaTreeView } from '@/features/schemas';
-import type { SchemaTreeNode } from '@/lib/types/domain';
+import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
 import { Button } from '@/components';
+
+function collectTargetSchemaPaths(nodes: readonly SchemaTreeNode[]): string[] {
+  const paths: string[] = [];
+
+  function walk(current: readonly SchemaTreeNode[]) {
+    for (const node of current) {
+      paths.push(node.path);
+      if (node.children.length > 0) {
+        walk(node.children);
+      }
+    }
+  }
+
+  walk(nodes);
+  return paths;
+}
 
 // ---------------------------------------------------------------------------
 // Loading skeleton
@@ -108,6 +124,58 @@ export default function MappingEditor() {
     expressionBuilderRef.current?.insertSourceField(node.path);
   }, []);
 
+  const handleSelectTargetNode = useCallback((node: SchemaTreeNode) => {
+    const matchingRuleIndex = editor.rules.findIndex((rule) => rule.target === node.path);
+    setSelectedRuleIndex(matchingRuleIndex >= 0 ? matchingRuleIndex : null);
+  }, [editor.rules]);
+
+  const selectedTargetPath = useMemo(() => {
+    if (selectedRuleIndex === null) {
+      return undefined;
+    }
+
+    return editor.rules[selectedRuleIndex]?.target;
+  }, [editor.rules, selectedRuleIndex]);
+
+  const targetMappingStatus = useMemo<Map<string, MappingNodeStatus> | undefined>(() => {
+    if (!editor.parsedTargetSchema) {
+      return undefined;
+    }
+
+    const statusMap = new Map<string, MappingNodeStatus>();
+    const targetPaths = collectTargetSchemaPaths(editor.parsedTargetSchema.nodes);
+
+    for (const path of targetPaths) {
+      statusMap.set(path, 'unmapped');
+    }
+
+    const ruleIndexesByTarget = new Map<string, number[]>();
+    editor.rules.forEach((rule, index) => {
+      const bucket = ruleIndexesByTarget.get(rule.target) ?? [];
+      bucket.push(index);
+      ruleIndexesByTarget.set(rule.target, bucket);
+    });
+
+    for (const [path, indexes] of ruleIndexesByTarget.entries()) {
+      if (!statusMap.has(path)) {
+        continue;
+      }
+
+      let hasDiagnostics = false;
+      for (const ruleIndex of indexes) {
+        const diagnostics = editor.validation.diagnosticsForRule(ruleIndex);
+        if (diagnostics.some((diagnostic) => diagnostic.severity === 'warning' || diagnostic.severity === 'error')) {
+          hasDiagnostics = true;
+          break;
+        }
+      }
+
+      statusMap.set(path, hasDiagnostics ? 'warning' : 'mapped');
+    }
+
+    return statusMap;
+  }, [editor.parsedTargetSchema, editor.rules, editor.validation]);
+
   // Loading state
   if (editor.loadState === 'loading') {
     return <LoadingSkeleton />;
@@ -151,6 +219,16 @@ export default function MappingEditor() {
     <SchemaTreeView
       schema={editor.parsedSourceSchema}
       onSelectNode={handleSelectSourceNode}
+    />
+  ) : undefined;
+
+  const panelTwoContent = editor.parsedTargetSchema ? (
+    <SchemaTreeView
+      variant="target"
+      schema={editor.parsedTargetSchema}
+      mappingStatus={targetMappingStatus}
+      onSelectNode={handleSelectTargetNode}
+      selectedPath={selectedTargetPath}
     />
   ) : undefined;
 
@@ -220,6 +298,7 @@ export default function MappingEditor() {
         targetSchemaName={editor.targetSchemaName}
         ruleListContent={ruleListContent}
         panelOneContent={panelOneContent}
+        panelTwoContent={panelTwoContent}
         expressionBuilderContent={expressionBuilderContent}
         previewContent={previewContent}
         configPanelContent={configPanelContent}

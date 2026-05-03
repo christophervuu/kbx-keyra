@@ -24,7 +24,11 @@ const ORIGIN_CONFIG: Record<
 };
 
 function OriginBadge({ origin }: OriginBadgeProps) {
-  const config = ORIGIN_CONFIG[origin];
+  const config = ORIGIN_CONFIG[origin] ?? {
+    emoji: '❓',
+    label: 'Unknown',
+    className: 'bg-slate-200 text-slate-800',
+  };
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${config.className}`}
