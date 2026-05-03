@@ -68,7 +68,7 @@ ui/
         CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
         MappingDeployment.tsx
-        SchemaLibrary.tsx
+        SchemaLibrary.tsx          Renders SchemaLibraryPage from features/schemas (FS-016 T-04)
         SchemaDetail.tsx
         TemplateLibrary.tsx
         Settings.tsx
@@ -76,13 +76,22 @@ ui/
     features/             Feature-scoped code — one folder per major screen or domain
         schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
         index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
-        types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types)
+        types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types, SchemaLibraryItem, SchemaLibraryFilters, SchemaLibrarySort, SyncStatus, DisplayFormat — FS-016 T-01)
         components/       Schema tree view components (T-05+)
           index.ts        Components barrel
           SchemaActions.tsx        Context-dependent action buttons: Edit, Auto-describe (placeholder), Sync (placeholder), Re-sync (CDM placeholder), Promote to Global, Replace file, Remove, View Raw; confirm modals for Promote and Remove; Remove blocked by usage mappings (FS-015 T-07)
           InferredSchemaBanner.tsx Amber warning banner shown when schema.inferred === true; dismiss persisted to localStorage key keyra:schema-banner-dismissed:{schemaId} (FS-015 T-08)
           ViewRawModal.tsx         Modal with regex-based syntax-highlighted JSON/XSD content in <pre>; clipboard copy button with "Copied!" feedback; focus trap + ESC close (FS-015 T-08)
           ReplaceFileDialog.tsx    Two-step dialog: confirm message → file picker (.json/.xsd) → parse → adapter.updateSchema → onReplaced callback; inline error on parse failure (FS-015 T-08)
+          SchemaLibraryCard.tsx    Clickable card for a single schema in the library: name, origin badge (emoji+color), scope badge, field count, format, sync status indicator, project usage count with tooltip; keyboard nav + react-router navigation (FS-016 T-02)
+          SchemaLibrarySearch.tsx  Controlled search input: placeholder, clear button, optional "Showing X of Y" count, aria-label (FS-016 T-03)
+          SchemaLibraryFiltersPanel.tsx  Multi-select filter toggles for origin/format/scope using pill-style ToggleButtons; fieldset/legend/aria-label groups (FS-016 T-03)
+          SchemaLibrarySortControl.tsx  Sort field <select> + direction toggle button; aria-label="Sort schemas" (FS-016 T-03)
+          ActiveFilterChips.tsx    Renders active filter values as removable chips with × buttons; Clear all button; hidden when no filters active (FS-016 T-03)
+          SchemaLibraryNoResults.tsx   Centered empty state shown when filters yield zero results; "Clear filters" button (FS-016 T-03)
+          SchemaLibrarySkeleton.tsx    6-card animate-pulse skeleton grid; role="status" + sr-only "Loading schemas" (FS-016 T-04)
+          SchemaLibraryEmptyState.tsx  Zero-schemas empty state: Database icon, "No schemas available" heading + subtext (FS-016 T-04)
+          SchemaLibraryPage.tsx        Assembled Schema Library page: wires useSchemaLibrary hook to search/filter/sort controls + card grid; handles loading/error/empty/no-results/loaded states (FS-016 T-04)
           MappingStatusIcon.tsx    Mapping status icon (mapped/unmapped/warning) with aria-labels
           SchemaDetailPage.tsx     Schema Detail feature page: metadata display, inline editing (non-CDM), edit mode tree controls, save/cancel toolbar, loading/error/not-found states (FS-015 T-02/T-04/T-05)
           SchemaGitStatus.tsx      Git/repository status section: upload-source "local only" notice, GitHub source card with repo/branch/path/SHA/timestamp, synced/not-synced/local-changes indicator (FS-015 T-03)
@@ -101,6 +110,9 @@ ui/
             SchemaUsageSection.test.tsx   Component tests (5 tests: loading skeleton, empty state, project link, source mapping, target mapping) (FS-015 T-06)
             SchemaActions.test.tsx        Component tests (12 tests: CDM vs non-CDM visibility, Edit hidden while editing, placeholder tooltips, Promote flow, Remove blocked/confirm/delete) (FS-015 T-07)
             SchemaT08Features.test.tsx    Component tests: InferredSchemaBanner (4 tests), ViewRawModal (5 tests), ReplaceFileDialog (5 tests) (FS-015 T-08)
+            SchemaLibraryCard.test.tsx   Component tests: name, origin badges (3 origins × color), scope badges, field count, format, sync status (5 variants), project count, click/Enter/Space navigation, tabIndex, aria-label, tooltip (FS-016 T-02)
+            SchemaLibraryControls.test.tsx  Component tests: SchemaLibrarySearch (9), SchemaLibraryFiltersPanel (10), SchemaLibrarySortControl (8), ActiveFilterChips (10), SchemaLibraryNoResults (3) (FS-016 T-03)
+            SchemaLibraryPage.test.tsx   Integration tests: data-testid, loading skeleton, error+retry, empty state, loaded cards, no-results, search/filter/sort interactions (FS-016 T-04)
         hooks/            Feature-specific React hooks
           index.ts        Hooks barrel
           use-flattened-tree.ts       DFS flatten of tree based on expand state (virtualizer input)
@@ -110,15 +122,20 @@ ui/
           use-schema-detail.ts        Loads schema by ID, parses content, exposes loading/error/not-found/updateMetadata/setParsedSchema (FS-015 T-02)
           use-schema-editor.ts        Edit-mode state + all tree operations + save flow wired to adapter (FS-015 T-05)
           use-schema-usage.ts         Derives referencing projects and mappings for a schema; returns UsageProject[], UsageMapping[], isLoading (FS-015 T-06)
+          use-schema-library.ts       Loads all schemas+projects, enriches into SchemaLibraryItem[], exposes filter/sort state and actions (FS-016 T-01)
+          __tests__/
+            use-schema-library.test.ts  Hook tests: loading/success/error states, enrichment, project usage counts, sync status derivation, filter/sort state updates (FS-016 T-01)
         lib/              Schema parsing logic and utilities
           index.ts        Lib barrel
           tree-filter.ts  Pure filter function (case-insensitive substring, ancestor propagation)
           tree-filter.test.ts  Filter unit tests (11 tests including performance)
           schema-editor-ops.ts        Immutable tree manipulation: toggleRequired, changeType, renameField, updateDescription, addField, removeField, addNestedObject, addArrayField (FS-015 T-05)
           tree-to-json-schema.ts      Reconstruct JSON Schema from SchemaTreeNode[] tree; preserves top-level keys from original; countAllNodes helper (FS-015 T-05)
+          schema-filters.ts           Pure filter (filterSchemas) and sort (sortSchemas) utilities for Schema Library; AND-between/OR-within logic (FS-016 T-01)
           __tests__/
             schema-editor-ops.test.ts   Unit tests for all 8 tree operations
             tree-to-json-schema.test.ts Unit tests including round-trip test
+            schema-filters.test.ts      Unit tests: search by name/description, origin/format/scope OR+AND logic, all sort fields asc/desc (FS-016 T-01)
           parsers/        Parser implementations
             index.ts      Parsers barrel
             parse-json-schema.ts

@@ -1,4 +1,11 @@
-import type { MappingNodeStatus, ParsedSchema, SchemaFormat, SchemaNodeType, SchemaTreeNode } from '@/lib/types';
+import type {
+  MappingNodeStatus,
+  ParsedSchema,
+  SchemaFormat,
+  SchemaNodeType,
+  SchemaOrigin,
+  SchemaTreeNode,
+} from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Component Props
@@ -68,3 +75,41 @@ export class SchemaParseError extends Error {
 export type ParseJsonSchemaFn = (content: string | object) => ParsedSchema;
 export type ParseXsdFn = (content: string) => ParsedSchema;
 export type ParseInferredSchemaFn = (content: string, format: 'json' | 'xml') => ParsedSchema;
+
+// ---------------------------------------------------------------------------
+// Schema Library Types (FS-016)
+// ---------------------------------------------------------------------------
+
+export type SyncStatus = 'synced' | 'not-synced' | 'local-changes' | 'local' | 'inferred';
+export type DisplayFormat = 'JSON Schema' | 'XSD' | 'Inferred';
+
+export interface SchemaLibraryItem {
+  schemaId: string;
+  name: string;
+  description?: string;
+  origin: SchemaOrigin;
+  scope: 'global' | 'project';
+  format: SchemaFormat;
+  displayFormat: DisplayFormat;
+  fieldCount: number;
+  syncStatus: SyncStatus;
+  projectCount: number;
+  projectNames: string[];
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface SchemaLibraryFilters {
+  search: string;
+  origins: SchemaOrigin[];
+  formats: DisplayFormat[];
+  scopes: Array<'global' | 'project'>;
+}
+
+export type SortField = 'name' | 'fieldCount' | 'updatedAt' | 'origin';
+export type SortDirection = 'asc' | 'desc';
+
+export interface SchemaLibrarySort {
+  field: SortField;
+  direction: SortDirection;
+}

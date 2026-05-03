@@ -12,3 +12,4 @@ export {
   addArrayField,
 } from './schema-editor-ops';
 export { treeToJsonSchema, countAllNodes } from './tree-to-json-schema';
+export { filterSchemas, sortSchemas } from './schema-filters';

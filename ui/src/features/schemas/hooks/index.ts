@@ -9,3 +9,5 @@ export { useSchemaEditor } from './use-schema-editor';
 export type { UseSchemaEditorResult } from './use-schema-editor';
 export { useSchemaUsage } from './use-schema-usage';
 export type { UseSchemaUsageResult, UsageProject, UsageMapping } from './use-schema-usage';
+export { useSchemaLibrary } from './use-schema-library';
+export type { UseSchemaLibraryResult } from './use-schema-library';

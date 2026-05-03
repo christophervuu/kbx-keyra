@@ -25,5 +25,6 @@ export { flattenTree, useFlattenedTree, useTreeSearch } from './hooks';
 export type { UseTreeSearchReturn } from './hooks';
 
 // Components
+export { SchemaLibraryPage } from './components/SchemaLibraryPage';
 export { SchemaSearchInput, SchemaTreeNodeIcon, SchemaTreeNodeRow, SchemaTreeView } from './components';
 export type { SchemaTreeViewHandle } from './components';

@@ -6,7 +6,7 @@ import { useMappingEditor } from './use-mapping-editor';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
-import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
+import type { MappingConfig, MappingConfigOptions, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -663,8 +663,7 @@ describe('useMappingEditor', () => {
     });
   });
 
-  describe('Save status', () => {
-    it('saveStatus is "saved" after load with no changes', async () => {
+  describe('Save status', () => {    it('saveStatus is "saved" after load with no changes', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -728,6 +727,148 @@ describe('useMappingEditor', () => {
       await waitFor(() => {
         expect(result.current.saveStatus).toBe('saved');
       });
+     });
+  });
+
+  describe('Config mutation (AE-05, AE-08)', () => {
+    it('updateConfig updates returned configOptions', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateConfig({ unmappedTargets: 'error' });
+      });
+
+      expect(result.current.configOptions.unmappedTargets).toBe('error');
+    });
+
+    it('hasUnsavedChanges is true after updateConfig when rules are unchanged', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      expect(result.current.hasUnsavedChanges).toBe(false);
+
+      act(() => {
+        result.current.actions.updateConfig({ unmappedTargets: 'error' });
+      });
+
+      expect(result.current.hasUnsavedChanges).toBe(true);
+    });
+
+    it('hasUnsavedChanges is false after save with config changes', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateConfig({ unmappedTargets: 'error' });
+      });
+
+      expect(result.current.hasUnsavedChanges).toBe(true);
+
+      await act(async () => {
+        result.current.actions.save();
+      });
+
+      await waitFor(() => {
+        expect(result.current.hasUnsavedChanges).toBe(false);
+      });
+    });
+
+    it('validationConfig includes updated config options after updateConfig', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateConfig({ unmappedTargets: 'null' });
+      });
+
+      expect(result.current.config?.config.unmappedTargets).toBe('null');
+    });
+
+    it('save persists config options to adapter (AE-05)', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateConfig({
+          unmappedTargets: 'omit',
+          constants: { VERSION: '2.0' },
+          externalSources: ['lookup'],
+        });
+      });
+
+      await act(async () => {
+        result.current.actions.save();
+      });
+
+      await waitFor(() => {
+        expect(result.current.saveStatus).toBe('saved');
+      });
+
+      expect(adapter.updateMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          config: expect.objectContaining({
+            unmappedTargets: 'omit',
+            constants: { VERSION: '2.0' },
+            externalSources: ['lookup'],
+          }),
+        }),
+      );
+    });
+
+    it('multiple updateConfig calls merge correctly', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateConfig({ unmappedTargets: 'error' });
+      });
+
+      act(() => {
+        result.current.actions.updateConfig({ constants: { KEY: 'val' } });
+      });
+
+      const opts: MappingConfigOptions = result.current.configOptions;
+      expect(opts.unmappedTargets).toBe('error');
+      expect(opts.constants).toEqual({ KEY: 'val' });
     });
   });
 });
+

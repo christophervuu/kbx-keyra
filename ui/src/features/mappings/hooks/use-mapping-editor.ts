@@ -4,7 +4,7 @@ import { useEngineValidation } from './use-engine-validation';
 import type { EngineValidationState } from './use-engine-validation';
 
 import { useAdapter } from '@/lib/api';
-import type { MappingConfig, MappingRule, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
+import type { MappingConfig, MappingConfigOptions, MappingRule, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 import type { SaveStatus } from '../components/EditorTopBar';
 import { parseJsonSchema, parseXsd } from '@/features/schemas';
 
@@ -29,6 +29,8 @@ export interface MappingEditorActions {
   bulkDuplicate: (indices: number[]) => void;
   /** Paste rules from clipboard (append at end) */
   pasteRules: (rules: Array<Pick<MappingRule, 'target' | 'type' | 'expression' | 'description'>>) => void;
+  /** Merge partial config options into local state */
+  updateConfig: (partial: Partial<MappingConfigOptions>) => void;
   /** Persist current state to adapter */
   save: () => void;
   /** Retry a failed load */
@@ -52,6 +54,9 @@ export interface UseMappingEditorResult {
 
   /** Current rules array (local, mutable) */
   rules: readonly MappingRule[];
+
+  /** Current config options (local, mutable — potentially unsaved) */
+  configOptions: MappingConfigOptions;
 
   /**
    * Current mapping config with live (potentially unsaved) rules applied.
@@ -96,6 +101,14 @@ export interface UseMappingEditorResult {
  */
 function rulesEqual(a: readonly MappingRule[], b: readonly MappingRule[]): boolean {
   if (a.length !== b.length) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Simple deep equality for config options using JSON serialization.
+ * Acceptable for Phase 0 with small config objects.
+ */
+function configOptionsEqual(a: MappingConfigOptions, b: MappingConfigOptions): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -159,6 +172,8 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
   // Local editing state
   const [rules, setRules] = useState<readonly MappingRule[]>([]);
   const [lastSavedRules, setLastSavedRules] = useState<readonly MappingRule[]>([]);
+  const [configOptions, setConfigOptions] = useState<MappingConfigOptions>({});
+  const [lastSavedConfigOptions, setLastSavedConfigOptions] = useState<MappingConfigOptions>({});
   const [version, setVersion] = useState(1);
 
   // Save state
@@ -185,6 +200,8 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       setConfig(mappingConfig);
       setRules(mappingConfig.rules);
       setLastSavedRules(mappingConfig.rules);
+      setConfigOptions(mappingConfig.config);
+      setLastSavedConfigOptions(mappingConfig.config);
       setVersion(mappingConfig.version);
 
       // Load schemas in parallel (graceful failure per AE-10)
@@ -244,11 +261,11 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
   // Engine validation (raw schema content for engine, not ParsedSchema)
   // ---------------------------------------------------------------------------
 
-  // Build a config object with current rules for validation
+  // Build a config object with current rules and config options for validation
   const validationConfig = useMemo<MappingConfig | null>(() => {
     if (!config) return null;
-    return { ...config, rules };
-  }, [config, rules]);
+    return { ...config, rules, config: configOptions };
+  }, [config, rules, configOptions]);
 
   const sourceSchemaContent = sourceSchema?.content ?? null;
   const targetSchemaContent = targetSchema?.content ?? null;
@@ -264,8 +281,8 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
   // ---------------------------------------------------------------------------
 
   const hasUnsavedChanges = useMemo(() => {
-    return !rulesEqual(rules, lastSavedRules);
-  }, [rules, lastSavedRules]);
+    return !rulesEqual(rules, lastSavedRules) || !configOptionsEqual(configOptions, lastSavedConfigOptions);
+  }, [rules, lastSavedRules, configOptions, lastSavedConfigOptions]);
 
   // ---------------------------------------------------------------------------
   // Save status derivation
@@ -315,6 +332,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       ...config,
       version: newVersion,
       rules,
+      config: configOptions,
     };
 
     try {
@@ -323,6 +341,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
 
       setConfig(updatedConfig);
       setLastSavedRules(rules);
+      setLastSavedConfigOptions(configOptions);
       setVersion(newVersion);
       setSaveState('saved');
     } catch (err) {
@@ -332,7 +351,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, rules, hasUnsavedChanges, adapter, mappingId]);
+  }, [config, version, rules, configOptions, hasUnsavedChanges, adapter, mappingId]);
 
   // Keep ref up to date for keyboard handler
   saveRef.current = save;
@@ -422,6 +441,11 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     [],
   );
 
+  const updateConfig = useCallback((partial: Partial<MappingConfigOptions>) => {
+    setConfigOptions((prev) => ({ ...prev, ...partial }));
+    setSaveState('idle');
+  }, []);
+
   const retry = useCallback(() => {
     void loadData();
   }, [loadData]);
@@ -439,10 +463,11 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       bulkDelete,
       bulkDuplicate,
       pasteRules,
+      updateConfig,
       save,
       retry,
     }),
-    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, save, retry],
+    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, save, retry],
   );
 
   // ---------------------------------------------------------------------------
@@ -461,6 +486,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     sourceSchemaName,
     targetSchemaName,
     rules,
+    configOptions,
     config: validationConfig,
     sourceSchemaDetail: sourceSchema,
     targetSchemaDetail: targetSchema,
