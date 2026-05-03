@@ -19,3 +19,8 @@ export { decomposeExpression, BUILDER_SUPPORTED_FUNCTIONS } from './ast-decompos
 export type { DecompositionResult } from './ast-decomposer';
 export { computeVersionDiff, generateChangeSummary } from './version-diff';
 export type { RuleDiff, ConfigDiff, VersionDiff } from './version-diff';
+export { truncateExpression } from './truncate-expression';
+export { suggestSourceFields } from './suggest-source-fields';
+export type { SuggestedField, MatchKind } from './suggest-source-fields';
+export { generateArrayExpression } from './array-expression-generator';
+export type { ArrayBuilderState, ArrayPattern, FieldMapping } from './array-expression-generator';

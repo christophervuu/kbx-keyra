@@ -260,7 +260,7 @@ ui/
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
           RawDslEditor.test.tsx      Component tests (25 tests: rendering, token colors, placeholder, readOnly, onChange, onCursorChange, bracket matching, ref API, error decoration overlay, aria-invalid, tooltip)
-          MappingEditorPage.tsx      Multi-panel grid layout container (8 named panel slots)
+          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01): GlobalToolbar slot, Source panel (collapsible ≤1024px), Target Worklist (center, never collapses), Builder/Editor (right), full-width bottom area; slots: toolbarContent, sourceContent, targetWorklistContent, builderContent, bottomContent
           MappingEditorPage.test.tsx Component tests (22 tests: top bar, panels, slots, routing)
           NestedFunctionBuilder.tsx  Inline mini builder for nested function arguments: TransformPicker + ArgumentConfigurator, accordion-style, limited to nestingLevel < 2 (T-06)
           NestedFunctionBuilder.test.tsx Component tests (7 tests: initial state, function selection, args change, clear/reset)

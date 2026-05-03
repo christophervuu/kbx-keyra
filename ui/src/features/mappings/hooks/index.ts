@@ -23,4 +23,12 @@ export type {
 } from './use-expression-preview';
 export { useVersionHistory } from './use-version-history';
 export type { VersionHistoryEntry, UseVersionHistoryResult } from './use-version-history';
+export { useTargetStatus } from './use-target-status';
+export type { UseTargetStatusResult, CoverageEntry } from './use-target-status';
+export { useArrayBuilder } from './use-array-builder';
+export type { UseArrayBuilderResult, ArrayBuilderStep } from './use-array-builder';
+export { useDragSource } from './use-drag-source';
+export type { UseDragSourceResult, DragHandlers } from './use-drag-source';
+export { useDropZone } from './use-drop-zone';
+export type { UseDropZoneResult, UseDropZoneOptions, DropHandlers } from './use-drop-zone';
 

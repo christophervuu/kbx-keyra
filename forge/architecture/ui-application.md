@@ -88,14 +88,25 @@ ui/src/
         tree-to-json-schema.ts Tree reconstruction + field counting utilities
         parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
 
-    mappings/                 Mapping Editor feature module (FS-010, FS-011)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020)
       index.ts                Feature barrel (components + hooks + utilities)
+      types.ts                TargetFilter, TargetSort, EditorView types
       components/
-        MappingEditorPage.tsx Multi-panel editor shell (8 named panel slots)
+        MappingEditorPage.tsx Three-column editor shell (toolbar/source/worklist/builder/bottom slots)
+        GlobalToolbar.tsx     Search · filters · sort · Focus mode toggle · view toggle
+        SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD)
+        TargetWorklist.tsx    Center column: target schema tree with status/coverage
+        BreadcrumbNav.tsx     Breadcrumb drill-down navigation trail
+        BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
+        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone
+        ObjectSummaryPanel.tsx Right panel: object node coverage + child status
+        ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
+        BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases)
+        TargetFieldRow.tsx    Atomic target field row (status icon, type badge, expression summary)
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
         RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics)
-        ExpressionBuilderPanel.tsx  Panel 4 expression shell (mode toggle + composition)
+        ExpressionBuilderPanel.tsx  Rules View expression shell (mode toggle + composition)
         RawDslEditor.tsx      Raw DSL textarea editor (overlay highlighting + autocomplete)
         GuidedBuilder.tsx     Step-based builder (source -> transform -> arguments -> preview)
         ExpressionPreview.tsx Live expression preview/result surface
@@ -104,16 +115,23 @@ ui/src/
       hooks/
         use-engine-validation.ts  Debounced engine validate() integration hook
         use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring)
-        use-expression-builder.ts  Panel 4 expression state orchestration + debounced commit
+        use-expression-builder.ts  Rules View expression state orchestration + debounced commit
         use-expression-preview.ts  Single-expression parse/evaluate preview hook
         use-dsl-autocomplete.ts    Context-aware DSL autocomplete state hook
         use-dsl-validation.ts      Inline parse diagnostics + editor error decorations
+        use-target-status.ts       Status/coverage derivation from rules + validation
+        use-array-builder.ts       Array mapping wizard state (4-step)
+        use-drag-source.ts         HTML5 drag state for a single source field
+        use-drop-zone.ts           HTML5 drop zone state (isDragOver + handlers)
       lib/
         infer-rule-type.ts    Expression outer-function -> display label mapping
         dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
         expression-generator.ts  Guided-builder state -> DSL expression generator
         ast-decomposer.ts     Editor expression -> guided-builder decomposition utility
         autocomplete-utils.ts Context detection + suggestion filtering utilities
+        suggest-source-fields.ts  Heuristic source field suggestions (exact/case/contains + type)
+        truncate-expression.ts    Expression display truncation utility (max 60 chars)
+        array-expression-generator.ts  Array pattern -> DSL expression generator
 
   lib/
     api/
@@ -333,23 +351,159 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ## Mapping Editor Architecture
 
-FS-010 establishes the editor shell pattern in `ui/src/features/mappings/`. FS-011 extends the shell with a full Panel 4 expression authoring architecture.
+FS-020 redesigns the Mapping Editor from an 8-panel grid into a **target-driven three-column layout** with a collapsible bottom area. The new layout is implemented across `ui/src/features/mappings/` and composed at `ui/src/routes/pages/MappingEditor.tsx`.
 
-### Multi-Panel Layout + Slot Pattern
+### Three-Column + Bottom Area Layout
 
-- `MappingEditorPage` owns the editor grid and defines stable named panel slots (Panels 1-8).
-- Each slot renders a dedicated child panel (or `PanelPlaceholder` when deferred).
-- Panel 3 (`Rule List`) is injected as child content (`ruleListContent`) so rule-list behavior can evolve without layout refactors.
-- Panel 1 and Panel 4 can also be injected via slot content (`panelOneContent`, `expressionBuilderContent`) to keep page layout stable while feature composition evolves.
-- Panel 5 (`Preview`) is injected via `previewContent`.
-- Panel 7 (`Configuration`) is injected via `configPanelContent` (FS-017). When not provided, the slot renders a `PanelPlaceholder` labeled "Configuration (Panel 7)". Panel 7 was previously labeled "AI Assist" — that label is retired; AI Assist will be a floating overlay in Phase 2.
-- Panel 8 (`History`) is injected via `historyPanelContent` (FS-018). It renders a compact summary of the current version and an "Open History" button. The full version history UI is a drawer overlay, not a grid panel — see Version History Drawer below.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  GlobalToolbar (search · filters · sort · Focus mode · view)    │
+├──────────────┬──────────────────────────┬───────────────────────┤
+│ Source Panel │   Target Worklist        │  Right Panel          │
+│ (left col)   │   (center col)           │  (builder/summary)    │
+│              │                          │                       │
+│ hidden on    │  BreadcrumbNav (opt)     │  BuilderEmptyState    │
+│ ≤1024px      │  TargetFieldRow tree     │  ScalarFieldBuilder   │
+│              │                          │  ObjectSummaryPanel   │
+│ SourceSchema │  — OR —                  │  ArrayMappingBuilder  │
+│ Panel        │  RuleList (rules view)   │  ExpressionBuilderPanel│
+│              │                          │  (rules view)         │
+├──────────────┴──────────────────────────┴───────────────────────┤
+│  BottomArea: Preview · Diagnostics · Trace · Test Cases (tabs)  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-Pattern for adding new panels:
+**Slot props on `MappingEditorPage`:**
+- `toolbarContent` — `GlobalToolbar` instance
+- `sourceContent` — `SourceSchemaPanel` (hidden at ≤1024px via `hidden lg:block`)
+- `targetWorklistContent` — `TargetWorklist` (target view) or `RuleList` (rules view)
+- `builderContent` — node-type-specific right panel (see below)
+- `bottomContent` — `BottomArea` tabbed container
 
-1. implement panel component under `features/mappings/components/`
-2. replace placeholder in corresponding slot
-3. preserve slot identity and grid coordinates to avoid cross-panel regressions
+### Component Hierarchy
+
+```
+MappingEditorPage
+├── GlobalToolbar
+├── SourceSchemaPanel          (left column, lg:block only)
+├── TargetWorklist             (center column, target view)
+│   └── BreadcrumbNav          (when breadcrumb mode active)
+│   └── TargetFieldRow[]       (recursive tree)
+├── RuleList                   (center column, rules view)
+├── Right panel (conditional on selected node type):
+│   ├── BuilderEmptyState      (no selection)
+│   ├── ScalarFieldBuilder     (scalar leaf node)
+│   ├── ObjectSummaryPanel     (object node)
+│   ├── ArrayMappingBuilder    (array node)
+│   └── ExpressionBuilderPanel (rules view — any rule)
+└── BottomArea
+    ├── PreviewPanel
+    ├── DiagnosticsDisplay
+    ├── TraceDisplay
+    └── TestCaseManager
+```
+
+### View Toggle Pattern
+
+The Global Toolbar exposes a **Target View / Rules View** toggle (`EditorView = 'target' | 'rules'`).
+
+- **Target View (default):** center column = `TargetWorklist`; right panel = node-type-specific builder
+- **Rules View:** center column = `RuleList`; right panel = `ExpressionBuilderPanel` (existing expression editing UX)
+
+**Selection persistence across view toggles:**
+- Target → Rules: find the rule whose `targetPath` matches `selectedTargetPath`; set `selectedRuleIndex`
+- Rules → Target: resolve `selectedRuleIndex` rule's `target` path; set `selectedTargetPath`
+- If no match found, selection clears gracefully (no error)
+
+State is managed at the composition level (`MappingEditor.tsx`):
+- `selectedTargetPath: string | null` — target view selection
+- `selectedRuleIndex: number | null` — rules view selection
+- `view: EditorView` — current view toggle state
+
+### Node-Type-Specific Right Panel Pattern
+
+When a target field is selected in Target View, the right panel renders based on the node's type:
+
+| Node type | Right panel component |
+|---|---|
+| none selected | `BuilderEmptyState` |
+| `string`, `number`, `boolean`, `integer`, `null` | `ScalarFieldBuilder` |
+| `object` | `ObjectSummaryPanel` |
+| `array` | `ArrayMappingBuilder` |
+
+`ScalarFieldBuilder` renders within the `ExpressionBuilderPanel` context — it owns its own GuidedBuilder/RawDslEditor mode toggle and drop zone, rather than relying on a standalone Panel 4 slot.
+
+### Drag-and-Drop Pattern (HTML5 API)
+
+Source fields in `SourceSchemaPanel` are draggable using the HTML5 Drag API (no external DnD library).
+
+- **Drag payload:** source field path string set as `text/plain` on `DataTransfer`
+- **`useDragSource(path)`:** returns `{ isDragging, dragHandlers }` for a single draggable element
+- **`useDropZone({ onDrop })`:** returns `{ isDragOver, dropHandlers }` for a drop target; tracks enter/leave depth correctly across child elements
+- **Drop zones:** `ScalarFieldBuilder` expression area accepts drops; on drop, inserts `source("path")` into the active builder/editor slot
+- **Click-to-stage:** clicking a source field fires `onStageField(path)` — same insertion as drop
+- **Visual feedback:** drop zone highlights with `ring-1 ring-blue-500 bg-blue-950/40` on hover; source fields show grip handle + `cursor-grab`
+
+### Breadcrumb Drill-Down Mode
+
+An optional **Focus mode** toggle in `GlobalToolbar` activates breadcrumb drill-down for deeply nested schemas (5+ levels).
+
+- **Off (default):** clicking object/array nodes opens their builder panel normally
+- **On:** clicking an object/array node isolates that subtree in the worklist; `BreadcrumbNav` renders above the list showing the navigation path
+- **`BreadcrumbNav`:** renders `Root > segment > … > current`; each segment is a button that navigates to that level; clicking Root restores full tree
+- **State:** `currentSubtreePath: string | null` (null = full tree); `breadcrumbMode: boolean`
+- Both are managed at composition level and passed as props to `TargetWorklist`
+
+### `useTargetStatus` Hook Contract
+
+Location: `ui/src/features/mappings/hooks/use-target-status.ts`
+
+Inputs:
+- `rules: readonly MappingRule[]`
+- `validationResult: ValidationResult | null`
+- `nodes: readonly SchemaTreeNode[]`
+
+Outputs:
+- `statusMap: Map<string, 'unmapped' | 'mapped' | 'warning' | 'error'>` — per-path mapping status
+- `coverageMap: Map<string, { mapped: number; total: number }>` — per-object-node child coverage
+
+Derivation logic:
+1. All paths start as `'unmapped'`
+2. Paths with a matching rule become `'mapped'`
+3. Paths with rule diagnostics (warning/error severity) become `'warning'` or `'error'`
+4. Object/array nodes derive coverage from their direct children's status
+
+### `useArrayBuilder` Hook Contract
+
+Location: `ui/src/features/mappings/hooks/use-array-builder.ts`
+
+Manages the 4-step array mapping wizard state for `ArrayMappingBuilder`.
+
+Inputs:
+- `targetArrayPath: string`
+- `parsedSourceSchema: ParsedSchema | null`
+- `parsedTargetSchema: ParsedSchema | null`
+
+Outputs:
+- `step: ArrayBuilderStep` (1–4)
+- `pattern: ArrayPattern | null`
+- `sourceArrayPath: string | null`
+- `fieldMappings: FieldMapping[]`
+- `generatedExpression: string`
+- Navigation actions: `goToStep`, `nextStep`, `prevStep`
+- Field mapping actions: `setSourceArrayPath`, `setPattern`, `addFieldMapping`, `removeFieldMapping`, `updateFieldMapping`
+
+Patterns: `1:1 map`, `filter-then-map`, `merge-arrays`, `build-from-scalars`, `advanced` (bypasses Step 3, opens raw DSL).
+
+### Empty/First-Run State
+
+`BuilderEmptyState` renders in the right panel when no target field is selected. It provides:
+- Guidance text: "Select a target field to create its mapping"
+- CTA: "Start with required fields" → fires `onFilterRequired()` (sets `required` filter in toolbar)
+- CTA: "Auto-map this schema" → **disabled**, muted style, tooltip: "AI-powered auto-mapping — available in a future release"
+- Visual hint pointing to the worklist
+
+This replaces the legacy "No rules yet" empty state from `RuleList` in the target-driven view. `RuleList`'s own empty state is still shown in Rules View.
 
 ### Top Bar Contract
 
@@ -400,25 +554,21 @@ Version history is implemented as a **right-side overlay drawer**, not a grid pa
 - `updateConfig(partial: Partial<MappingConfigOptions>)` merges partial config option changes into local state (FS-017). Config changes flow through the `validationConfig` memo → `useEngineValidation()` → re-validation (debounced 300ms). Config changes also set `hasUnsavedChanges` to `true` and are persisted on `save()` alongside rules.
 - `restore(restoreConfig: MappingConfig)` replaces the entire working state (rules + config options) with the provided config, increments the version, and immediately persists via `adapter.updateMapping()`. On success it also fires a version snapshot via `adapter.saveMappingVersion()` (fire-and-forget). This is the end-to-end restore path for version history (FS-018).
 
-FS-011 expression flow adds a page-level selection bridge:
+FS-020 target-driven composition adds page-level state:
 
-1. `selectedRuleIndex` is owned at route/page composition level (`routes/pages/MappingEditor.tsx`)
-2. `RuleList` uses this value for active-row highlighting and selection toggle callbacks (`onRuleSelect`)
-3. `useExpressionBuilder({ selectedRuleIndex, rules, updateRule, parsedSourceSchema })` loads the selected rule expression into local working state
-4. local expression edits run inline parse validation (`useDslValidation`) and only commit syntactically valid updates
-5. valid expression updates are debounced and committed through `updateRule()`
-6. committed rule updates retrigger mapping-level validation (`useEngineValidation`)
-
-This keeps selection concerns outside the data-loading hook while preserving a stable `useMappingEditor` contract.
+1. `selectedTargetPath` is owned at route/page composition level
+2. `TargetWorklist` uses this for active-row highlighting and fires `onSelectNode(path, type)`
+3. Right panel component is selected based on the node type at `selectedTargetPath`
+4. `ScalarFieldBuilder` owns its own expression state and fires `onSave(targetPath, expression)` to the composition layer
+5. `handleSaveExpression` at composition level upserts the rule (update existing or add new)
 
 ### Expression Builder Architecture (FS-011)
 
-Panel 4 is implemented as a dual-mode authoring surface:
+The expression builder is a dual-mode authoring surface used in two contexts:
+- **Rules View:** `ExpressionBuilderPanel` (standalone panel, full feature set)
+- **Target View / scalar fields:** `ScalarFieldBuilder` embeds `GuidedBuilder` and `RawDslEditor` directly
 
-- **Editor mode:** raw DSL input for power users
-- **Builder mode:** guided step flow for common mapping patterns
-
-#### Component hierarchy
+#### Component hierarchy (Rules View)
 
 `ExpressionBuilderPanel`
 - mode toggle (Builder / Editor)
@@ -427,6 +577,18 @@ Panel 4 is implemented as a dual-mode authoring surface:
   - `GuidedBuilder` (builder mode)
 - `ExpressionPreview`
 - `FunctionReferencePanel`
+
+#### Component hierarchy (Target View / ScalarFieldBuilder)
+
+`ScalarFieldBuilder`
+- header: target path, type badge, required/optional, status
+- suggested sources (heuristic, up to 5)
+- mode toggle (Builder / Editor)
+- expression area (drop zone for DnD):
+  - `GuidedBuilder` (builder mode)
+  - `RawDslEditor` (editor mode)
+- disabled AI action buttons (placeholder)
+- save button (gated on `isValid && expression.trim()`)
 
 #### Hook contracts
 
@@ -439,6 +601,9 @@ Panel 4 is implemented as a dual-mode authoring surface:
   - Inputs: expression + optional sample data/context
   - Outputs: `{ result, error, isEvaluating }`
   - Responsibilities: debounced parse/evaluate preview flow via engine boundary helpers
+
+- `useDragSource(path)` — drag state for a single source field; returns `{ isDragging, dragHandlers }`
+- `useDropZone({ onDrop })` — drop zone state; returns `{ isDragOver, dropHandlers }`
 
 #### Mode-toggle rules
 
@@ -473,13 +638,14 @@ Function metadata is provided by static shared data in `ui/src/lib/data/dsl-func
 
 #### Cross-panel integration points
 
-- **Panel 3 -> Panel 4:** rule selection controls which rule expression is loaded/edited
-- **Panel 1 -> Panel 4:** schema-tree `onSelectNode` inserts `source("path")` in editor mode or fills source slots in builder mode via `ExpressionBuilderPanel` ref API
+- **Target Worklist → Right Panel:** node selection controls which builder renders and which expression is loaded/edited
+- **Source Panel → ScalarFieldBuilder:** drag-and-drop or click-to-stage inserts `source("path")` into the active expression slot
+- **Source Panel → ExpressionBuilderPanel (Rules View):** `expressionBuilderRef.insertSourceField(path)` inserts into the active expression
 
 State management note:
 
-- FS-010 currently uses hook-local `useState` with dispatch-style action callbacks.
-- If panel interaction complexity grows in FS-011/FS-012, this boundary is the place to consolidate into a `useReducer` store without changing panel contracts.
+- FS-020 uses hook-local `useState` with dispatch-style action callbacks at composition level.
+- If panel interaction complexity grows, the composition-level state is the place to consolidate into a `useReducer` store without changing panel contracts.
 
 ---
 

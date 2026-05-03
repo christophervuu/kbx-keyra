@@ -124,11 +124,18 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('editor-top-bar')).toBeInTheDocument();
   });
 
-  it('renders all 8 panel slots', () => {
+  it('renders all semantic slot areas', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    for (let i = 1; i <= 8; i++) {
-      expect(screen.getByTestId(`panel-slot-${i}`)).toBeInTheDocument();
-    }
+    expect(screen.getByTestId('global-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('source-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('target-worklist')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('bottom-area')).toBeInTheDocument();
+  });
+
+  it('renders the page container with correct testid', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
   });
 
   it('renders mapping name in top bar', () => {
@@ -145,76 +152,105 @@ describe('MappingEditorPage', () => {
     expect(screen.getByText('v5')).toBeInTheDocument();
   });
 
-  it('renders default placeholder in Panel 3 when no ruleListContent provided', () => {
+  it('renders placeholder in source panel when no sourceContent provided', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel3 = screen.getByTestId('panel-slot-3');
-    expect(panel3).toHaveTextContent('Rule List (Panel 3)');
+    expect(screen.getByTestId('source-panel')).toHaveTextContent('Source Schema');
   });
 
-  it('renders custom content in Panel 3 slot when ruleListContent is provided', () => {
+  it('renders custom content in source panel when sourceContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
-        ruleListContent={<div data-testid="custom-rule-list">My Rules</div>}
+        sourceContent={<div data-testid="custom-source">Source Tree</div>}
       />,
     );
-    expect(screen.getByTestId('custom-rule-list')).toBeInTheDocument();
-    expect(screen.queryByText('Rule List (Panel 3)')).not.toBeInTheDocument();
+    expect(screen.getByTestId('custom-source')).toBeInTheDocument();
   });
 
-  it('renders placeholder in Panel 4 when no expressionBuilderContent is provided', () => {
+  it('renders placeholder in target worklist when no targetWorklistContent provided', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel4 = screen.getByTestId('panel-slot-4');
-    expect(panel4).toHaveTextContent('Expression Builder (Panel 4)');
+    expect(screen.getByTestId('target-worklist')).toHaveTextContent('Target Worklist');
   });
 
-  it('renders custom content in Panel 4 slot when expressionBuilderContent is provided', () => {
+  it('renders custom content in target worklist when targetWorklistContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
-        expressionBuilderContent={<div data-testid="custom-expression-builder">Expression Builder</div>}
+        targetWorklistContent={<div data-testid="custom-worklist">Worklist</div>}
       />,
     );
-    expect(screen.getByTestId('custom-expression-builder')).toBeInTheDocument();
-    expect(screen.queryByText('Expression Builder (Panel 4)')).not.toBeInTheDocument();
+    expect(screen.getByTestId('custom-worklist')).toBeInTheDocument();
   });
 
-  it('renders placeholder in Panel 1 when no panelOneContent is provided', () => {
+  it('renders placeholder in builder panel when no builderContent provided', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel1 = screen.getByTestId('panel-slot-1');
-    expect(panel1).toHaveTextContent('Source Schema (Panel 1)');
+    expect(screen.getByTestId('builder-panel')).toHaveTextContent('Builder / Editor');
   });
 
-  it('renders custom content in Panel 1 slot when panelOneContent is provided', () => {
+  it('renders custom content in builder panel when builderContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
-        panelOneContent={<div data-testid="custom-schema-tree">Schema Tree</div>}
+        builderContent={<div data-testid="custom-builder">Builder</div>}
       />,
     );
-    expect(screen.getByTestId('custom-schema-tree')).toBeInTheDocument();
-    expect(screen.queryByText('Source Schema (Panel 1)')).not.toBeInTheDocument();
+    expect(screen.getByTestId('custom-builder')).toBeInTheDocument();
   });
 
-  it('renders placeholder in Panel 2 when no panelTwoContent is provided', () => {
+  it('renders placeholder in bottom area when no bottomContent provided', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel2 = screen.getByTestId('panel-slot-2');
-    expect(panel2).toHaveTextContent('Target Schema (Panel 2)');
+    expect(screen.getByTestId('bottom-area')).toHaveTextContent('Preview & Diagnostics');
   });
 
-  it('renders custom content in Panel 2 slot when panelTwoContent is provided', () => {
+  it('renders custom content in bottom area when bottomContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
-        panelTwoContent={<div data-testid="custom-target-schema-tree">Target Tree</div>}
+        bottomContent={<div data-testid="custom-bottom">Preview Panel</div>}
       />,
     );
-    expect(screen.getByTestId('custom-target-schema-tree')).toBeInTheDocument();
-    expect(screen.queryByText('Target Schema (Panel 2)')).not.toBeInTheDocument();
+    expect(screen.getByTestId('custom-bottom')).toBeInTheDocument();
+  });
+
+  it('renders placeholder in global toolbar when no toolbarContent provided', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('global-toolbar')).toHaveTextContent('Global Toolbar');
+  });
+
+  it('renders custom content in global toolbar when toolbarContent is provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        toolbarContent={<div data-testid="custom-toolbar">Toolbar</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-toolbar')).toBeInTheDocument();
+  });
+
+  it('target worklist is always rendered regardless of other slots', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    // target-worklist must always be present — it is the primary work queue
+    const worklist = screen.getByTestId('target-worklist');
+    expect(worklist).toBeInTheDocument();
+  });
+
+  it('source panel has lg: visibility class (collapses below 1024px)', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const sourcePanel = screen.getByTestId('source-panel');
+    // The source panel uses `hidden lg:block` — hidden by default, shown at lg breakpoint
+    expect(sourcePanel.className).toContain('hidden');
+    expect(sourcePanel.className).toContain('lg:block');
+  });
+
+  it('target worklist does not have a hidden class', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const worklist = screen.getByTestId('target-worklist');
+    expect(worklist.className).not.toContain('hidden');
   });
 
   it('renders deploy page link with correct route params', () => {
@@ -228,32 +264,8 @@ describe('MappingEditorPage', () => {
   it('renders default deploy statuses as not-deployed', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     const badges = screen.getByTestId('deploy-badges');
-    // All 3 environments should show
     expect(badges).toHaveTextContent('DEV');
     expect(badges).toHaveTextContent('QA');
     expect(badges).toHaveTextContent('PROD');
-  });
-
-  it('renders the page container with correct testid', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
-  });
-
-  it('renders "Configuration (Panel 7)" placeholder when configPanelContent is not provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel7 = screen.getByTestId('panel-slot-7');
-    expect(panel7).toHaveTextContent('Configuration (Panel 7)');
-  });
-
-  it('renders custom configPanelContent in Panel 7 slot when provided', () => {
-    renderWithRouter(
-      <MappingEditorPage
-        projectId="proj-1"
-        mappingId="mapping-1"
-        configPanelContent={<div data-testid="custom-config-panel">Config Panel</div>}
-      />,
-    );
-    expect(screen.getByTestId('custom-config-panel')).toBeInTheDocument();
-    expect(screen.queryByText('Configuration (Panel 7)')).not.toBeInTheDocument();
   });
 });

@@ -26,37 +26,34 @@ export interface MappingEditorPageProps {
   sourceSchemaName?: string | null;
   /** Target schema display name */
   targetSchemaName?: string | null;
-  /** Content for Panel 3 (Rule List) slot — accepts children from T-03+ */
-  ruleListContent?: ReactNode;
-  /** Content for Panel 1 (Source Schema) slot */
-  panelOneContent?: ReactNode;
-  /** Content for Panel 2 (Target Schema) slot */
-  panelTwoContent?: ReactNode;
-  /** Content for Panel 4 (Expression Builder) slot */
-  expressionBuilderContent?: ReactNode;
-  /** Content for Panel 5 (Preview) slot */
-  previewContent?: ReactNode;
-  /** Content for Panel 7 (Configuration) slot */
+  /** Content for the Global Toolbar slot (above the three columns) */
+  toolbarContent?: ReactNode;
+  /** Content for the Source Schema panel (left column, collapsible) */
+  sourceContent?: ReactNode;
+  /** Content for the Target Worklist panel (center column, primary — never collapses) */
+  targetWorklistContent?: ReactNode;
+  /** Content for the Builder/Editor panel (right column) */
+  builderContent?: ReactNode;
+  /** Content for the full-width bottom area (Preview / Diagnostics / Testing) */
+  bottomContent?: ReactNode;
+  /** Content for the Configuration panel (overlay/drawer — passed through to route composition) */
   configPanelContent?: ReactNode;
-  /** Content for Panel 8 (History) slot */
+  /** Content for the History panel (overlay/drawer — passed through to route composition) */
   historyPanelContent?: ReactNode;
   /** Callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
 }
 
 // ---------------------------------------------------------------------------
-// Panel configuration
+// Placeholder labels
 // ---------------------------------------------------------------------------
 
-const PANEL_NAMES = {
-  1: 'Source Schema (Panel 1)',
-  2: 'Target Schema (Panel 2)',
-  3: 'Rule List (Panel 3)',
-  4: 'Expression Builder (Panel 4)',
-  5: 'Preview (Panel 5)',
-  6: 'Diagnostics (Panel 6)',
-  7: 'Configuration (Panel 7)',
-  8: 'History (Panel 8)',
+const PLACEHOLDER_LABELS = {
+  toolbar: 'Global Toolbar',
+  source: 'Source Schema',
+  targetWorklist: 'Target Worklist',
+  builder: 'Builder / Editor',
+  bottom: 'Preview & Diagnostics',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -64,23 +61,26 @@ const PANEL_NAMES = {
 // ---------------------------------------------------------------------------
 
 /**
- * Full Mapping Editor page shell with multi-panel layout.
+ * Full Mapping Editor page shell with target-driven three-column layout.
  *
  * Layout at 1280px+:
- * ┌─────────────────────────────────────────────────────────────────┐
- * │                        EditorTopBar                              │
- * ├──────────┬─────────────────────────────────┬────────────────────┤
- * │ Panel 1  │                                 │     Panel 4        │
- * │ (Source) │         Panel 3                 │ (Expr Builder)     │
- * ├──────────┤       (Rule List)               ├────────────────────┤
- * │ Panel 2  │                                 │     Panel 5        │
- * │ (Target) │                                 │   (Preview)        │
- * ├──────────┴──────────────┬──────────────────┴────────────────────┤
- * │     Panel 6             │    Panel 7       │     Panel 8        │
- * │   (Diagnostics)         │ (Configuration)  │    (History)       │
- * └─────────────────────────┴──────────────────┴────────────────────┘
+ * ┌─────────────────────────────────────────────────────────────────────┐
+ * │                          EditorTopBar                                │
+ * ├─────────────────────────────────────────────────────────────────────┤
+ * │                          GlobalToolbar                               │
+ * ├──────────────┬──────────────────────────────────┬───────────────────┤
+ * │    Source    │                                  │                   │
+ * │    Schema    │      Target Worklist             │  Builder/Editor   │
+ * │   (220px)    │      (center, flex-1)            │    (360px)        │
+ * │ [collapsible │                                  │                   │
+ * │  at 1024px]  │                                  │                   │
+ * ├──────────────┴──────────────────────────────────┴───────────────────┤
+ * │                    Preview & Diagnostics (full-width)                │
+ * └─────────────────────────────────────────────────────────────────────┘
  *
- * At 1024px, columns compress proportionally.
+ * At 1024px: source column collapses (hidden, expand toggle available).
+ * Target Worklist never collapses — it is the primary work queue.
+ * Configuration and Version History are overlay drawers, not grid slots.
  */
 export function MappingEditorPage({
   projectId,
@@ -95,13 +95,11 @@ export function MappingEditorPage({
   ],
   sourceSchemaName = null,
   targetSchemaName = null,
-  ruleListContent,
-  panelOneContent,
-  panelTwoContent,
-  expressionBuilderContent,
-  previewContent,
-  configPanelContent,
-  historyPanelContent,
+  toolbarContent,
+  sourceContent,
+  targetWorklistContent,
+  builderContent,
+  bottomContent,
   onHistoryToggle,
 }: MappingEditorPageProps) {
   return (
@@ -122,47 +120,58 @@ export function MappingEditorPage({
         onHistoryToggle={onHistoryToggle}
       />
 
-      {/* Panel grid — wrapped in PreviewProvider so all panels share preview state */}
-      <PreviewProvider>
-      <div className="grid min-h-0 flex-1 grid-cols-[200px_1fr_240px] grid-rows-[1fr_1fr_180px] gap-px bg-slate-800 lg:grid-cols-[220px_1fr_280px]">
-        {/* Panel 1: Source Schema — top-left */}
-        <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-1">
-          {panelOneContent ?? <PanelPlaceholder name={PANEL_NAMES[1]} />}
-        </div>
-
-        {/* Panel 3: Rule List — center, spans 2 rows */}
-        <div className="row-span-2 overflow-auto bg-slate-950 p-1" data-testid="panel-slot-3">
-          {ruleListContent ?? <PanelPlaceholder name={PANEL_NAMES[3]} />}
-        </div>
-
-        {/* Panel 4: Expression Builder — top-right */}
-        <div className="row-span-1 overflow-hidden bg-slate-950 p-1" data-testid="panel-slot-4">
-          {expressionBuilderContent ?? <PanelPlaceholder name={PANEL_NAMES[4]} />}
-        </div>
-
-        {/* Panel 2: Target Schema — middle-left */}
-        <div className="row-span-1 bg-slate-950 p-1" data-testid="panel-slot-2">
-          {panelTwoContent ?? <PanelPlaceholder name={PANEL_NAMES[2]} />}
-        </div>
-
-        {/* Panel 5: Preview — middle-right */}
-        <div className="row-span-1 overflow-hidden bg-slate-950 p-1" data-testid="panel-slot-5">
-          {previewContent ?? <PanelPlaceholder name={PANEL_NAMES[5]} />}
-        </div>
-
-        {/* Bottom row: Diagnostics, Configuration, History — spans full width (3 columns) */}
-        <div className="bg-slate-950 p-1" data-testid="panel-slot-6">
-          <PanelPlaceholder name={PANEL_NAMES[6]} />
-        </div>
-
-        <div className="bg-slate-950 p-1" data-testid="panel-slot-7">
-          {configPanelContent ?? <PanelPlaceholder name={PANEL_NAMES[7]} />}
-        </div>
-
-        <div className="bg-slate-950 p-1" data-testid="panel-slot-8">
-          {historyPanelContent ?? <PanelPlaceholder name={PANEL_NAMES[8]} />}
-        </div>
+      {/* Global Toolbar — full-width strip below top bar */}
+      <div
+        className="shrink-0 border-b border-slate-800 bg-slate-950"
+        data-testid="global-toolbar"
+      >
+        {toolbarContent ?? (
+          <div className="flex h-9 items-center px-3">
+            <PanelPlaceholder name={PLACEHOLDER_LABELS.toolbar} />
+          </div>
+        )}
       </div>
+
+      {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}
+      <PreviewProvider>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* Three-column row */}
+          <div className="flex min-h-0 flex-1 gap-px bg-slate-800">
+            {/* Left column: Source Schema — collapsible at ≤1024px */}
+            <div
+              className="hidden w-[220px] shrink-0 overflow-auto bg-slate-950 lg:block"
+              data-testid="source-panel"
+            >
+              {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
+            </div>
+
+            {/* Center column: Target Worklist — primary, never collapses */}
+            <div
+              className="min-w-0 flex-1 overflow-auto bg-slate-950"
+              data-testid="target-worklist"
+            >
+              {targetWorklistContent ?? (
+                <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+              )}
+            </div>
+
+            {/* Right column: Builder / Editor */}
+            <div
+              className="w-[360px] shrink-0 overflow-auto bg-slate-950"
+              data-testid="builder-panel"
+            >
+              {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
+            </div>
+          </div>
+
+          {/* Bottom area: Preview / Diagnostics / Testing — full-width */}
+          <div
+            className="h-[200px] shrink-0 border-t border-slate-800 bg-slate-950"
+            data-testid="bottom-area"
+          >
+            {bottomContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.bottom} />}
+          </div>
+        </div>
       </PreviewProvider>
     </div>
   );
