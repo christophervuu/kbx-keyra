@@ -99,6 +99,10 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     navigate(PATHS.CREATE_MAPPING.replace(':projectId', projectId));
   }
 
+  function handleOpenSchemaUpload() {
+    setShowUploadDialog(true);
+  }
+
   function handleViewSchema(schemaId: string) {
     navigate(PATHS.SCHEMA_DETAIL.replace(':schemaId', schemaId));
   }
@@ -119,7 +123,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
         {/* Section B — Schemas */}
         <SchemaManagementSection
           schemas={schemas}
-          onUpload={handleCreateMapping}
+          onUpload={handleOpenSchemaUpload}
           onLink={addSchemaRef}
           onRemove={removeSchema}
           onView={handleViewSchema}
@@ -141,7 +145,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           mappingCount={mappings.length}
           schemaCount={schemas.length}
           onCreateMapping={handleCreateMapping}
-          onAddSchema={() => setShowUploadDialog(true)}
+          onAddSchema={handleOpenSchemaUpload}
           onDuplicateProject={handleDuplicateProject}
           onDeleteProject={handleDeleteProject}
         />

@@ -110,7 +110,7 @@ function renderPage(
         <Routes>
           <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
           <Route path="/" element={<div data-testid="home-page">Home</div>} />
-          <Route path="/projects/new" element={<div data-testid="create-mapping-page" />} />
+          <Route path="/projects/:projectId/mappings/new" element={<div data-testid="create-mapping-page" />} />
         </Routes>
       </MemoryRouter>
     </AdapterProvider>,
@@ -206,5 +206,46 @@ describe('ProjectOverviewPage', () => {
     });
 
     expect(getProject).toHaveBeenCalledTimes(2);
+  });
+
+  it('clicking Upload Schema opens upload dialog and does not navigate to create mapping', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /upload schema/i }));
+
+    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('create-mapping-page')).not.toBeInTheDocument();
+  });
+
+  it('clicking Add Schema opens upload dialog', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /add schema/i }));
+
+    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
+  });
+
+  it('clicking Create Mapping navigates to create mapping route', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+    });
+
+    const createButtons = screen.getAllByRole('button', { name: /create mapping/i });
+    await user.click(createButtons[0]);
+
+    expect(screen.getByTestId('create-mapping-page')).toBeInTheDocument();
   });
 });

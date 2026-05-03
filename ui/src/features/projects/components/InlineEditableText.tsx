@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 
 export interface InlineEditableTextProps {
   /** Current value */
-  value: string;
+  value?: string | null;
   /** Called with the new value when the user commits (Enter or blur) */
   onSave: (value: string) => void;
   /** Placeholder shown when value is empty */
@@ -38,15 +38,16 @@ export function InlineEditableText({
   className = '',
   ariaLabel,
 }: InlineEditableTextProps) {
+  const normalizedValue = value ?? '';
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
+  const [draft, setDraft] = useState(normalizedValue);
   const [isSaving, setIsSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
 
   // Sync draft when value changes externally
   useEffect(() => {
-    if (!isEditing) setDraft(value);
-  }, [value, isEditing]);
+    if (!isEditing) setDraft(normalizedValue);
+  }, [normalizedValue, isEditing]);
 
   // Focus input when entering edit mode
   useEffect(() => {
@@ -62,14 +63,14 @@ export function InlineEditableText({
   }, [isEditing]);
 
   function handleDisplayClick() {
-    setDraft(value);
+    setDraft(normalizedValue);
     setIsEditing(true);
   }
 
   async function commit() {
     const trimmed = draft.trim();
     setIsEditing(false);
-    if (trimmed === value) return;
+    if (trimmed === normalizedValue) return;
     setIsSaving(true);
     try {
       await onSave(trimmed);
@@ -84,7 +85,7 @@ export function InlineEditableText({
       void commit();
     }
     if (e.key === 'Escape') {
-      setDraft(value);
+      setDraft(normalizedValue);
       setIsEditing(false);
     }
   }
@@ -129,8 +130,8 @@ export function InlineEditableText({
   }
 
   // ---- Display mode ----
-  const hasValue = value.trim().length > 0;
-  const displayText = hasValue ? value : placeholder;
+  const hasValue = normalizedValue.trim().length > 0;
+  const displayText = hasValue ? normalizedValue : placeholder;
   const displayClass =
     `cursor-pointer rounded px-1 -mx-1 hover:underline hover:decoration-dotted ` +
     `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ` +

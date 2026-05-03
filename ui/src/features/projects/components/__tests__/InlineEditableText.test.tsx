@@ -17,6 +17,13 @@ describe('InlineEditableText', () => {
     expect(screen.getByText('Click to edit…')).toBeInTheDocument();
   });
 
+  it('shows placeholder when value is undefined', () => {
+    render(
+      <InlineEditableText value={undefined} onSave={vi.fn()} placeholder="Click to edit…" as="p" />,
+    );
+    expect(screen.getByText('Click to edit…')).toBeInTheDocument();
+  });
+
   it('enters edit mode on click', async () => {
     const user = userEvent.setup();
     render(<InlineEditableText value="Hello" onSave={vi.fn()} />);
