@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { ExpressionBuilderPanel } from '@/features/mappings/components';
+import { ConfigurationPanel, ExpressionBuilderPanel } from '@/features/mappings/components';
 import type { ExpressionBuilderPanelRef } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
@@ -154,6 +154,14 @@ export default function MappingEditor() {
     />
   );
 
+  const configPanelContent = (
+    <ConfigurationPanel
+      configOptions={editor.configOptions}
+      onUpdateConfig={editor.actions.updateConfig}
+      parsedTargetSchema={editor.parsedTargetSchema}
+    />
+  );
+
   return (
     <MappingEditorPage
       projectId={projectId}
@@ -167,6 +175,7 @@ export default function MappingEditor() {
       panelOneContent={panelOneContent}
       expressionBuilderContent={expressionBuilderContent}
       previewContent={previewContent}
+      configPanelContent={configPanelContent}
     />
   );
 }

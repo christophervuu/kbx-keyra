@@ -34,6 +34,8 @@ export interface MappingEditorPageProps {
   expressionBuilderContent?: ReactNode;
   /** Content for Panel 5 (Preview) slot */
   previewContent?: ReactNode;
+  /** Content for Panel 7 (Configuration) slot */
+  configPanelContent?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +49,7 @@ const PANEL_NAMES = {
   4: 'Expression Builder (Panel 4)',
   5: 'Preview (Panel 5)',
   6: 'Diagnostics (Panel 6)',
-  7: 'AI Assist (Panel 7)',
+  7: 'Configuration (Panel 7)',
   8: 'History (Panel 8)',
 } as const;
 
@@ -69,7 +71,7 @@ const PANEL_NAMES = {
  * │ (Target) │                                 │   (Preview)        │
  * ├──────────┴──────────────┬──────────────────┴────────────────────┤
  * │     Panel 6             │    Panel 7       │     Panel 8        │
- * │   (Diagnostics)         │  (AI Assist)     │    (History)       │
+ * │   (Diagnostics)         │ (Configuration)  │    (History)       │
  * └─────────────────────────┴──────────────────┴────────────────────┘
  *
  * At 1024px, columns compress proportionally.
@@ -91,6 +93,7 @@ export function MappingEditorPage({
   panelOneContent,
   expressionBuilderContent,
   previewContent,
+  configPanelContent,
 }: MappingEditorPageProps) {
   return (
     <div
@@ -137,13 +140,13 @@ export function MappingEditorPage({
           {previewContent ?? <PanelPlaceholder name={PANEL_NAMES[5]} />}
         </div>
 
-        {/* Bottom row: Diagnostics, AI Assist, History — spans full width (3 columns) */}
+        {/* Bottom row: Diagnostics, Configuration, History — spans full width (3 columns) */}
         <div className="bg-slate-950 p-1" data-testid="panel-slot-6">
           <PanelPlaceholder name={PANEL_NAMES[6]} />
         </div>
 
         <div className="bg-slate-950 p-1" data-testid="panel-slot-7">
-          <PanelPlaceholder name={PANEL_NAMES[7]} />
+          {configPanelContent ?? <PanelPlaceholder name={PANEL_NAMES[7]} />}
         </div>
 
         <div className="bg-slate-950 p-1" data-testid="panel-slot-8">

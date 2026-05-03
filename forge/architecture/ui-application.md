@@ -341,6 +341,8 @@ FS-010 establishes the editor shell pattern in `ui/src/features/mappings/`. FS-0
 - Each slot renders a dedicated child panel (or `PanelPlaceholder` when deferred).
 - Panel 3 (`Rule List`) is injected as child content (`ruleListContent`) so rule-list behavior can evolve without layout refactors.
 - Panel 1 and Panel 4 can also be injected via slot content (`panelOneContent`, `expressionBuilderContent`) to keep page layout stable while feature composition evolves.
+- Panel 5 (`Preview`) is injected via `previewContent`.
+- Panel 7 (`Configuration`) is injected via `configPanelContent` (FS-017). When not provided, the slot renders a `PanelPlaceholder` labeled "Configuration (Panel 7)". Panel 7 was previously labeled "AI Assist" — that label is retired; AI Assist will be a floating overlay in Phase 2.
 
 Pattern for adding new panels:
 
@@ -364,7 +366,8 @@ Its contract includes:
 
 - `useMappingEditor(mappingId)` is the feature orchestration boundary.
 - It loads mapping + schemas through `ApiAdapter`, owns local rule mutations, and wires validation through `useEngineValidation()`.
-- It returns state + action callbacks (`addRule`, `updateRule`, `deleteRule`, `reorderRules`, bulk actions, `save`, `retry`) as the panel-facing contract.
+- It returns state + action callbacks (`addRule`, `updateRule`, `deleteRule`, `reorderRules`, bulk actions, `updateConfig`, `save`, `retry`) as the panel-facing contract.
+- `updateConfig(partial: Partial<MappingConfigOptions>)` merges partial config option changes into local state (FS-017). Config changes flow through the `validationConfig` memo → `useEngineValidation()` → re-validation (debounced 300ms). Config changes also set `hasUnsavedChanges` to `true` and are persisted on `save()` alongside rules.
 
 FS-011 expression flow adds a page-level selection bridge:
 

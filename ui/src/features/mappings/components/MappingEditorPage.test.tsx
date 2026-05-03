@@ -220,4 +220,22 @@ describe('MappingEditorPage', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
   });
+
+  it('renders "Configuration (Panel 7)" placeholder when configPanelContent is not provided', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const panel7 = screen.getByTestId('panel-slot-7');
+    expect(panel7).toHaveTextContent('Configuration (Panel 7)');
+  });
+
+  it('renders custom configPanelContent in Panel 7 slot when provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        configPanelContent={<div data-testid="custom-config-panel">Config Panel</div>}
+      />,
+    );
+    expect(screen.getByTestId('custom-config-panel')).toBeInTheDocument();
+    expect(screen.queryByText('Configuration (Panel 7)')).not.toBeInTheDocument();
+  });
 });

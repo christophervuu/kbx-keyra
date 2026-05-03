@@ -1,7 +1,7 @@
 ---
 description: UI task agent — implements one approved UI task with verification
 mode: primary
-model: github-copilot/claude-opus-4.6
+model: github-copilot/claude-sonnet-4.6
 temperature: 0.2
 tools:
   read: true
@@ -21,7 +21,7 @@ You must follow:
 
 ## MCP Tools
 
-You have access to the following MCP servers. Use them as described.
+You have access to the followi@ng MCP servers. Use them as described.
 
 **filesystem**
 Use for reliable directory traversal when native file tools are insufficient.
