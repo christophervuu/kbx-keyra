@@ -21,14 +21,14 @@ The entire UI application running against `LocalStorageAdapter` with zero backen
 
 **What to verify before moving to Phase 1:**
 
-| Test | Why |
-|------|-----|
-| **TTFSM end-to-end:** Create project → upload schemas → create mapping → add 10 rules → preview → correct output in < 2 seconds | This is the primary success metric. If the offline flow is slow or broken, adding a backend won't help. |
-| **Engine in-browser:** `validate()` runs on every rule change with no visible lag. `execute()` produces correct output for all DSL function types (direct copy, conditional, array map, valueMap, formatDate, etc.) | The engine is the foundation. If it doesn't work in the browser, nothing downstream works. |
-| **Large schema handling:** Parse and render a 1,000+ field schema. Tree virtualizes. Search returns results in < 300ms. | Phase 1 won't fix client-side performance. |
-| **Round-trip persistence:** Save a project with mappings, schemas, and test cases → refresh browser → everything loads intact from localStorage | Proves the data model and adapter pattern work before swapping the adapter. |
-| **Playwright E2E (FS-019):** Happy path passes. Validation error flow passes. Schema tree interaction passes. | Regression safety net before Phase 1 refactoring. |
-| **Zero lint/typecheck errors.** `tsc --noEmit`, ESLint, Prettier all clean. | Technical debt compounds. Clean it now. |
+| Test                                                                                                                                                                                                                | Why                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **TTFSM end-to-end:** Create project → upload schemas → create mapping → add 10 rules → preview → correct output in < 2 seconds                                                                                     | This is the primary success metric. If the offline flow is slow or broken, adding a backend won't help. |
+| **Engine in-browser:** `validate()` runs on every rule change with no visible lag. `execute()` produces correct output for all DSL function types (direct copy, conditional, array map, valueMap, formatDate, etc.) | The engine is the foundation. If it doesn't work in the browser, nothing downstream works.              |
+| **Large schema handling:** Parse and render a 1,000+ field schema. Tree virtualizes. Search returns results in < 300ms.                                                                                             | Phase 1 won't fix client-side performance.                                                              |
+| **Round-trip persistence:** Save a project with mappings, schemas, and test cases → refresh browser → everything loads intact from localStorage                                                                     | Proves the data model and adapter pattern work before swapping the adapter.                             |
+| **Playwright E2E (FS-019):** Happy path passes. Validation error flow passes. Schema tree interaction passes.                                                                                                       | Regression safety net before Phase 1 refactoring.                                                       |
+| **Zero lint/typecheck errors.** `tsc --noEmit`, ESLint, Prettier all clean.                                                                                                                                         | Technical debt compounds. Clean it now.                                                                 |
 
 **Exit criteria:** A BA can complete a full mapping workflow (create → author → validate → preview → save) entirely in the browser with no backend. The Playwright suite passes.
 

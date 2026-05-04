@@ -980,5 +980,140 @@ describe('useMappingEditor', () => {
       expect(adapter.saveMappingVersion).not.toHaveBeenCalled();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // applyRule
+  // ---------------------------------------------------------------------------
+
+  describe('applyRule', () => {
+    it('upserts a new rule and increments unsavedRuleCount', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.applyRule('A.D', 'static("hello")');
+      });
+
+      expect(result.current.rules.find((r) => r.target === 'A.D')?.expression).toBe('static("hello")');
+      expect(result.current.unsavedRuleCount).toBe(1);
+    });
+
+    it('updates an existing rule expression and increments unsavedRuleCount', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.applyRule('A.B', 'static("updated")');
+      });
+
+      expect(result.current.rules.find((r) => r.target === 'A.B')?.expression).toBe('static("updated")');
+      expect(result.current.unsavedRuleCount).toBe(1);
+    });
+
+    it('increments unsavedRuleCount on each applyRule call', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.applyRule('A.B', 'static("x")'); });
+      act(() => { result.current.actions.applyRule('A.C', 'static("y")'); });
+
+      expect(result.current.unsavedRuleCount).toBe(2);
+    });
+
+    it('fires onRuleApplied callback after applyRule', async () => {
+      const onRuleApplied = vi.fn();
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1', onRuleApplied), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.applyRule('A.B', 'static("x")');
+      });
+
+      expect(onRuleApplied).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // unsavedRuleCount reset on save
+  // ---------------------------------------------------------------------------
+
+  describe('unsavedRuleCount reset', () => {
+    it('resets unsavedRuleCount to 0 after successful save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.applyRule('A.B', 'static("x")'); });
+      expect(result.current.unsavedRuleCount).toBe(1);
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.unsavedRuleCount).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // canNavigateAway
+  // ---------------------------------------------------------------------------
+
+  describe('canNavigateAway', () => {
+    it('returns allowed=true when no unsaved changes and no applied rules', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.actions.canNavigateAway()).toEqual({ allowed: true, reason: null });
+    });
+
+    it('returns allowed=false with reason "unsaved" when unsavedRuleCount > 0', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.applyRule('A.B', 'static("x")'); });
+
+      expect(result.current.actions.canNavigateAway()).toEqual({ allowed: false, reason: 'unsaved' });
+    });
+
+    it('returns allowed=false with reason "unsaved" when hasUnsavedChanges is true', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // addRule sets hasUnsavedChanges without going through applyRule
+      act(() => { result.current.actions.addRule({ target: 'A.D', expression: 'static("x")', description: undefined }); });
+
+      expect(result.current.actions.canNavigateAway()).toEqual({ allowed: false, reason: 'unsaved' });
+    });
+  });
 });
 

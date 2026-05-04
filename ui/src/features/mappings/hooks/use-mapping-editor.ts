@@ -33,10 +33,22 @@ export interface MappingEditorActions {
   updateConfig: (partial: Partial<MappingConfigOptions>) => void;
   /** Restore a previous version config — replaces working state and immediately saves */
   restore: (restoreConfig: MappingConfig) => void;
+  /**
+   * Apply a rule expression to the in-memory working session.
+   * Upserts the rule for `targetPath`, increments `unsavedRuleCount`, and fires
+   * the `onRuleApplied` callback (used by auto-preview in T-05).
+   * Does NOT call `adapter.updateMapping()`.
+   */
+  applyRule: (targetPath: string, expression: string) => void;
   /** Persist current state to adapter */
   save: () => void;
   /** Retry a failed load */
   retry: () => void;
+  /**
+   * Returns whether the editor can navigate away without data loss.
+   * `reason` is null when navigation is safe.
+   */
+  canNavigateAway: () => { allowed: boolean; reason: 'unsaved' | null };
 }
 
 export interface UseMappingEditorResult {
@@ -81,8 +93,13 @@ export interface UseMappingEditorResult {
 
   /** Current save status for EditorTopBar */
   saveStatus: SaveStatus;
-  /** Whether there are unsaved changes */
+  /** Whether there are unsaved changes (rules differ from last save) */
   hasUnsavedChanges: boolean;
+  /**
+   * Number of rules applied to the in-memory session since the last Save.
+   * Resets to 0 on successful save. Used by EditorTopBar unsaved count display.
+   */
+  unsavedRuleCount: number;
   /** Save error message (if save failed) */
   saveError: string | null;
 
@@ -154,12 +171,17 @@ function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
  * - Load mapping config and schemas from the API adapter on mount
  * - Maintain local rules state that can be mutated without immediate saves
  * - Track unsaved changes by comparing current rules to last-saved snapshot
+ * - Track unsaved rule count (incremented by applyRule, reset on save)
  * - Save with version increment
  * - Wire engine validation with loaded schemas
  * - Handle Ctrl+S / Cmd+S keyboard shortcut
  * - Handle beforeunload warning for unsaved changes
+ *
+ * @param mappingId - The mapping to load and edit
+ * @param onRuleApplied - Optional callback fired after each successful applyRule call
+ *   (used by the inline preview strip in T-05 for auto-run behavior)
  */
-export function useMappingEditor(mappingId: string): UseMappingEditorResult {
+export function useMappingEditor(mappingId: string, onRuleApplied?: () => void): UseMappingEditorResult {
   const adapter = useAdapter();
 
   // Load states
@@ -181,6 +203,15 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
   // Save state
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Unsaved rule count — incremented by applyRule, reset on save
+  const [unsavedRuleCount, setUnsavedRuleCount] = useState(0);
+
+  // Keep onRuleApplied callback in a ref so applyRule doesn't need it as a dep
+  const onRuleAppliedRef = useRef<(() => void) | undefined>(onRuleApplied);
+  useEffect(() => {
+    onRuleAppliedRef.current = onRuleApplied;
+  });
 
   // Ref to prevent concurrent saves
   const saveInProgressRef = useRef(false);
@@ -302,7 +333,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    if (!hasUnsavedChanges) return;
+    if (!hasUnsavedChanges && unsavedRuleCount === 0) return;
 
     function handleBeforeUnload(e: BeforeUnloadEvent) {
       e.preventDefault();
@@ -314,7 +345,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [hasUnsavedChanges]);
+  }, [hasUnsavedChanges, unsavedRuleCount]);
 
   // ---------------------------------------------------------------------------
   // Ctrl+S / Cmd+S keyboard shortcut
@@ -346,6 +377,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       setLastSavedConfigOptions(configOptions);
       setVersion(newVersion);
       setSaveState('saved');
+      setUnsavedRuleCount(0);
 
       // Fire-and-forget version snapshot (AE-01)
       const versionEntry: MappingVersionEntry = {
@@ -486,6 +518,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       setLastSavedConfigOptions(fullConfig.config);
       setVersion(newVersion);
       setSaveState('saved');
+      setUnsavedRuleCount(0);
 
       // Fire-and-forget version snapshot
       const versionEntry: MappingVersionEntry = {
@@ -512,6 +545,40 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
   }, [loadData]);
 
   // ---------------------------------------------------------------------------
+  // applyRule — upsert rule in-memory, increment unsaved count
+  // ---------------------------------------------------------------------------
+
+  const applyRule = useCallback(
+    (targetPath: string, expression: string) => {
+      setRules((prev) => {
+        const idx = prev.findIndex((r) => r.target === targetPath);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], expression };
+          return updated;
+        }
+        return [...prev, { target: targetPath, type: 'string', expression }];
+      });
+      setUnsavedRuleCount((n) => n + 1);
+      setSaveState('idle');
+      // Fire auto-preview callback (T-05)
+      onRuleAppliedRef.current?.();
+    },
+    [],
+  );
+
+  // ---------------------------------------------------------------------------
+  // canNavigateAway — used by route-level blocker
+  // ---------------------------------------------------------------------------
+
+  const canNavigateAway = useCallback((): { allowed: boolean; reason: 'unsaved' | null } => {
+    if (unsavedRuleCount > 0 || hasUnsavedChanges) {
+      return { allowed: false, reason: 'unsaved' };
+    }
+    return { allowed: true, reason: null };
+  }, [unsavedRuleCount, hasUnsavedChanges]);
+
+  // ---------------------------------------------------------------------------
   // Build actions object (stable reference)
   // ---------------------------------------------------------------------------
 
@@ -526,10 +593,12 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
       pasteRules,
       updateConfig,
       restore,
+      applyRule,
       save,
       retry,
+      canNavigateAway,
     }),
-    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore, save, retry],
+    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore, applyRule, save, retry, canNavigateAway],
   );
 
   // ---------------------------------------------------------------------------
@@ -557,6 +626,7 @@ export function useMappingEditor(mappingId: string): UseMappingEditorResult {
     schemasLoaded,
     saveStatus,
     hasUnsavedChanges,
+    unsavedRuleCount,
     saveError,
     validation,
     actions,

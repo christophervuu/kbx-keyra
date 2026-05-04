@@ -60,7 +60,6 @@ const DEFAULT_PROPS = {
   validationResult: null,
   selectedPath: null,
   groupingMode: 'schema' as const,
-  searchQuery: '',
   onSelectNode: vi.fn(),
 };
 
@@ -160,21 +159,133 @@ describe('TargetWorklist', () => {
     expect(screen.queryByTestId('target-field-row-name.first')).not.toBeInTheDocument();
   });
 
-  it('filters fields by search query', () => {
-    render(
-      <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} searchQuery="first" />,
-    );
+  // ---------------------------------------------------------------------------
+  // Internal search input
+  // ---------------------------------------------------------------------------
+
+  it('renders the internal search input', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.getByTestId('target-search')).toBeInTheDocument();
+  });
+
+  it('filters fields by typing in the search input', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.change(screen.getByTestId('target-search'), { target: { value: 'first' } });
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
   });
 
   it('shows no-results state when search matches nothing', () => {
-    render(
-      <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} searchQuery="zzznomatch" />,
-    );
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.change(screen.getByTestId('target-search'), { target: { value: 'zzznomatch' } });
     expect(screen.getByTestId('target-worklist-no-results')).toBeInTheDocument();
   });
+
+  it('shows clear button when search has a value', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.queryByTestId('target-search-clear')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('target-search'), { target: { value: 'first' } });
+    expect(screen.getByTestId('target-search-clear')).toBeInTheDocument();
+  });
+
+  it('clear button resets search and shows all fields', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.change(screen.getByTestId('target-search'), { target: { value: 'first' } });
+    expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('target-search-clear'));
+    expect(screen.getByTestId('target-field-row-lastName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-search-clear')).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Filter chips
+  // ---------------------------------------------------------------------------
+
+  it('renders all four filter chips', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.getByTestId('target-filter-unmapped')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-warnings')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-required')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-arrays')).toBeInTheDocument();
+  });
+
+  it('filter chips start inactive (aria-pressed=false)', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.getByTestId('target-filter-unmapped')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('clicking a filter chip activates it (aria-pressed=true)', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-required'));
+    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clicking an active filter chip deactivates it', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-required'));
+    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('target-filter-required'));
+    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('Required filter shows only required fields', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-required'));
+    expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  it('Unmapped filter shows only unmapped fields', () => {
+    const rules = [makeRule('firstName')];
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-unmapped'));
+    expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-lastName')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-age')).toBeInTheDocument();
+  });
+
+  it('AND logic: Required + Unmapped shows only required AND unmapped fields', () => {
+    // firstName is required but mapped; lastName is not required; age is not required
+    const rules = [makeRule('firstName')];
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-required'));
+    fireEvent.click(screen.getByTestId('target-filter-unmapped'));
+    // firstName is required but mapped — fails unmapped filter
+    // lastName/age are unmapped but not required — fail required filter
+    expect(screen.getByTestId('target-worklist-no-results')).toBeInTheDocument();
+  });
+
+  it('Arrays filter shows only array-type fields', () => {
+    const nodesWithArray: SchemaTreeNode[] = [
+      ...FLAT_NODES,
+      makeNode('tags', 'tags', 'array', 0, false),
+    ];
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodesWithArray} />);
+    fireEvent.click(screen.getByTestId('target-filter-arrays'));
+    expect(screen.getByTestId('target-field-row-tags')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
+  });
+
+  it('Warnings filter shows only fields with warning/error status', () => {
+    const rules = [makeRule('firstName'), makeRule('lastName')];
+    const validation = makeValidation([
+      { code: 'W001', severity: 'warning', message: 'warn', targetPath: 'firstName' },
+    ]);
+    render(
+      <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} validationResult={validation} />,
+    );
+    fireEvent.click(screen.getByTestId('target-filter-warnings'));
+    expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Grouping modes
+  // ---------------------------------------------------------------------------
 
   it('groups required fields first in required-first mode', () => {
     render(

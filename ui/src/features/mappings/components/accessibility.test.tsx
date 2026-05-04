@@ -481,11 +481,14 @@ describe('EditorTopBar save status ARIA', () => {
           mappingName="Test"
           version={1}
           saveStatus="saved"
-          deployStatuses={[]}
+          deployStatus={null}
+          unsavedCount={0}
+          onSave={() => undefined}
           sourceSchemaName={null}
           targetSchemaName={null}
           projectId="p1"
           mappingId="m1"
+          projectName="Test Project"
         />
       </MemoryRouter>,
     );
@@ -500,11 +503,14 @@ describe('EditorTopBar save status ARIA', () => {
           mappingName="Test"
           version={1}
           saveStatus="unsaved"
-          deployStatuses={[]}
+          deployStatus={null}
+          unsavedCount={1}
+          onSave={() => undefined}
           sourceSchemaName={null}
           targetSchemaName={null}
           projectId="p1"
           mappingId="m1"
+          projectName="Test Project"
         />
       </MemoryRouter>,
     );

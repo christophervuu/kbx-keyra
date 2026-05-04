@@ -44,8 +44,13 @@ export interface ScalarFieldBuilderProps {
   currentExpression?: string;
   /** Parsed source schema for suggestions and field picker */
   parsedSourceSchema: ParsedSchema | null;
-  /** Fired when the user saves the expression */
-  onSave: (targetPath: string, expression: string) => void;
+  /** Fired when the user applies the expression */
+  onApply: (targetPath: string, expression: string) => void;
+  /**
+   * Optional callback fired whenever the local expression text changes.
+   * Used by the parent to track unapplied expression state for navigation guards.
+   */
+  onExpressionChange?: (expression: string) => void;
   /** Optional className */
   className?: string;
 }
@@ -155,16 +160,28 @@ export function ScalarFieldBuilder({
   currentStatus,
   currentExpression = '',
   parsedSourceSchema,
-  onSave,
+  onApply,
+  onExpressionChange,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
   const [mode, setMode] = useState<'builder' | 'editor'>('builder');
 
+  // Keep onExpressionChange in a ref to avoid stale closure issues
+  const onExpressionChangeRef = useRef(onExpressionChange);
+  useEffect(() => {
+    onExpressionChangeRef.current = onExpressionChange;
+  });
+
+  const handleExpressionChange = useCallback((next: string) => {
+    setExpression(next);
+    onExpressionChangeRef.current?.(next);
+  }, []);
+
   const rawDslRef = useRef<RawDslEditorRef>(null);
   const guidedBuilderRef = useRef<GuidedBuilderRef>(null);
 
-  // Reset expression when target field changes
+  // Reset expression when target field changes (don't notify parent — it's a reset)
   useEffect(() => {
     setExpression(currentExpression);
     setMode('builder');
@@ -197,9 +214,9 @@ export function ScalarFieldBuilder({
 
   const handleSave = useCallback(() => {
     if (expression.trim() && isValid) {
-      onSave(selectedTargetPath, expression);
+      onApply(selectedTargetPath, expression);
     }
-  }, [expression, isValid, onSave, selectedTargetPath]);
+  }, [expression, isValid, onApply, selectedTargetPath]);
 
   const canSave = expression.trim().length > 0 && isValid && !isValidating;
 
@@ -298,7 +315,7 @@ export function ScalarFieldBuilder({
             <RawDslEditor
               ref={rawDslRef}
               value={expression}
-              onChange={setExpression}
+              onChange={handleExpressionChange}
               placeholder="Enter a DSL expression…"
               className="w-full"
               errorDecorations={errorDecorations}
@@ -309,7 +326,7 @@ export function ScalarFieldBuilder({
             <GuidedBuilder
               ref={guidedBuilderRef}
               expression={expression}
-              onExpressionChange={setExpression}
+              onExpressionChange={handleExpressionChange}
               parsedSourceSchema={parsedSourceSchema}
             />
           </div>
@@ -359,10 +376,10 @@ export function ScalarFieldBuilder({
           {/* Spacer */}
           <span className="flex-1" />
 
-          {/* Save button */}
+          {/* Apply button */}
           <button
             type="button"
-            data-testid="save-btn"
+            data-testid="apply-btn"
             disabled={!canSave}
             onClick={handleSave}
             className={[
@@ -374,7 +391,7 @@ export function ScalarFieldBuilder({
             ].join(' ')}
           >
             <Wand2 size={12} aria-hidden="true" />
-            Save mapping
+            Apply
           </button>
         </div>
       </div>

@@ -1,13 +1,16 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBlocker, useParams } from 'react-router-dom';
+
+import { useAdapter } from '@/lib/api';
 
 import { Button } from '@/components';
+import { ConfirmDialog } from '@/features/mappings/components';
 import {
   ArrayMappingBuilder,
-  BottomArea,
   BuilderEmptyState,
   ConfigurationModal,
   ConfigurationPanel,
+  ConnectedInlinePreviewStrip,
   ExpressionBuilderPanel,
   GlobalToolbar,
   ObjectSummaryPanel,
@@ -22,10 +25,9 @@ import {
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
-import { PreviewPanel } from '@/features/mappings/components/preview';
 import { useMappingEditor, useVersionHistory } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
-import type { EditorView, TargetFilter, TargetSort } from '@/features/mappings/types';
+import type { EditorView, TargetSort } from '@/features/mappings/types';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -114,8 +116,29 @@ export default function MappingEditor() {
     mappingId: string;
   }>();
 
-  const editor = useMappingEditor(mappingId);
+  // ---------------------------------------------------------------------------
+  // Inline preview strip state
+  // ---------------------------------------------------------------------------
+  const [lastApplyTimestamp, setLastApplyTimestamp] = useState<number | null>(null);
+
+  const editor = useMappingEditor(mappingId, () => {
+    setLastApplyTimestamp(Date.now());
+  });
   const history = useVersionHistory(mappingId, editor.config);
+
+  // ---------------------------------------------------------------------------
+  // Project name (lightweight fetch — display only)
+  // ---------------------------------------------------------------------------
+  const adapter = useAdapter();
+  const [projectName, setProjectName] = useState<string>('Project');
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    adapter.getProject(projectId).then((detail) => {
+      if (!cancelled) setProjectName(detail.name);
+    }).catch(() => { /* silently fall back to 'Project' */ });
+    return () => { cancelled = true; };
+  }, [adapter, projectId]);
 
   // ---------------------------------------------------------------------------
   // History drawer state
@@ -139,10 +162,8 @@ export default function MappingEditor() {
   );
 
   // ---------------------------------------------------------------------------
-  // Toolbar state (search, filters, sort, view, breadcrumb)
+  // Toolbar state (sort, view, breadcrumb)
   // ---------------------------------------------------------------------------
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilters, setActiveFilters] = useState<TargetFilter[]>([]);
   const [sort, setSort] = useState<TargetSort>('schema');
   const [view, setView] = useState<EditorView>('target');
   const [breadcrumbMode, setBreadcrumbMode] = useState(false);
@@ -194,38 +215,58 @@ export default function MappingEditor() {
   );
 
   // ---------------------------------------------------------------------------
-  // Target node selection
+  // Target node selection — with unapplied-changes guard
   // ---------------------------------------------------------------------------
+
+  // Pending navigation: the path the user clicked while an unapplied expression exists
+  const [pendingTargetPath, setPendingTargetPath] = useState<string | null>(null);
+  // Whether the unapplied-changes dialog is open
+  const [unappliedDialogOpen, setUnappliedDialogOpen] = useState(false);
+  // The current unapplied expression (set by ScalarFieldBuilder via callback)
+  const [unappliedExpression, setUnappliedExpression] = useState<string>('');
+
   const handleSelectTargetNode = useCallback(
     (path: string) => {
-      setSelectedTargetPath(path);
-    },
-    [],
-  );
-
-  // ---------------------------------------------------------------------------
-  // "Start with required fields" CTA from BuilderEmptyState
-  // ---------------------------------------------------------------------------
-  const handleFilterRequired = useCallback(() => {
-    setActiveFilters((prev) =>
-      prev.includes('required') ? prev : [...prev, 'required'],
-    );
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Save expression from right-panel builders
-  // ---------------------------------------------------------------------------
-  const handleSaveExpression = useCallback(
-    (targetPath: string, expression: string) => {
-      const existingIdx = editor.rules.findIndex((r) => r.target === targetPath);
-      if (existingIdx >= 0) {
-        editor.actions.updateRule(existingIdx, { ...editor.rules[existingIdx], expression });
+      if (unappliedExpression.trim() && selectedTargetPath !== null && path !== selectedTargetPath) {
+        // There is an unapplied expression — show the guard dialog
+        setPendingTargetPath(path);
+        setUnappliedDialogOpen(true);
       } else {
-        editor.actions.addRule({ target: targetPath, expression });
+        setSelectedTargetPath(path);
+        setUnappliedExpression('');
       }
     },
-    [editor.rules, editor.actions],
+    [unappliedExpression, selectedTargetPath],
   );
+
+  // "Apply & Continue" — apply current expression then navigate to the clicked field
+  const handleUnappliedApplyAndContinue = useCallback(() => {
+    if (selectedTargetPath && unappliedExpression.trim()) {
+      editor.actions.applyRule(selectedTargetPath, unappliedExpression);
+    }
+    setUnappliedDialogOpen(false);
+    setUnappliedExpression('');
+    if (pendingTargetPath !== null) {
+      setSelectedTargetPath(pendingTargetPath);
+      setPendingTargetPath(null);
+    }
+  }, [selectedTargetPath, unappliedExpression, pendingTargetPath, editor.actions]);
+
+  // "Discard" — discard unapplied expression and navigate to the clicked field
+  const handleUnappliedDiscard = useCallback(() => {
+    setUnappliedDialogOpen(false);
+    setUnappliedExpression('');
+    if (pendingTargetPath !== null) {
+      setSelectedTargetPath(pendingTargetPath);
+      setPendingTargetPath(null);
+    }
+  }, [pendingTargetPath]);
+
+  // "Cancel" — stay on current field
+  const handleUnappliedCancel = useCallback(() => {
+    setUnappliedDialogOpen(false);
+    setPendingTargetPath(null);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Derived: grouping mode from sort
@@ -272,6 +313,45 @@ export default function MappingEditor() {
   }, [editor.parsedTargetSchema, editor.rules, editor.validation]);
 
   // ---------------------------------------------------------------------------
+  // "Start with required fields" CTA from BuilderEmptyState
+  // ---------------------------------------------------------------------------
+  const handleFilterRequired = useCallback(() => {
+    // No-op: filter chips now live inside TargetWorklist
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Apply expression from ScalarFieldBuilder — upserts rule, advances focus
+  // ---------------------------------------------------------------------------
+
+  // Compute next unmapped path after a given path (document order, single pass)
+  const getNextUnmappedPath = useCallback(
+    (afterPath: string): string | null => {
+      if (!editor.parsedTargetSchema || !targetMappingStatus) return null;
+      const allPaths = collectTargetSchemaPaths(editor.parsedTargetSchema.nodes);
+      const currentIdx = allPaths.indexOf(afterPath);
+      if (currentIdx < 0) return null;
+      for (let i = currentIdx + 1; i < allPaths.length; i++) {
+        if (targetMappingStatus.get(allPaths[i]) === 'unmapped') return allPaths[i];
+      }
+      return null;
+    },
+    [editor.parsedTargetSchema, targetMappingStatus],
+  );
+
+  const handleApplyExpression = useCallback(
+    (targetPath: string, expression: string) => {
+      editor.actions.applyRule(targetPath, expression);
+      setUnappliedExpression('');
+      // Advance focus to next unmapped field (normal Apply flow)
+      const next = getNextUnmappedPath(targetPath);
+      if (next !== null) {
+        setSelectedTargetPath(next);
+      }
+    },
+    [editor.actions, getNextUnmappedPath],
+  );
+
+  // ---------------------------------------------------------------------------
   // Derived: selected node info (for right panel)
   // ---------------------------------------------------------------------------
   const selectedNode = useMemo(() => {
@@ -288,6 +368,32 @@ export default function MappingEditor() {
     if (!selectedTargetPath) return '';
     return editor.rules.find((r) => r.target === selectedTargetPath)?.expression ?? '';
   }, [selectedTargetPath, editor.rules]);
+
+  // ---------------------------------------------------------------------------
+  // Route-level navigation guard (unsaved changes)
+  // useBlocker must be called unconditionally (Rules of Hooks)
+  // ---------------------------------------------------------------------------
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      currentLocation.pathname !== nextLocation.pathname &&
+      !editor.actions.canNavigateAway().allowed,
+  );
+
+  // "Save & Leave" — save then let the blocked navigation proceed
+  const handleBlockerSaveAndLeave = useCallback(() => {
+    editor.actions.save();
+    blocker.proceed?.();
+  }, [editor.actions, blocker]);
+
+  // "Discard & Leave" — discard and proceed
+  const handleBlockerDiscard = useCallback(() => {
+    blocker.proceed?.();
+  }, [blocker]);
+
+  // "Cancel" — stay
+  const handleBlockerCancel = useCallback(() => {
+    blocker.reset?.();
+  }, [blocker]);
 
   // ---------------------------------------------------------------------------
   // Loading / error states
@@ -309,13 +415,9 @@ export default function MappingEditor() {
   // Toolbar
   const toolbarContent = (
     <GlobalToolbar
-      searchQuery={searchQuery}
-      activeFilters={activeFilters}
       sort={sort}
       view={view}
       breadcrumbMode={breadcrumbMode}
-      onSearchChange={setSearchQuery}
-      onFilterChange={setActiveFilters}
       onSortChange={setSort}
       onViewToggle={handleViewToggle}
       onBreadcrumbModeToggle={() => {
@@ -363,7 +465,6 @@ export default function MappingEditor() {
         validationResult={editor.validation.result ?? null}
         selectedPath={selectedTargetPath}
         groupingMode={groupingMode}
-        searchQuery={searchQuery}
         onSelectNode={handleSelectTargetNode}
         breadcrumbMode={breadcrumbMode}
         currentSubtreePath={currentSubtreePath}
@@ -428,7 +529,7 @@ export default function MappingEditor() {
           return parent?.type === 'array';
         })()}
         parentArrayPath={selectedNode.parentPath ?? undefined}
-        onSave={handleSaveExpression}
+        onSave={handleApplyExpression}
         onSelectParentArray={(path) => setSelectedTargetPath(path)}
         className="h-full"
       />
@@ -440,21 +541,21 @@ export default function MappingEditor() {
         currentStatus={selectedNodeStatus}
         currentExpression={selectedNodeExpression}
         parsedSourceSchema={editor.parsedSourceSchema}
-        onSave={handleSaveExpression}
+        onApply={handleApplyExpression}
+        onExpressionChange={setUnappliedExpression}
         className="h-full"
       />
     );
 
-  // Bottom area: tabbed preview/diagnostics/trace/test-cases
+  // Bottom area: connected inline preview strip (renders inside PreviewProvider)
   const bottomContent = (
-    <BottomArea
-      previewContent={
-        <PreviewPanel
-          config={editor.config}
-          sourceSchemaDetail={editor.sourceSchemaDetail}
-          targetSchemaDetail={editor.targetSchemaDetail}
-        />
-      }
+    <ConnectedInlinePreviewStrip
+      config={editor.config}
+      sourceSchemaDetail={editor.sourceSchemaDetail}
+      targetSchemaDetail={editor.targetSchemaDetail}
+      projectId={projectId}
+      mappingId={mappingId}
+      lastApplyTimestamp={lastApplyTimestamp}
     />
   );
 
@@ -463,9 +564,13 @@ export default function MappingEditor() {
       <MappingEditorPage
         projectId={projectId}
         mappingId={mappingId}
+        projectName={projectName}
         mappingName={editor.mappingName}
         version={editor.version}
         saveStatus={editor.saveStatus}
+        deployStatus={null}
+        unsavedCount={editor.unsavedRuleCount}
+        onSave={editor.actions.save}
         sourceSchemaName={editor.sourceSchemaName}
         targetSchemaName={editor.targetSchemaName}
         toolbarContent={toolbarContent}
@@ -509,6 +614,73 @@ export default function MappingEditor() {
           />
         )}
       </VersionHistoryDrawer>
+
+      {/* Unapplied-changes guard dialog (switching target selection) */}
+      {unappliedDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          role="presentation"
+          data-testid="unapplied-dialog-overlay"
+        >
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={handleUnappliedCancel}
+            aria-hidden="true"
+          />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="unapplied-dialog-title"
+            aria-describedby="unapplied-dialog-message"
+            className="relative z-10 w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-6 shadow-xl"
+            data-testid="unapplied-dialog"
+          >
+            <h2 id="unapplied-dialog-title" className="text-sm font-semibold text-slate-100">
+              Unapplied expression
+            </h2>
+            <p id="unapplied-dialog-message" className="mt-2 text-sm text-slate-400">
+              You have an expression that hasn&apos;t been applied. What would you like to do?
+            </p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleUnappliedCancel}
+                className="rounded px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition-colors"
+                data-testid="unapplied-dialog-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleUnappliedDiscard}
+                className="rounded border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+                data-testid="unapplied-dialog-discard"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={handleUnappliedApplyAndContinue}
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition-colors"
+                data-testid="unapplied-dialog-apply-continue"
+              >
+                Apply &amp; Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Route-level unsaved-changes guard dialog */}
+      <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        title="Unsaved changes"
+        message="You have unsaved changes. Save before leaving or your changes will be lost."
+        confirmLabel="Save & Leave"
+        cancelLabel="Discard"
+        onConfirm={handleBlockerSaveAndLeave}
+        onCancel={handleBlockerDiscard}
+      />
     </>
   );
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
 import { EditorTopBar } from './EditorTopBar';
-import type { DeployBadgeInfo, SaveStatus } from './EditorTopBar';
+import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
 import { PanelPlaceholder } from './PanelPlaceholder';
 import { PreviewProvider } from '../context/preview-context';
 
@@ -15,14 +15,23 @@ export interface MappingEditorPageProps {
   projectId: string;
   /** Route param: mapping ID */
   mappingId: string;
+  /** Human-readable project name (shown as link in context bar) */
+  projectName?: string;
   /** Mapping display name */
   mappingName?: string;
   /** Mapping version number */
   version?: number;
   /** Current save status */
   saveStatus?: SaveStatus;
-  /** Deploy status for each environment */
-  deployStatuses?: readonly DeployBadgeInfo[];
+  /**
+   * Highest deployed environment info.
+   * Null when the mapping has never been deployed.
+   */
+  deployStatus?: HighestDeployStatus | null;
+  /** Number of rules modified since last save (for unsaved indicator) */
+  unsavedCount?: number;
+  /** Callback for the Save button */
+  onSave?: () => void;
   /** Source schema display name */
   sourceSchemaName?: string | null;
   /** Target schema display name */
@@ -37,10 +46,6 @@ export interface MappingEditorPageProps {
   builderContent?: ReactNode;
   /** Content for the full-width bottom area (Preview / Diagnostics / Testing) */
   bottomContent?: ReactNode;
-  /** Content for the Configuration panel (overlay/drawer — passed through to route composition) */
-  configPanelContent?: ReactNode;
-  /** Content for the History panel (overlay/drawer — passed through to route composition) */
-  historyPanelContent?: ReactNode;
   /** Callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
   /** Callback to toggle the configuration modal */
@@ -68,17 +73,17 @@ const PLACEHOLDER_LABELS = {
  *
  * Layout at 1280px+:
  * ┌─────────────────────────────────────────────────────────────────────┐
- * │                          EditorTopBar                                │
+ * │                          EditorTopBar (context bar)                  │
  * ├─────────────────────────────────────────────────────────────────────┤
  * │                          GlobalToolbar                               │
  * ├──────────────┬──────────────────────────────────┬───────────────────┤
  * │    Source    │                                  │                   │
  * │    Schema    │      Target Worklist             │  Builder/Editor   │
- * │   (220px)    │      (center, flex-1)            │    (360px)        │
+ * │   (~15%)     │         (~35%)                  │     (~50%)        │
  * │ [collapsible │                                  │                   │
  * │  at 1024px]  │                                  │                   │
  * ├──────────────┴──────────────────────────────────┴───────────────────┤
- * │                    Preview & Diagnostics (full-width)                │
+ * │                    Preview Strip / Bottom Area (full-width)          │
  * └─────────────────────────────────────────────────────────────────────┘
  *
  * At 1024px: source column collapses (hidden, expand toggle available).
@@ -88,14 +93,13 @@ const PLACEHOLDER_LABELS = {
 export function MappingEditorPage({
   projectId,
   mappingId,
+  projectName = 'Project',
   mappingName = 'Untitled Mapping',
   version = 1,
   saveStatus = 'saved',
-  deployStatuses = [
-    { environment: 'DEV', status: 'not-deployed' },
-    { environment: 'QA', status: 'not-deployed' },
-    { environment: 'PROD', status: 'not-deployed' },
-  ],
+  deployStatus = null,
+  unsavedCount = 0,
+  onSave = () => undefined,
   sourceSchemaName = null,
   targetSchemaName = null,
   toolbarContent,
@@ -155,24 +159,27 @@ export function MappingEditorPage({
 
   return (
     <div
-      className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden"
+      className="flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden"
       data-testid="mapping-editor-page"
     >
-      {/* Top bar */}
+      {/* Context bar (Row 2 of 2-row top area) */}
       <EditorTopBar
+        projectName={projectName}
+        projectId={projectId}
         mappingName={mappingName}
+        mappingId={mappingId}
         version={version}
+        deployStatus={deployStatus}
         saveStatus={saveStatus}
-        deployStatuses={deployStatuses}
+        unsavedCount={unsavedCount}
+        onSave={onSave}
         sourceSchemaName={sourceSchemaName}
         targetSchemaName={targetSchemaName}
-        projectId={projectId}
-        mappingId={mappingId}
         onConfigToggle={onConfigToggle}
         onHistoryToggle={onHistoryToggle}
       />
 
-      {/* Global Toolbar — full-width strip below top bar */}
+      {/* Global Toolbar — full-width strip below context bar */}
       <div
         className="shrink-0 border-b border-slate-800 bg-slate-950"
         data-testid="global-toolbar"
@@ -187,19 +194,19 @@ export function MappingEditorPage({
       {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}
       <PreviewProvider>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {/* Three-column row */}
+          {/* Three-column row — 15% / 35% / 50% at ≥1280px */}
           <div className="flex min-h-0 flex-1 gap-px bg-slate-800">
-            {/* Left column: Source Schema — collapsible at ≤1024px */}
+            {/* Left column: Source Schema — ~15%, collapsible at ≤1024px */}
             <div
-              className="hidden w-[220px] shrink-0 overflow-auto bg-slate-950 lg:block"
+              className="hidden w-[15%] shrink-0 overflow-auto bg-slate-950 lg:block"
               data-testid="source-panel"
             >
               {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
             </div>
 
-            {/* Center column: Target Worklist — primary, never collapses */}
+            {/* Center column: Target Worklist — ~40% at <1024px (source hidden), ~35% at ≥1280px */}
             <div
-              className="min-w-0 flex-1 overflow-auto bg-slate-950"
+              className="w-[40%] shrink-0 overflow-auto bg-slate-950 lg:w-[35%]"
               data-testid="target-worklist"
             >
               {targetWorklistContent ?? (
@@ -207,29 +214,32 @@ export function MappingEditorPage({
               )}
             </div>
 
-            {/* Right column: Builder / Editor */}
+            {/* Right column: Builder / Editor — ~50%, fills remaining space */}
             <div
-              className="w-[360px] shrink-0 overflow-auto bg-slate-950"
+              className="min-w-0 flex-1 overflow-auto bg-slate-950"
               data-testid="builder-panel"
             >
               {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
             </div>
           </div>
 
-          {/* Bottom area: Preview / Diagnostics / Testing — full-width */}
-          <div className="shrink-0 border-t border-slate-800 bg-slate-950" data-testid="bottom-area">
-            <div
-              role="separator"
-              aria-label="Resize bottom panel"
-              aria-orientation="horizontal"
-              data-testid="bottom-resize-handle"
-              onMouseDown={startResize}
-              className="h-1.5 cursor-row-resize border-b border-slate-800 bg-slate-900 hover:bg-slate-700"
-            />
-
-            <div style={{ height: `${bottomHeight}px` }} className="min-h-0">
-            {bottomContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.bottom} />}
-            </div>
+          {/* Bottom area: Preview Strip / Testing — full-width */}
+          <div className="shrink-0" data-testid="bottom-area">
+            {bottomContent ?? (
+              <div className="border-t border-slate-800 bg-slate-950">
+                <div
+                  role="separator"
+                  aria-label="Resize bottom panel"
+                  aria-orientation="horizontal"
+                  data-testid="bottom-resize-handle"
+                  onMouseDown={startResize}
+                  className="h-1.5 cursor-row-resize border-b border-slate-800 bg-slate-900 hover:bg-slate-700"
+                />
+                <div style={{ height: `${bottomHeight}px` }} className="min-h-0">
+                  <PanelPlaceholder name={PLACEHOLDER_LABELS.bottom} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </PreviewProvider>

@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+
+import { Filter, Search, X } from 'lucide-react';
 
 import { BreadcrumbNav } from './BreadcrumbNav';
 import { TargetFieldRow } from './TargetFieldRow';
 import type { TargetFieldType } from './TargetFieldRow';
 import { useTargetStatus } from '../hooks/use-target-status';
+import type { TargetFilter } from '../types';
 
 import type { ValidationResult } from '@/lib/engine';
 import type { MappingRule, SchemaTreeNode } from '@/lib/types/domain';
@@ -29,8 +32,6 @@ export interface TargetWorklistProps {
   selectedPath: string | null;
   /** Active grouping mode */
   groupingMode: GroupingMode;
-  /** Search/filter string — hides non-matching fields */
-  searchQuery: string;
   /** Fired when a field row is clicked */
   onSelectNode: (path: string, nodeType: SchemaTreeNode['type']) => void;
   /**
@@ -48,6 +49,17 @@ export interface TargetWorklistProps {
   /** Optional className for the outer container */
   className?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Filter chip config
+// ---------------------------------------------------------------------------
+
+const FILTER_CHIPS: { value: TargetFilter; label: string }[] = [
+  { value: 'unmapped', label: 'Unmapped' },
+  { value: 'warnings', label: 'Warnings' },
+  { value: 'required', label: 'Required' },
+  { value: 'arrays', label: 'Arrays' },
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,6 +101,39 @@ function nodeMatchesSearch(node: SchemaTreeNode, query: string): boolean {
     return true;
   }
   return node.children.some((child) => nodeMatchesSearch(child, query));
+}
+
+/**
+ * Checks whether a node passes all active filter chips.
+ * AND semantics: must satisfy every active filter.
+ */
+function nodeMatchesFilters(
+  node: SchemaTreeNode,
+  activeFilters: Set<TargetFilter>,
+  statusMap: Map<string, string>,
+): boolean {
+  if (activeFilters.size === 0) return true;
+
+  for (const filter of activeFilters) {
+    switch (filter) {
+      case 'unmapped':
+        if (statusMap.get(node.path) !== 'unmapped') return false;
+        break;
+      case 'warnings':
+        if (
+          statusMap.get(node.path) !== 'warning' &&
+          statusMap.get(node.path) !== 'error'
+        ) return false;
+        break;
+      case 'required':
+        if (!node.isRequired) return false;
+        break;
+      case 'arrays':
+        if (node.type !== 'array') return false;
+        break;
+    }
+  }
+  return true;
 }
 
 /**
@@ -136,6 +181,7 @@ interface RenderNodeProps {
   expandedPaths: Set<string>;
   selectedPath: string | null;
   searchQuery: string;
+  activeFilters: Set<TargetFilter>;
   onSelectNode: (path: string, nodeType: SchemaTreeNode['type']) => void;
   onToggleExpand: (path: string) => void;
   rules: readonly MappingRule[];
@@ -148,12 +194,19 @@ function renderNode({
   expandedPaths,
   selectedPath,
   searchQuery,
+  activeFilters,
   onSelectNode,
   onToggleExpand,
   rules,
 }: RenderNodeProps): ReactNode[] {
-  // Filter by search
+  // Filter by search query
   if (searchQuery && !nodeMatchesSearch(node, searchQuery)) {
+    return [];
+  }
+
+  // Filter by active chips (leaf nodes only — container nodes pass through if any child matches)
+  const isContainer = node.childCount > 0;
+  if (!isContainer && activeFilters.size > 0 && !nodeMatchesFilters(node, activeFilters, statusMap)) {
     return [];
   }
 
@@ -201,6 +254,7 @@ function renderNode({
           expandedPaths,
           selectedPath,
           searchQuery,
+          activeFilters,
           onSelectNode,
           onToggleExpand,
           rules,
@@ -210,6 +264,38 @@ function renderNode({
   }
 
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// FilterChip sub-component
+// ---------------------------------------------------------------------------
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={`target-filter-${label.toLowerCase()}`}
+      className={[
+        'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+        active
+          ? 'bg-blue-600/30 text-blue-300 ring-1 ring-blue-500/50'
+          : 'border border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200',
+      ].join(' ')}
+    >
+      {label}
+    </button>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +309,8 @@ function renderNode({
  * `TargetFieldRow` components. Mapping status is derived from rules +
  * validation results via `useTargetStatus`.
  *
- * All state (selection, grouping, search) is owned by the parent — this
- * component is purely presentational beyond its internal expand/collapse state.
+ * Search and filter chip state are owned internally. Grouping mode is
+ * controlled by the parent via `groupingMode`.
  */
 export function TargetWorklist({
   nodes,
@@ -232,7 +318,6 @@ export function TargetWorklist({
   validationResult,
   selectedPath,
   groupingMode,
-  searchQuery,
   onSelectNode,
   currentSubtreePath = null,
   breadcrumbMode = false,
@@ -240,6 +325,8 @@ export function TargetWorklist({
   className = '',
 }: TargetWorklistProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Set<TargetFilter>>(new Set());
 
   const { statusMap, coverageMap } = useTargetStatus(rules, validationResult, nodes);
 
@@ -261,6 +348,18 @@ export function TargetWorklist({
       return next;
     });
   };
+
+  const handleFilterToggle = useCallback((filter: TargetFilter) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(filter)) {
+        next.delete(filter);
+      } else {
+        next.add(filter);
+      }
+      return next;
+    });
+  }, []);
 
   // When breadcrumb mode is active and user clicks an object/array node,
   // drill into that subtree instead of opening its builder.
@@ -312,22 +411,14 @@ export function TargetWorklist({
       expandedPaths,
       selectedPath,
       searchQuery,
+      activeFilters,
       onSelectNode: handleSelectNode,
       onToggleExpand: handleToggleExpand,
       rules,
     }),
   );
 
-  if (rows.length === 0 && searchQuery) {
-    return (
-      <div
-        className={`flex h-full items-center justify-center text-sm text-slate-500 ${className}`}
-        data-testid="target-worklist-no-results"
-      >
-        No fields match &ldquo;{searchQuery}&rdquo;
-      </div>
-    );
-  }
+  const isFiltering = searchQuery.trim().length > 0 || activeFilters.size > 0;
 
   return (
     <div
@@ -342,14 +433,76 @@ export function TargetWorklist({
           className="shrink-0 border-b border-slate-800"
         />
       )}
-      <div
-        role="grid"
-        aria-label="Target schema fields"
-        data-testid="target-worklist"
-        className="overflow-y-auto flex-1"
-      >
-        {rows}
+
+      {/* Search + filter toolbar */}
+      <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 space-y-1.5">
+        {/* Search input */}
+        <div className="relative flex items-center">
+          <Search
+            size={12}
+            className="pointer-events-none absolute left-2 text-slate-500"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            role="searchbox"
+            aria-label="Search target fields"
+            data-testid="target-search"
+            placeholder="Search fields…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear search"
+              data-testid="target-search-clear"
+              className="absolute right-1.5 text-slate-500 hover:text-slate-300"
+            >
+              <X size={11} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+
+        {/* Filter chips */}
+        <div
+          className="flex flex-wrap items-center gap-1"
+          role="group"
+          aria-label="Filter target fields"
+          data-testid="target-filter-chips"
+        >
+          <Filter size={11} className="text-slate-600 shrink-0" aria-hidden="true" />
+          {FILTER_CHIPS.map(({ value, label }) => (
+            <FilterChip
+              key={value}
+              label={label}
+              active={activeFilters.has(value)}
+              onClick={() => handleFilterToggle(value)}
+            />
+          ))}
+        </div>
       </div>
+
+      {/* Field list */}
+      {rows.length === 0 && isFiltering ? (
+        <div
+          className="flex flex-1 items-center justify-center text-sm text-slate-500"
+          data-testid="target-worklist-no-results"
+        >
+          No fields match the current filters
+        </div>
+      ) : (
+        <div
+          role="grid"
+          aria-label="Target schema fields"
+          data-testid="target-worklist"
+          className="overflow-y-auto flex-1"
+        >
+          {rows}
+        </div>
+      )}
     </div>
   );
 }

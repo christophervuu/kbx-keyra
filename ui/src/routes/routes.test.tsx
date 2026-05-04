@@ -1,7 +1,14 @@
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import {
+  Route,
+  RouterProvider,
+  createMemoryRouter,
+  createRoutesFromElements,
+} from 'react-router-dom';
 import { vi } from 'vitest';
 
+import { AdapterProvider } from '@/lib/api';
+import type { ApiAdapter } from '@/lib/api';
 import CreateMapping from '@/routes/pages/CreateMapping';
 import CreateProject from '@/routes/pages/CreateProject';
 import HomeDashboard from '@/routes/pages/HomeDashboard';
@@ -15,8 +22,6 @@ import SchemaDetail from '@/routes/pages/SchemaDetail';
 import SchemaLibrary from '@/routes/pages/SchemaLibrary';
 import Settings from '@/routes/pages/Settings';
 import TemplateLibrary from '@/routes/pages/TemplateLibrary';
-import { AdapterProvider } from '@/lib/api';
-import type { ApiAdapter } from '@/lib/api';
 
 // Mock adapter that never resolves (keeps component in loading state)
 const mockAdapter: ApiAdapter = {
@@ -31,7 +36,7 @@ const mockAdapter: ApiAdapter = {
   deleteMapping: vi.fn(),
   duplicateMapping: vi.fn(),
   listProjects: vi.fn(),
-  getProject: vi.fn(),
+  getProject: vi.fn().mockReturnValue(new Promise(() => {})),
   createProject: vi.fn(),
   updateProject: vi.fn(),
   deleteProject: vi.fn(),
@@ -59,28 +64,44 @@ const mockAdapter: ApiAdapter = {
 } as ApiAdapter;
 
 function renderWithRouter(path: string) {
+  const router = createMemoryRouter(
+    createRoutesFromElements(
+      <>
+        <Route path="/" element={<HomeDashboard />} />
+        <Route path="/projects/new" element={<CreateProject />} />
+        <Route path="/projects/:projectId" element={<ProjectOverview />} />
+        <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
+        <Route path="/projects/:projectId/deployments" element={<ProjectDeployments />} />
+        <Route path="/projects/:projectId/mappings/new" element={<CreateMapping />} />
+        <Route path="/projects/:projectId/mappings/:mappingId" element={<MappingEditor />} />
+        <Route
+          path="/projects/:projectId/mappings/:mappingId/deploy"
+          element={<MappingDeployment />}
+        />
+        <Route path="/schemas" element={<SchemaLibrary />} />
+        <Route path="/schemas/:schemaId" element={<SchemaDetail />} />
+        <Route path="/templates" element={<TemplateLibrary />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<NotFound />} />
+      </>,
+    ),
+    {
+      initialEntries: [path],
+      future: {
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      },
+    },
+  );
+
   return render(
     <AdapterProvider adapter={mockAdapter}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/" element={<HomeDashboard />} />
-          <Route path="/projects/new" element={<CreateProject />} />
-          <Route path="/projects/:projectId" element={<ProjectOverview />} />
-          <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
-          <Route path="/projects/:projectId/deployments" element={<ProjectDeployments />} />
-          <Route path="/projects/:projectId/mappings/new" element={<CreateMapping />} />
-          <Route path="/projects/:projectId/mappings/:mappingId" element={<MappingEditor />} />
-          <Route
-            path="/projects/:projectId/mappings/:mappingId/deploy"
-            element={<MappingDeployment />}
-          />
-          <Route path="/schemas" element={<SchemaLibrary />} />
-          <Route path="/schemas/:schemaId" element={<SchemaDetail />} />
-          <Route path="/templates" element={<TemplateLibrary />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </MemoryRouter>
+      <RouterProvider
+        router={router}
+        future={{
+          v7_startTransition: true,
+        }}
+      />
     </AdapterProvider>,
   );
 }

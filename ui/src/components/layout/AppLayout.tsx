@@ -9,7 +9,9 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
       <NavBar />
-      <Breadcrumbs />
+      {/* Breadcrumbs are suppressed on the Mapping Editor route — the editor's
+          own context bar (EditorTopBar) provides project/mapping navigation. */}
+      {!isMappingEditorRoute && <Breadcrumbs />}
       {isMappingEditorRoute ? (
         <main className="flex-1">
           <Outlet />

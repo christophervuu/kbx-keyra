@@ -1,5 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { GlobalToolbar } from './GlobalToolbar';
@@ -10,14 +9,12 @@ import type { GlobalToolbarProps } from './GlobalToolbar';
 // ---------------------------------------------------------------------------
 
 const DEFAULT_PROPS: GlobalToolbarProps = {
-  searchQuery: '',
-  activeFilters: [],
   sort: 'schema',
   view: 'target',
-  onSearchChange: vi.fn(),
-  onFilterChange: vi.fn(),
+  breadcrumbMode: false,
   onSortChange: vi.fn(),
   onViewToggle: vi.fn(),
+  onBreadcrumbModeToggle: vi.fn(),
 };
 
 function renderToolbar(overrides: Partial<GlobalToolbarProps> = {}) {
@@ -30,29 +27,11 @@ function renderToolbar(overrides: Partial<GlobalToolbarProps> = {}) {
 // ---------------------------------------------------------------------------
 
 describe('GlobalToolbar', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
   afterEach(() => {
-    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
   // Rendering
-  it('renders search input', () => {
-    renderToolbar();
-    expect(screen.getByTestId('toolbar-search')).toBeInTheDocument();
-  });
-
-  it('renders all filter buttons', () => {
-    renderToolbar();
-    expect(screen.getByRole('button', { name: 'Unmapped' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Warnings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Required' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Arrays' })).toBeInTheDocument();
-  });
-
   it('renders sort control', () => {
     renderToolbar();
     expect(screen.getByTestId('toolbar-sort')).toBeInTheDocument();
@@ -69,70 +48,9 @@ describe('GlobalToolbar', () => {
     expect(screen.getByTestId('toolbar-automap')).toBeInTheDocument();
   });
 
-  // Search debounce
-  it('fires onSearchChange after 300ms debounce', async () => {
-    const onSearchChange = vi.fn();
-    renderToolbar({ onSearchChange });
-    const input = screen.getByTestId('toolbar-search');
-    fireEvent.change(input, { target: { value: 'first' } });
-    expect(onSearchChange).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(300);
-    expect(onSearchChange).toHaveBeenCalledWith('first');
-  });
-
-  it('does not fire onSearchChange before debounce expires', () => {
-    const onSearchChange = vi.fn();
-    renderToolbar({ onSearchChange });
-    const input = screen.getByTestId('toolbar-search');
-    fireEvent.change(input, { target: { value: 'fi' } });
-    vi.advanceTimersByTime(200);
-    expect(onSearchChange).not.toHaveBeenCalled();
-  });
-
-  it('debounces rapid typing — only fires once for last value', () => {
-    const onSearchChange = vi.fn();
-    renderToolbar({ onSearchChange });
-    const input = screen.getByTestId('toolbar-search');
-    fireEvent.change(input, { target: { value: 'f' } });
-    fireEvent.change(input, { target: { value: 'fi' } });
-    fireEvent.change(input, { target: { value: 'fir' } });
-    vi.advanceTimersByTime(300);
-    expect(onSearchChange).toHaveBeenCalledTimes(1);
-    expect(onSearchChange).toHaveBeenCalledWith('fir');
-  });
-
-  // Filter toggles
-  it('clicking a filter button fires onFilterChange with that filter added', () => {
-    const onFilterChange = vi.fn();
-    renderToolbar({ onFilterChange });
-    fireEvent.click(screen.getByRole('button', { name: 'Unmapped' }));
-    expect(onFilterChange).toHaveBeenCalledWith(['unmapped']);
-  });
-
-  it('clicking an active filter removes it from the set', () => {
-    const onFilterChange = vi.fn();
-    renderToolbar({ activeFilters: ['unmapped'], onFilterChange });
-    fireEvent.click(screen.getByRole('button', { name: 'Unmapped' }));
-    expect(onFilterChange).toHaveBeenCalledWith([]);
-  });
-
-  it('multiple filters can be active simultaneously', () => {
-    const onFilterChange = vi.fn();
-    renderToolbar({ activeFilters: ['unmapped'], onFilterChange });
-    fireEvent.click(screen.getByRole('button', { name: 'Required' }));
-    const called = onFilterChange.mock.calls[0][0] as string[];
-    expect(called).toContain('unmapped');
-    expect(called).toContain('required');
-  });
-
-  it('active filter button has aria-pressed=true', () => {
-    renderToolbar({ activeFilters: ['warnings'] });
-    expect(screen.getByRole('button', { name: 'Warnings' })).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('inactive filter button has aria-pressed=false', () => {
-    renderToolbar({ activeFilters: [] });
-    expect(screen.getByRole('button', { name: 'Warnings' })).toHaveAttribute('aria-pressed', 'false');
+  it('renders breadcrumb mode toggle', () => {
+    renderToolbar();
+    expect(screen.getByTestId('toolbar-breadcrumb-mode')).toBeInTheDocument();
   });
 
   // Sort
@@ -178,6 +96,19 @@ describe('GlobalToolbar', () => {
     expect(screen.getByTestId('toolbar-view-rules')).toHaveAttribute('aria-pressed', 'false');
   });
 
+  // Breadcrumb mode toggle
+  it('breadcrumb mode toggle reflects aria-pressed state', () => {
+    renderToolbar({ breadcrumbMode: true });
+    expect(screen.getByTestId('toolbar-breadcrumb-mode')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clicking breadcrumb mode toggle fires onBreadcrumbModeToggle', () => {
+    const onBreadcrumbModeToggle = vi.fn();
+    renderToolbar({ onBreadcrumbModeToggle });
+    fireEvent.click(screen.getByTestId('toolbar-breadcrumb-mode'));
+    expect(onBreadcrumbModeToggle).toHaveBeenCalledTimes(1);
+  });
+
   // Auto-map button
   it('Auto-map Section button is disabled', () => {
     renderToolbar();
@@ -193,15 +124,10 @@ describe('GlobalToolbar', () => {
   });
 
   it('clicking disabled Auto-map button does not fire any handler', () => {
-    const onSearchChange = vi.fn();
-    const onFilterChange = vi.fn();
     const onSortChange = vi.fn();
     const onViewToggle = vi.fn();
-    renderToolbar({ onSearchChange, onFilterChange, onSortChange, onViewToggle });
+    renderToolbar({ onSortChange, onViewToggle });
     fireEvent.click(screen.getByTestId('toolbar-automap'));
-    vi.advanceTimersByTime(300);
-    expect(onSearchChange).not.toHaveBeenCalled();
-    expect(onFilterChange).not.toHaveBeenCalled();
     expect(onSortChange).not.toHaveBeenCalled();
     expect(onViewToggle).not.toHaveBeenCalled();
   });

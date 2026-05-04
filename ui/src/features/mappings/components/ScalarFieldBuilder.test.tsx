@@ -48,7 +48,7 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   currentStatus: 'unmapped',
   currentExpression: '',
   parsedSourceSchema: SOURCE_SCHEMA,
-  onSave: vi.fn(),
+  onApply: vi.fn(),
 };
 
 function renderBuilder(overrides: Partial<ScalarFieldBuilderProps> = {}) {
@@ -148,21 +148,26 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
   });
 
-  // Save button
-  it('save button is disabled when expression is empty', () => {
+  // Apply button
+  it('apply button is disabled when expression is empty', () => {
     renderBuilder({ currentExpression: '' });
-    expect(screen.getByTestId('save-btn')).toBeDisabled();
+    expect(screen.getByTestId('apply-btn')).toBeDisabled();
   });
 
-  it('fires onSave with target path and expression when save is clicked with valid expression', async () => {
-    const onSave = vi.fn();
-    renderBuilder({ currentExpression: 'source("firstName")', onSave });
+  it('apply button shows label "Apply"', () => {
+    renderBuilder();
+    expect(screen.getByTestId('apply-btn')).toHaveTextContent('Apply');
+  });
+
+  it('fires onApply with target path and expression when apply is clicked with valid expression', async () => {
+    const onApply = vi.fn();
+    renderBuilder({ currentExpression: 'source("firstName")', onApply });
     // Wait for debounced validation to settle
     await new Promise((r) => setTimeout(r, 400));
-    const saveBtn = screen.getByTestId('save-btn');
-    if (!saveBtn.hasAttribute('disabled')) {
-      fireEvent.click(saveBtn);
-      expect(onSave).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    const applyBtn = screen.getByTestId('apply-btn');
+    if (!applyBtn.hasAttribute('disabled')) {
+      fireEvent.click(applyBtn);
+      expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
     }
   });
 

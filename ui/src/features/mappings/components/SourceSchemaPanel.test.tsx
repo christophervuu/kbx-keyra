@@ -177,4 +177,48 @@ describe('SourceSchemaPanel', () => {
     expect(nameField).toHaveAttribute('role', 'button');
     expect(nameField).toHaveAttribute('aria-label', 'Stage source field name');
   });
+
+  // ---------------------------------------------------------------------------
+  // Internal search
+  // ---------------------------------------------------------------------------
+
+  it('renders the internal search input', () => {
+    render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
+    expect(screen.getByTestId('source-search')).toBeInTheDocument();
+  });
+
+  it('filters fields by typing in the search input', () => {
+    render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
+    expect(screen.getByTestId('source-field-name')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-field-email')).not.toBeInTheDocument();
+  });
+
+  it('shows no-results state when search matches nothing', () => {
+    render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'zzznomatch' } });
+    expect(screen.getByTestId('source-search-no-results')).toBeInTheDocument();
+  });
+
+  it('shows result count when search has matches', () => {
+    render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
+    expect(screen.getByTestId('source-search-count')).toBeInTheDocument();
+  });
+
+  it('shows clear button when search has a value', () => {
+    render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
+    expect(screen.queryByTestId('source-search-clear')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
+    expect(screen.getByTestId('source-search-clear')).toBeInTheDocument();
+  });
+
+  it('clear button resets search and shows all fields', () => {
+    render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
+    expect(screen.queryByTestId('source-field-email')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('source-search-clear'));
+    expect(screen.getByTestId('source-field-email')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-search-clear')).not.toBeInTheDocument();
+  });
 });

@@ -58,7 +58,7 @@ ui/
     App.tsx               Root component and router setup
     routes/               Route path constants and placeholder pages
       index.ts            Barrel export for route constants
-      paths.ts            Route path string constants (PATHS object)
+      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test' (FS-021 T-05)
       pages/              Placeholder page components (one per route)
         HomeDashboard.tsx   Renders HomeDashboardPage from features/home (FS-014 T-11)
         CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
@@ -68,6 +68,7 @@ ui/
         CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
         MappingDeployment.tsx
+        MappingAdvancedTesting.tsx  Thin wrapper: extracts projectId/mappingId from route params, renders AdvancedTestingPage (FS-021 T-06)
         SchemaLibrary.tsx          Renders SchemaLibraryPage from features/schemas (FS-016 T-04)
         SchemaDetail.tsx
         TemplateLibrary.tsx
@@ -260,7 +261,7 @@ ui/
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
           RawDslEditor.test.tsx      Component tests (25 tests: rendering, token colors, placeholder, readOnly, onChange, onCursorChange, bracket matching, ref API, error decoration overlay, aria-invalid, tooltip)
-          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01): GlobalToolbar slot, Source panel (collapsible ≤1024px), Target Worklist (center, never collapses), Builder/Editor (right), full-width bottom area; slots: toolbarContent, sourceContent, targetWorklistContent, builderContent, bottomContent
+          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01): GlobalToolbar slot, Source panel (collapsible ≤1024px), Target Worklist (center, never collapses), Builder/Editor (right), full-width bottom area; slots: toolbarContent, sourceContent, targetWorklistContent, builderContent, bottomContent; panel widths 15/35/50 (FS-021 T-04)
           MappingEditorPage.test.tsx Component tests (22 tests: top bar, panels, slots, routing)
           NestedFunctionBuilder.tsx  Inline mini builder for nested function arguments: TransformPicker + ArgumentConfigurator, accordion-style, limited to nestingLevel < 2 (T-06)
           NestedFunctionBuilder.test.tsx Component tests (7 tests: initial state, function selection, args change, clear/reset)
@@ -276,6 +277,11 @@ ui/
           TransformPicker.test.tsx   Component tests (9 tests: categories, search, click handler, SourceAccess excluded)
           ValidationSummaryBar.tsx   Validation summary (role=status, aria-live=polite, aria-atomic=true, aria-label, rule count, valid/warning/error counts, coverage %)
           accessibility.test.tsx     Accessibility tests (T-08: ARIA attrs, keyboard nav, focus trap, focus return, tab order, aria-controls/expanded)
+          InlinePreviewStrip.tsx     Collapsed bar + expanded strip; auto-preview via lastApplyTimestamp; output flash animation; Run disabled when sourceData empty; keyboard accessible (FS-021 T-05)
+          InlinePreviewStrip.test.tsx Component tests (25 tests: collapsed/expanded states, auto-run, flash animation, run disabled, keyboard nav)
+          ConnectedInlinePreviewStrip.tsx  Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
+          AdvancedTestingPage.tsx    Full-page test case management and execution: two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs (Output/Diagnostics/Trace/Diff); trace toggle; auto-run toggle; Run button; "Back to Editor" link; own isolated PreviewProvider (FS-021 T-06)
+          AdvancedTestingPage.test.tsx Component tests (layout, tabs, tab switching, Run button, trace toggle, auto-run toggle, back link, empty state, mapping context)
           preview/          Preview & Testing Panel components (FS-012)
             index.ts              Preview barrel (re-exports all preview components)
             PreviewPanel.tsx      Panel 5 shell: toolbar (Run/auto-run/trace), Test Case Manager, 4-tab bar (Output/Diagnostics/Trace/Diff), stats bar, empty/loading states, wired to usePreviewExecution (FS-012 T-06); accepts mappingId prop for test case scoping
@@ -302,7 +308,7 @@ ui/
           use-dsl-autocomplete.test.ts   Hook unit tests (15 tests: context kinds, filtering, open/close, keyboard nav, confirm, closing quote)
           use-dsl-validation.ts          Debounced DSL validation hook: 300ms debounce, engine parse() with defaultRegistry, maps diagnostics to ErrorDecoration[] with AST position resolution (T-04)
           use-dsl-validation.test.ts     Hook unit tests (13 tests: valid/invalid expressions, debounce, decoration mapping, severity, AST position resolution)
-          use-mapping-editor.ts          Orchestration hook: load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection
+          use-mapping-editor.ts          Orchestration hook: load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection, applyRule(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02)
           use-mapping-editor.test.tsx    Hook unit tests (26 tests: loading, save, unsaved detection, keyboard, beforeunload, actions)
           use-preview-execution.ts       Preview execution lifecycle hook: manual run(), auto-run (500ms debounce), 2s timeout guard, trace toggle, publishes to PreviewContext (FS-012 T-04)
           use-preview-execution.test.ts  Hook unit tests (idle state, guards, success, error, trace flag, auto-run debounce, timeout)

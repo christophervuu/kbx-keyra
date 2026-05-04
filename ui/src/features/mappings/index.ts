@@ -13,7 +13,7 @@ export type {
   MappingEditorPageProps,
   RuleListProps,
   SaveStatus,
-  DeployBadgeInfo,
+  HighestDeployStatus,
   ExpressionBuilderPanelProps,
   RawDslEditorProps,
   RawDslEditorRef,

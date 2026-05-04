@@ -7,6 +7,7 @@ export const PATHS = {
   CREATE_MAPPING: '/projects/:projectId/mappings/new',
   MAPPING_EDITOR: '/projects/:projectId/mappings/:mappingId',
   MAPPING_DEPLOYMENT: '/projects/:projectId/mappings/:mappingId/deploy',
+  MAPPING_TEST: '/projects/:projectId/mappings/:mappingId/test',
   SCHEMA_LIBRARY: '/schemas',
   SCHEMA_DETAIL: '/schemas/:schemaId',
   TEMPLATE_LIBRARY: '/templates',

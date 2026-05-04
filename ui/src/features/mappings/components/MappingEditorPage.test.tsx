@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { EditorTopBar } from './EditorTopBar';
-import type { DeployBadgeInfo, SaveStatus } from './EditorTopBar';
+import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
 import { MappingEditorPage } from './MappingEditorPage';
 import { PanelPlaceholder } from './PanelPlaceholder';
 
@@ -17,18 +17,17 @@ function renderWithRouter(ui: ReactElement) {
 }
 
 const DEFAULT_TOP_BAR_PROPS = {
+  projectName: 'My Project',
+  projectId: 'proj-1',
   mappingName: 'Order Transform',
+  mappingId: 'mapping-1',
   version: 3,
   saveStatus: 'saved' as SaveStatus,
-  deployStatuses: [
-    { environment: 'DEV', status: 'deployed' },
-    { environment: 'QA', status: 'not-deployed' },
-    { environment: 'PROD', status: 'not-deployed' },
-  ] as DeployBadgeInfo[],
+  deployStatus: null as HighestDeployStatus | null,
+  unsavedCount: 0,
+  onSave: vi.fn(),
   sourceSchemaName: 'OrderRequest',
   targetSchemaName: 'PurchaseOrder',
-  projectId: 'proj-1',
-  mappingId: 'mapping-1',
 };
 
 // ---------------------------------------------------------------------------
@@ -62,14 +61,16 @@ describe('EditorTopBar', () => {
     expect(screen.getByText('v3')).toBeInTheDocument();
   });
 
-  it('renders save status "Saved"', () => {
+  it('renders save status "Saved ✓"', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saved" />);
     expect(screen.getByTestId('save-status')).toHaveTextContent('Saved');
   });
 
-  it('renders save status "Unsaved changes"', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" />);
-    expect(screen.getByTestId('save-status')).toHaveTextContent('Unsaved changes');
+  it('renders save status with unsaved count', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedCount={3} />,
+    );
+    expect(screen.getByTestId('save-status')).toHaveTextContent('3 unsaved changes');
   });
 
   it('renders save status "Saving…"', () => {
@@ -82,12 +83,23 @@ describe('EditorTopBar', () => {
     expect(screen.getByTestId('save-status')).toHaveTextContent('Save failed');
   });
 
-  it('renders deploy status badges for each environment', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    const badges = screen.getByTestId('deploy-badges');
-    expect(badges).toHaveTextContent('DEV');
-    expect(badges).toHaveTextContent('QA');
-    expect(badges).toHaveTextContent('PROD');
+  it('renders "Not deployed" badge when deployStatus is null', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} deployStatus={null} />);
+    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('Not deployed');
+  });
+
+  it('renders highest deploy environment badge when deployStatus is provided', () => {
+    const deployStatus: HighestDeployStatus = { environment: 'DEV', deployedVersion: 3 };
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} deployStatus={deployStatus} />);
+    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('DEV');
+  });
+
+  it('renders stale badge when saved version is ahead of deployed version', () => {
+    const deployStatus: HighestDeployStatus = { environment: 'QA', deployedVersion: 1 };
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} version={3} deployStatus={deployStatus} />,
+    );
+    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('QA (stale)');
   });
 
   it('renders source and target schema names', () => {
@@ -128,6 +140,25 @@ describe('EditorTopBar', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
     expect(screen.queryByTestId('config-toggle-button')).not.toBeInTheDocument();
   });
+
+  it('calls onSave when Save button is clicked', () => {
+    const onSave = vi.fn();
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedCount={1} onSave={onSave} />,
+    );
+    fireEvent.click(screen.getByTestId('save-button'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('Save button is disabled when saveStatus is "saved"', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saved" />);
+    expect(screen.getByTestId('save-button')).toBeDisabled();
+  });
+
+  it('renders project name link', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.getByTestId('project-name-link')).toHaveTextContent('My Project');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -147,7 +178,6 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('target-worklist')).toBeInTheDocument();
     expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
     expect(screen.getByTestId('bottom-area')).toBeInTheDocument();
-    expect(screen.getByTestId('bottom-resize-handle')).toBeInTheDocument();
   });
 
   it('renders the page container with correct testid', () => {
@@ -222,6 +252,11 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('bottom-area')).toHaveTextContent('Preview & Diagnostics');
   });
 
+  it('renders resize handle in placeholder bottom area', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('bottom-resize-handle')).toBeInTheDocument();
+  });
+
   it('renders custom content in bottom area when bottomContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
@@ -251,7 +286,6 @@ describe('MappingEditorPage', () => {
 
   it('target worklist is always rendered regardless of other slots', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    // target-worklist must always be present — it is the primary work queue
     const worklist = screen.getByTestId('target-worklist');
     expect(worklist).toBeInTheDocument();
   });
@@ -259,7 +293,6 @@ describe('MappingEditorPage', () => {
   it('source panel has lg: visibility class (collapses below 1024px)', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     const sourcePanel = screen.getByTestId('source-panel');
-    // The source panel uses `hidden lg:block` — hidden by default, shown at lg breakpoint
     expect(sourcePanel.className).toContain('hidden');
     expect(sourcePanel.className).toContain('lg:block');
   });
@@ -270,6 +303,21 @@ describe('MappingEditorPage', () => {
     expect(worklist.className).not.toContain('hidden');
   });
 
+  it('source panel has w-[15%] width class', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('source-panel').className).toContain('w-[15%]');
+  });
+
+  it('target worklist has lg:w-[35%] width class', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('target-worklist').className).toContain('lg:w-[35%]');
+  });
+
+  it('builder panel uses flex-1 to fill remaining space', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('builder-panel').className).toContain('flex-1');
+  });
+
   it('renders deploy page link with correct route params', () => {
     renderWithRouter(
       <MappingEditorPage projectId="my-project" mappingId="my-mapping" />,
@@ -278,11 +326,20 @@ describe('MappingEditorPage', () => {
     expect(link).toHaveAttribute('href', '/projects/my-project/mappings/my-mapping/deploy');
   });
 
-  it('renders default deploy statuses as not-deployed', () => {
+  it('renders "Not deployed" badge by default when no deployStatus provided', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const badges = screen.getByTestId('deploy-badges');
-    expect(badges).toHaveTextContent('DEV');
-    expect(badges).toHaveTextContent('QA');
-    expect(badges).toHaveTextContent('PROD');
+    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('Not deployed');
+  });
+
+  it('renders highest deploy environment badge when deployStatus is provided', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        deployStatus={{ environment: 'PROD', deployedVersion: 3 }}
+        version={3}
+      />,
+    );
+    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('PROD');
   });
 });

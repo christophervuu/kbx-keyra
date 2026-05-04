@@ -1,25 +1,17 @@
-import { AlertTriangle, Filter, Layers, List, Search, Sparkles, SortAsc } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Filter, Layers, List, SortAsc, Sparkles } from 'lucide-react';
+import { useCallback } from 'react';
 
-import type { EditorView, TargetFilter, TargetSort } from '../types';
+import type { EditorView, TargetSort } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface GlobalToolbarProps {
-  /** Current search query (controlled) */
-  searchQuery: string;
-  /** Currently active filters (controlled) */
-  activeFilters: readonly TargetFilter[];
   /** Current sort mode (controlled) */
   sort: TargetSort;
   /** Current editor view (controlled) */
   view: EditorView;
-  /** Fired (debounced 300ms) when search input changes */
-  onSearchChange: (query: string) => void;
-  /** Fired when filter set changes */
-  onFilterChange: (filters: TargetFilter[]) => void;
   /** Fired when sort mode changes */
   onSortChange: (sort: TargetSort) => void;
   /** Fired when view toggle is clicked */
@@ -36,15 +28,6 @@ export interface GlobalToolbarProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEBOUNCE_MS = 300;
-
-const FILTER_OPTIONS: { value: TargetFilter; label: string }[] = [
-  { value: 'unmapped', label: 'Unmapped' },
-  { value: 'warnings', label: 'Warnings' },
-  { value: 'required', label: 'Required' },
-  { value: 'arrays', label: 'Arrays' },
-];
-
 const SORT_OPTIONS: { value: TargetSort; label: string }[] = [
   { value: 'schema', label: 'Schema order' },
   { value: 'unmapped-first', label: 'Unmapped first' },
@@ -54,37 +37,6 @@ const SORT_OPTIONS: { value: TargetSort; label: string }[] = [
 const AUTO_MAP_TOOLTIP = 'AI-powered auto-mapping \u2014 available in a future release';
 
 // ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function FilterButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={[
-        'rounded px-2 py-1 text-xs font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-        active
-          ? 'bg-blue-600/30 text-blue-300 ring-1 ring-blue-500/50'
-          : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200',
-      ].join(' ')}
-    >
-      {label}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -92,68 +44,23 @@ function FilterButton({
  * GlobalToolbar — horizontal bar above the three-column layout.
  *
  * Provides:
- * - Debounced search input for filtering target fields
- * - Combinable filter toggles: Unmapped, Warnings, Required, Arrays
  * - Sort mode selector: Schema order, Unmapped first, Required first
  * - Disabled "Auto-map Section" button (placeholder for future AI feature)
+ * - Breadcrumb focus mode toggle
  * - View toggle: Target View / Rules View
  *
- * All state is controlled — the toolbar only emits change events.
+ * Search and filter chips have moved into TargetWorklist (internal state).
+ * All remaining state is controlled — the toolbar only emits change events.
  */
 export function GlobalToolbar({
-  searchQuery,
-  activeFilters,
   sort,
   view,
-  onSearchChange,
-  onFilterChange,
   onSortChange,
   onViewToggle,
   breadcrumbMode,
   onBreadcrumbModeToggle,
   className = '',
 }: GlobalToolbarProps) {
-  // Internal search input value — debounced before firing onSearchChange
-  const [inputValue, setInputValue] = useState(searchQuery);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Sync controlled value → local input when parent resets it
-  useEffect(() => {
-    setInputValue(searchQuery);
-  }, [searchQuery]);
-
-  const handleSearchInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      setInputValue(value);
-      if (debounceRef.current !== null) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        onSearchChange(value);
-      }, DEBOUNCE_MS);
-    },
-    [onSearchChange],
-  );
-
-  // Cleanup debounce on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current !== null) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  const handleFilterToggle = useCallback(
-    (filter: TargetFilter) => {
-      const current = new Set(activeFilters);
-      if (current.has(filter)) {
-        current.delete(filter);
-      } else {
-        current.add(filter);
-      }
-      onFilterChange(Array.from(current));
-    },
-    [activeFilters, onFilterChange],
-  );
-
   const handleSortChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       onSortChange(e.target.value as TargetSort);
@@ -173,47 +80,6 @@ export function GlobalToolbar({
         className,
       ].join(' ')}
     >
-      {/* Search input */}
-      <div className="relative flex items-center">
-        <Search
-          size={13}
-          className="pointer-events-none absolute left-2 text-slate-500"
-          aria-hidden="true"
-        />
-        <input
-          type="search"
-          role="searchbox"
-          aria-label="Search target fields"
-          data-testid="toolbar-search"
-          placeholder="Search fields\u2026"
-          value={inputValue}
-          onChange={handleSearchInput}
-          className="h-7 w-44 rounded border border-slate-700 bg-slate-800 pl-7 pr-2 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-      </div>
-
-      {/* Divider */}
-      <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
-
-      {/* Filter label */}
-      <span className="flex items-center gap-1 text-xs text-slate-500">
-        <Filter size={12} aria-hidden="true" />
-        <span className="sr-only">Filters:</span>
-      </span>
-
-      {/* Filter buttons */}
-      {FILTER_OPTIONS.map(({ value, label }) => (
-        <FilterButton
-          key={value}
-          label={label}
-          active={activeFilters.includes(value)}
-          onClick={() => handleFilterToggle(value)}
-        />
-      ))}
-
-      {/* Divider */}
-      <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
-
       {/* Sort selector */}
       <div className="flex items-center gap-1">
         <SortAsc size={13} className="text-slate-500" aria-hidden="true" />
