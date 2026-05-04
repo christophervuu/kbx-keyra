@@ -88,7 +88,7 @@ ui/src/
         tree-to-json-schema.ts Tree reconstruction + field counting utilities
         parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
 
-    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023)
       index.ts                Feature barrel (components + hooks + utilities)
       types.ts                TargetFilter, TargetSort, EditorView types
       components/
@@ -96,7 +96,7 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; onApply/onExpressionChange callbacks (FS-021 T-02)
+        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode; onApply/onExpressionChange callbacks (FS-021, FS-023)
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status
         ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
@@ -107,16 +107,27 @@ ui/src/
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
         RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics + debounced search/filter by target/expression/type; DnD disabled during active search)
-        ExpressionBuilderPanel.tsx  Rules View expression shell (mode toggle + composition)
+        ExpressionBuilderPanel.tsx  Rules View expression shell (mode toggle + composition); embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode (FS-023)
         RawDslEditor.tsx      Raw DSL textarea editor (overlay highlighting + autocomplete)
-        GuidedBuilder.tsx     Step-based builder (source -> transform -> arguments -> preview)
+        UnifiedExpressionBuilder.tsx Single-form multi-mode builder (Value / Conditional / Value Map) with live expression/result sections (FS-023)
+        SourceChipPicker.tsx  Value-mode source chip picker with search and static-value toggle (FS-023)
+        TransformPipeline.tsx  Value-mode ordered transform chain (add/remove/reorder) (FS-023)
+        TransformPipelineStep.tsx Value-mode single transform step card (auto-wired first param + dynamic additional params) (FS-023)
+        TransformFunctionPicker.tsx Value-mode categorized transform picker with search (FS-023)
+        ConditionalModeBuilder.tsx Conditional-mode IF/THEN/ELSE builder with grouped AND/OR conditions and nested else-if (FS-023)
+        ConditionRowEditor.tsx Conditional-mode single comparison row editor (FS-023)
+        BranchValueSelector.tsx Conditional/value-branch selector (static/source/expression/else-if) with depth cap messaging (FS-023)
+        ValueMapModeBuilder.tsx Value-map mode source + table + fallback builder (FS-023)
+        LiveExpressionDisplay.tsx Always-visible generated DSL display; click-to-edit handoff to editor mode (FS-023)
+        LiveResultDisplay.tsx Always-visible evaluated result display powered by useExpressionPreview (FS-023)
+        GuidedBuilder.tsx     Legacy step-based builder retained for non-FS-023 surfaces
         ExpressionPreview.tsx Live expression preview/result surface
         FunctionReferencePanel.tsx  Collapsible searchable DSL function reference
         AutocompleteDropdown.tsx    Portal dropdown for DSL autocomplete suggestions
       hooks/
         use-engine-validation.ts  Debounced engine validate() integration hook
         use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring); applyRule(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02)
-        use-expression-builder.ts  Rules View expression state orchestration + debounced commit
+        use-expression-builder.ts  Rules View expression orchestration + mode switch/decomposition flow (pipeline-decomposer first, legacy fallback) + debounced commit (FS-023)
         use-expression-preview.ts  Single-expression parse/evaluate preview hook
         use-dsl-autocomplete.ts    Context-aware DSL autocomplete state hook
         use-dsl-validation.ts      Inline parse diagnostics + editor error decorations
@@ -132,8 +143,11 @@ ui/src/
       lib/
         infer-rule-type.ts    Expression outer-function -> display label mapping
         dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
-        expression-generator.ts  Guided-builder state -> DSL expression generator
-        ast-decomposer.ts     Editor expression -> guided-builder decomposition utility
+        expression-builder-state.ts Discriminated union state model for UnifiedExpressionBuilder modes (Value/Conditional/ValueMap) (FS-023)
+        pipeline-expression-generator.ts Pure state -> DSL generator for UnifiedExpressionBuilder (FS-023)
+        pipeline-decomposer.ts DSL -> ExpressionBuilderState decomposer with mode auto-detection and failure reason (FS-023)
+        expression-generator.ts  Legacy guided-builder state -> DSL expression generator
+        ast-decomposer.ts     Legacy editor expression -> guided-builder decomposition utility
         autocomplete-utils.ts Context detection + suggestion filtering utilities
         suggest-source-fields.ts  Heuristic source field suggestions (exact/case/contains + type)
         truncate-expression.ts    Expression display truncation utility (max 60 chars)
@@ -442,7 +456,7 @@ When a target field is selected in Target View, the right panel renders based on
 | `object` | `ObjectSummaryPanel` |
 | `array` | `ArrayMappingBuilder` |
 
-`ScalarFieldBuilder` renders within the `ExpressionBuilderPanel` context — it owns its own GuidedBuilder/RawDslEditor mode toggle and drop zone, rather than relying on a standalone Panel 4 slot.
+`ScalarFieldBuilder` renders within the expression-panel context — it owns its own UnifiedExpressionBuilder/RawDslEditor mode toggle and drop zone, rather than relying on a standalone Panel 4 slot.
 
 ### Drag-and-Drop Pattern (HTML5 API)
 
@@ -719,19 +733,30 @@ FS-020 target-driven composition adds page-level state:
 4. `ScalarFieldBuilder` owns its own expression state and fires `onSave(targetPath, expression)` to the composition layer
 5. `handleSaveExpression` at composition level upserts the rule (update existing or add new)
 
-### Expression Builder Architecture (FS-011)
+### Expression Builder Architecture (FS-011, FS-023)
 
-The expression builder is a dual-mode authoring surface used in two contexts:
-- **Rules View:** `ExpressionBuilderPanel` (standalone panel, full feature set)
-- **Target View / scalar fields:** `ScalarFieldBuilder` embeds `GuidedBuilder` and `RawDslEditor` directly
+The expression builder is a dual-surface authoring system used in two contexts:
+- **Rules View:** `ExpressionBuilderPanel` (rule-selected panel)
+- **Target View / scalar fields:** `ScalarFieldBuilder` (target-selected panel)
+
+Both surfaces now use the same builder implementation in builder mode: `UnifiedExpressionBuilder`.
 
 #### Component hierarchy (Rules View)
 
 `ExpressionBuilderPanel`
 - mode toggle (Builder / Editor)
+- decomposition warning (`ComplexExpressionWarning`) when editor expression cannot hydrate builder
 - conditional main surface:
   - `RawDslEditor` (editor mode)
-  - `GuidedBuilder` (builder mode)
+  - `UnifiedExpressionBuilder` (builder mode)
+    - mode tabs: Value | Conditional | Value Map
+    - mode-specific content:
+      - Value mode: `SourceChipPicker` + `TransformPipeline` (`TransformPipelineStep[]` + `TransformFunctionPicker`)
+      - Conditional mode: `ConditionalModeBuilder` (`ConditionRowEditor[]`, nested groups, `BranchValueSelector`)
+      - Value Map mode: `ValueMapModeBuilder`
+    - shared always-visible sections:
+      - `LiveExpressionDisplay`
+      - `LiveResultDisplay`
 - `ExpressionPreview`
 - `FunctionReferencePanel`
 
@@ -742,17 +767,54 @@ The expression builder is a dual-mode authoring surface used in two contexts:
 - suggested sources (heuristic, up to 5)
 - mode toggle (Builder / Editor)
 - expression area (drop zone for DnD):
-  - `GuidedBuilder` (builder mode)
+  - `UnifiedExpressionBuilder` (builder mode)
   - `RawDslEditor` (editor mode)
 - disabled AI action buttons (placeholder)
-- save button (gated on `isValid && expression.trim()`)
+- apply button (gated on `isValid && expression.trim()`)
+
+#### State model
+
+`UnifiedExpressionBuilder` owns a discriminated union state model:
+
+`ExpressionBuilderState`
+- `mode: 'value'` — source selections + transform pipeline (+ optional static value)
+- `mode: 'conditional'` — condition tree + then/else branches
+- `mode: 'valueMap'` — input source + mapping rows + fallback
+
+The expression string is derived from state on each change and propagated upward through `onExpressionChange`.
+
+#### Expression generation
+
+- Canonical generator: `generateExpressionFromState(state)` (`pipeline-expression-generator.ts`)
+- Pattern: pure state -> DSL transform
+- Value mode uses nested wrapping semantics:
+  - innermost: source/static
+  - each transform wraps prior output
+  - final string matches pipeline order
+- Conditional mode generates `if(condition, then, else)` with nested `if()` for else-if branches
+- Value Map mode generates `valueMap(source("field"), {...}, fallback)`
+
+#### Expression decomposition
+
+- Canonical decomposer: `decomposeExpression(expression)` (`pipeline-decomposer.ts`)
+- Pattern: DSL string -> `ExpressionBuilderState` or failure reason
+- Mode auto-detection from outer AST structure:
+  - `if(...)` -> conditional mode
+  - `valueMap(...)` -> value-map mode
+  - transform/source pipeline -> value mode
+- Failure path: remain in editor mode and show warning banner ("Complex expression -- edit in Editor mode.")
 
 #### Hook contracts
 
 - `useExpressionBuilder()`
   - Inputs: `selectedRuleIndex`, `rules`, `updateRule`, `parsedSourceSchema`
-  - Outputs: mode state, expression state, switch handlers, decomposition warning state, parse validity/decorations, flush commit API
-  - Responsibilities: load selected-rule expression, preserve local in-progress edits, debounce valid commits
+  - Outputs: mode state, expression state, switch handlers, decomposition warning state, parse validity/decorations, flush commit API, and decomposition hydration state
+  - Responsibilities:
+    - load selected-rule expression
+    - preserve local in-progress edits
+    - debounce valid commits
+    - Builder/Editor toggle orchestration
+    - editor->builder decomposition using `pipeline-decomposer.ts` first, with legacy fallback for compatibility
 
 - `useExpressionPreview()`
   - Inputs: expression + optional sample data/context
@@ -764,10 +826,10 @@ The expression builder is a dual-mode authoring surface used in two contexts:
 
 #### Mode-toggle rules
 
-- Builder -> Editor: direct projection of current expression string into raw editor (no decomposition required)
-- Editor -> Builder: attempt AST decomposition (`ast-decomposer.ts`)
-  - success: hydrate guided-builder initial state
-  - failure: stay in editor mode and surface `ComplexExpressionWarning`
+- Builder -> Editor: direct projection of current generated expression string into raw editor
+- Editor -> Builder: decomposition attempt via pipeline decomposer
+  - success: hydrate builder state + auto-switch to detected mode (Value / Conditional / Value Map)
+  - failure: stay in editor mode + surface `ComplexExpressionWarning`
 
 #### Raw editor overlay pattern
 
@@ -796,8 +858,8 @@ Function metadata is provided by static shared data in `ui/src/lib/data/dsl-func
 #### Cross-panel integration points
 
 - **Target Worklist → Right Panel:** node selection controls which builder renders and which expression is loaded/edited
-- **Source Panel → ScalarFieldBuilder:** drag-and-drop or click-to-stage inserts `source("path")` into the active expression slot
-- **Source Panel → ExpressionBuilderPanel (Rules View):** `expressionBuilderRef.insertSourceField(path)` inserts into the active expression
+- **Source Panel → ScalarFieldBuilder:** drag-and-drop or click-to-stage inserts `source("path")` into the active expression slot in editor mode, and in builder mode feeds the UnifiedExpressionBuilder source flow
+- **Source Panel → ExpressionBuilderPanel (Rules View):** `expressionBuilderRef.insertSourceField(path)` inserts into active expression flow (editor direct insertion; builder-mode source flow handled by UnifiedExpressionBuilder)
 
 State management note:
 

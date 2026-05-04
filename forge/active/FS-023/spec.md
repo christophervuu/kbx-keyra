@@ -18,6 +18,7 @@ Owner: @christophervuu
 Reviewers: TBD
 Created: 2026-05-04
 Last Updated: 2026-05-04
+
 Type: ui
 
 ---
@@ -30,7 +31,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -196,16 +197,16 @@ Key limitation: the current `BuilderState` model is a single function call with 
 
 **Value Mode (default):**
 
-1. **Source section:** A chip-based multi-select with a search input to pick source fields from the parsed source schema. A "Use a static value instead" toggle switches to a text/number/boolean input. When exactly 1 source field is selected and no transforms are added, a **"Direct Copy"** shortcut button appears that immediately generates `source("fieldPath")` and can be applied with one click.
-2. **Transform section:** Below the source section, a **transform pipeline** displays as a vertical list of numbered steps. Initially empty. The user clicks **[+ Add Transformation]** to open the function picker (categorized: String, Date & Time, Math, Conditional, Lookup, Array, Null Handling, Type Conversion — with search). After selecting a function, a new step appears showing: step number, function name, auto-wired value parameter (from previous step output or source), and editable additional parameter inputs (labeled, typed, with required/optional indicators). Each step can be drag-reordered or removed (x button). The first parameter of each transform is always auto-filled from the previous step's output — it is read-only and visually distinct. Additional parameters (e.g., `start`, `end` for `substring`; `search`, `replacement` for `replaceAll`) appear as labeled input fields.
+1. **Source section:** A chip-based multi-select with a search input to pick source fields from the parsed source schema. A "Use a static value instead" toggle switches to a text/number/boolean input. When exactly 1 source field is selected and no transforms are added, a **"Direct Copy"** shortcut button appears. Clicking Direct Copy **auto-applies** the rule immediately (fires `onApply` with `source("fieldPath")`), shows a brief toast confirmation ("Direct copy applied"), and advances focus to the next unmapped target field. No separate Apply click is needed.
+2. **Transform section:** Below the source section, a **transform pipeline** displays as a vertical list of numbered steps. Initially empty. The user clicks **[+ Add Transformation]** to open the function picker (categorized: String, Date & Time, Math, Conditional, Lookup, Array, Null Handling, Type Conversion — with search). After selecting a function, a new step appears showing: step number, function name, auto-wired value parameter (from previous step output or source), and editable additional parameter inputs (labeled, typed, with required/optional indicators). Each step can be drag-reordered or removed (x button). The first parameter of each transform is always auto-filled from the previous step's output — it is displayed as a **labeled read-only field** (e.g., `value: <- from source` or `value: <- from step 1`) with a grayed-out/locked style, maintaining visual consistency with other parameter fields while being clearly non-editable. Additional parameters (e.g., `start`, `end` for `substring`; `search`, `replacement` for `replaceAll`) appear as labeled editable input fields.
 3. **Live Expression:** Always visible below the transform chain. Updates in real-time as form fields change. Shows the generated DSL string. Clickable — clicking it switches to Editor mode with the expression pre-filled.
 4. **Live Result:** Below the expression. If test data is loaded in the preview strip, shows the actual evaluated output value. If not, shows "Load test data to see live results."
 
 **Conditional Mode:**
 
-1. **Condition section:** A form-based Boolean builder with: left operand (source field picker or expression input), comparison operator dropdown (equals, not equal, greater than, less than, greater or equal, less or equal, contains, is null, is not null), right operand (typed input, source field, or expression). For compound conditions, **[+ Add condition]** appends another row with an AND/OR toggle.
+1. **Condition section:** A form-based Boolean builder with: left operand (source field picker or expression input), comparison operator dropdown (equals, not equal, greater than, less than, greater or equal, less or equal, contains, is null, is not null), right operand (typed input, source field, or expression). For compound conditions, **[+ Add condition]** appends another row within the same logical group. Each condition group enforces a single logical operator (AND or OR) — all conditions in a group share the same operator, selected via an AND/OR toggle above the group. To mix AND/OR logic, the user creates a **nested group** (e.g., "ALL of: [condition A, ANY of: [condition B, condition C]]"), which generates clean unambiguous DSL: `and(condA, or(condB, condC))`.
 2. **Then branch:** a value selector that can be: static value input, source field picker, or "Build expression..." that opens an inline mini-builder (same Source + Transform UI, nested within the branch).
-3. **Else branch:** same options as Then, plus an additional option to "Add else-if condition" which nests another conditional (recursive).
+3. **Else branch:** same options as Then, plus an additional option to "Add else-if condition" which nests another conditional (recursive). The form supports up to **5 else-if levels** (6 total branches). Beyond 5 levels, an info message reads: "For more than 5 conditions, consider using a Value Map or switch to Editor mode."
 4. **Live Expression and Live Result:** Same as Value mode.
 
 **Value Map Mode:**
@@ -222,7 +223,7 @@ Key limitation: the current `BuilderState` model is a single function call with 
 - AI action buttons (**Suggest**, **Explain**, **Fix**) remain at the bottom as disabled placeholders.
 - **[Apply]** button at the bottom-right. Enabled when the expression is non-empty and valid.
 
-**Direct Copy fast path:** User selects a source field -> clicks "Direct Copy" -> expression is generated and applied. This is the fastest path for simple field copying (estimated ~50% of rules).
+**Direct Copy fast path:** User selects a source field -> clicks "Direct Copy" -> rule is auto-applied (fires `onApply`), toast shows "Direct copy applied", focus advances to the next unmapped target field. This is the zero-friction path for simple field copying (estimated ~50% of rules). The two-tier save model means this is not persisted until the user explicitly Saves — if they made a mistake, they can click the target field again and overwrite.
 
 ### System Behavior
 
@@ -237,7 +238,7 @@ type ExpressionBuilderState =
 
 **Expression Generation:** A new `generateExpressionFromState(state: ExpressionBuilderState): string` pure function converts the state model to a DSL expression string. For Value mode, it wraps source fields in transform functions as a nested pipeline (innermost = source, outermost = last transform). For Conditional mode, it generates `if(condition, then, else)` with nested `if()` for else-if chains. For Value Map mode, it generates `valueMap(source("field"), { "key": "value", ... }, fallback)`.
 
-**Expression Decomposition:** A new `decomposeExpression(expression: string): DecompositionResult` function parses a DSL expression and attempts to map it into the `ExpressionBuilderState` model. It detects the expression type (value/conditional/valueMap) from the outer function structure. If decomposition fails (unsupported nesting, unknown patterns), it returns `{ success: false, reason: "..." }` and the UI shows "Complex expression -- edit in Editor mode."
+**Expression Decomposition:** A new `decomposeExpression(expression: string): DecompositionResult` function parses a DSL expression and attempts to map it into the `ExpressionBuilderState` model. It **auto-detects the expression type mode** from the outer function structure: `if()` outer call -> Conditional mode, `valueMap()` outer call -> Value Map mode, pipeline of transforms wrapping `source()` -> Value mode. If decomposition fails (unsupported nesting, unknown patterns), it returns `{ success: false, reason: "..." }` and the UI shows "Complex expression -- edit in Editor mode." For expressions that don't cleanly map to any mode but are simple enough to represent (e.g., a single `source()` call), the decomposer defaults to Value mode.
 
 **Transform Parameter Derivation:** When a transform function is selected, its parameter form fields are derived from `DSL_FUNCTION_CATALOG`. The first parameter (typically named `value`) is auto-wired from the pipeline's previous step output and displayed as read-only. Remaining parameters are rendered as editable input fields with labels from `parameter.name`, type hints from `parameter.type`, and required/optional indicators from `parameter.required`.
 
@@ -245,7 +246,7 @@ type ExpressionBuilderState =
 
 **Mode toggle (Builder <-> Editor):**
 - Builder -> Editor: generate expression string from current state and populate the raw editor.
-- Editor -> Builder: run decomposition. On success, hydrate the builder state. On failure, remain in Editor mode and show the complex expression warning.
+- Editor -> Builder: run decomposition. On success, hydrate the builder state and **auto-switch to the detected mode** (Value, Conditional, or Value Map). On failure, remain in Editor mode and show the complex expression warning banner.
 
 **Panel parity:** `ScalarFieldBuilder` (Target View) and `ExpressionBuilderPanel` (Rules View) both render the same `UnifiedExpressionBuilder` component. The only difference is the header/wrapper — `ScalarFieldBuilder` adds the target field header and suggested sources section above the builder.
 
@@ -264,7 +265,7 @@ type ExpressionBuilderState =
 
 ## Acceptance Examples
 
-### AE-01 -- Direct Copy shortcut (one-click)
+### AE-01 -- Direct Copy shortcut (auto-apply)
 
 **Given**
 - The builder is in Value mode.
@@ -275,8 +276,9 @@ type ExpressionBuilderState =
 - The user clicks the "Direct Copy" button.
 
 **Then**
-- The Live Expression displays `source("email")`.
-- The expression is valid and the Apply button is enabled.
+- `onApply` is fired immediately with expression `source("email")`.
+- A brief toast/flash confirmation shows: "Direct copy applied".
+- Focus advances to the next unmapped target field in the worklist.
 
 ### AE-02 -- Transform pipeline with two steps
 
@@ -344,6 +346,24 @@ type ExpressionBuilderState =
 **Then**
 - The Live Expression displays: `if(eq(source("priority"), "high"), "1", if(eq(source("priority"), "medium"), "2", "3"))`.
 
+### AE-15 -- Compound condition with nested group (mixed AND/OR)
+
+**Given**
+- The builder is in Conditional mode.
+- Primary condition group is set to "ALL of" (AND).
+- First condition: source("amount") greater than 1000.
+- User adds a nested group (ANY of / OR) containing:
+  - source("channel") equals "web"
+  - source("channel") equals "mobile"
+- Then branch: static "approved".
+- Else branch: static "pending".
+
+**When**
+- All fields are filled.
+
+**Then**
+- The Live Expression displays: `if(and(gt(source("amount"), 1000), or(eq(source("channel"), "web"), eq(source("channel"), "mobile"))), "approved", "pending")`.
+
 ### AE-06 -- Value Map mode
 
 **Given**
@@ -382,7 +402,7 @@ type ExpressionBuilderState =
 **Then**
 - The Live Result section shows: "Load test data to see live results."
 
-### AE-09 -- Editor to Builder decomposition (success)
+### AE-09 -- Editor to Builder decomposition (success with mode auto-detect)
 
 **Given**
 - The user is in Editor mode with expression: `upper(trim(source("name")))`.
@@ -391,10 +411,24 @@ type ExpressionBuilderState =
 - The user switches to Builder mode.
 
 **Then**
-- The builder populates in Value mode with:
+- The builder populates in **Value mode** (auto-detected from pipeline structure) with:
   - Source: `name` field selected
   - Transform step 1: `trim` (value auto-wired from source)
   - Transform step 2: `upper` (value auto-wired from step 1)
+
+### AE-16 -- Editor to Builder decomposition (conditional auto-detect)
+
+**Given**
+- The user is in Editor mode with expression: `if(gt(source("amount"), 100), "high", "low")`.
+
+**When**
+- The user switches to Builder mode.
+
+**Then**
+- The builder populates in **Conditional mode** (auto-detected from `if()` outer call) with:
+  - Condition: source("amount") greater than 100
+  - Then: static "high"
+  - Else: static "low"
 
 ### AE-10 -- Editor to Builder decomposition (failure)
 
@@ -464,12 +498,16 @@ type ExpressionBuilderState =
 
 ## Open Questions
 
-- `Q1.` Should the Direct Copy button auto-apply (fire onApply immediately) or just generate the expression and leave it for the user to click Apply? Drafted as generating + enabling Apply, not auto-applying. Auto-apply could further reduce clicks but may surprise users.
-- `Q2.` For the transform pipeline auto-wiring, should the first parameter name be displayed (e.g., "value: source('email')") or just shown as a visual connection line? Drafted as labeled read-only field for clarity.
-- `Q3.` How should the Conditional mode handle compound conditions with mixed AND/OR? Should it enforce grouping (all ANDs or all ORs per group), or allow free mixing? Drafted as grouped -- all conditions in a group share the same logical operator, with the ability to nest groups.
-- `Q4.` Should the expression type mode be auto-detected when loading an existing expression (e.g., auto-switch to Conditional mode if the expression is an `if()` call)? Drafted as yes -- decomposition detects the mode from the outer function.
-- `Q5.` Maximum nesting depth for else-if chains in the Conditional builder? The current `ast-decomposer.ts` limits to 3 levels. Should the new builder enforce a similar limit? Drafted as allowing arbitrary depth in the form but capping decomposition at 5 levels.
-- `Q6.` Should the function picker show a "Recently used" section? This would require persisting usage data. Drafted as out of scope for this iteration.
+- none
+
+### Resolved Decisions (from Rev 1 questions)
+
+- **Direct Copy auto-applies** (was Q1): Clicking Direct Copy fires `onApply` immediately, shows a toast confirmation, and advances focus. The user's intent is unambiguous for a simple `source("field")` copy. The two-tier save model ensures nothing is persisted until explicit Save.
+- **Labeled read-only field for auto-wired parameter** (was Q2): The first parameter displays as `value: <- from source` (or `value: <- from step N`) in a labeled, grayed-out field. This makes data flow explicit without requiring users to interpret a new visual metaphor.
+- **Compound conditions are grouped (enforced)** (was Q3): Each condition group shares a single logical operator (AND or OR). To mix operators, users create nested groups (e.g., "ALL of: [A, ANY of: [B, C]]"). This prevents operator precedence ambiguity and generates clean DSL (`and(a, or(b, c))`).
+- **Mode auto-detection on load** (was Q4): The decomposer detects expression type from AST structure (`if()` -> Conditional, `valueMap()` -> Value Map, pipeline -> Value). Fallback for undecomposable expressions: stay in Editor mode with warning.
+- **5-level cap for else-if chains** (was Q5): The form allows up to 5 else-if levels (6 total branches). Beyond 5 levels, an info message nudges toward Value Map mode or raw Editor. This covers the vast majority of real conditional logic while keeping the UI readable.
+- **"Recently used" functions deferred** (was Q6): Out of scope. The categorized list with search is sufficient for v1. Revisit based on user feedback.
 
 ---
 
@@ -514,5 +552,17 @@ Sequencing: T-01 and T-02 are independent and can be parallelized. T-03 depends 
 
 ## Change Log
 
+- Rev 2 -- 2026-05-04
+  - Resolved all 6 open questions with decisions:
+    - Direct Copy now auto-applies (fires onApply immediately + toast + focus advance) — AE-01 updated
+    - Labeled read-only field confirmed for auto-wired parameter display
+    - Compound conditions enforced as grouped (single operator per group, nested groups for mixing) — AE-15 added
+    - Mode auto-detection confirmed: decomposer detects Value/Conditional/ValueMap from AST — AE-16 added
+    - 5-level cap for else-if nesting with info message nudging to Value Map or Editor
+    - "Recently used" functions confirmed out of scope
+  - Added AE-15 (compound condition with nested group)
+  - Added AE-16 (conditional mode auto-detection from Editor)
+  - Updated Proposed Behavior sections to reflect resolved decisions
+  - Moved Open Questions to "Resolved Decisions" section
 - Rev 1 -- 2026-05-04
   - Initial draft

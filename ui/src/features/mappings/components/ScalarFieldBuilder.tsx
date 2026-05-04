@@ -5,7 +5,7 @@
  * Target Worklist. Provides:
  *   - Header: target path, type badge, required/optional label, mapping status
  *   - Suggested Sources: client-side heuristic suggestions from parsed source schema
- *   - Expression Builder: GuidedBuilder (default) or RawDslEditor (toggle)
+ *   - Expression Builder: UnifiedExpressionBuilder (default) or RawDslEditor (toggle)
  *   - AI Action buttons: placeholder (Coming soon tooltip)
  *   - Save button: enabled only when expression is non-empty and valid
  *
@@ -15,8 +15,7 @@
 import { Lightbulb, Sparkles, Wand2, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { GuidedBuilder } from './GuidedBuilder';
-import type { GuidedBuilderRef } from './GuidedBuilder';
+import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
@@ -179,7 +178,6 @@ export function ScalarFieldBuilder({
   }, []);
 
   const rawDslRef = useRef<RawDslEditorRef>(null);
-  const guidedBuilderRef = useRef<GuidedBuilderRef>(null);
 
   // Reset expression when target field changes (don't notify parent — it's a reset)
   useEffect(() => {
@@ -197,12 +195,10 @@ export function ScalarFieldBuilder({
 
   const handleInsertSourceField = useCallback(
     (path: string) => {
-      const snippet = `source("${path}")`;
       if (mode === 'editor') {
-        rawDslRef.current?.insertText(snippet);
-      } else {
-        guidedBuilderRef.current?.insertSourceField(path);
+        rawDslRef.current?.insertText(`source("${path}")`);
       }
+      // In builder mode, UnifiedExpressionBuilder manages its own state
     },
     [mode],
   );
@@ -323,11 +319,13 @@ export function ScalarFieldBuilder({
           </div>
         ) : (
           <div data-testid="expression-builder-slot">
-            <GuidedBuilder
-              ref={guidedBuilderRef}
+            <UnifiedExpressionBuilder
               expression={expression}
               onExpressionChange={handleExpressionChange}
+              onApply={onApply}
+              selectedTargetPath={selectedTargetPath}
               parsedSourceSchema={parsedSourceSchema}
+              onSwitchToEditor={() => { setMode('editor'); }}
             />
           </div>
         )}

@@ -19,6 +19,27 @@ export { decomposeExpression, BUILDER_SUPPORTED_FUNCTIONS } from './ast-decompos
 export type { DecompositionResult } from './ast-decomposer';
 export { computeVersionDiff, generateChangeSummary } from './version-diff';
 export type { RuleDiff, ConfigDiff, VersionDiff } from './version-diff';
+export type {
+  PrimitiveValue,
+  SourceSelection,
+  TransformParameterValue,
+  TransformStep,
+  ValueModeState,
+  StaticValue,
+  Operand,
+  ComparisonOperator,
+  ConditionRow,
+  ConditionGroup,
+  ConditionalModeState,
+  BranchValue,
+  ValueMapEntry,
+  FallbackValue,
+  ValueMapModeState,
+  ExpressionBuilderState,
+} from './expression-builder-state';
+export { generateExpressionFromState } from './pipeline-expression-generator';
+export { decomposeExpression as decomposeExpressionFromState } from './pipeline-decomposer';
+export type { PipelineDecompositionResult } from './pipeline-decomposer';
 export { truncateExpression } from './truncate-expression';
 export { suggestSourceFields } from './suggest-source-fields';
 export type { SuggestedField, MatchKind } from './suggest-source-fields';

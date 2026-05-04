@@ -255,8 +255,24 @@ ui/
           ExpressionBuilderPanel.test.tsx Component tests (12 tests: empty state, mode toggle, slots, unsaved indicator, decomposition warning, stay/try actions)
           ExpressionPreviewStep.tsx  Step 4 preview: syntax-highlighted expression (tokenizeDsl), validation status indicator, "Use Expression" + "Copy" buttons, evaluation placeholder (T-06)
           ExpressionPreviewStep.test.tsx Component tests (8 tests: highlighting, valid/invalid status, button states, copy, placeholder)
-          GuidedBuilder.tsx          Guided expression builder orchestrator: 4-step flow (source→transform→args→preview), forwardRef GuidedBuilderRef.insertSourceField(), direct copy + static value shortcuts (T-05); Step 3 ArgumentConfigurator + Step 4 ExpressionPreviewStep, generateExpression + parse validation (T-06); array context detection + map()/filter() routing to ObjectTemplateBuilder/ConditionBuilder (T-07)
+          GuidedBuilder.tsx          Guided expression builder orchestrator: 4-step flow (source→transform→args→preview), forwardRef GuidedBuilderRef.insertSourceField(), direct copy + static value shortcuts (T-05); Step 3 ArgumentConfigurator + Step 4 ExpressionPreviewStep, generateExpression + parse validation (T-06); array context detection + map()/filter() routing to ObjectTemplateBuilder/ConditionBuilder (T-07) — replaced by UnifiedExpressionBuilder in FS-023 T-07
           GuidedBuilder.test.tsx     Component tests (18 tests: step flow, shortcuts, ref API, back navigation)
+          UnifiedExpressionBuilder.tsx  FS-023 single-form multi-mode builder shell: mode tabs, confirmation dialog, Value mode source section, Direct Copy (T-03); transform pipeline wired (T-04); ConditionalModeBuilder wired (T-05); ValueMapModeBuilder wired (T-06); LiveExpressionDisplay + LiveResultDisplay wired (T-07)
+          UnifiedExpressionBuilder.test.tsx  FS-023 component tests (23 tests: mode tabs, mode switch confirmation, source chip picker, static toggle, Direct Copy)
+          SourceChipPicker.tsx         FS-023 chip-based multi-select source field picker with search, static value toggle (T-03)
+          TransformFunctionPicker.tsx  FS-023 categorized function picker popover for pipeline (T-04): search, category accordions, SourceAccess excluded
+          TransformPipeline.tsx        FS-023 ordered transform step list with add/remove/reorder controls and function picker integration (T-04)
+          TransformPipeline.test.tsx   FS-023 component tests (24 tests: picker, pipeline CRUD, reorder AE-12, AE-02, AE-03 integration)
+          TransformPipelineStep.tsx    FS-023 single transform step card: auto-wired param, dynamic additional params, up/down/remove (T-04)
+          ConditionRowEditor.tsx       FS-023 single condition row: left operand input, operator dropdown, right operand input (hidden for isNull/isNotNull) (T-05)
+          BranchValueSelector.tsx      FS-023 branch kind selector (Static/Field/Else-if); depth cap at 5 shows info nudge; receives ConditionalModeBuilder as render prop to avoid circular import (T-05)
+          ConditionalModeBuilder.tsx   FS-023 IF/THEN/ELSE conditional form: ConditionGroupEditor (recursive AND/OR groups), BranchValueSelector for then/else; nested else-if up to depth 5 (T-05)
+          ConditionalModeBuilder.test.tsx  FS-023 component tests (24 tests: structure, operators, compound conditions, branch selector, depth cap, expression generation AE-04/05/15, integration)
+          ValueMapModeBuilder.tsx      FS-023 Value Map mode: single-select source picker, editable when→mapTo table, fallback (null or specific value); incomplete rows shown with warning icon and skipped in DSL (T-06)
+          ValueMapModeBuilder.test.tsx FS-023 component tests (25 tests: structure, source picker, mapping table CRUD, fallback, expression generation AE-06, integration)
+          LiveExpressionDisplay.tsx    FS-023 always-visible generated DSL expression with syntax highlighting; click-to-edit fires onSwitchToEditor; empty placeholder when no expression (T-07)
+          LiveResultDisplay.tsx        FS-023 evaluated expression result display; "Load test data" prompt when sourceData null (AE-08); uses useExpressionPreview (T-07)
+          LiveExpressionDisplay.test.tsx  FS-023 component tests (22 tests: LiveExpressionDisplay, LiveResultDisplay, ScalarFieldBuilder integration AE-07/08/09/10/11/16, decomposer integration)
           ObjectTemplateBuilder.tsx  Key-value pair editor for map() object template: add/remove pairs, key text inputs, ArgumentSlot value slots in array context (T-07)
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
@@ -324,6 +340,12 @@ ui/
           dsl-tokenizer.test.ts      Tokenizer unit tests (17 tests: all token types, edge cases, bracket matching)
           expression-generator.ts    Pure DSL generation from BuilderState: generateExpression(), makeSourceArg/makeLiteralArg/makeNestedArg helpers, BuilderArgument, BuilderState types (T-06)
           expression-generator.test.ts Unit tests (14 tests: direct copy, static types, concat, nested functions, escaping)
+          expression-builder-state.ts  FS-023 expression-builder state model types (Value/Conditional/ValueMap modes)
+          pipeline-expression-generator.ts  FS-023 pure state→DSL generator for unified expression builder
+          pipeline-decomposer.ts        FS-023 DSL→ExpressionBuilderState decomposer with mode auto-detection (AE-09/10/16)
+          __tests__/
+            pipeline-expression-generator.test.ts  FS-023 unit tests for state→DSL generation across AE-01/02/03/04/05/06/14/15
+            pipeline-decomposer.test.ts  FS-023 unit tests for DSL→state decomposition (28 tests: pipeline, conditional, valueMap, failures, roundtrips)
           autocomplete-utils.ts      detectAutocompleteContext(), flattenSchemaPaths(), filterSuggestions(); AutocompleteContext, SchemaPathEntry types (T-03)
           autocomplete-utils.test.ts Utility unit tests (25 tests: context detection for all kinds, schema flattening, prefix filtering)
           infer-rule-type.ts         Maps outermost expression function name to display label

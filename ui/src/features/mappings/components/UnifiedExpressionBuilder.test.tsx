@@ -1,0 +1,308 @@
+import { render, screen, fireEvent, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+
+import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
+import type { ParsedSchema } from '@/lib/types/domain';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const MOCK_SCHEMA: ParsedSchema = {
+  format: 'json-schema',
+  totalFieldCount: 3,
+  parseTimeMs: 1,
+  inferred: false,
+  nodes: [
+    {
+      path: 'email',
+      fieldName: 'email',
+      type: 'string',
+      depth: 0,
+      isArray: false,
+      isRequired: true,
+      parentPath: null,
+      childCount: 0,
+      children: [],
+    },
+    {
+      path: 'name',
+      fieldName: 'name',
+      type: 'string',
+      depth: 0,
+      isArray: false,
+      isRequired: true,
+      parentPath: null,
+      childCount: 0,
+      children: [],
+    },
+    {
+      path: 'age',
+      fieldName: 'age',
+      type: 'number',
+      depth: 0,
+      isArray: false,
+      isRequired: false,
+      parentPath: null,
+      childCount: 0,
+      children: [],
+    },
+  ],
+};
+
+function renderBuilder(overrides: Partial<React.ComponentProps<typeof UnifiedExpressionBuilder>> = {}) {
+  const defaults: React.ComponentProps<typeof UnifiedExpressionBuilder> = {
+    expression: '',
+    onExpressionChange: vi.fn(),
+    onApply: vi.fn(),
+    selectedTargetPath: 'target.field',
+    parsedSourceSchema: MOCK_SCHEMA,
+  };
+  return {
+    ...render(<UnifiedExpressionBuilder {...defaults} {...overrides} />),
+    onExpressionChange: (overrides.onExpressionChange ?? defaults.onExpressionChange) as ReturnType<typeof vi.fn>,
+    onApply: (overrides.onApply ?? defaults.onApply) as ReturnType<typeof vi.fn>,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mode tabs
+// ---------------------------------------------------------------------------
+
+describe('UnifiedExpressionBuilder — mode tabs', () => {
+  it('renders 3 mode tabs: Value, Conditional, Value Map', () => {
+    renderBuilder();
+    expect(screen.getByTestId('mode-tab-value')).toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-conditional')).toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-valueMap')).toBeInTheDocument();
+  });
+
+  it('Value tab is selected by default', () => {
+    renderBuilder();
+    expect(screen.getByTestId('mode-tab-value')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('mode-tab-conditional')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByTestId('mode-tab-valueMap')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('clicking Conditional tab with empty state switches immediately', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('mode-tab-conditional'));
+    expect(screen.getByTestId('mode-tab-conditional')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('conditional-mode-placeholder')).toBeInTheDocument();
+  });
+
+  it('clicking Value Map tab with empty state switches immediately', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('mode-tab-valueMap'));
+    expect(screen.getByTestId('mode-tab-valueMap')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('value-map-mode-placeholder')).toBeInTheDocument();
+  });
+
+  it('clicking the already-active tab does nothing', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('mode-tab-value'));
+    expect(screen.getByTestId('mode-tab-value')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mode switch confirmation (AE-13)
+// ---------------------------------------------------------------------------
+
+describe('UnifiedExpressionBuilder — mode switch confirmation', () => {
+  async function selectSourceField(user: ReturnType<typeof userEvent.setup>, fieldPath: string) {
+    const input = screen.getByTestId('source-search-input');
+    await user.click(input);
+    const suggestion = await screen.findByTestId(`suggestion-${fieldPath}`);
+    await user.click(suggestion);
+  }
+
+  it('shows confirmation dialog when switching mode with non-empty state (AE-13)', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await selectSourceField(user, 'email');
+    await user.click(screen.getByTestId('mode-tab-conditional'));
+    expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument();
+    expect(screen.getByText(/switching modes will reset/i)).toBeInTheDocument();
+  });
+
+  it('confirming mode switch resets state and switches mode', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await selectSourceField(user, 'email');
+    await user.click(screen.getByTestId('mode-tab-conditional'));
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
+    expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-conditional')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('conditional-mode-placeholder')).toBeInTheDocument();
+  });
+
+  it('cancelling mode switch preserves state and stays on current mode', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await selectSourceField(user, 'email');
+    await user.click(screen.getByTestId('mode-tab-conditional'));
+    await user.click(screen.getByTestId('confirm-dialog-cancel'));
+    expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-value')).toHaveAttribute('aria-selected', 'true');
+    // The chip should still be there
+    expect(screen.getByText('email')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SourceChipPicker integration
+// ---------------------------------------------------------------------------
+
+describe('UnifiedExpressionBuilder — source chip picker', () => {
+  it('renders source search input in value mode', () => {
+    renderBuilder();
+    expect(screen.getByTestId('source-search-input')).toBeInTheDocument();
+  });
+
+  it('shows suggestions when search input is focused', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('source-search-input'));
+    expect(screen.getByTestId('source-suggestions')).toBeInTheDocument();
+  });
+
+  it('clicking a suggestion adds it as a chip', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    expect(screen.getByTestId('selected-sources')).toBeInTheDocument();
+    expect(screen.getByText('email')).toBeInTheDocument();
+  });
+
+  it('clicking x on a chip removes it', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    const removeBtn = screen.getByRole('button', { name: /remove source email/i });
+    await user.click(removeBtn);
+    expect(screen.queryByTestId('selected-sources')).not.toBeInTheDocument();
+  });
+
+  it('search filters suggestions by query', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    const input = screen.getByTestId('source-search-input');
+    await user.click(input);
+    await user.type(input, 'em');
+    expect(screen.getByTestId('suggestion-email')).toBeInTheDocument();
+    expect(screen.queryByTestId('suggestion-name')).not.toBeInTheDocument();
+  });
+
+  it('fires onExpressionChange when a source is selected', async () => {
+    const user = userEvent.setup();
+    const onExpressionChange = vi.fn();
+    renderBuilder({ onExpressionChange });
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    expect(onExpressionChange).toHaveBeenCalledWith('source("email")');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Static value toggle (AE-14)
+// ---------------------------------------------------------------------------
+
+describe('UnifiedExpressionBuilder — static value toggle', () => {
+  it('clicking "Use a static value instead" shows static value input', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('static-mode-toggle'));
+    expect(screen.getByTestId('static-value-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-search-input')).not.toBeInTheDocument();
+  });
+
+  it('clicking "← Use source field instead" returns to field picker', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('static-mode-toggle'));
+    await user.click(screen.getByTestId('static-mode-toggle'));
+    expect(screen.getByTestId('source-search-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('static-value-input')).not.toBeInTheDocument();
+  });
+
+  it('static value input generates static() expression (AE-14)', async () => {
+    const user = userEvent.setup();
+    const onExpressionChange = vi.fn();
+    renderBuilder({ onExpressionChange });
+    await user.click(screen.getByTestId('static-mode-toggle'));
+    const input = screen.getByRole('textbox', { name: /static string value/i });
+    await user.clear(input);
+    await user.type(input, 'hello');
+    // Last call should be static("hello")
+    const calls = onExpressionChange.mock.calls;
+    const lastCall = calls[calls.length - 1][0] as string;
+    expect(lastCall).toBe('static("hello")');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Direct Copy button (AE-01)
+// ---------------------------------------------------------------------------
+
+describe('UnifiedExpressionBuilder — Direct Copy button', () => {
+  it('Direct Copy button is hidden when no source is selected', () => {
+    renderBuilder();
+    expect(screen.queryByTestId('direct-copy-btn')).not.toBeInTheDocument();
+  });
+
+  it('Direct Copy button appears when exactly 1 source is selected', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    expect(screen.getByTestId('direct-copy-btn')).toBeInTheDocument();
+  });
+
+  it('Direct Copy button is hidden when 2 sources are selected', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    // Select first source
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    // Type a character to re-open dropdown and show remaining suggestions
+    const input = screen.getByTestId('source-search-input');
+    await user.type(input, 'n');
+    await user.click(screen.getByTestId('suggestion-name'));
+    expect(screen.queryByTestId('direct-copy-btn')).not.toBeInTheDocument();
+  });
+
+  it('clicking Direct Copy fires onApply with source("email") (AE-01)', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn();
+    renderBuilder({ onApply, selectedTargetPath: 'target.email' });
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    await user.click(screen.getByTestId('direct-copy-btn'));
+    expect(onApply).toHaveBeenCalledWith('target.email', 'source("email")');
+  });
+
+  it('clicking Direct Copy shows toast confirmation', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('source-search-input'));
+    await user.click(screen.getByTestId('suggestion-email'));
+    await user.click(screen.getByTestId('direct-copy-btn'));
+    expect(screen.getByTestId('direct-copy-toast')).toBeInTheDocument();
+    expect(screen.getByText(/direct copy applied/i)).toBeInTheDocument();
+  });
+
+  it('Direct Copy button is hidden in static value mode', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('static-mode-toggle'));
+    expect(screen.queryByTestId('direct-copy-btn')).not.toBeInTheDocument();
+  });
+});

@@ -6,8 +6,7 @@ import { PreviewContext } from '../context/preview-context';
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { ExpressionPreview } from './ExpressionPreview';
 import { FunctionReferencePanel } from './FunctionReferencePanel';
-import { GuidedBuilder } from './GuidedBuilder';
-import type { GuidedBuilderRef } from './GuidedBuilder';
+import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
 
@@ -19,7 +18,7 @@ export interface ExpressionBuilderPanelRef {
   /**
    * Insert a source field path from Panel 1 (Schema Tree) into the active mode.
    * - Editor mode: inserts `source("path")` at cursor position in RawDslEditor.
-   * - Builder mode: adds the path to the selected source fields in GuidedBuilder Step 1.
+   * - Builder mode: no-op (UnifiedExpressionBuilder manages its own source state).
    */
   insertSourceField: (path: string) => void;
 }
@@ -110,7 +109,6 @@ function ModeToggle({ mode, onSwitchToBuilder, onSwitchToEditor }: ModeTogglePro
 export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, ExpressionBuilderPanelProps>(
   function ExpressionBuilderPanel({ builderState, parsedSourceSchema = null, sampleSourceData = null }, ref) {
   const rawDslRef = useRef<RawDslEditorRef>(null);
-  const guidedBuilderRef = useRef<GuidedBuilderRef>(null);
 
   // Expose insertSourceField to parent via ref
   useImperativeHandle(ref, () => ({
@@ -118,9 +116,8 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
       if (!builderState || builderState.selectedRule === null) return;
       if (builderState.mode === 'editor') {
         rawDslRef.current?.insertText(`source("${path}")`);
-      } else {
-        guidedBuilderRef.current?.insertSourceField(path);
       }
+      // Builder mode: UnifiedExpressionBuilder manages its own source state
     },
   }), [builderState]);
 
@@ -166,9 +163,8 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
   const handleInsertFunction = (functionName: string) => {
     if (mode === 'editor') {
       rawDslRef.current?.insertText(`${functionName}()`);
-    } else {
-      guidedBuilderRef.current?.selectFunction(functionName);
     }
+    // Builder mode: no direct function insertion in UnifiedExpressionBuilder
   };
 
   return (
@@ -211,11 +207,14 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
           </div>
         ) : (
           <div data-testid="expression-builder-slot" className="h-full overflow-y-auto">
-            <GuidedBuilder
-              ref={guidedBuilderRef}
+            <UnifiedExpressionBuilder
               expression={expression}
               onExpressionChange={setExpression}
+              onApply={() => {}}
+              selectedTargetPath={builderState.selectedRule?.target ?? ''}
               parsedSourceSchema={parsedSourceSchema}
+              sourceData={resolvedSourceData}
+              onSwitchToEditor={switchToEditor}
             />
           </div>
         )}

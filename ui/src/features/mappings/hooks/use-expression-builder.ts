@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ParseResult } from '@/lib/engine';
 import type { MappingRule, ParsedSchema } from '@/lib/types/domain';
+import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
+import type { ExpressionBuilderState } from '../lib/expression-builder-state';
+// Keep old decomposer import for canDecompose (backward compat with ExpressionBuilderPanel)
 import { decomposeExpression } from '../lib/ast-decomposer';
 import type { BuilderState } from '../lib/expression-generator';
 import { useDslValidation } from './use-dsl-validation';
@@ -77,11 +80,17 @@ export interface ExpressionBuilderResult {
    */
   readonly decompositionWarning: string | null;
   /**
-   * The BuilderState resulting from the last successful decomposition.
+   * The BuilderState resulting from the last successful decomposition (old decomposer).
    * Populated after a successful switchToBuilder() call.
    * Null otherwise.
    */
   readonly initialBuilderState: BuilderState | null;
+  /**
+   * The ExpressionBuilderState resulting from the last successful decomposition (new decomposer).
+   * Populated after a successful switchToBuilder() call.
+   * Null otherwise.
+   */
+  readonly initialUnifiedBuilderState: ExpressionBuilderState | null;
   /**
    * Immediately flush any pending debounced commit.
    * Used by Ctrl+Enter keyboard shortcut to apply the current expression now.
@@ -128,6 +137,7 @@ export function useExpressionBuilder({
   const [expression, setExpressionLocal] = useState<string>(selectedRule?.expression ?? '');
   const [decompositionWarning, setDecompositionWarning] = useState<string | null>(null);
   const [initialBuilderState, setInitialBuilderState] = useState<BuilderState | null>(null);
+  const [initialUnifiedBuilderState, setInitialUnifiedBuilderState] = useState<ExpressionBuilderState | null>(null);
 
   // Track what is currently committed to the rule (to detect unsaved changes)
   const committedExpressionRef = useRef<string>(selectedRule?.expression ?? '');
@@ -155,6 +165,7 @@ export function useExpressionBuilder({
     // Reset mode-transition state on rule change
     setDecompositionWarning(null);
     setInitialBuilderState(null);
+    setInitialUnifiedBuilderState(null);
     setMode('editor');
 
     // Cancel any pending commit debounce from the previous selection
@@ -238,13 +249,24 @@ export function useExpressionBuilder({
    * On failure: set decompositionWarning, stay in editor.
    */
   const switchToBuilder = useCallback(() => {
+    // Try new decomposer first (FS-023)
+    const newResult = decomposeExpressionNew(expression);
+    if (newResult.success) {
+      setInitialUnifiedBuilderState(newResult.state);
+      setInitialBuilderState(null);
+      setDecompositionWarning(null);
+      setMode('builder');
+      return;
+    }
+    // Fall back to old decomposer for backward compat
     const result = decomposeExpression(expression);
     if (result.success && result.builderState) {
       setInitialBuilderState(result.builderState);
+      setInitialUnifiedBuilderState(null);
       setDecompositionWarning(null);
       setMode('builder');
     } else {
-      setDecompositionWarning(result.reason ?? 'Expression cannot be loaded into the guided builder.');
+      setDecompositionWarning(newResult.reason ?? result.reason ?? 'Expression cannot be loaded into the guided builder.');
       // Stay in editor — do NOT change mode
     }
   }, [expression]);
@@ -261,6 +283,7 @@ export function useExpressionBuilder({
   const forceBuilder = useCallback(() => {
     setDecompositionWarning(null);
     setInitialBuilderState(null);
+    setInitialUnifiedBuilderState(null);
     setMode('builder');
   }, []);
 
@@ -306,6 +329,7 @@ export function useExpressionBuilder({
     hasUnsavedChanges,
     decompositionWarning,
     initialBuilderState,
+    initialUnifiedBuilderState,
     flushCommit,
   };
 }
