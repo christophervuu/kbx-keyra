@@ -12,6 +12,8 @@ export { BuilderStepIndicator } from './BuilderStepIndicator';
 export type { BuilderStepIndicatorProps } from './BuilderStepIndicator';
 export { ConfigurationPanel } from './ConfigurationPanel';
 export type { ConfigurationPanelProps } from './ConfigurationPanel';
+export { ConfigurationModal } from './ConfigurationModal';
+export type { ConfigurationModalProps } from './ConfigurationModal';
 export { ConfirmDialog } from './ConfirmDialog';
 export type { ConfirmDialogProps } from './ConfirmDialog';
 export { ComplexExpressionWarning } from './ComplexExpressionWarning';

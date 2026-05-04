@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createElement } from 'react';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
 import { SourceDataInput } from './SourceDataInput';
 import { PreviewProvider } from '../../context/preview-context';
@@ -15,6 +15,24 @@ const wrapper = ({ children }: { children: ReactNode }) =>
 
 function renderInput(onRawChange = vi.fn()) {
   render(createElement(SourceDataInput, { onRawChange }), { wrapper });
+  return {
+    textarea: screen.getByTestId('source-data-textarea'),
+    onRawChange,
+  };
+}
+
+function renderInputWithProps(
+  props: Partial<ComponentProps<typeof SourceDataInput>>,
+  onRawChange = vi.fn(),
+) {
+  render(
+    createElement(SourceDataInput, {
+      onRawChange,
+      ...props,
+    }),
+    { wrapper },
+  );
+
   return {
     textarea: screen.getByTestId('source-data-textarea'),
     onRawChange,
@@ -147,5 +165,29 @@ describe('SourceDataInput', () => {
     const validCalls = onRawChange.mock.calls.filter(([arg]) => arg !== null);
     expect(validCalls).toHaveLength(1);
     expect(validCalls[0][0]).toBe('{"a": 1}');
+  });
+
+  it('validates initialValue on mount and emits raw JSON after debounce', () => {
+    const { textarea, onRawChange } = renderInputWithProps({ initialValue: '{"x": 1}' });
+
+    expect(textarea).toHaveValue('{"x": 1}');
+
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    expect(onRawChange).toHaveBeenCalledWith('{"x": 1}');
+    expect(screen.queryByTestId('source-data-error')).not.toBeInTheDocument();
+  });
+
+  it('invalid initialValue emits null and shows parse error after debounce', () => {
+    const { onRawChange } = renderInputWithProps({ initialValue: '{bad' });
+
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    expect(onRawChange).toHaveBeenCalledWith(null);
+    expect(screen.getByTestId('source-data-error')).toBeInTheDocument();
   });
 });

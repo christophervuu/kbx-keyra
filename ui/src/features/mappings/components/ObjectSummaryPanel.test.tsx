@@ -17,7 +17,7 @@ const CHILDREN: ChildFieldInfo[] = [
 
 const DEFAULT_PROPS: ObjectSummaryPanelProps = {
   objectPath: 'patient',
-  children: CHILDREN,
+  childFields: CHILDREN,
   coverage: { mapped: 1, total: 4 },
   onFilterRequired: vi.fn(),
   onValidateSection: vi.fn(),

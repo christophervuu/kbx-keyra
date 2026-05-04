@@ -1,12 +1,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createElement } from 'react';
 import type { ReactNode } from 'react';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { PreviewPanel } from './PreviewPanel';
 import { PreviewProvider } from '../../context/preview-context';
-
-import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Mock engine
@@ -17,6 +15,8 @@ vi.mock('@/lib/engine', () => ({
 }));
 
 import { executeMapping } from '@/lib/engine';
+import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
+
 const mockExecuteMapping = vi.mocked(executeMapping);
 
 // ---------------------------------------------------------------------------
@@ -71,6 +71,14 @@ describe('PreviewPanel', () => {
   it('renders without errors', () => {
     render(createElement(PreviewPanel, fullProps), { wrapper });
     expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
+  });
+
+  it('renders controls and results panes for side-by-side preview workflow', () => {
+    render(createElement(PreviewPanel, fullProps), { wrapper });
+
+    expect(screen.getByTestId('preview-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-tabs')).toBeInTheDocument();
+    expect(screen.getByTestId('source-data-input-container')).toBeInTheDocument();
   });
 
   it('renders the tab bar with all 4 tabs', () => {

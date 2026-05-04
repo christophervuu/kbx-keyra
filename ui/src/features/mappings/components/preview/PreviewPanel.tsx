@@ -1,13 +1,14 @@
 import { useState } from 'react';
 
-import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
-import { usePreviewExecution } from '../../hooks/use-preview-execution';
 import { DiagnosticsDisplay } from './DiagnosticsDisplay';
 import { DiffDisplay } from './DiffDisplay';
 import { OutputDisplay } from './OutputDisplay';
 import { SourceDataInput } from './SourceDataInput';
 import { TestCaseManager } from './TestCaseManager';
 import { TraceDisplay } from './TraceDisplay';
+import { usePreviewExecution } from '../../hooks/use-preview-execution';
+
+import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,149 +128,149 @@ export function PreviewPanel({
 
   return (
     <div
-      className="flex h-full flex-col overflow-hidden text-sm text-zinc-300"
+      className="grid h-full min-h-0 grid-cols-1 overflow-hidden text-sm text-zinc-300 lg:grid-cols-[minmax(320px,420px)_1fr]"
       data-testid="preview-panel"
     >
-      {/* ------------------------------------------------------------------ */}
-      {/* Toolbar                                                              */}
-      {/* ------------------------------------------------------------------ */}
-      <div
-        className="flex shrink-0 items-center gap-3 border-b border-zinc-700 px-3 py-1.5"
-        data-testid="preview-toolbar"
-      >
-        {/* Run button */}
-        <button
-          type="button"
-          onClick={run}
-          disabled={!canRun}
-          aria-disabled={!canRun}
-          data-testid="run-button"
-          className={[
-            'flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-            canRun
-              ? 'bg-blue-600 text-white hover:bg-blue-500'
-              : 'cursor-not-allowed bg-zinc-700 text-zinc-500',
-          ].join(' ')}
-          title={
-            config === null || sourceSchemaDetail === null || targetSchemaDetail === null
-              ? 'Schemas must be loaded before preview'
-              : sourceDataRaw === null
-                ? 'Enter valid source data to run'
-                : undefined
-          }
+      {/* Left column: controls + source data */}
+      <div className="flex min-h-0 flex-col border-r border-zinc-700">
+        {/* Toolbar */}
+        <div
+          className="flex shrink-0 items-center gap-3 border-b border-zinc-700 px-3 py-1.5"
+          data-testid="preview-toolbar"
         >
-          {isExecuting ? <Spinner /> : null}
-          Run
-        </button>
-
-        {/* Auto-run toggle */}
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
-          <input
-            type="checkbox"
-            checked={autoRun}
-            onChange={(e) => { setAutoRun(e.target.checked); }}
-            data-testid="auto-run-toggle"
-            className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-zinc-900"
-          />
-          Auto-run
-        </label>
-
-        {/* Trace toggle */}
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
-          <input
-            type="checkbox"
-            checked={traceEnabled}
-            onChange={(e) => { setTraceEnabled(e.target.checked); }}
-            data-testid="trace-toggle"
-            className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-zinc-900"
-          />
-          Trace
-        </label>
-
-        {/* Execution status indicator */}
-        {isExecuting && (
-          <span className="ml-auto text-xs text-zinc-400" aria-live="polite">
-            Running…
-          </span>
-        )}
-        {state.status === 'error' && (
-          <span className="ml-auto text-xs text-red-400" role="alert">
-            Execution failed
-          </span>
-        )}
-        {state.status === 'timeout' && (
-          <span className="ml-auto text-xs text-amber-400" role="alert">
-            Timed out
-          </span>
-        )}
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Test Case Manager                                                    */}
-      {/* ------------------------------------------------------------------ */}
-      <TestCaseManager
-        mappingId={mappingId}
-        sourceDataRaw={sourceDataRaw}
-        expectedOutputRaw={currentExpectedOutput}
-        onLoad={handleLoadTestCase}
-      />
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Source Data Input                                                    */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="shrink-0 border-b border-zinc-700 px-2 py-2">
-        <SourceDataInput
-          key={loadKey}
-          onRawChange={setSourceDataRaw}
-          initialValue={loadedSourceData}
-        />
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Tab bar                                                              */}
-      {/* ------------------------------------------------------------------ */}
-      <div
-        role="tablist"
-        aria-label="Preview results"
-        className="flex shrink-0 border-b border-zinc-700"
-        data-testid="preview-tabs"
-      >
-        {TABS.map((tab) => (
           <button
-            key={tab.id}
             type="button"
-            role="tab"
-            id={`preview-tab-${tab.id}`}
-            aria-selected={activeTab === tab.id}
-            aria-controls={`preview-tabpanel-${tab.id}`}
-            onClick={() => { setActiveTab(tab.id); }}
-            data-testid={`tab-${tab.id}`}
+            onClick={run}
+            disabled={!canRun}
+            aria-disabled={!canRun}
+            data-testid="run-button"
             className={[
-              'relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
-              activeTab === tab.id
-                ? 'border-b-2 border-blue-500 text-blue-400'
-                : 'text-zinc-400 hover:text-zinc-300',
+              'flex items-center gap-1.5 rounded px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+              canRun
+                ? 'bg-blue-600 text-white hover:bg-blue-500'
+                : 'cursor-not-allowed bg-zinc-700 text-zinc-500',
             ].join(' ')}
+            title={
+              config === null || sourceSchemaDetail === null || targetSchemaDetail === null
+                ? 'Schemas must be loaded before preview'
+                : sourceDataRaw === null
+                  ? 'Enter valid source data to run'
+                  : undefined
+            }
           >
-            {tab.label}
-            {/* Diagnostics badge */}
-            {tab.id === 'diagnostics' && diagnosticCount > 0 && (
-              <span
-                className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-zinc-900"
-                aria-label={`${diagnosticCount} diagnostic${diagnosticCount === 1 ? '' : 's'}`}
-                data-testid="diagnostics-badge"
-              >
-                {diagnosticCount}
-              </span>
-            )}
+            {isExecuting ? <Spinner /> : null}
+            Run
           </button>
-        ))}
+
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={autoRun}
+              onChange={(e) => { setAutoRun(e.target.checked); }}
+              data-testid="auto-run-toggle"
+              className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-zinc-900"
+            />
+            Auto-run
+          </label>
+
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={traceEnabled}
+              onChange={(e) => { setTraceEnabled(e.target.checked); }}
+              data-testid="trace-toggle"
+              className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-zinc-900"
+            />
+            Trace
+          </label>
+
+          {isExecuting && (
+            <span className="ml-auto text-xs text-zinc-400" aria-live="polite">
+              Running…
+            </span>
+          )}
+          {state.status === 'error' && (
+            <span className="ml-auto text-xs text-red-400" role="alert">
+              Execution failed
+            </span>
+          )}
+          {state.status === 'timeout' && (
+            <span className="ml-auto text-xs text-amber-400" role="alert">
+              Timed out
+            </span>
+          )}
+        </div>
+
+        <TestCaseManager
+          mappingId={mappingId}
+          sourceDataRaw={sourceDataRaw}
+          expectedOutputRaw={currentExpectedOutput}
+          onLoad={handleLoadTestCase}
+        />
+
+        <div className="min-h-0 flex-1 overflow-auto border-b border-zinc-700 px-2 py-2">
+          <SourceDataInput
+            key={loadKey}
+            onRawChange={setSourceDataRaw}
+            initialValue={loadedSourceData}
+          />
+        </div>
+
+        {stats !== null && stats !== undefined && (
+          <div
+            className="flex shrink-0 items-center gap-3 border-t border-zinc-700 px-3 py-1 text-xs text-zinc-500"
+            data-testid="preview-stats-bar"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span>{stats.durationMs}ms</span>
+            <span aria-hidden="true">•</span>
+            <span>{stats.rulesEvaluated} rule{stats.rulesEvaluated === 1 ? '' : 's'} evaluated</span>
+          </div>
+        )}
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Content area                                                         */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Right column: results tabs and content */}
+      <div className="flex min-h-0 flex-col">
+        <div
+          role="tablist"
+          aria-label="Preview results"
+          className="flex shrink-0 border-b border-zinc-700"
+          data-testid="preview-tabs"
+        >
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`preview-tab-${tab.id}`}
+              aria-selected={activeTab === tab.id}
+              aria-controls={`preview-tabpanel-${tab.id}`}
+              onClick={() => { setActiveTab(tab.id); }}
+              data-testid={`tab-${tab.id}`}
+              className={[
+                'relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
+                activeTab === tab.id
+                  ? 'border-b-2 border-blue-500 text-blue-400'
+                  : 'text-zinc-400 hover:text-zinc-300',
+              ].join(' ')}
+            >
+              {tab.label}
+              {tab.id === 'diagnostics' && diagnosticCount > 0 && (
+                <span
+                  className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-zinc-900"
+                  aria-label={`${diagnosticCount} diagnostic${diagnosticCount === 1 ? '' : 's'}`}
+                  data-testid="diagnostics-badge"
+                >
+                  {diagnosticCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto">
         {/* Empty state — no execution run yet */}
         {state.status === 'idle' && (
           <div
@@ -349,23 +350,7 @@ export function PreviewPanel({
           </>
         )}
       </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Stats bar                                                            */}
-      {/* ------------------------------------------------------------------ */}
-      {stats !== null && stats !== undefined && (
-        <div
-          className="flex shrink-0 items-center gap-3 border-t border-zinc-700 px-3 py-1 text-xs text-zinc-500"
-          data-testid="preview-stats-bar"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          <span>{stats.durationMs}ms</span>
-          <span aria-hidden="true">•</span>
-          <span>{stats.rulesEvaluated} rule{stats.rulesEvaluated === 1 ? '' : 's'} evaluated</span>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -20,8 +20,8 @@ export interface SourceDataInputProps {
   onRawChange: (raw: string | null) => void;
   /**
    * Initial value to pre-populate the textarea. Changing this prop after
-   * mount has no effect — use a React `key` to force a full reset with a
-   * new initial value (e.g. when loading a test case).
+   * mount updates validation/output state; route-level composition may still
+   * use a React key reset when loading a test case.
    */
   initialValue?: string;
 }
@@ -91,6 +91,11 @@ export function SourceDataInput({ onRawChange, initialValue }: SourceDataInputPr
       }
     };
   }, []);
+
+  // Validate/emit preloaded value so parent run gating reflects initial input.
+  useEffect(() => {
+    validate(initialValue ?? '');
+  }, [initialValue, validate]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {

@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { EditorTopBar } from './EditorTopBar';
 import type { DeployBadgeInfo, SaveStatus } from './EditorTopBar';
@@ -112,6 +112,22 @@ describe('EditorTopBar', () => {
     const link = screen.getByTestId('deploy-page-link');
     expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
   });
+
+  it('renders config toggle button when onConfigToggle is provided', () => {
+    const onConfigToggle = vi.fn();
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onConfigToggle={onConfigToggle} />);
+
+    const button = screen.getByTestId('config-toggle-button');
+    expect(button).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(onConfigToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render config toggle button by default', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.queryByTestId('config-toggle-button')).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -131,6 +147,7 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('target-worklist')).toBeInTheDocument();
     expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
     expect(screen.getByTestId('bottom-area')).toBeInTheDocument();
+    expect(screen.getByTestId('bottom-resize-handle')).toBeInTheDocument();
   });
 
   it('renders the page container with correct testid', () => {

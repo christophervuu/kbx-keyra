@@ -1,4 +1,4 @@
-import { ArrowRight, Clock, ExternalLink } from 'lucide-react';
+import { ArrowRight, Clock, ExternalLink, SlidersHorizontal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { StatusBadge } from '@/components';
@@ -25,6 +25,8 @@ export interface EditorTopBarProps {
   targetSchemaName: string | null;
   projectId: string;
   mappingId: string;
+  /** Optional callback to toggle the configuration modal */
+  onConfigToggle?: () => void;
   /** Optional callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
 }
@@ -58,6 +60,7 @@ export function EditorTopBar({
   targetSchemaName,
   projectId,
   mappingId,
+  onConfigToggle,
   onHistoryToggle,
 }: EditorTopBarProps) {
   const saveConfig = saveStatusConfig[saveStatus];
@@ -124,6 +127,19 @@ export function EditorTopBar({
         Deploy
         <ExternalLink size={12} aria-hidden="true" />
       </Link>
+
+      {/* Configuration toggle button */}
+      {onConfigToggle && (
+        <button
+          type="button"
+          onClick={onConfigToggle}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
+          data-testid="config-toggle-button"
+        >
+          <SlidersHorizontal size={12} aria-hidden="true" />
+          Config
+        </button>
+      )}
 
       {/* History toggle button */}
       {onHistoryToggle && (

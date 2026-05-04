@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
+import { Button } from '@/components';
 import {
   ArrayMappingBuilder,
   BottomArea,
   BuilderEmptyState,
+  ConfigurationModal,
   ConfigurationPanel,
   ExpressionBuilderPanel,
   GlobalToolbar,
@@ -14,11 +16,9 @@ import {
   TargetWorklist,
   VersionDiffView,
   VersionHistoryDrawer,
-} from '@/features/mappings/components';
-import type {
-  ChildFieldInfo,
-  ExpressionBuilderPanelRef,
-  GroupingMode,
+  type ChildFieldInfo,
+  type ExpressionBuilderPanelRef,
+  type GroupingMode,
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
@@ -27,7 +27,6 @@ import { useMappingEditor, useVersionHistory } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import type { EditorView, TargetFilter, TargetSort } from '@/features/mappings/types';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
-import { Button } from '@/components';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,6 +54,20 @@ function findNodeByPath(
     if (found) return found;
   }
   return undefined;
+}
+
+function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldType'] {
+  switch (type) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'object':
+    case 'array':
+    case 'null':
+      return type;
+    default:
+      return 'string';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +121,7 @@ export default function MappingEditor() {
   // History drawer state
   // ---------------------------------------------------------------------------
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Restore handler
@@ -183,7 +197,7 @@ export default function MappingEditor() {
   // Target node selection
   // ---------------------------------------------------------------------------
   const handleSelectTargetNode = useCallback(
-    (path: string, _nodeType: SchemaTreeNode['type']) => {
+    (path: string) => {
       setSelectedTargetPath(path);
     },
     [],
@@ -385,14 +399,7 @@ export default function MappingEditor() {
         const children: ChildFieldInfo[] = selectedNode.children.map((child) => ({
           path: child.path,
           fieldName: child.fieldName,
-          fieldType: (() => {
-            const t = child.type;
-            if (
-              t === 'string' || t === 'number' || t === 'boolean' ||
-              t === 'object' || t === 'array' || t === 'null' || t === 'integer'
-            ) return t;
-            return 'string' as const;
-          })(),
+          fieldType: toTargetFieldType(child.type),
           status: (targetMappingStatus?.get(child.path) as 'unmapped' | 'mapped' | 'warning' | 'error') ?? 'unmapped',
           required: child.isRequired,
         }));
@@ -400,9 +407,9 @@ export default function MappingEditor() {
         return (
           <ObjectSummaryPanel
             objectPath={selectedNode.path}
-            children={children}
+            childFields={children}
             coverage={{ mapped, total: children.length }}
-            onMapRequiredFirst={(path) => setSelectedTargetPath(path)}
+            onFilterRequired={(path: string) => setSelectedTargetPath(path)}
             onValidateSection={() => {/* no-op placeholder */}}
             className="h-full"
           />
@@ -428,14 +435,7 @@ export default function MappingEditor() {
     ) : (
       <ScalarFieldBuilder
         selectedTargetPath={selectedNode.path}
-        selectedTargetType={(() => {
-          const t = selectedNode.type;
-          if (
-            t === 'string' || t === 'number' || t === 'boolean' ||
-            t === 'object' || t === 'array' || t === 'null' || t === 'integer'
-          ) return t;
-          return 'string' as const;
-        })()}
+        selectedTargetType={toTargetFieldType(selectedNode.type)}
         selectedTargetRequired={selectedNode.isRequired}
         currentStatus={selectedNodeStatus}
         currentExpression={selectedNodeExpression}
@@ -473,8 +473,20 @@ export default function MappingEditor() {
         targetWorklistContent={targetWorklistContent}
         builderContent={builderContent}
         bottomContent={bottomContent}
+        onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
         onHistoryToggle={() => setIsHistoryOpen((prev) => !prev)}
       />
+
+      <ConfigurationModal
+        isOpen={isConfigOpen}
+        onClose={() => setIsConfigOpen(false)}
+      >
+        <ConfigurationPanel
+          configOptions={editor.configOptions}
+          onUpdateConfig={editor.actions.updateConfig}
+          parsedTargetSchema={editor.parsedTargetSchema}
+        />
+      </ConfigurationModal>
 
       <VersionHistoryDrawer
         isOpen={isHistoryOpen}
@@ -497,12 +509,6 @@ export default function MappingEditor() {
           />
         )}
       </VersionHistoryDrawer>
-
-      <ConfigurationPanel
-        configOptions={editor.configOptions}
-        onUpdateConfig={editor.actions.updateConfig}
-        parsedTargetSchema={editor.parsedTargetSchema}
-      />
     </>
   );
 }

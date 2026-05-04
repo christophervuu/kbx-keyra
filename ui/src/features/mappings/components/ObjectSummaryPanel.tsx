@@ -32,7 +32,7 @@ export interface ObjectSummaryPanelProps {
   /** Full dot-path of the selected object node */
   objectPath: string;
   /** Direct children of this object node */
-  children: ChildFieldInfo[];
+  childFields: ChildFieldInfo[];
   /** Coverage data for this object node */
   coverage: { mapped: number; total: number };
   /** Fired when "Auto-map section" is clicked (currently disabled — placeholder) */
@@ -87,7 +87,7 @@ function StatusIcon({ status }: { status: TargetFieldStatus }) {
  */
 export function ObjectSummaryPanel({
   objectPath,
-  children,
+  childFields,
   coverage,
   onFilterRequired,
   onValidateSection,
@@ -141,12 +141,12 @@ export function ObjectSummaryPanel({
       <div className="flex-1 overflow-y-auto">
         <div className="px-4 py-2">
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Fields ({children.length})
+            Fields ({childFields.length})
           </span>
         </div>
 
         <ul role="list" data-testid="child-list" className="divide-y divide-slate-800/60">
-          {children.map((child) => (
+          {childFields.map((child) => (
             <li
               key={child.path}
               data-testid={`child-row-${child.path}`}

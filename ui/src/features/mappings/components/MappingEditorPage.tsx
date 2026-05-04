@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
 import { EditorTopBar } from './EditorTopBar';
 import type { DeployBadgeInfo, SaveStatus } from './EditorTopBar';
@@ -42,6 +43,8 @@ export interface MappingEditorPageProps {
   historyPanelContent?: ReactNode;
   /** Callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
+  /** Callback to toggle the configuration modal */
+  onConfigToggle?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +104,55 @@ export function MappingEditorPage({
   builderContent,
   bottomContent,
   onHistoryToggle,
+  onConfigToggle,
 }: MappingEditorPageProps) {
+  const [bottomHeight, setBottomHeight] = useState(260);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const resizeStartYRef = useRef(0);
+  const resizeStartHeightRef = useRef(260);
+
+  const startResize = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+
+      resizeStartYRef.current = event.clientY;
+      resizeStartHeightRef.current = bottomHeight;
+      setIsResizing(true);
+    },
+    [bottomHeight],
+  );
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    function handleResizeMove(event: MouseEvent) {
+      const delta = resizeStartYRef.current - event.clientY;
+      const minHeight = 180;
+      const maxHeight = Math.max(320, Math.floor(window.innerHeight * 0.65));
+      const nextHeight = Math.min(
+        maxHeight,
+        Math.max(minHeight, resizeStartHeightRef.current + delta),
+      );
+
+      setBottomHeight(nextHeight);
+    }
+
+    function handleResizeEnd() {
+      setIsResizing(false);
+    }
+
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleResizeMove);
+    window.addEventListener('mouseup', handleResizeEnd);
+
+    return () => {
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handleResizeMove);
+      window.removeEventListener('mouseup', handleResizeEnd);
+    };
+  }, [isResizing]);
+
   return (
     <div
       className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden"
@@ -117,6 +168,7 @@ export function MappingEditorPage({
         targetSchemaName={targetSchemaName}
         projectId={projectId}
         mappingId={mappingId}
+        onConfigToggle={onConfigToggle}
         onHistoryToggle={onHistoryToggle}
       />
 
@@ -165,11 +217,19 @@ export function MappingEditorPage({
           </div>
 
           {/* Bottom area: Preview / Diagnostics / Testing — full-width */}
-          <div
-            className="h-[200px] shrink-0 border-t border-slate-800 bg-slate-950"
-            data-testid="bottom-area"
-          >
+          <div className="shrink-0 border-t border-slate-800 bg-slate-950" data-testid="bottom-area">
+            <div
+              role="separator"
+              aria-label="Resize bottom panel"
+              aria-orientation="horizontal"
+              data-testid="bottom-resize-handle"
+              onMouseDown={startResize}
+              className="h-1.5 cursor-row-resize border-b border-slate-800 bg-slate-900 hover:bg-slate-700"
+            />
+
+            <div style={{ height: `${bottomHeight}px` }} className="min-h-0">
             {bottomContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.bottom} />}
+            </div>
           </div>
         </div>
       </PreviewProvider>
