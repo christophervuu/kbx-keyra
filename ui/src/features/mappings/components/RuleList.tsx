@@ -14,8 +14,8 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { ClipboardPaste, Plus, Sparkles } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { ClipboardPaste, Plus, Search, Sparkles, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import { BulkActionBar } from './BulkActionBar';
@@ -229,13 +229,40 @@ export function RuleList({
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   // Keyboard navigation: index of the currently "focused" row (-1 = none)
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
 
   const focusTargetRef = useRef<number | null>(null);
 
-  // DnD sensors
+  // Debounce searchQuery → debouncedQuery at 200ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Filtered rule indices
+  const filteredIndices = useMemo(() => {
+    if (!debouncedQuery.trim()) return rules.map((_, i) => i);
+    const q = debouncedQuery.toLowerCase();
+    return rules.reduce<number[]>((acc, rule, i) => {
+      if (
+        rule.target.toLowerCase().includes(q) ||
+        rule.expression.toLowerCase().includes(q) ||
+        (rule.type && rule.type.toLowerCase().includes(q))
+      ) acc.push(i);
+      return acc;
+    }, []);
+  }, [rules, debouncedQuery]);
+
+  const isSearchActive = debouncedQuery.trim().length > 0;
+
+  // DnD sensors — disabled when search is active
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
+      activationConstraint: { distance: isSearchActive ? Infinity : 8 },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
@@ -243,14 +270,15 @@ export function RuleList({
   );
 
   const sortableIds = useMemo(
-    () => rules.map((_, i) => makeRuleId(i)),
-    [rules],
+    () => filteredIndices.map((i) => makeRuleId(i)),
+    [filteredIndices],
   );
 
   // Selection helpers
   const selectionCount = selection.size;
-  const allSelected = rules.length > 0 && selectionCount === rules.length;
-  const someSelected = selectionCount > 0 && selectionCount < rules.length;
+  const selectableIndices = isSearchActive ? filteredIndices : rules.map((_, i) => i);
+  const allSelected = selectableIndices.length > 0 && selectableIndices.every((i) => selection.has(i));
+  const someSelected = selectionCount > 0 && !allSelected;
 
   function handleSelectionChange(index: number, selected: boolean) {
     setSelection((prev) => {
@@ -266,11 +294,19 @@ export function RuleList({
 
   function handleSelectAll() {
     if (allSelected) {
-      // Deselect all
-      setSelection(new Set());
+      // Deselect all selectable
+      setSelection((prev) => {
+        const next = new Set(prev);
+        selectableIndices.forEach((i) => next.delete(i));
+        return next;
+      });
     } else {
-      // Select all
-      setSelection(new Set(rules.map((_, i) => i)));
+      // Select all selectable
+      setSelection((prev) => {
+        const next = new Set(prev);
+        selectableIndices.forEach((i) => next.add(i));
+        return next;
+      });
     }
   }
 
@@ -280,12 +316,12 @@ export function RuleList({
 
   // Keyboard navigation handler for the rule list container
   function handleListKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (rules.length === 0) return;
+    if (filteredIndices.length === 0) return;
 
     switch (e.key) {
       case 'ArrowDown': {
         e.preventDefault();
-        setFocusedIndex((prev) => Math.min(prev + 1, rules.length - 1));
+        setFocusedIndex((prev) => Math.min(prev + 1, filteredIndices.length - 1));
         break;
       }
       case 'ArrowUp': {
@@ -300,7 +336,7 @@ export function RuleList({
       }
       case 'End': {
         e.preventDefault();
-        setFocusedIndex(rules.length - 1);
+        setFocusedIndex(filteredIndices.length - 1);
         break;
       }
       case 'Escape': {
@@ -616,6 +652,40 @@ export function RuleList({
         </div>
       )}
 
+      {/* Search input row */}
+      {!showAddForm && editingIndex === null && rules.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-1.5">
+          <div className="relative flex flex-1 items-center">
+            <Search size={13} className="absolute left-2 text-slate-500" aria-hidden="true" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search rules..."
+              className="w-full rounded border border-slate-700 bg-slate-900 py-1 pl-7 pr-7 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              aria-label="Search rules"
+              data-testid="rule-search"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 text-slate-500 hover:text-slate-300"
+                aria-label="Clear search"
+                data-testid="rule-search-clear"
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          {isSearchActive && (
+            <span className="shrink-0 text-xs text-slate-400" data-testid="rule-search-count">
+              {filteredIndices.length} of {rules.length} rules
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Add Rule form */}
       {showAddForm && (
         <RuleForm
@@ -639,49 +709,66 @@ export function RuleList({
             aria-label="Mapping rules"
             aria-activedescendant={focusedIndex >= 0 ? `rule-row-id-${focusedIndex}` : undefined}
             onKeyDown={handleListKeyDown}
-            tabIndex={rules.length > 0 ? 0 : undefined}
+            tabIndex={filteredIndices.length > 0 ? 0 : undefined}
             data-testid="rule-list-container"
           >
-            {rules.map((rule, index) => {
-              if (editingIndex === index) {
+            {isSearchActive && filteredIndices.length === 0 ? (
+              <div
+                className="flex flex-col items-center justify-center gap-2 p-6 text-center"
+                data-testid="rule-search-no-results"
+              >
+                <p className="text-sm text-slate-400">No rules match your search.</p>
+                <button
+                  type="button"
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                  onClick={() => setSearchQuery('')}
+                >
+                  Clear filter
+                </button>
+              </div>
+            ) : (
+              filteredIndices.map((index) => {
+                const rule = rules[index];
+                if (editingIndex === index) {
+                  return (
+                    <RuleForm
+                      key={`edit-${index}`}
+                      mode="edit"
+                      initialValues={{
+                        target: rule.target,
+                        expression: rule.expression,
+                        description: rule.description,
+                      }}
+                      onSave={handleEditSave}
+                      onCancel={handleEditCancel}
+                    />
+                  );
+                }
+
                 return (
-                  <RuleForm
-                    key={`edit-${index}`}
-                    mode="edit"
-                    initialValues={{
-                      target: rule.target,
-                      expression: rule.expression,
-                      description: rule.description,
-                    }}
-                    onSave={handleEditSave}
-                    onCancel={handleEditCancel}
+                  <SortableRuleRow
+                    key={makeRuleId(index)}
+                    id={makeRuleId(index)}
+                    index={index}
+                    rule={rule}
+                    diagnostics={diagnosticsForRule(index)}
+                    schemasLoaded={schemasLoaded}
+                    selected={selection.has(index)}
+                    isActive={selectedRuleIndex === index}
+                    isFocused={focusedIndex === index}
+                    isFirst={index === 0}
+                    isLast={index === rules.length - 1}
+                    onSelectionChange={handleSelectionChange}
+                    onActivate={onRuleSelect ? (i) => onRuleSelect(selectedRuleIndex === i ? null : i) : undefined}
+                    onEdit={handleEditClick}
+                    onDelete={handleDeleteClick}
+                    onCopy={handleCopyRule}
+                    onMoveUp={handleMoveUp}
+                    onMoveDown={handleMoveDown}
                   />
                 );
-              }
-
-              return (
-                <SortableRuleRow
-                  key={makeRuleId(index)}
-                  id={makeRuleId(index)}
-                  index={index}
-                  rule={rule}
-                  diagnostics={diagnosticsForRule(index)}
-                  schemasLoaded={schemasLoaded}
-                  selected={selection.has(index)}
-                  isActive={selectedRuleIndex === index}
-                  isFocused={focusedIndex === index}
-                  isFirst={index === 0}
-                  isLast={index === rules.length - 1}
-                  onSelectionChange={handleSelectionChange}
-                  onActivate={onRuleSelect ? (i) => onRuleSelect(selectedRuleIndex === i ? null : i) : undefined}
-                  onEdit={handleEditClick}
-                  onDelete={handleDeleteClick}
-                  onCopy={handleCopyRule}
-                  onMoveUp={handleMoveUp}
-                  onMoveDown={handleMoveDown}
-                />
-              );
-            })}
+              })
+            )}
           </div>
         </SortableContext>
       </DndContext>

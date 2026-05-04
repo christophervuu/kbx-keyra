@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+
+import { ChevronRight } from 'lucide-react';
 
 import { EditorTopBar } from './EditorTopBar';
 import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
 import { PanelPlaceholder } from './PanelPlaceholder';
 import { PreviewProvider } from '../context/preview-context';
+import { useResizableLayout } from '../hooks/use-resizable-layout';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,8 +38,6 @@ export interface MappingEditorPageProps {
   sourceSchemaName?: string | null;
   /** Target schema display name */
   targetSchemaName?: string | null;
-  /** Content for the Global Toolbar slot (above the three columns) */
-  toolbarContent?: ReactNode;
   /** Content for the Source Schema panel (left column, collapsible) */
   sourceContent?: ReactNode;
   /** Content for the Target Worklist panel (center column, primary — never collapses) */
@@ -57,7 +57,6 @@ export interface MappingEditorPageProps {
 // ---------------------------------------------------------------------------
 
 const PLACEHOLDER_LABELS = {
-  toolbar: 'Global Toolbar',
   source: 'Source Schema',
   targetWorklist: 'Target Worklist',
   builder: 'Builder / Editor',
@@ -71,24 +70,23 @@ const PLACEHOLDER_LABELS = {
 /**
  * Full Mapping Editor page shell with target-driven three-column layout.
  *
- * Layout at 1280px+:
+ * Layout at 1024px+:
  * ┌─────────────────────────────────────────────────────────────────────┐
  * │                          EditorTopBar (context bar)                  │
- * ├─────────────────────────────────────────────────────────────────────┤
- * │                          GlobalToolbar                               │
  * ├──────────────┬──────────────────────────────────┬───────────────────┤
  * │    Source    │                                  │                   │
  * │    Schema    │      Target Worklist             │  Builder/Editor   │
- * │   (~15%)     │         (~35%)                  │     (~50%)        │
- * │ [collapsible │                                  │                   │
- * │  at 1024px]  │                                  │                   │
+ * │  (resizable) │       (resizable)               │   (fills rest)    │
+ * │ [collapsible]│                                  │                   │
  * ├──────────────┴──────────────────────────────────┴───────────────────┤
  * │                    Preview Strip / Bottom Area (full-width)          │
  * └─────────────────────────────────────────────────────────────────────┘
  *
- * At 1024px: source column collapses (hidden, expand toggle available).
+ * Column widths are pixel-based and user-resizable via drag handles.
+ * Source panel is collapsible; a persistent expand strip replaces it when collapsed.
  * Target Worklist never collapses — it is the primary work queue.
- * Configuration and Version History are overlay drawers, not grid slots.
+ * Bottom area is collapsible via double-click on its resize handle.
+ * Layout persists to localStorage under `keyra:editor-layout`.
  */
 export function MappingEditorPage({
   projectId,
@@ -102,7 +100,6 @@ export function MappingEditorPage({
   onSave = () => undefined,
   sourceSchemaName = null,
   targetSchemaName = null,
-  toolbarContent,
   sourceContent,
   targetWorklistContent,
   builderContent,
@@ -110,59 +107,23 @@ export function MappingEditorPage({
   onHistoryToggle,
   onConfigToggle,
 }: MappingEditorPageProps) {
-  const [bottomHeight, setBottomHeight] = useState(260);
-  const [isResizing, setIsResizing] = useState(false);
+  const {
+    layout,
+    isDragging,
+    sourceHandleProps,
+    builderHandleProps,
+    bottomHandleProps,
+    expandSource,
+  } = useResizableLayout();
 
-  const resizeStartYRef = useRef(0);
-  const resizeStartHeightRef = useRef(260);
-
-  const startResize = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      event.preventDefault();
-
-      resizeStartYRef.current = event.clientY;
-      resizeStartHeightRef.current = bottomHeight;
-      setIsResizing(true);
-    },
-    [bottomHeight],
-  );
-
-  useEffect(() => {
-    if (!isResizing) return;
-
-    function handleResizeMove(event: MouseEvent) {
-      const delta = resizeStartYRef.current - event.clientY;
-      const minHeight = 180;
-      const maxHeight = Math.max(320, Math.floor(window.innerHeight * 0.65));
-      const nextHeight = Math.min(
-        maxHeight,
-        Math.max(minHeight, resizeStartHeightRef.current + delta),
-      );
-
-      setBottomHeight(nextHeight);
-    }
-
-    function handleResizeEnd() {
-      setIsResizing(false);
-    }
-
-    document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', handleResizeMove);
-    window.addEventListener('mouseup', handleResizeEnd);
-
-    return () => {
-      document.body.style.userSelect = '';
-      window.removeEventListener('mousemove', handleResizeMove);
-      window.removeEventListener('mouseup', handleResizeEnd);
-    };
-  }, [isResizing]);
+  const { sourceWidth, targetWidth, bottomHeight, sourceCollapsed, bottomCollapsed } = layout;
 
   return (
     <div
       className="flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden"
       data-testid="mapping-editor-page"
     >
-      {/* Context bar (Row 2 of 2-row top area) */}
+      {/* Context bar */}
       <EditorTopBar
         projectName={projectName}
         projectId={projectId}
@@ -179,42 +140,84 @@ export function MappingEditorPage({
         onHistoryToggle={onHistoryToggle}
       />
 
-      {/* Global Toolbar — full-width strip below context bar */}
-      <div
-        className="shrink-0 border-b border-slate-800 bg-slate-950"
-        data-testid="global-toolbar"
-      >
-        {toolbarContent ?? (
-          <div className="flex h-9 items-center px-3">
-            <PanelPlaceholder name={PLACEHOLDER_LABELS.toolbar} />
-          </div>
-        )}
-      </div>
-
       {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}
       <PreviewProvider>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {/* Three-column row — 15% / 35% / 50% at ≥1280px */}
-          <div className="flex min-h-0 flex-1 gap-px bg-slate-800">
-            {/* Left column: Source Schema — ~15%, collapsible at ≤1024px */}
-            <div
-              className="hidden w-[15%] shrink-0 overflow-auto bg-slate-950 lg:block"
-              data-testid="source-panel"
-            >
-              {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
-            </div>
+          {/* Three-column row */}
+          <div
+            className={[
+              'flex min-h-0 flex-1 bg-slate-800',
+              isDragging ? 'select-none' : '',
+            ].join(' ')}
+          >
+            {/* Left column: Source Schema — collapsible */}
+            {sourceCollapsed ? (
+              /* Collapsed expand strip */
+              <button
+                type="button"
+                data-testid="expand-source"
+                onClick={expandSource}
+                aria-label="Expand Source panel"
+                className="flex w-3.5 shrink-0 flex-col items-center justify-center gap-1 border-r border-slate-700 bg-slate-900 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500"
+              >
+                <ChevronRight size={10} aria-hidden="true" />
+                <span
+                  className="text-[9px] font-medium tracking-wide"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                >
+                  Source
+                </span>
+              </button>
+            ) : (
+              <div
+                data-testid="source-panel"
+                className={[
+                  'shrink-0 overflow-auto bg-slate-950',
+                  isDragging ? '' : 'transition-[width] duration-200 ease-in-out',
+                ].join(' ')}
+                style={{ width: `${sourceWidth}px` }}
+              >
+                {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
+              </div>
+            )}
 
-            {/* Center column: Target Worklist — ~40% at <1024px (source hidden), ~35% at ≥1280px */}
+            {/* Drag handle: Source / Target */}
             <div
-              className="w-[40%] shrink-0 overflow-auto bg-slate-950 lg:w-[35%]"
+              role="separator"
+              aria-label="Resize source panel"
+              aria-orientation="vertical"
+              data-testid="resize-handle-source"
+              onMouseDown={sourceHandleProps.onMouseDown}
+              onDoubleClick={sourceHandleProps.onDoubleClick}
+              className="w-1.5 shrink-0 cursor-col-resize bg-slate-800 hover:bg-blue-500/20 active:bg-blue-500/30"
+            />
+
+            {/* Center column: Target Worklist — never collapses */}
+            <div
               data-testid="target-worklist"
+              className={[
+                'shrink-0 overflow-auto bg-slate-950',
+                isDragging ? '' : 'transition-[width] duration-200 ease-in-out',
+              ].join(' ')}
+              style={{ width: `${targetWidth}px` }}
             >
               {targetWorklistContent ?? (
                 <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
               )}
             </div>
 
-            {/* Right column: Builder / Editor — ~50%, fills remaining space */}
+            {/* Drag handle: Target / Builder */}
+            <div
+              role="separator"
+              aria-label="Resize builder panel"
+              aria-orientation="vertical"
+              data-testid="resize-handle-builder"
+              onMouseDown={builderHandleProps.onMouseDown}
+              onDoubleClick={builderHandleProps.onDoubleClick}
+              className="w-1.5 shrink-0 cursor-col-resize bg-slate-800 hover:bg-blue-500/20 active:bg-blue-500/30"
+            />
+
+            {/* Right column: Builder / Editor — fills remaining space */}
             <div
               className="min-w-0 flex-1 overflow-auto bg-slate-950"
               data-testid="builder-panel"
@@ -225,19 +228,35 @@ export function MappingEditorPage({
 
           {/* Bottom area: Preview Strip / Testing — full-width */}
           <div className="shrink-0" data-testid="bottom-area">
-            {bottomContent ?? (
-              <div className="border-t border-slate-800 bg-slate-950">
-                <div
-                  role="separator"
-                  aria-label="Resize bottom panel"
-                  aria-orientation="horizontal"
-                  data-testid="bottom-resize-handle"
-                  onMouseDown={startResize}
-                  className="h-1.5 cursor-row-resize border-b border-slate-800 bg-slate-900 hover:bg-slate-700"
-                />
-                <div style={{ height: `${bottomHeight}px` }} className="min-h-0">
-                  <PanelPlaceholder name={PLACEHOLDER_LABELS.bottom} />
-                </div>
+            {/* Resize handle — always rendered so tests can find it */}
+            <div
+              role="separator"
+              aria-label="Resize bottom panel"
+              aria-orientation="horizontal"
+              data-testid="bottom-resize-handle"
+              onMouseDown={bottomHandleProps.onMouseDown}
+              onDoubleClick={bottomHandleProps.onDoubleClick}
+              className="h-1.5 cursor-row-resize border-b border-slate-800 bg-slate-900 hover:bg-blue-500/20 active:bg-blue-500/30"
+            />
+            {bottomContent ? (
+              <div
+                className={[
+                  'overflow-hidden',
+                  isDragging ? '' : 'transition-[height] duration-200 ease-in-out',
+                ].join(' ')}
+                style={{ height: bottomCollapsed ? 0 : `${bottomHeight}px` }}
+              >
+                {bottomContent}
+              </div>
+            ) : (
+              <div
+                className={[
+                  'overflow-hidden border-t border-slate-800 bg-slate-950',
+                  isDragging ? '' : 'transition-[height] duration-200 ease-in-out',
+                ].join(' ')}
+                style={{ height: bottomCollapsed ? 0 : `${bottomHeight}px` }}
+              >
+                <PanelPlaceholder name={PLACEHOLDER_LABELS.bottom} />
               </div>
             )}
           </div>

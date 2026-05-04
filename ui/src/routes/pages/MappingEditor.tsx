@@ -12,7 +12,6 @@ import {
   ConfigurationPanel,
   ConnectedInlinePreviewStrip,
   ExpressionBuilderPanel,
-  GlobalToolbar,
   ObjectSummaryPanel,
   ScalarFieldBuilder,
   SourceSchemaPanel,
@@ -162,12 +161,10 @@ export default function MappingEditor() {
   );
 
   // ---------------------------------------------------------------------------
-  // Toolbar state (sort, view, breadcrumb)
+  // Toolbar state (sort, view)
   // ---------------------------------------------------------------------------
   const [sort, setSort] = useState<TargetSort>('schema');
   const [view, setView] = useState<EditorView>('target');
-  const [breadcrumbMode, setBreadcrumbMode] = useState(false);
-  const [currentSubtreePath, setCurrentSubtreePath] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // Target View selection state
@@ -412,21 +409,6 @@ export default function MappingEditor() {
   // Slot content
   // ---------------------------------------------------------------------------
 
-  // Toolbar
-  const toolbarContent = (
-    <GlobalToolbar
-      sort={sort}
-      view={view}
-      breadcrumbMode={breadcrumbMode}
-      onSortChange={setSort}
-      onViewToggle={handleViewToggle}
-      onBreadcrumbModeToggle={() => {
-        setBreadcrumbMode((prev) => !prev);
-        if (breadcrumbMode) setCurrentSubtreePath(null);
-      }}
-    />
-  );
-
   // Source panel (left column)
   const sourceContent = editor.parsedSourceSchema ? (
     <SourceSchemaPanel
@@ -466,9 +448,10 @@ export default function MappingEditor() {
         selectedPath={selectedTargetPath}
         groupingMode={groupingMode}
         onSelectNode={handleSelectTargetNode}
-        breadcrumbMode={breadcrumbMode}
-        currentSubtreePath={currentSubtreePath}
-        onSubtreeNavigate={setCurrentSubtreePath}
+        sort={sort}
+        onSortChange={setSort}
+        view={view}
+        onViewToggle={handleViewToggle}
         className="h-full"
       />
     );
@@ -573,7 +556,6 @@ export default function MappingEditor() {
         onSave={editor.actions.save}
         sourceSchemaName={editor.sourceSchemaName}
         targetSchemaName={editor.targetSchemaName}
-        toolbarContent={toolbarContent}
         sourceContent={sourceContent}
         targetWorklistContent={targetWorklistContent}
         builderContent={builderContent}

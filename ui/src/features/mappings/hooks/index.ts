@@ -33,4 +33,6 @@ export { useDropZone } from './use-drop-zone';
 export type { UseDropZoneResult, UseDropZoneOptions, DropHandlers } from './use-drop-zone';
 export { usePreviewExecution } from './use-preview-execution';
 export type { UsePreviewExecutionParams, UsePreviewExecutionResult } from './use-preview-execution';
+export { useResizableLayout } from './use-resizable-layout';
+export type { LayoutState, ResizeHandleProps, UseResizableLayoutResult } from './use-resizable-layout';
 

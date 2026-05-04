@@ -88,27 +88,25 @@ ui/src/
         tree-to-json-schema.ts Tree reconstruction + field counting utilities
         parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
 
-    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022)
       index.ts                Feature barrel (components + hooks + utilities)
       types.ts                TargetFilter, TargetSort, EditorView types
       components/
-        MappingEditorPage.tsx Three-column editor shell (toolbar/source/worklist/builder/bottom slots); panel widths 15/35/50 (FS-021 T-04)
-        GlobalToolbar.tsx     Sort · Focus mode toggle · view toggle (search/filter removed in FS-021 T-03)
+        MappingEditorPage.tsx Three-column editor shell with draggable resize handles, persistent pixel widths, source expand strip, and bottom collapse/resize behavior (FS-022)
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
-        TargetWorklist.tsx    Center column: target schema tree with status/coverage; internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
-        BreadcrumbNav.tsx     Breadcrumb drill-down navigation trail
+        TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
         ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; onApply/onExpressionChange callbacks (FS-021 T-02)
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status
         ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
-        BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) — retained for Rules View; replaced by InlinePreviewStrip in Target View (FS-021 T-05)
-        InlinePreviewStrip.tsx Collapsed bar + expanded strip; auto-preview via lastApplyTimestamp; output flash animation; Run disabled when sourceData empty (FS-021 T-05)
+        BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
+        InlinePreviewStrip.tsx Collapsed bar + expanded strip; unconditional auto-preview on Apply when sourceData is present; test case selector; output flash animation; Run disabled when sourceData empty (FS-022)
         ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
         AdvancedTestingPage.tsx Full-page test case management: two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs; trace/auto-run toggles; own isolated PreviewProvider (FS-021 T-06)
         TargetFieldRow.tsx    Atomic target field row (status icon, type badge, expression summary)
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
-        RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics)
+        RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics + debounced search/filter by target/expression/type; DnD disabled during active search)
         ExpressionBuilderPanel.tsx  Rules View expression shell (mode toggle + composition)
         RawDslEditor.tsx      Raw DSL textarea editor (overlay highlighting + autocomplete)
         GuidedBuilder.tsx     Step-based builder (source -> transform -> arguments -> preview)
@@ -127,6 +125,7 @@ ui/src/
         use-drag-source.ts         HTML5 drag state for a single source field
         use-drop-zone.ts           HTML5 drop zone state (isDragOver + handlers)
         use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04)
+        use-resizable-layout.ts    Resizable layout state hook (source/target widths, bottom height, collapse state, drag handle props, localStorage persistence)
         use-test-cases.ts          Test case CRUD hook keyed by mappingId (FS-012 T-05)
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
@@ -359,59 +358,60 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ## Mapping Editor Architecture
 
-FS-020 redesigns the Mapping Editor from an 8-panel grid into a **target-driven three-column layout** with a collapsible bottom area. FS-021 refines the layout further: a 2-row top bar, per-panel search, rebalanced column widths, an inline preview strip replacing the 4-tab bottom area, and a new dedicated Advanced Testing page.
+FS-020 redesigns the Mapping Editor from an 8-panel grid into a **target-driven three-column layout** with a collapsible bottom area. FS-021 adds the two-row top context model and inline preview strip. FS-022 consolidates toolbar controls into panel-local surfaces, removes Focus/Breadcrumb drill-down mode, introduces persistent resizable panel layout, adds Rules View search, and makes inline preview auto-run on Apply unconditional when source data is present.
 
-### Three-Column + Inline Preview Layout (FS-021)
+### Three-Column + Resizable Layout (FS-022)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Row 1: NavBar (global navigation)                              │
-│  Row 2: EditorTopBar (mapping name · version · save · deploy)   │
-├───────────────┬─────────────────────────┬───────────────────────┤
-│ Source Panel  │   Target Worklist       │  Right Panel          │
-│ (15%)         │   (35%)                 │  (50%)                │
-│               │                         │                       │
-│ hidden on     │  BreadcrumbNav (opt)    │  BuilderEmptyState    │
-│ ≤1024px       │  TargetFieldRow tree    │  ScalarFieldBuilder   │
-│               │                         │  ObjectSummaryPanel   │
-│ SourceSchema  │  — OR —                 │  ArrayMappingBuilder  │
-│ Panel         │  RuleList (rules view)  │  ExpressionBuilderPanel│
-│ (with search) │  (with search)          │  (rules view)         │
-├───────────────┴─────────────────────────┴───────────────────────┤
-│  InlinePreviewStrip (collapsed bar or expanded strip)           │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│ Row 1: NavBar (global navigation)                                                 │
+│ Row 2: EditorTopBar (mapping context + save/deploy + Auto-map placeholder)       │
+├──────────────────────┬┬──────────────────────────────┬┬───────────────────────────┤
+│ Source Panel         ││ Target Panel                ││ Builder Panel             │
+│ SourceSchemaPanel    ││ TargetWorklist (target)     ││ Node-type-specific panel  │
+│                      ││ RuleList (rules view)        ││ / ExpressionBuilderPanel  │
+│                      ││ Toolbar contains Sort +      ││                           │
+│                      ││ View Toggle + Search/Filters ││                           │
+├──────────────────────┴┴──────────────────────────────┴┴───────────────────────────┤
+│ Bottom resize handle                                                               │
+├────────────────────────────────────────────────────────────────────────────────────┤
+│ Bottom area: ConnectedInlinePreviewStrip (Target View) OR BottomArea (Rules View) │
+└────────────────────────────────────────────────────────────────────────────────────┘
+
+Legend: vertical `││` separators are draggable resize handles between panels.
 ```
 
 **Slot props on `MappingEditorPage`:**
-- `toolbarContent` — `GlobalToolbar` instance (sort, Focus mode, view toggle; search removed in FS-021 T-03)
-- `sourceContent` — `SourceSchemaPanel` (hidden at ≤1024px via `hidden lg:block`; owns internal search)
-- `targetWorklistContent` — `TargetWorklist` (target view; owns internal search + 4 filter chips) or `RuleList` (rules view)
+- `sourceContent` — `SourceSchemaPanel` (left panel, internal search)
+- `targetWorklistContent` — `TargetWorklist` (target view) or `RuleList` (rules view)
 - `builderContent` — node-type-specific right panel (see below)
 - `bottomContent` — `ConnectedInlinePreviewStrip` (Target View) or `BottomArea` (Rules View)
+
+`toolbarContent` was removed in FS-022; sort and view toggle controls are now internal to `TargetWorklist`.
 
 ### Component Hierarchy
 
 ```
 MappingEditorPage
-├── GlobalToolbar
-├── SourceSchemaPanel          (left column, lg:block only; internal search)
-├── TargetWorklist             (center column, target view; internal search + filter chips)
-│   └── BreadcrumbNav          (when breadcrumb mode active)
+├── SourceSchemaPanel          (left panel; internal search)
+├── TargetWorklist             (center panel, target view)
 │   └── TargetFieldRow[]       (recursive tree)
-├── RuleList                   (center column, rules view)
-├── Right panel (conditional on selected node type):
+├── RuleList                   (center panel, rules view)
+├── Right panel (conditional on selected node type)
 │   ├── BuilderEmptyState      (no selection)
 │   ├── ScalarFieldBuilder     (scalar leaf node)
 │   ├── ObjectSummaryPanel     (object node)
 │   ├── ArrayMappingBuilder    (array node)
-│   └── ExpressionBuilderPanel (rules view — any rule)
-└── ConnectedInlinePreviewStrip  (bottom slot, Target View)
-    └── InlinePreviewStrip       (collapsed bar or expanded strip)
+│   └── ExpressionBuilderPanel (rules view)
+└── Bottom content (by view)
+    ├── ConnectedInlinePreviewStrip
+    │   └── InlinePreviewStrip
+    └── BottomArea
 ```
 
 ### View Toggle Pattern
 
-The Global Toolbar exposes a **Target View / Rules View** toggle (`EditorView = 'target' | 'rules'`).
+The **Target View / Rules View** segmented toggle (`EditorView = 'target' | 'rules'`) is now rendered in the `TargetWorklist` toolbar row (not in a global toolbar).
 
 - **Target View (default):** center column = `TargetWorklist`; right panel = node-type-specific builder
 - **Rules View:** center column = `RuleList`; right panel = `ExpressionBuilderPanel` (existing expression editing UX)
@@ -425,6 +425,11 @@ State is managed at the composition level (`MappingEditor.tsx`):
 - `selectedTargetPath: string | null` — target view selection
 - `selectedRuleIndex: number | null` — rules view selection
 - `view: EditorView` — current view toggle state
+
+`TargetWorklist` owns toolbar controls for:
+- `sort` / `onSortChange`
+- `view` / `onViewToggle`
+- search input and filter chips
 
 ### Node-Type-Specific Right Panel Pattern
 
@@ -450,15 +455,55 @@ Source fields in `SourceSchemaPanel` are draggable using the HTML5 Drag API (no 
 - **Click-to-stage:** clicking a source field fires `onStageField(path)` — same insertion as drop
 - **Visual feedback:** drop zone highlights with `ring-1 ring-blue-500 bg-blue-950/40` on hover; source fields show grip handle + `cursor-grab`
 
-### Breadcrumb Drill-Down Mode
+### Resizable Panel Layout (FS-022)
 
-An optional **Focus mode** toggle in `GlobalToolbar` activates breadcrumb drill-down for deeply nested schemas (5+ levels).
+`MappingEditorPage` uses `useResizableLayout()` (`ui/src/features/mappings/hooks/use-resizable-layout.ts`) as the canonical layout state contract.
 
-- **Off (default):** clicking object/array nodes opens their builder panel normally
-- **On:** clicking an object/array node isolates that subtree in the worklist; `BreadcrumbNav` renders above the list showing the navigation path
-- **`BreadcrumbNav`:** renders `Root > segment > … > current`; each segment is a button that navigates to that level; clicking Root restores full tree
-- **State:** `currentSubtreePath: string | null` (null = full tree); `breadcrumbMode: boolean`
-- Both are managed at composition level and passed as props to `TargetWorklist`
+Hook contract:
+
+- **Inputs:** none
+- **Outputs:**
+  - `layout: { sourceWidth, targetWidth, bottomHeight, sourceCollapsed, bottomCollapsed }`
+  - `sourceHandleProps`, `builderHandleProps`, `bottomHandleProps`
+  - `expandSource`, `collapseSource`, `expandBottom`, `collapseBottom`
+  - `isDragging`
+
+Persistence:
+
+- localStorage key: `keyra:editor-layout`
+- persisted shape:
+
+```json
+{
+  "sourceWidth": 240,
+  "targetWidth": 450,
+  "bottomHeight": 260,
+  "sourceCollapsed": false,
+  "bottomCollapsed": false
+}
+```
+
+Constraints and behavior:
+
+- Source minimum width: `180px`
+- Target minimum width: `250px`
+- Builder minimum width target: `300px` (enforced by clamping strategy and flex behavior)
+- Bottom minimum expanded height: `180px`
+- Bottom maximum height: `65%` of viewport height
+- Drag interactions use `mousedown` / `mousemove` / `mouseup` listeners (not HTML5 DnD) to avoid conflicts with source-field drag-and-drop
+- During drag, body cursor is forced to `col-resize` or `row-resize` and text selection is disabled
+
+Collapse model:
+
+- **Collapsible:** Source panel, Bottom panel
+- **Not collapsible:** Target panel, Builder panel
+- Source collapse uses a persistent expand strip in the layout shell
+- Bottom collapse uses the strip's collapsed presentation
+
+Fallback behavior:
+
+- Missing, invalid, or corrupt localStorage payload falls back to defaults
+- Storage write failures are ignored (no UI crash)
 
 ### `useTargetStatus` Hook Contract
 
@@ -529,6 +574,7 @@ Props contract:
 - `sourceSchemaName`, `targetSchemaName` — schema context labels
 - `onSave` — save callback
 - `onHistoryToggle` — optional; when provided, renders "History" button (clock icon) for version history drawer
+- Auto-map placeholder action is rendered in this top bar as a disabled control (feature intentionally not implemented)
 
 ### Two-Tier Save Model (FS-021 T-02)
 
@@ -556,26 +602,28 @@ The editor uses a **two-tier save model** to separate expression authoring from 
 - `canNavigateAway(): boolean` — returns `unsavedRuleCount === 0`
 - `onRuleApplied?: () => void` — optional callback fired after each `applyRule()` call; used by `ConnectedInlinePreviewStrip` to trigger auto-preview
 
-### Per-Panel Search (FS-021 T-03)
+### Per-Panel Search
 
 Search state is **owned per-panel** rather than in the global toolbar:
 
 - **Source panel (`SourceSchemaPanel`):** internal search input using `useTreeSearch` hook; no filter chips.
 - **Target panel (`TargetWorklist`):** internal search input + 4 filter chips (Unmapped / Warnings / Required / Arrays); filter chips use AND semantics (`activeFilters: Set<TargetFilter>`).
-- **`GlobalToolbar`:** search input and filter props removed; retains sort, Auto-map placeholder, Focus mode toggle, and view toggle.
+- Global toolbar surface has been removed; panel-specific controls remain in their owning panels.
 
 This change was made in FS-021 T-03 to reduce prop drilling and allow each panel to own its own search lifecycle independently.
 
-### Inline Preview Strip (FS-021 T-05)
+### Inline Preview Strip
 
 `InlinePreviewStrip` replaces the 4-tab `BottomArea` as the bottom slot in Target View:
 
 - **Collapsed state (default):** a slim bar showing last output summary and a Run button.
 - **Expanded state:** full strip with source data input, output display, and run controls.
-- **Auto-preview:** when `lastApplyTimestamp` changes (i.e., a rule was applied), the strip auto-runs if `autoRun` is enabled (500ms debounce).
+- **Unconditional auto-preview on Apply:** when `lastApplyTimestamp` changes (rule Apply event), the strip calls `onRun()` whenever `sourceData` is non-empty. There is no auto-preview toggle in this strip.
+- **Test case selector:** the strip supports `testCases` and `onLoadTestCase` props; users can load saved test cases directly into the source textarea. If no saved cases exist, selector shows a disabled empty-state option.
 - **Output flash animation:** a brief highlight animation plays on the output area when new results arrive.
 - **Run disabled:** the Run button is disabled when `sourceData` is empty (AE-14 compliance).
 - **`ConnectedInlinePreviewStrip`:** thin wrapper that owns `usePreviewExecution` and local state; must be rendered inside `<PreviewProvider>`. Used as `bottomContent` in `MappingEditor.tsx`.
+- **Rules View parity:** `BottomArea` also exposes the same test case selector behavior so saved test cases can be loaded without switching views.
 - **`PreviewProvider` isolation:** `MappingEditor.tsx` wraps its content in a `<PreviewProvider>`. The Advanced Testing page has its own separate `<PreviewProvider>` — they are never co-mounted.
 
 ### Advanced Testing Page (FS-021 T-06)
@@ -608,6 +656,24 @@ A dedicated full-page testing surface that provides the full test case managemen
 **Empty state:** when no execution has run, the right panel shows "Enter source data and click Run to see results."
 
 **`PreviewProvider` isolation:** the Advanced Testing page wraps its content in its own `<PreviewProvider>`, independent from the editor's provider. Both pages independently access the same localStorage keys via their respective hook instances. This avoids stale-reference risk and is future-proof for `HttpAdapter` migration.
+
+### Rules View Search (FS-022)
+
+`RuleList` includes a local search bar for filtering visible rules by case-insensitive substring match against:
+
+- `rule.target`
+- `rule.expression`
+- `rule.type`
+
+Behavior:
+
+- search input state is debounced by `200ms`
+- displayed rows are filtered via `filteredIndices` while retaining original rule indices for all operations
+- match count is displayed as `{N} of {M} rules` when search is active
+- clear button resets query and restores full list
+- no-match state renders inline guidance (`No rules match your search`)
+- drag-and-drop reorder is disabled while search is active to avoid index-remapping ambiguity
+- multi-select `Select All` operates on filtered rows only while search is active
 
 ### Version History Drawer (FS-018)
 

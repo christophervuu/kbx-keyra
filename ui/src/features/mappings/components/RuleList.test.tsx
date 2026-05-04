@@ -1094,6 +1094,172 @@ describe('RuleList Multi-select & Bulk Actions', () => {
 });
 
 // ---------------------------------------------------------------------------
+// RuleList — Search / Filter (T-04 tests)
+// ---------------------------------------------------------------------------
+
+describe('RuleList Search', () => {
+  const defaultProps = {
+    rules: MOCK_RULES,
+    schemasLoaded: true,
+    summary: MOCK_SUMMARY,
+    coveragePercent: 80,
+    isValidating: false,
+    diagnosticsForRule: mockDiagnosticsForRule,
+  };
+
+  it('renders search input', () => {
+    render(<RuleList {...defaultProps} />);
+    expect(screen.getByTestId('rule-search')).toBeInTheDocument();
+  });
+
+  it('search input has correct placeholder', () => {
+    render(<RuleList {...defaultProps} />);
+    expect(screen.getByTestId('rule-search')).toHaveAttribute('placeholder', 'Search rules...');
+  });
+
+  it('does not show clear button when search is empty', () => {
+    render(<RuleList {...defaultProps} />);
+    expect(screen.queryByTestId('rule-search-clear')).not.toBeInTheDocument();
+  });
+
+  it('shows clear button when search has text', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'Order' } });
+    expect(screen.getByTestId('rule-search-clear')).toBeInTheDocument();
+  });
+
+  it('filters rules by target path (case-insensitive)', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'doctype' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-row-0')).toBeInTheDocument();
+      expect(screen.queryByTestId('rule-row-1')).not.toBeInTheDocument();
+    });
+  });
+
+  it('filters rules by expression text', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'orderDate' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-row-1')).toBeInTheDocument();
+      expect(screen.queryByTestId('rule-row-0')).not.toBeInTheDocument();
+    });
+  });
+
+  it('filters rules by type', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'array' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-row-2')).toBeInTheDocument();
+      expect(screen.queryByTestId('rule-row-0')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows match count when search is active', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'Order.Header' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-search-count')).toBeInTheDocument();
+    });
+  });
+
+  it('match count shows correct "N of M rules" format', async () => {
+    render(<RuleList {...defaultProps} />);
+    // Order.Header matches rules 0, 1, 3, 4 (4 rules)
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'Order.Header' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-search-count')).toHaveTextContent('4 of 5 rules');
+    });
+  });
+
+  it('does not show match count when search is empty', () => {
+    render(<RuleList {...defaultProps} />);
+    expect(screen.queryByTestId('rule-search-count')).not.toBeInTheDocument();
+  });
+
+  it('shows no-results state when filter matches zero rules', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'zzznomatch' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-search-no-results')).toBeInTheDocument();
+      expect(screen.getByText('No rules match your search.')).toBeInTheDocument();
+    });
+  });
+
+  it('clear button resets search and shows all rules', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'doctype' } });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId('rule-row-1')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('rule-search-clear'));
+
+    await vi.waitFor(() => {
+      for (let i = 0; i < 5; i++) {
+        expect(screen.getByTestId(`rule-row-${i}`)).toBeInTheDocument();
+      }
+    });
+  });
+
+  it('DnD drag handles are present when search is inactive', () => {
+    render(<RuleList {...defaultProps} />);
+    for (let i = 0; i < 5; i++) {
+      expect(screen.getByTestId(`drag-handle-${i}`)).toBeInTheDocument();
+    }
+  });
+
+  it('drag handles remain rendered when search is active (DnD disabled via sensor config)', async () => {
+    render(<RuleList {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'Order.Header' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-search-count')).toBeInTheDocument();
+    });
+
+    // Drag handles still present — DnD is disabled via activationConstraint distance:Infinity
+    expect(screen.getByTestId('drag-handle-0')).toBeInTheDocument();
+  });
+
+  it('"Select All" when search is active selects only filtered rules', async () => {
+    render(<RuleList {...defaultProps} />);
+    // Filter to only rule 0 (DocType)
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'DocType' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-row-0')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('select-all-checkbox'));
+    expect(screen.getByTestId('bulk-selection-count')).toHaveTextContent('1 rule selected');
+  });
+
+  it('CRUD operations use original rule indices when search is active', async () => {
+    const onDeleteRule = vi.fn();
+    render(<RuleList {...defaultProps} onDeleteRule={onDeleteRule} />);
+
+    // Filter to show only rule at index 4 (Amount)
+    fireEvent.change(screen.getByTestId('rule-search'), { target: { value: 'Amount' } });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('rule-row-4')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('rule-delete-4'));
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'));
+
+    expect(onDeleteRule).toHaveBeenCalledWith(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // RuleList — selected rule integration (T-11)
 // ---------------------------------------------------------------------------
 

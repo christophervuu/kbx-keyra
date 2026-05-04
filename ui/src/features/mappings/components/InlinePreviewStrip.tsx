@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 
 import { ChevronDown, ChevronUp, ExternalLink, Play } from 'lucide-react';
 
+import type { TestCase } from '@/lib/types/domain';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -29,16 +31,16 @@ export interface InlinePreviewStripProps {
   isCollapsed: boolean;
   /** Toggle collapsed/expanded state */
   onToggleCollapse: () => void;
-  /** Whether auto-preview is enabled */
-  autoPreview: boolean;
-  /** Fired when the auto-preview checkbox changes */
-  onAutoPreviewChange: (enabled: boolean) => void;
   /**
    * Incremented each time a rule is applied.
    * When auto-preview is on and sourceData is non-empty, a change here
    * triggers an automatic run.
    */
   lastApplyTimestamp: number | null;
+  /** Saved test cases available for loading into the source textarea */
+  testCases?: readonly TestCase[];
+  /** Fired when a test case is selected from the dropdown */
+  onLoadTestCase?: (id: string) => void;
   /** Optional className for the outer container */
   className?: string;
 }
@@ -95,6 +97,56 @@ function StatusLine({ status }: { status: { errors: number; warnings: number } |
 }
 
 // ---------------------------------------------------------------------------
+// TestCaseSelector sub-component
+// ---------------------------------------------------------------------------
+
+function TestCaseSelector({
+  testCases,
+  onLoadTestCase,
+}: {
+  testCases?: readonly TestCase[];
+  onLoadTestCase?: (id: string) => void;
+}) {
+  const [value, setValue] = useState('');
+  const hasTestCases = testCases && testCases.length > 0;
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    if (!id) return;
+    onLoadTestCase?.(id);
+    // Reset to placeholder after selection
+    setValue('');
+  };
+
+  return (
+    <select
+      aria-label="Load test case"
+      data-testid="strip-test-case-selector"
+      value={value}
+      onChange={handleChange}
+      className="h-6 rounded border border-slate-700 bg-slate-800 px-1.5 text-xs text-slate-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+    >
+      {hasTestCases ? (
+        <>
+          <option value="" disabled>
+            Load test case…
+          </option>
+          {testCases.map((tc) => (
+            <option key={tc.id} value={tc.id}>
+              {tc.name}
+            </option>
+          ))}
+        </>
+      ) : (
+        <option value="" disabled>
+          No saved test cases
+        </option>
+      )}
+    </select>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -102,13 +154,13 @@ function StatusLine({ status }: { status: { errors: number; warnings: number } |
  * InlinePreviewStrip — compact bottom strip replacing the 4-tab BottomArea.
  *
  * Expanded layout (~120px):
- *   [Source input 30%] [Run] [Output 45%] [Status + auto-preview + link 25%]
+ *   [Source input 30%] [Run] [Output 45%] [Status + link 25%]
  *
  * Collapsed layout (~32px):
  *   "Preview" label | status summary | expand chevron
  *
- * Auto-preview: when enabled and sourceData is non-empty, watches
- * `lastApplyTimestamp` and calls `onRun()` automatically on each change.
+ * Auto-preview: when sourceData is non-empty, watches `lastApplyTimestamp`
+ * and calls `onRun()` automatically on each change.
  * If sourceData is empty, auto-run is silently skipped (AE-14).
  */
 export function InlinePreviewStrip({
@@ -121,9 +173,9 @@ export function InlinePreviewStrip({
   testingPageUrl,
   isCollapsed,
   onToggleCollapse,
-  autoPreview,
-  onAutoPreviewChange,
   lastApplyTimestamp,
+  testCases,
+  onLoadTestCase,
   className = '',
 }: InlinePreviewStripProps) {
   // Flash animation state — applied briefly when output updates via auto-preview
@@ -136,11 +188,10 @@ export function InlinePreviewStrip({
     if (lastApplyTimestamp === prevTimestampRef.current) return;
     prevTimestampRef.current = lastApplyTimestamp;
 
-    if (!autoPreview) return;
     if (!sourceData.trim()) return; // AE-14: no-op when source data is empty
 
     onRun();
-  }, [lastApplyTimestamp, autoPreview, sourceData, onRun]);
+  }, [lastApplyTimestamp, sourceData, onRun]);
 
   // Flash output area briefly when output changes (only when auto-preview triggered it)
   const prevOutputRef = useRef<unknown>(null);
@@ -216,6 +267,8 @@ export function InlinePreviewStrip({
           >
             Source JSON
           </label>
+          {/* Test case selector */}
+          <TestCaseSelector testCases={testCases} onLoadTestCase={onLoadTestCase} />
           <textarea
             id="strip-source-input"
             data-testid="strip-source-input"
@@ -291,21 +344,6 @@ export function InlinePreviewStrip({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {/* Auto-preview toggle */}
-            <label
-              className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400"
-              data-testid="strip-auto-preview-label"
-            >
-              <input
-                type="checkbox"
-                checked={autoPreview}
-                onChange={(e) => onAutoPreviewChange(e.target.checked)}
-                data-testid="strip-auto-preview-toggle"
-                className="rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900"
-              />
-              Auto-preview
-            </label>
-
             {/* Advanced Testing link */}
             <Link
               to={testingPageUrl}

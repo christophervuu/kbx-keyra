@@ -159,6 +159,21 @@ describe('EditorTopBar', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
     expect(screen.getByTestId('project-name-link')).toHaveTextContent('My Project');
   });
+
+  it('renders disabled Auto-map button', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    const btn = screen.getByTestId('automap-button');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+  });
+
+  it('Auto-map button has correct tooltip text', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.getByTestId('automap-button')).toHaveAttribute(
+      'title',
+      'AI-powered auto-mapping \u2014 coming soon',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -173,11 +188,15 @@ describe('MappingEditorPage', () => {
 
   it('renders all semantic slot areas', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('global-toolbar')).toBeInTheDocument();
     expect(screen.getByTestId('source-panel')).toBeInTheDocument();
     expect(screen.getByTestId('target-worklist')).toBeInTheDocument();
     expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
     expect(screen.getByTestId('bottom-area')).toBeInTheDocument();
+  });
+
+  it('does not render a global-toolbar element', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.queryByTestId('global-toolbar')).not.toBeInTheDocument();
   });
 
   it('renders the page container with correct testid', () => {
@@ -268,33 +287,10 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('custom-bottom')).toBeInTheDocument();
   });
 
-  it('renders placeholder in global toolbar when no toolbarContent provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('global-toolbar')).toHaveTextContent('Global Toolbar');
-  });
-
-  it('renders custom content in global toolbar when toolbarContent is provided', () => {
-    renderWithRouter(
-      <MappingEditorPage
-        projectId="proj-1"
-        mappingId="mapping-1"
-        toolbarContent={<div data-testid="custom-toolbar">Toolbar</div>}
-      />,
-    );
-    expect(screen.getByTestId('custom-toolbar')).toBeInTheDocument();
-  });
-
   it('target worklist is always rendered regardless of other slots', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     const worklist = screen.getByTestId('target-worklist');
     expect(worklist).toBeInTheDocument();
-  });
-
-  it('source panel has lg: visibility class (collapses below 1024px)', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const sourcePanel = screen.getByTestId('source-panel');
-    expect(sourcePanel.className).toContain('hidden');
-    expect(sourcePanel.className).toContain('lg:block');
   });
 
   it('target worklist does not have a hidden class', () => {
@@ -303,19 +299,40 @@ describe('MappingEditorPage', () => {
     expect(worklist.className).not.toContain('hidden');
   });
 
-  it('source panel has w-[15%] width class', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('source-panel').className).toContain('w-[15%]');
-  });
-
-  it('target worklist has lg:w-[35%] width class', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('target-worklist').className).toContain('lg:w-[35%]');
-  });
-
   it('builder panel uses flex-1 to fill remaining space', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     expect(screen.getByTestId('builder-panel').className).toContain('flex-1');
+  });
+
+  it('renders resize handle between source and target columns', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('resize-handle-source')).toBeInTheDocument();
+  });
+
+  it('renders resize handle between target and builder columns', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('resize-handle-builder')).toBeInTheDocument();
+  });
+
+  it('renders bottom resize handle', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    expect(screen.getByTestId('bottom-resize-handle')).toBeInTheDocument();
+  });
+
+  it('source panel has non-zero inline width by default', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const panel = screen.getByTestId('source-panel');
+    const width = (panel as HTMLElement).style.width;
+    expect(width).toBeTruthy();
+    expect(parseInt(width)).toBeGreaterThan(0);
+  });
+
+  it('target worklist has non-zero inline width by default', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+    const panel = screen.getByTestId('target-worklist');
+    const width = (panel as HTMLElement).style.width;
+    expect(width).toBeTruthy();
+    expect(parseInt(width)).toBeGreaterThan(0);
   });
 
   it('renders deploy page link with correct route params', () => {

@@ -10,6 +10,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
+import type { TestCase } from '@/lib/types/domain';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -39,6 +41,10 @@ export interface BottomAreaProps {
   testCasesContent?: ReactNode;
   /** Initial collapsed state (default: false) */
   defaultCollapsed?: boolean;
+  /** Saved test cases available for loading into the source textarea */
+  testCases?: readonly TestCase[];
+  /** Fired when a test case is selected from the dropdown */
+  onLoadTestCase?: (id: string) => void;
   /** Optional className for the outer container */
   className?: string;
 }
@@ -58,16 +64,28 @@ export function BottomArea({
   traceContent,
   testCasesContent,
   defaultCollapsed = false,
+  testCases,
+  onLoadTestCase,
   className = '',
 }: BottomAreaProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [activeTab, setActiveTab] = useState<BottomTabId>('preview');
+  const [selectorValue, setSelectorValue] = useState('');
 
   const tabContent: Record<BottomTabId, ReactNode> = {
     preview: previewContent,
     diagnostics: diagnosticsContent,
     trace: traceContent,
     'test-cases': testCasesContent,
+  };
+
+  const hasTestCases = testCases && testCases.length > 0;
+
+  const handleTestCaseChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    if (!id) return;
+    onLoadTestCase?.(id);
+    setSelectorValue('');
   };
 
   return (
@@ -110,6 +128,32 @@ export function BottomArea({
 
         {/* Spacer */}
         <span className="flex-1" />
+
+        {/* Test case selector */}
+        <select
+          aria-label="Load test case"
+          data-testid="bottom-test-case-selector"
+          value={selectorValue}
+          onChange={handleTestCaseChange}
+          className="mr-2 h-6 rounded border border-slate-700 bg-slate-800 px-1.5 text-xs text-slate-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          {hasTestCases ? (
+            <>
+              <option value="" disabled>
+                Load test case…
+              </option>
+              {testCases.map((tc) => (
+                <option key={tc.id} value={tc.id}>
+                  {tc.name}
+                </option>
+              ))}
+            </>
+          ) : (
+            <option value="" disabled>
+              No saved test cases
+            </option>
+          )}
+        </select>
 
         {/* Collapse toggle */}
         <button

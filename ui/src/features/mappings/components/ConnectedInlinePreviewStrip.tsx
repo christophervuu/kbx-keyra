@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { InlinePreviewStrip } from './InlinePreviewStrip';
 import { usePreviewExecution } from '../hooks/use-preview-execution';
+import { useTestCases } from '../hooks/use-test-cases';
 
 import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 
@@ -49,7 +50,16 @@ export function ConnectedInlinePreviewStrip({
 }: ConnectedInlinePreviewStripProps) {
   const [sourceData, setSourceData] = useState('');
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [autoPreview, setAutoPreview] = useState(true);
+
+  const { testCases, loadTestCase } = useTestCases(mappingId);
+
+  const handleLoadTestCase = useCallback(
+    (id: string) => {
+      const tc = loadTestCase(id);
+      if (tc) setSourceData(tc.sourceData);
+    },
+    [loadTestCase],
+  );
 
   const { state, run } = usePreviewExecution({
     config,
@@ -78,9 +88,9 @@ export function ConnectedInlinePreviewStrip({
       testingPageUrl={`/projects/${projectId}/mappings/${mappingId}/test`}
       isCollapsed={isCollapsed}
       onToggleCollapse={() => setIsCollapsed((prev) => !prev)}
-      autoPreview={autoPreview}
-      onAutoPreviewChange={setAutoPreview}
       lastApplyTimestamp={lastApplyTimestamp}
+      testCases={testCases}
+      onLoadTestCase={handleLoadTestCase}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Save, SlidersHorizontal } from 'lucide-react';
+import { Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
@@ -196,6 +196,19 @@ export function EditorTopBar({
           </span>
         </div>
       )}
+
+      {/* Auto-map placeholder button */}
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        title="AI-powered auto-mapping — coming soon"
+        data-testid="automap-button"
+        className="inline-flex cursor-not-allowed items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-slate-500 opacity-50"
+      >
+        <Sparkles size={12} aria-hidden="true" />
+        Auto-map
+      </button>
 
       {/* Save state indicator */}
       <span

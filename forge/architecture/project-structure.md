@@ -261,7 +261,7 @@ ui/
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
           RawDslEditor.test.tsx      Component tests (25 tests: rendering, token colors, placeholder, readOnly, onChange, onCursorChange, bracket matching, ref API, error decoration overlay, aria-invalid, tooltip)
-          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01): GlobalToolbar slot, Source panel (collapsible ≤1024px), Target Worklist (center, never collapses), Builder/Editor (right), full-width bottom area; slots: toolbarContent, sourceContent, targetWorklistContent, builderContent, bottomContent; panel widths 15/35/50 (FS-021 T-04)
+          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01, updated FS-022 T-01, T-02): Source panel (pixel-width, collapsible with expand strip), Target Worklist (pixel-width, never collapses), Builder/Editor (flex-1), full-width bottom area; slots: sourceContent, targetWorklistContent, builderContent, bottomContent; drag handles between columns and above bottom; layout managed by useResizableLayout hook (FS-022 T-02)
           MappingEditorPage.test.tsx Component tests (22 tests: top bar, panels, slots, routing)
           NestedFunctionBuilder.tsx  Inline mini builder for nested function arguments: TransformPicker + ArgumentConfigurator, accordion-style, limited to nestingLevel < 2 (T-06)
           NestedFunctionBuilder.test.tsx Component tests (7 tests: initial state, function selection, args change, clear/reset)
@@ -312,6 +312,8 @@ ui/
           use-mapping-editor.test.tsx    Hook unit tests (26 tests: loading, save, unsaved detection, keyboard, beforeunload, actions)
           use-preview-execution.ts       Preview execution lifecycle hook: manual run(), auto-run (500ms debounce), 2s timeout guard, trace toggle, publishes to PreviewContext (FS-012 T-04)
           use-preview-execution.test.ts  Hook unit tests (idle state, guards, success, error, trace flag, auto-run debounce, timeout)
+          use-resizable-layout.ts        Resizable panel layout hook: pixel-based column widths, bottom height, collapse states, drag logic, localStorage persistence under keyra:editor-layout (FS-022 T-02)
+          use-resizable-layout.test.ts   Hook unit tests (defaults, localStorage read/write, clamp, collapse/expand, drag min-width enforcement)
           use-test-cases.ts              Test case CRUD hook: save/load/delete, localStorage persistence keyed by mappingId (keyra:testcases:{id}), quota error handling (FS-012 T-05)
           use-test-cases.test.ts         Hook unit tests (save, persist, load, delete, mappingId reload, corrupted storage, quota error)
         context/          Feature-scoped React contexts

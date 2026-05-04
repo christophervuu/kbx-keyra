@@ -76,8 +76,6 @@ export { TargetFieldRow } from './TargetFieldRow';
 export type { TargetFieldRowProps, TargetFieldType, TargetFieldStatus } from './TargetFieldRow';
 export { TargetWorklist } from './TargetWorklist';
 export type { TargetWorklistProps, GroupingMode } from './TargetWorklist';
-export { GlobalToolbar } from './GlobalToolbar';
-export type { GlobalToolbarProps } from './GlobalToolbar';
 export { ScalarFieldBuilder } from './ScalarFieldBuilder';
 export type { ScalarFieldBuilderProps } from './ScalarFieldBuilder';
 export { ObjectSummaryPanel } from './ObjectSummaryPanel';

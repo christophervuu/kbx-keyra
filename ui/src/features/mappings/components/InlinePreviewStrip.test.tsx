@@ -19,8 +19,6 @@ const DEFAULT_PROPS: InlinePreviewStripProps = {
   testingPageUrl: '/projects/p1/mappings/m1/test',
   isCollapsed: false,
   onToggleCollapse: vi.fn(),
-  autoPreview: true,
-  onAutoPreviewChange: vi.fn(),
   lastApplyTimestamp: null,
 };
 
@@ -66,9 +64,14 @@ describe('InlinePreviewStrip', () => {
     expect(screen.getByTestId('strip-status')).toBeInTheDocument();
   });
 
-  it('renders auto-preview toggle', () => {
+  it('does not render auto-preview toggle', () => {
     renderStrip();
-    expect(screen.getByTestId('strip-auto-preview-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('strip-auto-preview-toggle')).not.toBeInTheDocument();
+  });
+
+  it('does not render auto-preview label', () => {
+    renderStrip();
+    expect(screen.queryByTestId('strip-auto-preview-label')).not.toBeInTheDocument();
   });
 
   it('renders "Open Advanced Testing" link', () => {
@@ -172,33 +175,16 @@ describe('InlinePreviewStrip', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Auto-preview toggle
+  // Auto-preview: lastApplyTimestamp triggers onRun unconditionally
   // ---------------------------------------------------------------------------
 
-  it('auto-preview checkbox reflects autoPreview prop', () => {
-    renderStrip({ autoPreview: true });
-    expect(screen.getByTestId('strip-auto-preview-toggle')).toBeChecked();
-  });
-
-  it('auto-preview checkbox calls onAutoPreviewChange when changed', () => {
-    const onAutoPreviewChange = vi.fn();
-    renderStrip({ autoPreview: true, onAutoPreviewChange });
-    fireEvent.click(screen.getByTestId('strip-auto-preview-toggle'));
-    expect(onAutoPreviewChange).toHaveBeenCalledWith(false);
-  });
-
-  // ---------------------------------------------------------------------------
-  // Auto-preview: lastApplyTimestamp triggers onRun
-  // ---------------------------------------------------------------------------
-
-  it('calls onRun when lastApplyTimestamp changes, autoPreview is on, and sourceData is non-empty', () => {
+  it('calls onRun when lastApplyTimestamp changes and sourceData is non-empty', () => {
     const onRun = vi.fn();
     const { rerender } = render(
       <MemoryRouter>
         <InlinePreviewStrip
           {...DEFAULT_PROPS}
           onRun={onRun}
-          autoPreview={true}
           sourceData={'{"a":1}'}
           lastApplyTimestamp={null}
         />
@@ -211,7 +197,6 @@ describe('InlinePreviewStrip', () => {
         <InlinePreviewStrip
           {...DEFAULT_PROPS}
           onRun={onRun}
-          autoPreview={true}
           sourceData={'{"a":1}'}
           lastApplyTimestamp={1000}
         />
@@ -220,42 +205,13 @@ describe('InlinePreviewStrip', () => {
     expect(onRun).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT call onRun when autoPreview is off and lastApplyTimestamp changes', () => {
+  it('does NOT call onRun when lastApplyTimestamp changes but sourceData is empty (AE-14)', () => {
     const onRun = vi.fn();
     const { rerender } = render(
       <MemoryRouter>
         <InlinePreviewStrip
           {...DEFAULT_PROPS}
           onRun={onRun}
-          autoPreview={false}
-          sourceData={'{"a":1}'}
-          lastApplyTimestamp={null}
-        />
-      </MemoryRouter>,
-    );
-
-    rerender(
-      <MemoryRouter>
-        <InlinePreviewStrip
-          {...DEFAULT_PROPS}
-          onRun={onRun}
-          autoPreview={false}
-          sourceData={'{"a":1}'}
-          lastApplyTimestamp={1000}
-        />
-      </MemoryRouter>,
-    );
-    expect(onRun).not.toHaveBeenCalled();
-  });
-
-  it('does NOT call onRun when autoPreview is on but sourceData is empty (AE-14)', () => {
-    const onRun = vi.fn();
-    const { rerender } = render(
-      <MemoryRouter>
-        <InlinePreviewStrip
-          {...DEFAULT_PROPS}
-          onRun={onRun}
-          autoPreview={true}
           sourceData={''}
           lastApplyTimestamp={null}
         />
@@ -267,7 +223,6 @@ describe('InlinePreviewStrip', () => {
         <InlinePreviewStrip
           {...DEFAULT_PROPS}
           onRun={onRun}
-          autoPreview={true}
           sourceData={''}
           lastApplyTimestamp={1000}
         />
@@ -283,19 +238,13 @@ describe('InlinePreviewStrip', () => {
         <InlinePreviewStrip
           {...DEFAULT_PROPS}
           onRun={onRun}
-          autoPreview={true}
           sourceData={'{"a":1}'}
           lastApplyTimestamp={1000}
         />
       </MemoryRouter>,
     );
-    // First render with a non-null timestamp — should NOT fire because prevRef starts null
-    // and the effect fires once, setting prevRef to 1000 and calling onRun
-    // Actually per the implementation it WILL fire on first render if timestamp != null
-    // This is intentional — if the page loads with a pre-existing timestamp, skip.
-    // The implementation guards: if (lastApplyTimestamp === prevTimestampRef.current) return;
-    // prevRef starts null, so 1000 !== null → fires. This is acceptable behavior.
-    // Test is informational — just verify it doesn't throw.
+    // First render with a non-null timestamp — prevRef starts null so 1000 !== null → fires.
+    // This is acceptable behavior. Test is informational — just verify it doesn't throw.
     expect(true).toBe(true);
   });
 
@@ -316,5 +265,59 @@ describe('InlinePreviewStrip', () => {
   it('displays "Running…" in output area when isRunning is true', () => {
     renderStrip({ output: null, isRunning: true });
     expect(screen.getByTestId('strip-output')).toHaveTextContent('Running…');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test case selector
+  // ---------------------------------------------------------------------------
+
+  it('renders test case selector dropdown', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-test-case-selector')).toBeInTheDocument();
+  });
+
+  it('shows "No saved test cases" when testCases is empty', () => {
+    renderStrip({ testCases: [] });
+    const selector = screen.getByTestId('strip-test-case-selector');
+    expect(selector).toHaveTextContent('No saved test cases');
+  });
+
+  it('shows "No saved test cases" when testCases is undefined', () => {
+    renderStrip({ testCases: undefined });
+    const selector = screen.getByTestId('strip-test-case-selector');
+    expect(selector).toHaveTextContent('No saved test cases');
+  });
+
+  it('lists test case names when testCases has items', () => {
+    const testCases = [
+      { id: 'tc-1', name: 'Happy path', sourceData: '{}', createdAt: '2024-01-01T00:00:00Z' },
+      { id: 'tc-2', name: 'Edge case', sourceData: '{"x":1}', createdAt: '2024-01-02T00:00:00Z' },
+    ];
+    renderStrip({ testCases });
+    expect(screen.getByText('Happy path')).toBeInTheDocument();
+    expect(screen.getByText('Edge case')).toBeInTheDocument();
+  });
+
+  it('fires onLoadTestCase with the selected test case ID', () => {
+    const onLoadTestCase = vi.fn();
+    const testCases = [
+      { id: 'tc-1', name: 'Happy path', sourceData: '{}', createdAt: '2024-01-01T00:00:00Z' },
+    ];
+    renderStrip({ testCases, onLoadTestCase });
+    fireEvent.change(screen.getByTestId('strip-test-case-selector'), {
+      target: { value: 'tc-1' },
+    });
+    expect(onLoadTestCase).toHaveBeenCalledWith('tc-1');
+  });
+
+  it('resets dropdown to placeholder after selection', () => {
+    const testCases = [
+      { id: 'tc-1', name: 'Happy path', sourceData: '{}', createdAt: '2024-01-01T00:00:00Z' },
+    ];
+    renderStrip({ testCases, onLoadTestCase: vi.fn() });
+    const selector = screen.getByTestId('strip-test-case-selector') as HTMLSelectElement;
+    fireEvent.change(selector, { target: { value: 'tc-1' } });
+    // After selection the value resets to '' (placeholder)
+    expect(selector.value).toBe('');
   });
 });

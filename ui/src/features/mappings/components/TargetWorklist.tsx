@@ -1,13 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { Filter, Search, X } from 'lucide-react';
+import { Filter, List, Search, SortAsc, X } from 'lucide-react';
 
-import { BreadcrumbNav } from './BreadcrumbNav';
 import { TargetFieldRow } from './TargetFieldRow';
 import type { TargetFieldType } from './TargetFieldRow';
 import { useTargetStatus } from '../hooks/use-target-status';
-import type { TargetFilter } from '../types';
+import type { EditorView, TargetFilter, TargetSort } from '../types';
 
 import type { ValidationResult } from '@/lib/engine';
 import type { MappingRule, SchemaTreeNode } from '@/lib/types/domain';
@@ -34,21 +33,27 @@ export interface TargetWorklistProps {
   groupingMode: GroupingMode;
   /** Fired when a field row is clicked */
   onSelectNode: (path: string, nodeType: SchemaTreeNode['type']) => void;
-  /**
-   * When breadcrumb mode is active, this is the path of the subtree being
-   * viewed. null means the full tree is shown.
-   */
-  currentSubtreePath?: string | null;
-  /**
-   * Whether breadcrumb drill-down mode is active. When true, clicking an
-   * object/array node isolates that subtree instead of opening its builder.
-   */
-  breadcrumbMode?: boolean;
-  /** Fired when the breadcrumb path changes (drill-in or navigate up) */
-  onSubtreeNavigate?: (path: string | null) => void;
+  /** Current sort mode (controlled) */
+  sort: TargetSort;
+  /** Fired when sort mode changes */
+  onSortChange: (sort: TargetSort) => void;
+  /** Current editor view (controlled) */
+  view: EditorView;
+  /** Fired when view toggle is clicked */
+  onViewToggle: (view: EditorView) => void;
   /** Optional className for the outer container */
   className?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Sort options
+// ---------------------------------------------------------------------------
+
+const SORT_OPTIONS: { value: TargetSort; label: string }[] = [
+  { value: 'schema', label: 'Schema order' },
+  { value: 'unmapped-first', label: 'Unmapped first' },
+  { value: 'required-first', label: 'Required first' },
+];
 
 // ---------------------------------------------------------------------------
 // Filter chip config
@@ -310,7 +315,8 @@ function FilterChip({
  * validation results via `useTargetStatus`.
  *
  * Search and filter chip state are owned internally. Grouping mode is
- * controlled by the parent via `groupingMode`.
+ * controlled by the parent via `groupingMode`. Sort and view toggle are
+ * controlled by the parent and rendered in the toolbar row above the search.
  */
 export function TargetWorklist({
   nodes,
@@ -319,9 +325,10 @@ export function TargetWorklist({
   selectedPath,
   groupingMode,
   onSelectNode,
-  currentSubtreePath = null,
-  breadcrumbMode = false,
-  onSubtreeNavigate,
+  sort,
+  onSortChange,
+  view,
+  onViewToggle,
   className = '',
 }: TargetWorklistProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -361,37 +368,6 @@ export function TargetWorklist({
     });
   }, []);
 
-  // When breadcrumb mode is active and user clicks an object/array node,
-  // drill into that subtree instead of opening its builder.
-  const handleSelectNode = (path: string, nodeType: SchemaTreeNode['type']) => {
-    if (breadcrumbMode && (nodeType === 'object' || nodeType === 'array')) {
-      onSubtreeNavigate?.(path);
-    } else {
-      onSelectNode(path, nodeType);
-    }
-  };
-
-  // When breadcrumb mode is active, filter nodes to only those within the
-  // current subtree path.
-  const effectiveRootNodes = useMemo(() => {
-    if (!breadcrumbMode || !currentSubtreePath) return groupedRoots;
-    // Find the node at currentSubtreePath and use its children as roots
-    function findNode(
-      candidates: SchemaTreeNode[],
-      targetPath: string,
-    ): SchemaTreeNode | undefined {
-      for (const n of candidates) {
-        if (n.path === targetPath) return n;
-        const found = findNode(n.children, targetPath);
-        if (found) return found;
-      }
-      return undefined;
-    }
-    const subtreeNode = findNode(Array.from(nodes), currentSubtreePath);
-    if (!subtreeNode) return groupedRoots;
-    return subtreeNode.children;
-  }, [breadcrumbMode, currentSubtreePath, groupedRoots, nodes]);
-
   if (nodes.length === 0) {
     return (
       <div
@@ -403,7 +379,7 @@ export function TargetWorklist({
     );
   }
 
-  const rows = effectiveRootNodes.flatMap((node) =>
+  const rows = groupedRoots.flatMap((node) =>
     renderNode({
       node,
       statusMap,
@@ -412,7 +388,7 @@ export function TargetWorklist({
       selectedPath,
       searchQuery,
       activeFilters,
-      onSelectNode: handleSelectNode,
+      onSelectNode,
       onToggleExpand: handleToggleExpand,
       rules,
     }),
@@ -425,65 +401,124 @@ export function TargetWorklist({
       className={`flex flex-col overflow-hidden ${className}`}
       data-testid="target-worklist-container"
     >
-      {/* Breadcrumb nav — only shown when breadcrumb mode is active */}
-      {breadcrumbMode && (
-        <BreadcrumbNav
-          currentPath={currentSubtreePath}
-          onNavigate={(path) => onSubtreeNavigate?.(path)}
-          className="shrink-0 border-b border-slate-800"
-        />
-      )}
-
-      {/* Search + filter toolbar */}
-      <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 space-y-1.5">
-        {/* Search input */}
-        <div className="relative flex items-center">
-          <Search
-            size={12}
-            className="pointer-events-none absolute left-2 text-slate-500"
-            aria-hidden="true"
-          />
-          <input
-            type="search"
-            role="searchbox"
-            aria-label="Search target fields"
-            data-testid="target-search"
-            placeholder="Search fields…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              aria-label="Clear search"
-              data-testid="target-search-clear"
-              className="absolute right-1.5 text-slate-500 hover:text-slate-300"
+      {/* Sort + View toggle toolbar */}
+      <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 flex items-center gap-2">
+        {/* Sort selector — hidden in rules view */}
+        {view !== 'rules' && (
+          <div className="flex items-center gap-1">
+            <SortAsc size={12} className="text-slate-500 shrink-0" aria-hidden="true" />
+            <select
+              aria-label="Sort order"
+              data-testid="toolbar-sort"
+              value={sort}
+              onChange={(e) => onSortChange(e.target.value as TargetSort)}
+              className="h-6 rounded border border-slate-700 bg-slate-800 px-1.5 text-xs text-slate-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <X size={11} aria-hidden="true" />
-            </button>
-          )}
-        </div>
+              {SORT_OPTIONS.map(({ value: v, label }) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        {/* Filter chips */}
+        {/* Spacer */}
+        <span className="flex-1" aria-hidden="true" />
+
+        {/* View toggle */}
         <div
-          className="flex flex-wrap items-center gap-1"
           role="group"
-          aria-label="Filter target fields"
-          data-testid="target-filter-chips"
+          aria-label="Editor view"
+          className="flex rounded border border-slate-700 bg-slate-800"
         >
-          <Filter size={11} className="text-slate-600 shrink-0" aria-hidden="true" />
-          {FILTER_CHIPS.map(({ value, label }) => (
-            <FilterChip
-              key={value}
-              label={label}
-              active={activeFilters.has(value)}
-              onClick={() => handleFilterToggle(value)}
-            />
-          ))}
+          <button
+            type="button"
+            data-testid="toolbar-view-target"
+            aria-pressed={view === 'target'}
+            onClick={() => view !== 'target' && onViewToggle('target')}
+            className={[
+              'flex items-center gap-1 rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+              view === 'target'
+                ? 'bg-slate-700 text-slate-100'
+                : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+            ].join(' ')}
+          >
+            <Filter size={11} aria-hidden="true" />
+            Target
+          </button>
+          <button
+            type="button"
+            data-testid="toolbar-view-rules"
+            aria-pressed={view === 'rules'}
+            onClick={() => view !== 'rules' && onViewToggle('rules')}
+            className={[
+              'flex items-center gap-1 rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+              view === 'rules'
+                ? 'bg-slate-700 text-slate-100'
+                : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+            ].join(' ')}
+          >
+            <List size={11} aria-hidden="true" />
+            Rules
+          </button>
         </div>
       </div>
+
+      {/* Search + filter toolbar — hidden in rules view */}
+      {view !== 'rules' && (
+        <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 space-y-1.5">
+          {/* Search input */}
+          <div className="relative flex items-center">
+            <Search
+              size={12}
+              className="pointer-events-none absolute left-2 text-slate-500"
+              aria-hidden="true"
+            />
+            <input
+              type="search"
+              role="searchbox"
+              aria-label="Search target fields"
+              data-testid="target-search"
+              placeholder="Search fields…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                data-testid="target-search-clear"
+                className="absolute right-1.5 text-slate-500 hover:text-slate-300"
+              >
+                <X size={11} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+
+          {/* Filter chips */}
+          <div
+            className="flex flex-wrap items-center gap-1"
+            role="group"
+            aria-label="Filter target fields"
+            data-testid="target-filter-chips"
+          >
+            <Filter size={11} className="text-slate-600 shrink-0" aria-hidden="true" />
+            {FILTER_CHIPS.map(({ value: v, label }) => (
+              <FilterChip
+                key={v}
+                label={label}
+                active={activeFilters.has(v)}
+                onClick={() => handleFilterToggle(v)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Field list */}
       {rows.length === 0 && isFiltering ? (
