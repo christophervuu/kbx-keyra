@@ -14,7 +14,7 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { ClipboardPaste, Plus, Search, Sparkles, X } from 'lucide-react';
+import { ClipboardPaste, Filter, List, Plus, Search, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
@@ -26,6 +26,7 @@ import { ValidationSummaryBar } from './ValidationSummaryBar';
 import type { ValidationSummary } from '../hooks/use-engine-validation';
 
 import { Button } from '@/components';
+import type { EditorView } from '@/features/mappings/types';
 import type { Diagnostic } from '@/lib/engine';
 import type { MappingRule } from '@/lib/types/domain';
 
@@ -60,6 +61,10 @@ export interface RuleListProps {
   onBulkDuplicate?: (indices: number[]) => void;
   /** Callback when rules are pasted from clipboard */
   onPasteRules?: (rules: Array<Pick<MappingRule, 'target' | 'type' | 'expression' | 'description'>>) => void;
+  /** Current editor view (target/rules) for toolbar toggle */
+  view?: EditorView;
+  /** View toggle handler from MappingEditor */
+  onViewToggle?: (view: EditorView) => void;
   /**
    * Index of the currently active/selected rule for the expression builder.
    * Highlighted with a left border. Null when no rule is active.
@@ -216,6 +221,8 @@ export function RuleList({
   onBulkDelete,
   onBulkDuplicate,
   onPasteRules,
+  view = 'rules',
+  onViewToggle,
   selectedRuleIndex = null,
   onRuleSelect,
 }: RuleListProps) {
@@ -258,6 +265,7 @@ export function RuleList({
   }, [rules, debouncedQuery]);
 
   const isSearchActive = debouncedQuery.trim().length > 0;
+  const searchQueryTrimmed = searchQuery.trim().toLowerCase();
 
   // DnD sensors — disabled when search is active
   const sensors = useSensors(
@@ -276,7 +284,19 @@ export function RuleList({
 
   // Selection helpers
   const selectionCount = selection.size;
-  const selectableIndices = isSearchActive ? filteredIndices : rules.map((_, i) => i);
+  const selectableIndices = useMemo(() => {
+    if (!searchQueryTrimmed) return rules.map((_, i) => i);
+    return rules.reduce<number[]>((acc, rule, i) => {
+      if (
+        rule.target.toLowerCase().includes(searchQueryTrimmed) ||
+        rule.expression.toLowerCase().includes(searchQueryTrimmed) ||
+        (rule.type && rule.type.toLowerCase().includes(searchQueryTrimmed))
+      ) {
+        acc.push(i);
+      }
+      return acc;
+    }, []);
+  }, [rules, searchQueryTrimmed]);
   const allSelected = selectableIndices.length > 0 && selectableIndices.every((i) => selection.has(i));
   const someSelected = selectionCount > 0 && !allSelected;
 
@@ -594,23 +614,41 @@ export function RuleList({
         </div>
       )}
 
-      {/* Validation summary bar */}
-      <ValidationSummaryBar
-        summary={summary}
-        coveragePercent={coveragePercent}
-        isValidating={isValidating}
-        schemasLoaded={schemasLoaded}
-      />
+      {/* Search input row */}
+      {!showAddForm && editingIndex === null && rules.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-1.5">
+          <div className="relative flex flex-1 items-center">
+            <Search size={13} className="absolute left-2 text-slate-500" aria-hidden="true" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search rules..."
+              className="w-full rounded border border-slate-700 bg-slate-900 py-1 pl-7 pr-7 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              aria-label="Search rules"
+              data-testid="rule-search"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 text-slate-500 hover:text-slate-300"
+                aria-label="Clear search"
+                data-testid="rule-search-clear"
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          {isSearchActive && (
+            <span className="shrink-0 text-xs text-slate-400" data-testid="rule-search-count">
+              {filteredIndices.length} of {rules.length} rules
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Bulk action bar (appears when selection is non-empty) */}
-      <BulkActionBar
-        selectedCount={selectionCount}
-        onDeleteSelected={handleBulkDeleteClick}
-        onDuplicateSelected={handleBulkDuplicate}
-        onCopySelected={handleBulkCopy}
-      />
-
-      {/* Toolbar row: Add Rule, Select All, Paste */}
+      {/* Toolbar row: Add Rule, Paste, Select All, Target/Rules toggle */}
       {!showAddForm && editingIndex === null && (
         <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-1.5">
           <Button variant="ghost" size="sm" onClick={handleAddClick} data-testid="add-rule-button">
@@ -649,42 +687,63 @@ export function RuleList({
               Select All
             </label>
           )}
+
+          <div
+            role="group"
+            aria-label="Editor view"
+            className="flex rounded border border-slate-700 bg-slate-800"
+          >
+            <button
+              type="button"
+              data-testid="toolbar-view-target"
+              aria-pressed={view === 'target'}
+              onClick={() => view !== 'target' && onViewToggle?.('target')}
+              className={[
+                'flex items-center gap-1 rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                view === 'target'
+                  ? 'bg-slate-700 text-slate-100'
+                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+              ].join(' ')}
+            >
+              <Filter size={11} aria-hidden="true" />
+              Target
+            </button>
+            <button
+              type="button"
+              data-testid="toolbar-view-rules"
+              aria-pressed={view === 'rules'}
+              onClick={() => view !== 'rules' && onViewToggle?.('rules')}
+              className={[
+                'flex items-center gap-1 rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                view === 'rules'
+                  ? 'bg-slate-700 text-slate-100'
+                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+              ].join(' ')}
+            >
+              <List size={11} aria-hidden="true" />
+              Rules
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Search input row */}
-      {!showAddForm && editingIndex === null && rules.length > 0 && (
-        <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-1.5">
-          <div className="relative flex flex-1 items-center">
-            <Search size={13} className="absolute left-2 text-slate-500" aria-hidden="true" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search rules..."
-              className="w-full rounded border border-slate-700 bg-slate-900 py-1 pl-7 pr-7 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              aria-label="Search rules"
-              data-testid="rule-search"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 text-slate-500 hover:text-slate-300"
-                aria-label="Clear search"
-                data-testid="rule-search-clear"
-              >
-                <X size={12} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          {isSearchActive && (
-            <span className="shrink-0 text-xs text-slate-400" data-testid="rule-search-count">
-              {filteredIndices.length} of {rules.length} rules
-            </span>
-          )}
-        </div>
-      )}
+      {/* Validation summary bar */}
+      <ValidationSummaryBar
+        summary={summary}
+        coveragePercent={coveragePercent}
+        isValidating={isValidating}
+        schemasLoaded={schemasLoaded}
+      />
+
+      {/* Bulk action bar (appears when selection is non-empty) */}
+      <BulkActionBar
+        selectedCount={selectionCount}
+        onDeleteSelected={handleBulkDeleteClick}
+        onDuplicateSelected={handleBulkDuplicate}
+        onCopySelected={handleBulkCopy}
+      />
 
       {/* Add Rule form */}
       {showAddForm && (

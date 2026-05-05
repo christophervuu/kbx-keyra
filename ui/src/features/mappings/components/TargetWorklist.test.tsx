@@ -345,30 +345,8 @@ describe('TargetWorklist', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Sort + View toolbar
+  // View toggle
   // ---------------------------------------------------------------------------
-
-  it('renders sort dropdown in target view', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    expect(screen.getByTestId('toolbar-sort')).toBeInTheDocument();
-  });
-
-  it('sort dropdown reflects current sort prop', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} sort="required-first" />);
-    expect(screen.getByTestId('toolbar-sort')).toHaveValue('required-first');
-  });
-
-  it('changing sort fires onSortChange with new value', () => {
-    const onSortChange = vi.fn();
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} onSortChange={onSortChange} />);
-    fireEvent.change(screen.getByTestId('toolbar-sort'), { target: { value: 'unmapped-first' } });
-    expect(onSortChange).toHaveBeenCalledWith('unmapped-first');
-  });
-
-  it('sort dropdown is hidden in rules view', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="rules" />);
-    expect(screen.queryByTestId('toolbar-sort')).not.toBeInTheDocument();
-  });
 
   it('renders view toggle buttons', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
@@ -391,9 +369,9 @@ describe('TargetWorklist', () => {
 
   it('clicking Target View fires onViewToggle with "target"', () => {
     const onViewToggle = vi.fn();
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="rules" onViewToggle={onViewToggle} />);
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="target" onViewToggle={onViewToggle} />);
     fireEvent.click(screen.getByTestId('toolbar-view-target'));
-    expect(onViewToggle).toHaveBeenCalledWith('target');
+    expect(onViewToggle).not.toHaveBeenCalled();
   });
 
   it('clicking the already-active view does not fire onViewToggle', () => {

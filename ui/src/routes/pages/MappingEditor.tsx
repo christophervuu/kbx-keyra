@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBlocker, useParams } from 'react-router-dom';
 
-import { useAdapter } from '@/lib/api';
 
 import { Button } from '@/components';
 import { ConfirmDialog } from '@/features/mappings/components';
@@ -20,13 +19,13 @@ import {
   VersionHistoryDrawer,
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
-  type GroupingMode,
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { useMappingEditor, useVersionHistory } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
-import type { EditorView, TargetSort } from '@/features/mappings/types';
+import type { EditorView } from '@/features/mappings/types';
+import { useAdapter } from '@/lib/api';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -161,9 +160,8 @@ export default function MappingEditor() {
   );
 
   // ---------------------------------------------------------------------------
-  // Toolbar state (sort, view)
+  // View state
   // ---------------------------------------------------------------------------
-  const [sort, setSort] = useState<TargetSort>('schema');
   const [view, setView] = useState<EditorView>('target');
 
   // ---------------------------------------------------------------------------
@@ -264,15 +262,6 @@ export default function MappingEditor() {
     setUnappliedDialogOpen(false);
     setPendingTargetPath(null);
   }, []);
-
-  // ---------------------------------------------------------------------------
-  // Derived: grouping mode from sort
-  // ---------------------------------------------------------------------------
-  const groupingMode = useMemo((): GroupingMode => {
-    if (sort === 'required-first') return 'required-first';
-    if (sort === 'unmapped-first') return 'unmapped-first';
-    return 'schema';
-  }, [sort]);
 
   // ---------------------------------------------------------------------------
   // Derived: target status map (for ObjectSummaryPanel child info)
@@ -387,11 +376,6 @@ export default function MappingEditor() {
     blocker.proceed?.();
   }, [blocker]);
 
-  // "Cancel" — stay
-  const handleBlockerCancel = useCallback(() => {
-    blocker.reset?.();
-  }, [blocker]);
-
   // ---------------------------------------------------------------------------
   // Loading / error states
   // ---------------------------------------------------------------------------
@@ -432,6 +416,8 @@ export default function MappingEditor() {
         diagnosticsForRule={editor.validation.diagnosticsForRule}
         selectedRuleIndex={selectedRuleIndex}
         onRuleSelect={setSelectedRuleIndex}
+        view={view}
+        onViewToggle={handleViewToggle}
         onAddRule={editor.actions.addRule}
         onEditRule={editor.actions.updateRule}
         onDeleteRule={editor.actions.deleteRule}
@@ -446,10 +432,8 @@ export default function MappingEditor() {
         rules={editor.rules}
         validationResult={editor.validation.result ?? null}
         selectedPath={selectedTargetPath}
-        groupingMode={groupingMode}
+        groupingMode="schema"
         onSelectNode={handleSelectTargetNode}
-        sort={sort}
-        onSortChange={setSort}
         view={view}
         onViewToggle={handleViewToggle}
         className="h-full"
@@ -539,6 +523,10 @@ export default function MappingEditor() {
       projectId={projectId}
       mappingId={mappingId}
       lastApplyTimestamp={lastApplyTimestamp}
+      onNavigateToRule={(ruleIndex) => {
+        const rule = editor.rules[ruleIndex];
+        if (rule) setSelectedTargetPath(rule.target);
+      }}
     />
   );
 

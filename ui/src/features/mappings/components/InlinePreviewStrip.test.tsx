@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
@@ -41,50 +41,498 @@ describe('InlinePreviewStrip', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Rendering — expanded
+  // Toolbar row
   // ---------------------------------------------------------------------------
 
-  it('renders source input', () => {
+  it('renders toolbar row with PREVIEW label', () => {
     renderStrip();
-    expect(screen.getByTestId('strip-source-input')).toBeInTheDocument();
+    const toolbar = screen.getByTestId('strip-toolbar');
+    expect(toolbar).toBeInTheDocument();
+    expect(toolbar).toHaveTextContent('Preview');
   });
 
-  it('renders Run button', () => {
+  it('renders Run button in toolbar', () => {
     renderStrip();
     expect(screen.getByTestId('strip-run-button')).toBeInTheDocument();
   });
 
-  it('renders output area', () => {
+  it('renders collapse toggle in toolbar', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-collapse-toggle')).toBeInTheDocument();
+  });
+
+  it('renders Clear button in toolbar', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-clear-button')).toBeInTheDocument();
+  });
+
+  it('renders Auto-run toggle in toolbar', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-autorun-toggle')).toBeInTheDocument();
+  });
+
+  it('renders Advanced Testing link in toolbar', () => {
+    renderStrip({ testingPageUrl: '/projects/p1/mappings/m1/test' });
+    const link = screen.getByTestId('strip-advanced-testing-link');
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test');
+  });
+
+  it('Clear button calls onClearSource when clicked', () => {
+    const onClearSource = vi.fn();
+    renderStrip({ onClearSource });
+    fireEvent.click(screen.getByTestId('strip-clear-button'));
+    expect(onClearSource).toHaveBeenCalledTimes(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-run toggle
+  // ---------------------------------------------------------------------------
+
+  it('Auto-run toggle shows green dot when autoRun is true', () => {
+    renderStrip({ autoRun: true });
+    const toggle = screen.getByTestId('strip-autorun-toggle');
+    // The dot span inside should have bg-green-400
+    const dot = toggle.querySelector('span[aria-hidden]');
+    expect(dot?.className).toContain('bg-green-400');
+  });
+
+  it('Auto-run toggle shows gray dot when autoRun is false', () => {
+    renderStrip({ autoRun: false });
+    const toggle = screen.getByTestId('strip-autorun-toggle');
+    const dot = toggle.querySelector('span[aria-hidden]');
+    expect(dot?.className).toContain('bg-slate-600');
+  });
+
+  it('Auto-run toggle has aria-checked=true when autoRun is true', () => {
+    renderStrip({ autoRun: true });
+    expect(screen.getByTestId('strip-autorun-toggle')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('Auto-run toggle has aria-checked=false when autoRun is false', () => {
+    renderStrip({ autoRun: false });
+    expect(screen.getByTestId('strip-autorun-toggle')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('clicking Auto-run toggle fires onAutoRunChange with opposite value (true→false)', () => {
+    const onAutoRunChange = vi.fn();
+    renderStrip({ autoRun: true, onAutoRunChange });
+    fireEvent.click(screen.getByTestId('strip-autorun-toggle'));
+    expect(onAutoRunChange).toHaveBeenCalledWith(false);
+  });
+
+  it('clicking Auto-run toggle fires onAutoRunChange with opposite value (false→true)', () => {
+    const onAutoRunChange = vi.fn();
+    renderStrip({ autoRun: false, onAutoRunChange });
+    fireEvent.click(screen.getByTestId('strip-autorun-toggle'));
+    expect(onAutoRunChange).toHaveBeenCalledWith(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Save as test case button and modal
+  // ---------------------------------------------------------------------------
+
+  it('renders Save button in toolbar', () => {
+    renderStrip({ sourceData: '{"a":1}' });
+    expect(screen.getByTestId('strip-save-testcase-button')).toBeInTheDocument();
+  });
+
+  it('Save button is disabled when sourceData is empty', () => {
+    renderStrip({ sourceData: '' });
+    expect(screen.getByTestId('strip-save-testcase-button')).toBeDisabled();
+  });
+
+  it('Save button is enabled when sourceData is non-empty', () => {
+    renderStrip({ sourceData: '{"a":1}' });
+    expect(screen.getByTestId('strip-save-testcase-button')).not.toBeDisabled();
+  });
+
+  it('clicking Save button opens modal', () => {
+    renderStrip({ sourceData: '{"a":1}' });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    expect(screen.getByTestId('save-testcase-modal')).toBeInTheDocument();
+  });
+
+  it('modal has role=dialog and aria-modal', () => {
+    renderStrip({ sourceData: '{"a":1}' });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('modal name input is pre-filled with "Test case 1" when no existing test cases', () => {
+    renderStrip({ sourceData: '{"a":1}', testCases: [] });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    const nameInput = screen.getByTestId('save-testcase-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('Test case 1');
+  });
+
+  it('modal name input is pre-filled with "Test case 3" when 2 existing test cases', () => {
+    const testCases = [
+      { id: 'tc-1', name: 'A', sourceData: '{}', createdAt: '2024-01-01T00:00:00Z' },
+      { id: 'tc-2', name: 'B', sourceData: '{}', createdAt: '2024-01-02T00:00:00Z' },
+    ];
+    renderStrip({ sourceData: '{"a":1}', testCases });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    const nameInput = screen.getByTestId('save-testcase-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('Test case 3');
+  });
+
+  it('Cancel button closes modal without calling onSaveTestCase', () => {
+    const onSaveTestCase = vi.fn();
+    renderStrip({ sourceData: '{"a":1}', onSaveTestCase });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    fireEvent.click(screen.getByTestId('save-testcase-cancel'));
+    expect(screen.queryByTestId('save-testcase-modal')).not.toBeInTheDocument();
+    expect(onSaveTestCase).not.toHaveBeenCalled();
+  });
+
+  it('clicking backdrop closes modal without calling onSaveTestCase', () => {
+    const onSaveTestCase = vi.fn();
+    renderStrip({ sourceData: '{"a":1}', onSaveTestCase });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    fireEvent.click(screen.getByTestId('save-testcase-backdrop'));
+    expect(screen.queryByTestId('save-testcase-modal')).not.toBeInTheDocument();
+    expect(onSaveTestCase).not.toHaveBeenCalled();
+  });
+
+  it('submitting modal calls onSaveTestCase with name and sourceData', () => {
+    const onSaveTestCase = vi.fn();
+    renderStrip({ sourceData: '{"a":1}', onSaveTestCase });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    const nameInput = screen.getByTestId('save-testcase-name-input');
+    fireEvent.change(nameInput, { target: { value: 'My test' } });
+    fireEvent.click(screen.getByTestId('save-testcase-confirm'));
+    expect(onSaveTestCase).toHaveBeenCalledWith({
+      name: 'My test',
+      sourceData: '{"a":1}',
+    });
+  });
+
+  it('submitting with expected output checked includes expectedOutput', () => {
+    const onSaveTestCase = vi.fn();
+    renderStrip({ sourceData: '{"a":1}', output: { result: 'ok' }, onSaveTestCase });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    fireEvent.click(screen.getByTestId('save-testcase-expected-checkbox'));
+    fireEvent.click(screen.getByTestId('save-testcase-confirm'));
+    expect(onSaveTestCase).toHaveBeenCalledWith({
+      name: expect.any(String),
+      sourceData: '{"a":1}',
+      expectedOutput: { result: 'ok' },
+    });
+  });
+
+  it('"Set as expected output" checkbox is disabled when output is null', () => {
+    renderStrip({ sourceData: '{"a":1}', output: null });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    expect(screen.getByTestId('save-testcase-expected-checkbox')).toBeDisabled();
+  });
+
+  it('modal closes after successful save', () => {
+    const onSaveTestCase = vi.fn();
+    renderStrip({ sourceData: '{"a":1}', onSaveTestCase });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    fireEvent.click(screen.getByTestId('save-testcase-confirm'));
+    expect(screen.queryByTestId('save-testcase-modal')).not.toBeInTheDocument();
+  });
+
+  it('Save button shows "Saved ✓" feedback after successful save', () => {
+    const onSaveTestCase = vi.fn();
+    renderStrip({ sourceData: '{"a":1}', onSaveTestCase });
+    fireEvent.click(screen.getByTestId('strip-save-testcase-button'));
+    fireEvent.click(screen.getByTestId('save-testcase-confirm'));
+    expect(screen.getByTestId('strip-save-testcase-button')).toHaveTextContent('Saved ✓');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Status bar — six states
+  // ---------------------------------------------------------------------------
+
+  it('status bar shows Idle state when sourceData is empty', () => {
+    renderStrip({ sourceData: '', status: null, isRunning: false });
+    const bar = screen.getByTestId('strip-status-bar');
+    expect(bar).toHaveTextContent('Paste source JSON and click Run');
+  });
+
+  it('status bar shows Ready state when sourceData is non-empty and no run yet', () => {
+    renderStrip({ sourceData: '{"a":1}', status: null, isRunning: false });
+    const bar = screen.getByTestId('strip-status-bar');
+    expect(bar).toHaveTextContent('Ready — click Run or enable Auto-run');
+  });
+
+  it('status bar shows Running state when isRunning is true', () => {
+    renderStrip({ sourceData: '{"a":1}', isRunning: true, status: null });
+    const bar = screen.getByTestId('strip-status-bar');
+    expect(bar).toHaveTextContent('Evaluating');
+  });
+
+  it('status bar shows Success state when status has no errors or warnings', () => {
+    renderStrip({
+      sourceData: '{"a":1}',
+      isRunning: false,
+      status: { errors: 0, warnings: 0 },
+      ruleCount: 5,
+      durationMs: 12,
+    });
+    const bar = screen.getByTestId('strip-status-bar');
+    expect(bar).toHaveTextContent('5 rules evaluated');
+    expect(bar).toHaveTextContent('0 errors');
+    expect(bar).toHaveTextContent('0 warnings');
+    expect(bar).toHaveTextContent('12ms');
+  });
+
+  it('status bar shows Success with warnings state', () => {
+    renderStrip({
+      sourceData: '{"a":1}',
+      isRunning: false,
+      status: { errors: 0, warnings: 3 },
+      ruleCount: 5,
+    });
+    const bar = screen.getByTestId('strip-status-bar');
+    expect(bar).toHaveTextContent('5 rules evaluated');
+    expect(bar).toHaveTextContent('3 warnings');
+  });
+
+  it('status bar shows Error state with Advanced Testing link', () => {
+    renderStrip({
+      sourceData: '{"a":1}',
+      isRunning: false,
+      status: { errors: 2, warnings: 1 },
+      testingPageUrl: '/projects/p1/mappings/m1/test',
+    });
+    const bar = screen.getByTestId('strip-status-bar');
+    expect(bar).toHaveTextContent('2 errors');
+    expect(bar).toHaveTextContent('1 warning');
+    const link = screen.getByTestId('strip-status-bar-advanced-testing-link');
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Three panes
+  // ---------------------------------------------------------------------------
+
+  it('renders source pane', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-source-pane')).toBeInTheDocument();
+  });
+
+  it('renders output pane', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-output-pane')).toBeInTheDocument();
+  });
+
+  it('renders diagnostics pane', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-diagnostics-pane')).toBeInTheDocument();
+  });
+
+  it('source pane contains source input', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-source-input')).toBeInTheDocument();
+  });
+
+  it('output pane contains output area', () => {
     renderStrip();
     expect(screen.getByTestId('strip-output')).toBeInTheDocument();
   });
 
-  it('renders status area', () => {
-    renderStrip();
-    expect(screen.getByTestId('strip-status')).toBeInTheDocument();
-  });
+  // ---------------------------------------------------------------------------
+  // Output pane placeholder
+  // ---------------------------------------------------------------------------
 
-  it('does not render auto-preview toggle', () => {
-    renderStrip();
-    expect(screen.queryByTestId('strip-auto-preview-toggle')).not.toBeInTheDocument();
-  });
-
-  it('does not render auto-preview label', () => {
-    renderStrip();
-    expect(screen.queryByTestId('strip-auto-preview-label')).not.toBeInTheDocument();
-  });
-
-  it('renders "Open Advanced Testing" link', () => {
-    renderStrip();
-    expect(screen.getByTestId('strip-advanced-testing-link')).toBeInTheDocument();
-  });
-
-  it('"Open Advanced Testing" link has correct href', () => {
-    renderStrip({ testingPageUrl: '/projects/p1/mappings/m1/test' });
-    expect(screen.getByTestId('strip-advanced-testing-link')).toHaveAttribute(
-      'href',
-      '/projects/p1/mappings/m1/test',
+  it('output pane shows placeholder when output is null', () => {
+    renderStrip({ output: null, isRunning: false });
+    expect(screen.getByTestId('strip-output')).toHaveTextContent(
+      'No output yet — run the mapping to see results',
     );
+  });
+
+  it('output pane shows Running… when isRunning is true and output is null', () => {
+    renderStrip({ output: null, isRunning: true });
+    expect(screen.getByTestId('strip-output')).toHaveTextContent('Running…');
+  });
+
+  it('output pane shows formatted output when output is provided', () => {
+    renderStrip({ output: { name: 'Alice' } });
+    expect(screen.getByTestId('strip-output')).toHaveTextContent('"name"');
+  });
+
+  it('output pane does not have line-clamp class', () => {
+    renderStrip({ output: { name: 'Alice' } });
+    const outputEl = screen.getByTestId('strip-output');
+    expect(outputEl.className).not.toContain('line-clamp');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Format button
+  // ---------------------------------------------------------------------------
+
+  it('Format button renders in source pane header', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-format-button')).toBeInTheDocument();
+  });
+
+  it('Format button with valid JSON calls onSourceDataChange with pretty-printed JSON', () => {
+    const onSourceDataChange = vi.fn();
+    renderStrip({ sourceData: '{"a":1,"b":2}', onSourceDataChange });
+    fireEvent.click(screen.getByTestId('strip-format-button'));
+    expect(onSourceDataChange).toHaveBeenCalledWith(
+      JSON.stringify({ a: 1, b: 2 }, null, 2),
+    );
+  });
+
+  it('Format button with invalid JSON does NOT call onSourceDataChange', () => {
+    const onSourceDataChange = vi.fn();
+    renderStrip({ sourceData: 'not valid json', onSourceDataChange });
+    fireEvent.click(screen.getByTestId('strip-format-button'));
+    expect(onSourceDataChange).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Copy button
+  // ---------------------------------------------------------------------------
+
+  it('Copy button renders in output pane header', () => {
+    renderStrip();
+    expect(screen.getByTestId('strip-copy-button')).toBeInTheDocument();
+  });
+
+  it('Copy button is disabled when output is null', () => {
+    renderStrip({ output: null });
+    expect(screen.getByTestId('strip-copy-button')).toBeDisabled();
+  });
+
+  it('Copy button is enabled when output is provided', () => {
+    renderStrip({ output: { result: 'ok' } });
+    expect(screen.getByTestId('strip-copy-button')).not.toBeDisabled();
+  });
+
+  it('Copy button calls navigator.clipboard.writeText with output text', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderStrip({ output: { result: 'ok' } });
+    fireEvent.click(screen.getByTestId('strip-copy-button'));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ result: 'ok' }, null, 2));
+  });
+
+  it('Copy button shows "Copied ✓" after successful copy', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderStrip({ output: { result: 'ok' } });
+    fireEvent.click(screen.getByTestId('strip-copy-button'));
+    // Wait for the promise to resolve
+    await Promise.resolve();
+    expect(screen.getByTestId('strip-copy-button')).toHaveTextContent('Copied ✓');
+  });
+
+  it('Copy button shows "Copy failed" after clipboard error', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderStrip({ output: { result: 'ok' } });
+    fireEvent.click(screen.getByTestId('strip-copy-button'));
+    await Promise.resolve();
+    // Need one more tick for the rejection handler
+    await Promise.resolve();
+    expect(screen.getByTestId('strip-copy-button')).toHaveTextContent('Copy failed');
+  });
+
+  it('diagnostics pane shows placeholder when diagnostics is empty', () => {
+    renderStrip({ diagnostics: [] });
+    expect(screen.getByTestId('strip-diagnostics-placeholder')).toHaveTextContent(
+      'Run to see diagnostics.',
+    );
+  });
+
+  it('diagnostics pane shows placeholder when diagnostics is undefined', () => {
+    renderStrip({ diagnostics: undefined });
+    expect(screen.getByTestId('strip-diagnostics-placeholder')).toHaveTextContent(
+      'Run to see diagnostics.',
+    );
+  });
+
+  it('diagnostics pane renders entries when diagnostics are present', () => {
+    renderStrip({
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'E001',
+          message: 'Invalid source path',
+          ruleName: 'patient.name.given',
+          ruleIndex: 0,
+        },
+      ],
+    });
+    expect(screen.queryByTestId('strip-diagnostics-placeholder')).not.toBeInTheDocument();
+    expect(screen.getByText('E001')).toBeInTheDocument();
+    expect(screen.getByText('Invalid source path')).toBeInTheDocument();
+  });
+
+  it('each diagnostic entry has data-testid="diagnostic-entry-{index}"', () => {
+    renderStrip({
+      diagnostics: [
+        { severity: 'error', code: 'E001', message: 'Msg 1', ruleName: 'rule.a', ruleIndex: 0 },
+        { severity: 'warning', code: 'W002', message: 'Msg 2', ruleName: 'rule.b', ruleIndex: 1 },
+      ],
+    });
+    expect(screen.getByTestId('diagnostic-entry-0')).toBeInTheDocument();
+    expect(screen.getByTestId('diagnostic-entry-1')).toBeInTheDocument();
+  });
+
+  it('diagnostic entry shows severity icon, code, message, and ruleName', () => {
+    renderStrip({
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'E001',
+          message: 'Invalid source path',
+          ruleName: 'patient.name.given',
+          ruleIndex: 2,
+        },
+      ],
+    });
+    const entry = screen.getByTestId('diagnostic-entry-0');
+    expect(entry).toHaveTextContent('E001');
+    expect(entry).toHaveTextContent('Invalid source path');
+    expect(entry).toHaveTextContent('patient.name.given');
+  });
+
+  it('clicking a diagnostic entry calls onNavigateToRule with the correct ruleIndex', () => {
+    const onNavigateToRule = vi.fn();
+    renderStrip({
+      onNavigateToRule,
+      diagnostics: [
+        { severity: 'error', code: 'E001', message: 'Msg', ruleName: 'rule.a', ruleIndex: 3 },
+      ],
+    });
+    fireEvent.click(screen.getByTestId('diagnostic-entry-0'));
+    expect(onNavigateToRule).toHaveBeenCalledWith(3);
+  });
+
+  it('diagnostic entries are keyboard-accessible (button elements)', () => {
+    renderStrip({
+      diagnostics: [
+        { severity: 'warning', code: 'W001', message: 'Msg', ruleName: 'rule.b', ruleIndex: 0 },
+      ],
+    });
+    const entry = screen.getByTestId('diagnostic-entry-0');
+    expect(entry.tagName).toBe('BUTTON');
+  });
+
+  it('count badge shows correct number when diagnostics are present', () => {
+    renderStrip({
+      diagnostics: [
+        { severity: 'error', code: 'E001', message: 'A', ruleName: 'r1', ruleIndex: 0 },
+        { severity: 'warning', code: 'W001', message: 'B', ruleName: 'r2', ruleIndex: 1 },
+        { severity: 'info', code: 'I001', message: 'C', ruleName: 'r3', ruleIndex: 2 },
+      ],
+    });
+    expect(screen.getByTestId('diagnostics-count')).toHaveTextContent('3');
+  });
+
+  it('count badge is not rendered when diagnostics is empty', () => {
+    renderStrip({ diagnostics: [] });
+    expect(screen.queryByTestId('diagnostics-count')).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -106,37 +554,6 @@ describe('InlinePreviewStrip', () => {
   it('Run button is disabled when isRunning is true', () => {
     renderStrip({ sourceData: '{"a":1}', isRunning: true });
     expect(screen.getByTestId('strip-run-button')).toBeDisabled();
-  });
-
-  // ---------------------------------------------------------------------------
-  // Status display
-  // ---------------------------------------------------------------------------
-
-  it('displays "Valid" when status has no errors or warnings', () => {
-    renderStrip({ status: { errors: 0, warnings: 0 } });
-    expect(screen.getByTestId('strip-status')).toHaveTextContent('✓ Valid');
-  });
-
-  it('displays error count when status has errors', () => {
-    renderStrip({ status: { errors: 2, warnings: 0 } });
-    expect(screen.getByTestId('strip-status')).toHaveTextContent('2 errors');
-  });
-
-  it('displays warning count when status has warnings', () => {
-    renderStrip({ status: { errors: 0, warnings: 3 } });
-    expect(screen.getByTestId('strip-status')).toHaveTextContent('3 warnings');
-  });
-
-  it('displays both error and warning counts', () => {
-    renderStrip({ status: { errors: 1, warnings: 2 } });
-    const statusEl = screen.getByTestId('strip-status');
-    expect(statusEl).toHaveTextContent('1 error');
-    expect(statusEl).toHaveTextContent('2 warnings');
-  });
-
-  it('displays "No result yet" when status is null', () => {
-    renderStrip({ status: null });
-    expect(screen.getByTestId('strip-status')).toHaveTextContent('No result yet');
   });
 
   // ---------------------------------------------------------------------------
@@ -172,6 +589,16 @@ describe('InlinePreviewStrip', () => {
   it('collapsed bar shows status summary', () => {
     renderStrip({ isCollapsed: true, status: { errors: 1, warnings: 0 } });
     expect(screen.getByTestId('strip-status')).toHaveTextContent('1 error');
+  });
+
+  it('collapsed bar shows "No result yet" when status is null', () => {
+    renderStrip({ isCollapsed: true, status: null });
+    expect(screen.getByTestId('strip-status')).toHaveTextContent('No result yet');
+  });
+
+  it('collapsed bar shows "✓ Valid" when status has no errors or warnings', () => {
+    renderStrip({ isCollapsed: true, status: { errors: 0, warnings: 0 } });
+    expect(screen.getByTestId('strip-status')).toHaveTextContent('✓ Valid');
   });
 
   // ---------------------------------------------------------------------------
@@ -231,40 +658,60 @@ describe('InlinePreviewStrip', () => {
     expect(onRun).not.toHaveBeenCalled();
   });
 
-  it('does NOT call onRun when lastApplyTimestamp is set on initial render (no change)', () => {
+  it('does NOT call onRun when autoRun is false and lastApplyTimestamp changes (AE-08)', () => {
     const onRun = vi.fn();
-    render(
+    const { rerender } = render(
       <MemoryRouter>
         <InlinePreviewStrip
           {...DEFAULT_PROPS}
           onRun={onRun}
           sourceData={'{"a":1}'}
+          autoRun={false}
+          lastApplyTimestamp={null}
+        />
+      </MemoryRouter>,
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InlinePreviewStrip
+          {...DEFAULT_PROPS}
+          onRun={onRun}
+          sourceData={'{"a":1}'}
+          autoRun={false}
           lastApplyTimestamp={1000}
         />
       </MemoryRouter>,
     );
-    // First render with a non-null timestamp — prevRef starts null so 1000 !== null → fires.
-    // This is acceptable behavior. Test is informational — just verify it doesn't throw.
-    expect(true).toBe(true);
+    expect(onRun).not.toHaveBeenCalled();
   });
 
-  // ---------------------------------------------------------------------------
-  // Output display
-  // ---------------------------------------------------------------------------
+  it('calls onRun when autoRun is true and lastApplyTimestamp changes with non-empty source (AE-09)', () => {
+    const onRun = vi.fn();
+    const { rerender } = render(
+      <MemoryRouter>
+        <InlinePreviewStrip
+          {...DEFAULT_PROPS}
+          onRun={onRun}
+          sourceData={'{"a":1}'}
+          autoRun={true}
+          lastApplyTimestamp={null}
+        />
+      </MemoryRouter>,
+    );
 
-  it('displays formatted output when output is provided', () => {
-    renderStrip({ output: { name: 'Alice' } });
-    expect(screen.getByTestId('strip-output')).toHaveTextContent('"name"');
-  });
-
-  it('displays "No output yet" when output is null', () => {
-    renderStrip({ output: null, isRunning: false });
-    expect(screen.getByTestId('strip-output')).toHaveTextContent('No output yet');
-  });
-
-  it('displays "Running…" in output area when isRunning is true', () => {
-    renderStrip({ output: null, isRunning: true });
-    expect(screen.getByTestId('strip-output')).toHaveTextContent('Running…');
+    rerender(
+      <MemoryRouter>
+        <InlinePreviewStrip
+          {...DEFAULT_PROPS}
+          onRun={onRun}
+          sourceData={'{"a":1}'}
+          autoRun={true}
+          lastApplyTimestamp={2000}
+        />
+      </MemoryRouter>,
+    );
+    expect(onRun).toHaveBeenCalledTimes(1);
   });
 
   // ---------------------------------------------------------------------------

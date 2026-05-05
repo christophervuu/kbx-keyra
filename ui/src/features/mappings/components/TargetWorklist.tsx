@@ -1,7 +1,6 @@
+import { Filter, List, Search, X } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-
-import { Filter, List, Search, SortAsc, X } from 'lucide-react';
 
 import { TargetFieldRow } from './TargetFieldRow';
 import type { TargetFieldType } from './TargetFieldRow';
@@ -34,9 +33,9 @@ export interface TargetWorklistProps {
   /** Fired when a field row is clicked */
   onSelectNode: (path: string, nodeType: SchemaTreeNode['type']) => void;
   /** Current sort mode (controlled) */
-  sort: TargetSort;
+  sort?: TargetSort;
   /** Fired when sort mode changes */
-  onSortChange: (sort: TargetSort) => void;
+  onSortChange?: (sort: TargetSort) => void;
   /** Current editor view (controlled) */
   view: EditorView;
   /** Fired when view toggle is clicked */
@@ -44,16 +43,6 @@ export interface TargetWorklistProps {
   /** Optional className for the outer container */
   className?: string;
 }
-
-// ---------------------------------------------------------------------------
-// Sort options
-// ---------------------------------------------------------------------------
-
-const SORT_OPTIONS: { value: TargetSort; label: string }[] = [
-  { value: 'schema', label: 'Schema order' },
-  { value: 'unmapped-first', label: 'Unmapped first' },
-  { value: 'required-first', label: 'Required first' },
-];
 
 // ---------------------------------------------------------------------------
 // Filter chip config
@@ -229,7 +218,7 @@ function renderNode({
   const rule = rules.find((r) => r.target === node.path);
   const expressionSummary = rule?.expression ?? undefined;
 
-  const rows: React.ReactNode[] = [
+  const rows: ReactNode[] = [
     <TargetFieldRow
       key={node.path}
       fieldName={node.fieldName}
@@ -325,8 +314,6 @@ export function TargetWorklist({
   selectedPath,
   groupingMode,
   onSelectNode,
-  sort,
-  onSortChange,
   view,
   onViewToggle,
   className = '',
@@ -401,72 +388,6 @@ export function TargetWorklist({
       className={`flex flex-col overflow-hidden ${className}`}
       data-testid="target-worklist-container"
     >
-      {/* Sort + View toggle toolbar */}
-      <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 flex items-center gap-2">
-        {/* Sort selector — hidden in rules view */}
-        {view !== 'rules' && (
-          <div className="flex items-center gap-1">
-            <SortAsc size={12} className="text-slate-500 shrink-0" aria-hidden="true" />
-            <select
-              aria-label="Sort order"
-              data-testid="toolbar-sort"
-              value={sort}
-              onChange={(e) => onSortChange(e.target.value as TargetSort)}
-              className="h-6 rounded border border-slate-700 bg-slate-800 px-1.5 text-xs text-slate-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              {SORT_OPTIONS.map(({ value: v, label }) => (
-                <option key={v} value={v}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Spacer */}
-        <span className="flex-1" aria-hidden="true" />
-
-        {/* View toggle */}
-        <div
-          role="group"
-          aria-label="Editor view"
-          className="flex rounded border border-slate-700 bg-slate-800"
-        >
-          <button
-            type="button"
-            data-testid="toolbar-view-target"
-            aria-pressed={view === 'target'}
-            onClick={() => view !== 'target' && onViewToggle('target')}
-            className={[
-              'flex items-center gap-1 rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-              view === 'target'
-                ? 'bg-slate-700 text-slate-100'
-                : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
-            ].join(' ')}
-          >
-            <Filter size={11} aria-hidden="true" />
-            Target
-          </button>
-          <button
-            type="button"
-            data-testid="toolbar-view-rules"
-            aria-pressed={view === 'rules'}
-            onClick={() => view !== 'rules' && onViewToggle('rules')}
-            className={[
-              'flex items-center gap-1 rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-              view === 'rules'
-                ? 'bg-slate-700 text-slate-100'
-                : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
-            ].join(' ')}
-          >
-            <List size={11} aria-hidden="true" />
-            Rules
-          </button>
-        </div>
-      </div>
-
       {/* Search + filter toolbar — hidden in rules view */}
       {view !== 'rules' && (
         <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 space-y-1.5">
@@ -516,6 +437,47 @@ export function TargetWorklist({
                 onClick={() => handleFilterToggle(v)}
               />
             ))}
+
+            <span className="flex-1" aria-hidden="true" />
+
+            <div
+              role="group"
+              aria-label="Editor view"
+              className="flex rounded border border-slate-700 bg-slate-800"
+            >
+              <button
+                type="button"
+                data-testid="toolbar-view-target"
+                aria-pressed={view === 'target'}
+                onClick={() => view !== 'target' && onViewToggle('target')}
+                className={[
+                  'flex items-center gap-1 rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                  view === 'target'
+                    ? 'bg-slate-700 text-slate-100'
+                    : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+                ].join(' ')}
+              >
+                <Filter size={11} aria-hidden="true" />
+                Target
+              </button>
+              <button
+                type="button"
+                data-testid="toolbar-view-rules"
+                aria-pressed={view === 'rules'}
+                onClick={() => view !== 'rules' && onViewToggle('rules')}
+                className={[
+                  'flex items-center gap-1 rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                  view === 'rules'
+                    ? 'bg-slate-700 text-slate-100'
+                    : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+                ].join(' ')}
+              >
+                <List size={11} aria-hidden="true" />
+                Rules
+              </button>
+            </div>
           </div>
         </div>
       )}

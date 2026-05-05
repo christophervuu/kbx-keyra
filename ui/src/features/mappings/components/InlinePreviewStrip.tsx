@@ -1,7 +1,10 @@
+import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, Info, Play, X, XCircle } from 'lucide-react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 
-import { ChevronDown, ChevronUp, ExternalLink, Play } from 'lucide-react';
+import type { PreviewDiagnostic } from '../types';
 
 import type { TestCase } from '@/lib/types/domain';
 
@@ -41,6 +44,26 @@ export interface InlinePreviewStripProps {
   testCases?: readonly TestCase[];
   /** Fired when a test case is selected from the dropdown */
   onLoadTestCase?: (id: string) => void;
+  /** Diagnostic entries from the last execution run */
+  diagnostics?: readonly PreviewDiagnostic[];
+  /** Total number of rules evaluated in the last run */
+  ruleCount?: number;
+  /** Execution duration in milliseconds (null = no run yet) */
+  durationMs?: number | null;
+  /** Callback to navigate to a specific rule in the target worklist */
+  onNavigateToRule?: (ruleIndex: number) => void;
+  /** Callback to save a test case */
+  onSaveTestCase?: (input: {
+    name: string;
+    sourceData: string;
+    expectedOutput?: unknown;
+  }) => { success: boolean; error?: string };
+  /** Callback to clear the source data textarea */
+  onClearSource?: () => void;
+  /** Whether auto-run is enabled */
+  autoRun?: boolean;
+  /** Callback to toggle auto-run state */
+  onAutoRunChange?: (value: boolean) => void;
   /** Optional className for the outer container */
   className?: string;
 }
@@ -59,7 +82,139 @@ function formatOutput(output: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// StatusLine sub-component
+// StatusBar sub-component
+// ---------------------------------------------------------------------------
+
+type StatusBarState =
+  | 'idle'
+  | 'ready'
+  | 'running'
+  | 'success'
+  | 'success-warnings'
+  | 'error';
+
+function deriveStatusBarState(
+  sourceData: string,
+  isRunning: boolean,
+  status: { errors: number; warnings: number } | null,
+): StatusBarState {
+  if (isRunning) return 'running';
+  if (!sourceData.trim()) return 'idle';
+  if (status === null) return 'ready';
+  if (status.errors > 0) return 'error';
+  if (status.warnings > 0) return 'success-warnings';
+  return 'success';
+}
+
+interface StatusBarProps {
+  sourceData: string;
+  isRunning: boolean;
+  status: { errors: number; warnings: number } | null;
+  ruleCount?: number;
+  durationMs?: number | null;
+  diagnostics?: readonly PreviewDiagnostic[];
+  testingPageUrl: string;
+}
+
+function StatusBar({
+  sourceData,
+  isRunning,
+  status,
+  ruleCount = 0,
+  durationMs,
+  testingPageUrl,
+}: StatusBarProps) {
+  const state = deriveStatusBarState(sourceData, isRunning, status);
+
+  const baseClass =
+    'flex h-7 shrink-0 items-center gap-1.5 border-b border-slate-800 bg-slate-950 px-3 text-xs';
+
+  if (state === 'idle') {
+    return (
+      <div className={`${baseClass} text-slate-500`} data-testid="strip-status-bar">
+        <span aria-hidden="true">●</span>
+        <span>Paste source JSON and click Run</span>
+      </div>
+    );
+  }
+
+  if (state === 'ready') {
+    return (
+      <div className={`${baseClass} text-slate-500`} data-testid="strip-status-bar">
+        <span aria-hidden="true">●</span>
+        <span>Ready — click Run or enable Auto-run</span>
+      </div>
+    );
+  }
+
+  if (state === 'running') {
+    return (
+      <div className={`${baseClass} text-amber-400`} data-testid="strip-status-bar">
+        <span
+          role="status"
+          aria-label="Running"
+          className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent"
+        />
+        <span>Evaluating {ruleCount} rule{ruleCount !== 1 ? 's' : ''}…</span>
+      </div>
+    );
+  }
+
+  if (state === 'success') {
+    const errors = status?.errors ?? 0;
+    const warnings = status?.warnings ?? 0;
+    const duration = durationMs != null ? `· ${durationMs}ms` : '';
+    return (
+      <div className={`${baseClass} text-green-400`} data-testid="strip-status-bar">
+        <span aria-hidden="true">✓</span>
+        <span>
+          {ruleCount} rule{ruleCount !== 1 ? 's' : ''} evaluated · {errors} error
+          {errors !== 1 ? 's' : ''} · {warnings} warning{warnings !== 1 ? 's' : ''}
+          {duration ? ` ${duration}` : ''}
+        </span>
+      </div>
+    );
+  }
+
+  if (state === 'success-warnings') {
+    const errors = status?.errors ?? 0;
+    const warnings = status?.warnings ?? 0;
+    const duration = durationMs != null ? `· ${durationMs}ms` : '';
+    return (
+      <div className={`${baseClass} text-amber-400`} data-testid="strip-status-bar">
+        <span aria-hidden="true">⚠</span>
+        <span>
+          {ruleCount} rule{ruleCount !== 1 ? 's' : ''} evaluated · {errors} error
+          {errors !== 1 ? 's' : ''} · {warnings} warning{warnings !== 1 ? 's' : ''}
+          {duration ? ` ${duration}` : ''}
+        </span>
+      </div>
+    );
+  }
+
+  // error state
+  const errors = status?.errors ?? 0;
+  const warnings = status?.warnings ?? 0;
+  return (
+    <div className={`${baseClass} text-red-400`} data-testid="strip-status-bar">
+      <span aria-hidden="true">✗</span>
+      <span>
+        {errors} error{errors !== 1 ? 's' : ''} · {warnings} warning{warnings !== 1 ? 's' : ''}
+      </span>
+      <span aria-hidden="true">·</span>
+      <Link
+        to={testingPageUrl}
+        data-testid="strip-status-bar-advanced-testing-link"
+        className="text-red-400 underline hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+      >
+        Open Advanced Testing →
+      </Link>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StatusLine sub-component (used in collapsed bar)
 // ---------------------------------------------------------------------------
 
 function StatusLine({ status }: { status: { errors: number; warnings: number } | null }) {
@@ -110,7 +265,7 @@ function TestCaseSelector({
   const [value, setValue] = useState('');
   const hasTestCases = testCases && testCases.length > 0;
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const id = e.target.value;
     if (!id) return;
     onLoadTestCase?.(id);
@@ -147,21 +302,195 @@ function TestCaseSelector({
 }
 
 // ---------------------------------------------------------------------------
+// SaveTestCaseModal sub-component
+// ---------------------------------------------------------------------------
+
+interface SaveTestCaseModalProps {
+  sourceData: string;
+  output: unknown | null;
+  existingCount: number;
+  saveError?: string | null;
+  onSave: (input: { name: string; sourceData: string; expectedOutput?: unknown }) => void;
+  onClose: () => void;
+}
+
+const MAX_PREVIEW_LINES = 10;
+
+function truncateForPreview(text: string): string {
+  const lines = text.split('\n');
+  if (lines.length <= MAX_PREVIEW_LINES) return text;
+  return lines.slice(0, MAX_PREVIEW_LINES).join('\n') + '\n…';
+}
+
+function SaveTestCaseModal({
+  sourceData,
+  output,
+  existingCount,
+  saveError,
+  onSave,
+  onClose,
+}: SaveTestCaseModalProps) {
+  const defaultName = `Test case ${existingCount + 1}`;
+  const [name, setName] = useState(defaultName);
+  const [includeExpected, setIncludeExpected] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus name input on open
+  useEffect(() => {
+    nameInputRef.current?.focus();
+  }, []);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmedName = name.trim() || defaultName;
+    onSave({
+      name: trimmedName,
+      sourceData,
+      ...(includeExpected && output !== null ? { expectedOutput: output } : {}),
+    });
+  };
+
+  const sourcePreview = truncateForPreview(sourceData);
+
+  const modal = (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      data-testid="save-testcase-modal"
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60"
+        aria-hidden="true"
+        onClick={onClose}
+        data-testid="save-testcase-backdrop"
+      />
+
+      {/* Dialog */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-testcase-title"
+        className="relative z-10 flex w-[420px] flex-col gap-4 rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl"
+      >
+        <h2
+          id="save-testcase-title"
+          className="text-sm font-semibold text-slate-200"
+        >
+          Save as test case
+        </h2>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          {/* Name input */}
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="save-testcase-name"
+              className="text-xs font-medium text-slate-400"
+            >
+              Name <span className="text-red-400">*</span>
+            </label>
+            <input
+              id="save-testcase-name"
+              ref={nameInputRef}
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              data-testid="save-testcase-name-input"
+              className="rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Source JSON preview */}
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-400">Source JSON</span>
+            <pre
+              data-testid="save-testcase-source-preview"
+              className="max-h-40 overflow-y-auto rounded border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-300"
+            >
+              {sourcePreview}
+            </pre>
+          </div>
+
+          {/* Set as expected output checkbox */}
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <input
+              type="checkbox"
+              checked={includeExpected}
+              onChange={(e) => setIncludeExpected(e.target.checked)}
+              disabled={output === null}
+              data-testid="save-testcase-expected-checkbox"
+              className="rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+            />
+            Set as expected output
+            {output === null && (
+              <span className="text-slate-600">(no output yet)</span>
+            )}
+          </label>
+
+          {/* Actions */}
+          {saveError && (
+            <p
+              role="alert"
+              data-testid="save-testcase-error"
+              className="text-xs text-red-400"
+            >
+              {saveError}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              data-testid="save-testcase-cancel"
+              className="rounded px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              data-testid="save-testcase-confirm"
+              className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 /**
  * InlinePreviewStrip — compact bottom strip replacing the 4-tab BottomArea.
  *
- * Expanded layout (~120px):
- *   [Source input 30%] [Run] [Output 45%] [Status + link 25%]
+ * Expanded layout:
+ *   Toolbar row (PREVIEW label, test case selector, Clear, Auto-run toggle, Run, Advanced Testing link)
+ *   Status bar (state-dependent single-line display)
+ *   Three-pane content area:
+ *     [Source JSON ~35%] [Output ~40%] [Diagnostics ~25%]
  *
  * Collapsed layout (~32px):
  *   "Preview" label | status summary | expand chevron
  *
- * Auto-preview: when sourceData is non-empty, watches `lastApplyTimestamp`
- * and calls `onRun()` automatically on each change.
- * If sourceData is empty, auto-run is silently skipped (AE-14).
+ * Auto-preview: when autoRun is true and sourceData is non-empty, watches
+ * `lastApplyTimestamp` and calls `onRun()` automatically on each change.
+ * If autoRun is false or sourceData is empty, auto-run is silently skipped.
  */
 export function InlinePreviewStrip({
   sourceData,
@@ -176,6 +505,14 @@ export function InlinePreviewStrip({
   lastApplyTimestamp,
   testCases,
   onLoadTestCase,
+  diagnostics = [],
+  ruleCount = 0,
+  durationMs = null,
+  onNavigateToRule,
+  onSaveTestCase,
+  onClearSource,
+  autoRun = true,
+  onAutoRunChange,
   className = '',
 }: InlinePreviewStripProps) {
   // Flash animation state — applied briefly when output updates via auto-preview
@@ -188,10 +525,11 @@ export function InlinePreviewStrip({
     if (lastApplyTimestamp === prevTimestampRef.current) return;
     prevTimestampRef.current = lastApplyTimestamp;
 
+    if (!autoRun) return; // AE-08: no-op when auto-run is disabled
     if (!sourceData.trim()) return; // AE-14: no-op when source data is empty
 
     onRun();
-  }, [lastApplyTimestamp, sourceData, onRun]);
+  }, [lastApplyTimestamp, sourceData, onRun, autoRun]);
 
   // Flash output area briefly when output changes (only when auto-preview triggered it)
   const prevOutputRef = useRef<unknown>(null);
@@ -200,6 +538,7 @@ export function InlinePreviewStrip({
     prevOutputRef.current = output;
     if (output === null) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- transient visual feedback only when output changes
     setOutputFlash(true);
     const timer = setTimeout(() => setOutputFlash(false), 300);
     return () => clearTimeout(timer);
@@ -207,6 +546,62 @@ export function InlinePreviewStrip({
 
   const outputText = formatOutput(output);
   const canRun = !isRunning && sourceData.trim().length > 0;
+  const canSave = sourceData.trim().length > 0;
+
+  // Save modal state
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [savedFeedback, setSavedFeedback] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSaveTestCase = (input: {
+    name: string;
+    sourceData: string;
+    expectedOutput?: unknown;
+  }) => {
+    const result = onSaveTestCase?.(input) ?? { success: true };
+    if (result.success) {
+      setSaveError(null);
+      setSaveModalOpen(false);
+      setSavedFeedback(true);
+      setTimeout(() => setSavedFeedback(false), 1500);
+      return;
+    }
+
+    setSaveError(result.error ?? 'Unable to save test case');
+  };
+
+  // Format button state
+  const [formatShake, setFormatShake] = useState(false);
+
+  const handleFormat = () => {
+    try {
+      const parsed = JSON.parse(sourceData);
+      onSourceDataChange(JSON.stringify(parsed, null, 2));
+    } catch {
+      setFormatShake(true);
+      setTimeout(() => setFormatShake(false), 400);
+    }
+  };
+
+  // Copy button state
+  type CopyState = 'idle' | 'copied' | 'failed';
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+
+  const handleCopy = () => {
+    setCopyState('copied');
+    navigator.clipboard.writeText(outputText).then(
+      () => {
+        setTimeout(() => setCopyState('idle'), 1500);
+      },
+      () => {
+        setCopyState('failed');
+        setTimeout(() => setCopyState('idle'), 1500);
+      },
+    );
+  };
+
+  const copyLabel =
+    copyState === 'copied' ? 'Copied ✓' : copyState === 'failed' ? 'Copy failed' : 'Copy';
 
   // ---------------------------------------------------------------------------
   // Collapsed bar
@@ -238,14 +633,123 @@ export function InlinePreviewStrip({
   // Expanded strip
   // ---------------------------------------------------------------------------
   return (
-    <div
-      className={`flex shrink-0 flex-col border-t border-slate-800 bg-slate-950 ${className}`}
+    <>
+      {/* Shake keyframe for Format button invalid JSON feedback */}
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-2px); }
+          75% { transform: translateX(2px); }
+        }
+      `}</style>
+      <div
+        className={`flex shrink-0 flex-col border-t border-slate-800 bg-slate-950 ${className}`}
       data-testid="inline-preview-strip"
     >
-      {/* Header bar */}
-      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-slate-800 px-3">
-        <span className="text-xs font-medium text-slate-400">Preview</span>
+      {/* Toolbar row */}
+      <div
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-slate-800 px-3"
+        data-testid="strip-toolbar"
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+          Preview
+        </span>
+
+        {/* Test case selector */}
+        <TestCaseSelector testCases={testCases} onLoadTestCase={onLoadTestCase} />
+
+        {/* Clear button */}
+        <button
+          type="button"
+          onClick={onClearSource}
+          aria-label="Clear source data"
+          data-testid="strip-clear-button"
+          className="flex items-center rounded p-0.5 text-slate-500 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          <X size={12} aria-hidden="true" />
+        </button>
+
+        {/* Save as test case button */}
+        <button
+          type="button"
+          onClick={() => {
+            setSaveError(null);
+            setSaveModalOpen(true);
+          }}
+          disabled={!canSave}
+          aria-disabled={!canSave}
+          aria-label="Save as test case"
+          data-testid="strip-save-testcase-button"
+          className={[
+            'flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+            canSave
+              ? 'text-slate-400 hover:text-slate-200'
+              : 'cursor-not-allowed text-slate-600',
+          ].join(' ')}
+        >
+          {savedFeedback ? 'Saved ✓' : '⊕ Save'}
+        </button>
+
+        {/* Auto-run toggle */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoRun}
+          aria-label={autoRun ? 'Auto-run enabled' : 'Auto-run disabled'}
+          data-testid="strip-autorun-toggle"
+          onClick={() => onAutoRunChange?.(!autoRun)}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          <span
+            className={[
+              'inline-block h-2 w-2 rounded-full',
+              autoRun ? 'bg-green-400' : 'bg-slate-600',
+            ].join(' ')}
+            aria-hidden="true"
+          />
+          <span className={autoRun ? 'text-slate-300' : 'text-slate-500'}>Auto</span>
+        </button>
+
+        {/* Run button */}
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={!canRun}
+          aria-disabled={!canRun}
+          data-testid="strip-run-button"
+          className={[
+            'flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            canRun
+              ? 'bg-blue-600 text-white hover:bg-blue-500'
+              : 'cursor-not-allowed bg-slate-800 text-slate-600',
+          ].join(' ')}
+        >
+          {isRunning ? (
+            <span
+              role="status"
+              aria-label="Running…"
+              className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-400 border-t-transparent"
+            />
+          ) : (
+            <Play size={11} aria-hidden="true" />
+          )}
+          Run
+        </button>
+
         <span className="flex-1" aria-hidden="true" />
+
+        {/* Open Advanced Testing link */}
+        <Link
+          to={testingPageUrl}
+          data-testid="strip-advanced-testing-link"
+          className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          Open Advanced Testing
+          <ExternalLink size={10} aria-hidden="true" />
+        </Link>
+
         <button
           type="button"
           onClick={onToggleCollapse}
@@ -257,105 +761,192 @@ export function InlinePreviewStrip({
         </button>
       </div>
 
-      {/* Main row */}
+      {/* Status bar */}
+      <StatusBar
+        sourceData={sourceData}
+        isRunning={isRunning}
+        status={status}
+        ruleCount={ruleCount}
+        durationMs={durationMs}
+        diagnostics={diagnostics}
+        testingPageUrl={testingPageUrl}
+      />
+
+      {/* Three-pane content area */}
       <div className="flex min-h-0 flex-1 divide-x divide-slate-800">
-        {/* Source input — ~30% */}
-        <div className="flex w-[30%] shrink-0 flex-col gap-1 p-2">
-          <label
-            htmlFor="strip-source-input"
-            className="text-[10px] font-medium uppercase tracking-wide text-slate-500"
-          >
-            Source JSON
-          </label>
-          {/* Test case selector */}
-          <TestCaseSelector testCases={testCases} onLoadTestCase={onLoadTestCase} />
-          <textarea
-            id="strip-source-input"
-            data-testid="strip-source-input"
-            rows={3}
-            value={sourceData}
-            onChange={(e) => onSourceDataChange(e.target.value)}
-            placeholder="Paste source JSON…"
-            spellCheck={false}
-            className="flex-1 resize-none rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
+        {/* Source JSON pane — ~35% */}
+        <div
+          className="flex w-[35%] shrink-0 flex-col"
+          data-testid="strip-source-pane"
+        >
+          {/* Pane header */}
+          <div className="group flex h-6 shrink-0 items-center bg-slate-900 px-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Source JSON
+            </span>
+            <span className="flex-1" aria-hidden="true" />
+            <button
+              type="button"
+              onClick={handleFormat}
+              data-testid="strip-format-button"
+              aria-label="Format JSON"
+              style={formatShake ? { animation: 'shake 0.4s ease' } : undefined}
+              className="text-[10px] uppercase tracking-wide text-slate-600 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              Format
+            </button>
+          </div>
+          {/* Content */}
+          <div className="flex flex-1 flex-col gap-1 p-2">
+            <textarea
+              id="strip-source-input"
+              data-testid="strip-source-input"
+              rows={3}
+              value={sourceData}
+              onChange={(e) => onSourceDataChange(e.target.value)}
+              placeholder="Paste source JSON…"
+              spellCheck={false}
+              className="flex-1 resize-none rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
         </div>
 
-        {/* Run button — narrow column */}
-        <div className="flex shrink-0 flex-col items-center justify-center gap-1.5 px-2">
-          <button
-            type="button"
-            onClick={onRun}
-            disabled={!canRun}
-            aria-disabled={!canRun}
-            data-testid="strip-run-button"
-            className={[
-              'flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-              canRun
-                ? 'bg-blue-600 text-white hover:bg-blue-500'
-                : 'cursor-not-allowed bg-slate-800 text-slate-600',
-            ].join(' ')}
-          >
-            {isRunning ? (
+        {/* Output pane — ~40% */}
+        <div
+          className="flex min-w-0 flex-1 flex-col"
+          data-testid="strip-output-pane"
+        >
+          {/* Pane header */}
+          <div className="group flex h-6 shrink-0 items-center bg-slate-900 px-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Output
+            </span>
+            <span className="flex-1" aria-hidden="true" />
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={output === null}
+              data-testid="strip-copy-button"
+              aria-label="Copy output"
+              className="text-[10px] uppercase tracking-wide text-slate-600 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {copyLabel}
+            </button>
+          </div>
+          {/* Content */}
+          <div className="flex flex-1 flex-col p-2">
+            <pre
+              data-testid="strip-output"
+              aria-label="Preview output"
+              className={[
+                'flex-1 overflow-y-auto rounded border bg-slate-900 px-2 py-1 font-mono text-xs text-slate-200',
+                outputFlash
+                  ? 'border-blue-400 ring-2 ring-blue-400 transition-all duration-300'
+                  : 'border-slate-700',
+              ].join(' ')}
+            >
+              {output !== null ? (
+                outputText
+              ) : (
+                <span className="text-slate-600">
+                  {isRunning
+                    ? 'Running…'
+                    : 'No output yet — run the mapping to see results'}
+                </span>
+              )}
+            </pre>
+          </div>
+        </div>
+
+        {/* Diagnostics pane — ~25% */}
+        <div
+          className="flex w-[25%] shrink-0 flex-col"
+          data-testid="strip-diagnostics-pane"
+        >
+          {/* Pane header */}
+          <div className="flex h-6 shrink-0 items-center bg-slate-900 px-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Diagnostics
+            </span>
+            {diagnostics.length > 0 && (
               <span
-                role="status"
-                aria-label="Running…"
-                className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-400 border-t-transparent"
-              />
-            ) : (
-              <Play size={11} aria-hidden="true" />
-            )}
-            Run
-          </button>
-        </div>
-
-        {/* Output — ~45% */}
-        <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            Output
-          </span>
-          <pre
-            data-testid="strip-output"
-            aria-label="Preview output"
-            className={[
-              'flex-1 overflow-hidden rounded border bg-slate-900 px-2 py-1 font-mono text-xs text-slate-200',
-              'line-clamp-3 max-h-[4.5rem]',
-              outputFlash
-                ? 'border-blue-400 ring-2 ring-blue-400 transition-all duration-300'
-                : 'border-slate-700',
-            ].join(' ')}
-          >
-            {outputText || (
-              <span className="text-slate-600">
-                {isRunning ? 'Running…' : 'No output yet'}
+                className="ml-1.5 rounded bg-slate-700 px-1 py-0.5 text-[9px] font-medium text-slate-400"
+                data-testid="diagnostics-count"
+              >
+                {diagnostics.length}
               </span>
             )}
-          </pre>
-        </div>
-
-        {/* Status + controls — ~25% */}
-        <div className="flex w-[25%] shrink-0 flex-col justify-between gap-1 p-2">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Status
-            </span>
-            <StatusLine status={status} />
           </div>
-
-          <div className="flex flex-col gap-1.5">
-            {/* Advanced Testing link */}
-            <Link
-              to={testingPageUrl}
-              data-testid="strip-advanced-testing-link"
-              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-            >
-              Open Advanced Testing
-              <ExternalLink size={10} aria-hidden="true" />
-            </Link>
+          {/* Content */}
+          <div className="flex flex-1 flex-col overflow-y-auto">
+            {diagnostics.length === 0 ? (
+              <span className="p-2 text-xs text-slate-600" data-testid="strip-diagnostics-placeholder">
+                Run to see diagnostics.
+              </span>
+            ) : (
+              <ul className="flex flex-col" aria-label="Diagnostics">
+                {diagnostics.map((d, i) => (
+                  <li key={i}>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToRule?.(d.ruleIndex)}
+                      data-testid={`diagnostic-entry-${i}`}
+                      className="flex w-full items-start gap-1.5 px-2 py-1.5 text-left hover:bg-slate-800/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500"
+                    >
+                      {/* Severity icon */}
+                      <span className="mt-0.5 shrink-0">
+                        {d.severity === 'error' ? (
+                          <XCircle
+                            size={12}
+                            className="text-red-400"
+                            aria-label="Error"
+                          />
+                        ) : d.severity === 'warning' ? (
+                          <AlertTriangle
+                            size={12}
+                            className="text-amber-400"
+                            aria-label="Warning"
+                          />
+                        ) : (
+                          <Info
+                            size={12}
+                            className="text-blue-400"
+                            aria-label="Info"
+                          />
+                        )}
+                      </span>
+                      {/* Entry text */}
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="flex items-center gap-1">
+                          <span className="font-mono text-[10px] text-slate-400">{d.code}</span>
+                          <span className="truncate text-xs text-slate-300">{d.message}</span>
+                        </span>
+                        <span className="truncate text-[10px] text-slate-500">{d.ruleName}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Save as test case modal */}
+      {saveModalOpen && (
+        <SaveTestCaseModal
+          sourceData={sourceData}
+          output={output}
+          existingCount={testCases?.length ?? 0}
+          saveError={saveError}
+          onSave={handleSaveTestCase}
+          onClose={() => {
+            setSaveError(null);
+            setSaveModalOpen(false);
+          }}
+        />
+      )}
     </div>
+    </>
   );
 }
