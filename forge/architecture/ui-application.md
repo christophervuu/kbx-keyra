@@ -116,7 +116,8 @@ ui/src/
         TransformFunctionPicker.tsx Value-mode categorized transform picker with search (FS-023)
         ConditionalModeBuilder.tsx Conditional-mode IF/THEN/ELSE builder with grouped AND/OR conditions and nested else-if (FS-023)
         ConditionRowEditor.tsx Conditional-mode single comparison row editor (FS-023)
-        BranchValueSelector.tsx Conditional/value-branch selector (static/source/expression/else-if) with depth cap messaging (FS-023)
+        BranchValueSelector.tsx Conditional/value-branch selector (static/source/pipeline/else-if) with depth cap messaging; "Build expression" option renders InlinePipelineBuilder (FS-023, FS-025 T-03)
+        InlinePipelineBuilder.tsx Compact inline Source + Transform mini-builder for branch values and condition left operands; Value mode only (FS-025 T-03)
         ValueMapModeBuilder.tsx Value-map mode source + table + fallback builder (FS-023)
         LiveExpressionDisplay.tsx Always-visible generated DSL display; click-to-edit handoff to editor mode (FS-023)
         LiveResultDisplay.tsx Always-visible evaluated result display powered by useExpressionPreview (FS-023)
@@ -597,8 +598,10 @@ The editor uses a **two-tier save model** to separate expression authoring from 
 **Tier 1 — Apply:**
 - `ScalarFieldBuilder` exposes an `onApply` callback and an `apply-btn` test ID.
 - Clicking Apply calls `useMappingEditor.applyRule(targetPath, expression)`, which upserts the rule into local state and increments `unsavedRuleCount`.
-- After applying, focus advances to the next unmapped field in the worklist (normal Apply behavior).
+- After applying, the builder **remains on the current field** in a committed state: the Apply button shows a disabled "Applied ✓" indicator until the user makes further edits. Auto-advance was removed in FS-025 T-04.
 - `onExpressionChange` fires on every keystroke so the parent can track the in-progress expression.
+- **"Next unmapped →" button:** visible when unmapped target fields remain; clicking it navigates to the next unmapped field in document order. Keyboard shortcut: `Ctrl+]` / `Cmd+]`.
+- `onAdvanceToNext` callback on `ScalarFieldBuilder` is wired to the composition layer's `getNextUnmappedPath` logic in `MappingEditor.tsx`.
 
 **Tier 2 — Save:**
 - `useMappingEditor.save()` persists all applied rules to `LocalStorageAdapter` and resets `unsavedRuleCount` to 0.
@@ -783,6 +786,37 @@ Both surfaces now use the same builder implementation in builder mode: `UnifiedE
 
 The expression string is derived from state on each change and propagated upward through `onExpressionChange`.
 
+#### State hydration on target selection (FS-025 T-01)
+
+When `selectedTargetPath` changes in the composition layer:
+1. The matching rule expression (if any) is looked up from `editor.rules`.
+2. The expression is passed to `decomposeExpression()` (`pipeline-decomposer.ts`).
+3. **Decomposition success:** builder state is hydrated with the returned `ExpressionBuilderState`; mode is auto-detected (Value / Conditional / Value Map); Builder mode is activated.
+4. **Decomposition failure:** raw expression is loaded into Editor mode; a "Complex expression — edit in Editor mode" warning banner is shown.
+5. **No rule / empty expression:** builder resets to default empty state (Value mode, no sources, no transforms).
+
+`ScalarFieldBuilder` passes `initialState` to `UnifiedExpressionBuilder`, which applies it via a `useEffect` on mount or when the prop reference changes.
+
+#### Builder reset on navigation (FS-025 T-02)
+
+- The builder fully resets when the user navigates to a different target field.
+- The navigation guard (FS-021 AE-05) fires before reset when unapplied changes exist.
+- `UnifiedExpressionBuilder` is keyed on `selectedTargetPath` in `ScalarFieldBuilder` to guarantee state isolation between fields.
+
+#### Conditional branch expressions (FS-025 T-03)
+
+`BranchValue` discriminated union extended with:
+- `{ kind: 'pipeline'; state: ValueModeState }` — structured inline mini-builder state for then/else branches
+
+`Operand` (condition left/right side) extended with:
+- `{ kind: 'pipeline'; value: string; pipelineState: ValueModeState }` — structured inline mini-builder state for left operands
+
+Rules:
+- Inline mini-builder is **Value mode only** (Source + Transforms); no nested conditionals or value-maps within branches.
+- Expression generation calls `generateValueExpression(state)` for `kind: 'pipeline'` branches and operands.
+- Decomposer attempts per-branch pipeline decomposition for transform-chain branches (e.g., `upper(source("tier"))` → `kind: 'pipeline'`); falls back to `kind: 'expression'` (raw DSL string) if decomposition fails.
+- `InlinePipelineBuilder` component renders a compact `SourceChipPicker` + `TransformPipeline` + sub-expression preview within branch containers and condition left operand rows.
+
 #### Expression generation
 
 - Canonical generator: `generateExpressionFromState(state)` (`pipeline-expression-generator.ts`)
@@ -808,9 +842,9 @@ The expression string is derived from state on each change and propagated upward
 
 - `useExpressionBuilder()`
   - Inputs: `selectedRuleIndex`, `rules`, `updateRule`, `parsedSourceSchema`
-  - Outputs: mode state, expression state, switch handlers, decomposition warning state, parse validity/decorations, flush commit API, and decomposition hydration state
+  - Outputs: mode state, expression state, switch handlers, decomposition warning state, parse validity/decorations, flush commit API, decomposition hydration state, and `loadExpression`
   - Responsibilities:
-    - load selected-rule expression
+    - load selected-rule expression via `loadExpression(expression: string | null)` — triggers decomposition and state hydration (or reset for null/empty); called automatically on `selectedRuleIndex` change
     - preserve local in-progress edits
     - debounce valid commits
     - Builder/Editor toggle orchestration

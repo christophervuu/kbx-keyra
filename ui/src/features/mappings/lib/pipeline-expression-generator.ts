@@ -43,6 +43,13 @@ function generateOperand(operand: Operand): string {
       return operand.value;
     case 'static':
       return quoteString(operand.value);
+    case 'pipeline': {
+      // Generate from structured pipeline state (T-03)
+      if (operand.pipelineState) {
+        return generateValueExpression(operand.pipelineState);
+      }
+      return operand.value;
+    }
   }
 }
 
@@ -89,6 +96,9 @@ function generateBranch(branch: BranchValue): string {
       return `source(${quoteString(branch.value)})`;
     case 'expression':
       return branch.value;
+    case 'pipeline':
+      // Generate from structured pipeline state (T-03)
+      return generateValueExpression(branch.state);
     case 'conditional':
       return generateExpressionFromState(branch.value);
   }
@@ -116,7 +126,7 @@ function comparisonToFunction(operator: Exclude<ComparisonOperator, 'isNotNull'>
   return operator;
 }
 
-function generateValueExpression(state: Extract<ExpressionBuilderState, { mode: 'value' }>): string {
+export function generateValueExpression(state: Extract<ExpressionBuilderState, { mode: 'value' }>): string {
   if (state.staticValue) {
     return `static(${staticLiteral(state.staticValue)})`;
   }

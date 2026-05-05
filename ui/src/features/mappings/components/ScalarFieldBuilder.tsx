@@ -12,17 +12,20 @@
  * No preview in this panel — preview lives in the bottom area (T-08).
  */
 
-import { Lightbulb, Sparkles, Wand2, Wrench } from 'lucide-react';
+import { Check, ChevronRight, Lightbulb, Sparkles, Wand2, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
+import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
 import { suggestSourceFields } from '../lib/suggest-source-fields';
 import type { SuggestedField } from '../lib/suggest-source-fields';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
+import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
+import type { ExpressionBuilderState } from '../lib/expression-builder-state';
 
 import type { ParsedSchema } from '@/lib/types/domain';
 
@@ -50,6 +53,16 @@ export interface ScalarFieldBuilderProps {
    * Used by the parent to track unapplied expression state for navigation guards.
    */
   onExpressionChange?: (expression: string) => void;
+  /**
+   * Fires when the user clicks "Next unmapped →" or presses Ctrl+].
+   * The composition layer handles finding and selecting the next unmapped field.
+   */
+  onAdvanceToNext?: () => void;
+  /**
+   * Whether any unmapped target fields remain.
+   * Controls visibility of the "Next unmapped →" button.
+   */
+  hasUnmappedFields?: boolean;
   /** Optional className */
   className?: string;
 }
@@ -161,10 +174,16 @@ export function ScalarFieldBuilder({
   parsedSourceSchema,
   onApply,
   onExpressionChange,
+  onAdvanceToNext,
+  hasUnmappedFields = false,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
   const [mode, setMode] = useState<'builder' | 'editor'>('builder');
+  const [decompositionWarning, setDecompositionWarning] = useState<string | null>(null);
+  const [initialUnifiedBuilderState, setInitialUnifiedBuilderState] = useState<ExpressionBuilderState | null>(null);
+  // Track whether the current expression has been applied (AE-10)
+  const [appliedExpression, setAppliedExpression] = useState<string | null>(null);
 
   // Keep onExpressionChange in a ref to avoid stale closure issues
   const onExpressionChangeRef = useRef(onExpressionChange);
@@ -174,15 +193,39 @@ export function ScalarFieldBuilder({
 
   const handleExpressionChange = useCallback((next: string) => {
     setExpression(next);
+    // Reset applied state when expression changes (AE-10)
+    setAppliedExpression(null);
     onExpressionChangeRef.current?.(next);
   }, []);
 
   const rawDslRef = useRef<RawDslEditorRef>(null);
 
-  // Reset expression when target field changes (don't notify parent — it's a reset)
+  // Hydrate builder state when target field or its expression changes
   useEffect(() => {
-    setExpression(currentExpression);
-    setMode('builder');
+    const expr = currentExpression ?? '';
+    setExpression(expr);
+    setAppliedExpression(null); // Reset applied state on field navigation (AE-10)
+
+    if (!expr) {
+      // Unmapped / empty → reset to default empty builder state
+      setDecompositionWarning(null);
+      setInitialUnifiedBuilderState(null);
+      setMode('builder');
+      return;
+    }
+
+    // Attempt decomposition
+    const result = decomposeExpressionNew(expr);
+    if (result.success) {
+      setInitialUnifiedBuilderState(result.state);
+      setDecompositionWarning(null);
+      setMode('builder');
+    } else {
+      // Decomposition failed → Editor mode with warning
+      setInitialUnifiedBuilderState(null);
+      setDecompositionWarning(result.reason ?? 'Expression cannot be loaded into the guided builder.');
+      setMode('editor');
+    }
   }, [selectedTargetPath, currentExpression]);
 
   const { isValid, isValidating, errorDecorations } = useDslValidation(expression);
@@ -211,10 +254,29 @@ export function ScalarFieldBuilder({
   const handleSave = useCallback(() => {
     if (expression.trim() && isValid) {
       onApply(selectedTargetPath, expression);
+      setAppliedExpression(expression);
     }
   }, [expression, isValid, onApply, selectedTargetPath]);
 
-  const canSave = expression.trim().length > 0 && isValid && !isValidating;
+  // Ctrl+] / Cmd+] → advance to next unmapped field (AE-12)
+  const onAdvanceToNextRef = useRef(onAdvanceToNext);
+  useEffect(() => {
+    onAdvanceToNextRef.current = onAdvanceToNext;
+  });
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === ']') {
+        e.preventDefault();
+        onAdvanceToNextRef.current?.();
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => { document.removeEventListener('keydown', handleKeyDown); };
+  }, []);
+
+  const isApplied = appliedExpression !== null && appliedExpression === expression;
+  const canSave = expression.trim().length > 0 && isValid && !isValidating && !isApplied;
 
   return (
     <div
@@ -306,6 +368,20 @@ export function ScalarFieldBuilder({
         aria-label="Expression drop zone — drop a source field here"
         {...dropHandlers}
       >
+        {/* Decomposition warning banner (AE-05) */}
+        {decompositionWarning !== null && mode === 'editor' && (
+          <div className="mb-3" data-testid="decomposition-warning-container">
+            <ComplexExpressionWarning
+              reason={decompositionWarning}
+              onStayInEditor={() => { setDecompositionWarning(null); }}
+              onTryBuilder={() => {
+                setDecompositionWarning(null);
+                setMode('builder');
+              }}
+            />
+          </div>
+        )}
+
         {mode === 'editor' ? (
           <div data-testid="expression-editor-slot">
             <RawDslEditor
@@ -320,12 +396,14 @@ export function ScalarFieldBuilder({
         ) : (
           <div data-testid="expression-builder-slot">
             <UnifiedExpressionBuilder
+              key={selectedTargetPath}
               expression={expression}
               onExpressionChange={handleExpressionChange}
               onApply={onApply}
               selectedTargetPath={selectedTargetPath}
               parsedSourceSchema={parsedSourceSchema}
               onSwitchToEditor={() => { setMode('editor'); }}
+              initialState={initialUnifiedBuilderState}
             />
           </div>
         )}
@@ -374,6 +452,20 @@ export function ScalarFieldBuilder({
           {/* Spacer */}
           <span className="flex-1" />
 
+          {/* Next unmapped → button (AE-11) */}
+          {hasUnmappedFields && onAdvanceToNext && (
+            <button
+              type="button"
+              data-testid="next-unmapped-btn"
+              onClick={onAdvanceToNext}
+              aria-label="Navigate to next unmapped target field"
+              className="flex items-center gap-1 rounded border border-slate-600 px-2.5 py-1.5 text-xs text-slate-300 transition-colors hover:border-blue-500 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              Next unmapped
+              <ChevronRight size={12} aria-hidden="true" />
+            </button>
+          )}
+
           {/* Apply button */}
           <button
             type="button"
@@ -383,13 +475,24 @@ export function ScalarFieldBuilder({
             className={[
               'flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors',
               'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-              canSave
-                ? 'bg-blue-600 text-white hover:bg-blue-500'
-                : 'cursor-not-allowed bg-slate-700 text-slate-500',
+              isApplied
+                ? 'cursor-default bg-green-800/60 text-green-300'
+                : canSave
+                  ? 'bg-blue-600 text-white hover:bg-blue-500'
+                  : 'cursor-not-allowed bg-slate-700 text-slate-500',
             ].join(' ')}
           >
-            <Wand2 size={12} aria-hidden="true" />
-            Apply
+            {isApplied ? (
+              <>
+                <Check size={12} aria-hidden="true" />
+                Applied
+              </>
+            ) : (
+              <>
+                <Wand2 size={12} aria-hidden="true" />
+                Apply
+              </>
+            )}
           </button>
         </div>
       </div>

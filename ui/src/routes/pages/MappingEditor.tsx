@@ -306,7 +306,7 @@ export default function MappingEditor() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Apply expression from ScalarFieldBuilder — upserts rule, advances focus
+  // Apply expression from ScalarFieldBuilder — upserts rule, no auto-advance (FS-025 T-04)
   // ---------------------------------------------------------------------------
 
   // Compute next unmapped path after a given path (document order, single pass)
@@ -328,14 +328,29 @@ export default function MappingEditor() {
     (targetPath: string, expression: string) => {
       editor.actions.applyRule(targetPath, expression);
       setUnappliedExpression('');
-      // Advance focus to next unmapped field (normal Apply flow)
-      const next = getNextUnmappedPath(targetPath);
-      if (next !== null) {
-        setSelectedTargetPath(next);
-      }
+      // NOTE: Auto-advance removed (FS-025 T-04 / AE-10).
+      // Navigation is now explicit via "Next unmapped →" button or Ctrl+].
     },
-    [editor.actions, getNextUnmappedPath],
+    [editor.actions],
   );
+
+  // Advance to next unmapped field — used by ScalarFieldBuilder's "Next unmapped →" button
+  const handleAdvanceToNext = useCallback(() => {
+    if (!selectedTargetPath) return;
+    const next = getNextUnmappedPath(selectedTargetPath);
+    if (next !== null) {
+      setSelectedTargetPath(next);
+    }
+  }, [selectedTargetPath, getNextUnmappedPath]);
+
+  // Whether any unmapped fields remain (drives button visibility in ScalarFieldBuilder)
+  const hasUnmappedFields = useMemo(() => {
+    if (!targetMappingStatus) return false;
+    for (const status of targetMappingStatus.values()) {
+      if (status === 'unmapped') return true;
+    }
+    return false;
+  }, [targetMappingStatus]);
 
   // ---------------------------------------------------------------------------
   // Derived: selected node info (for right panel)
@@ -510,6 +525,8 @@ export default function MappingEditor() {
         parsedSourceSchema={editor.parsedSourceSchema}
         onApply={handleApplyExpression}
         onExpressionChange={setUnappliedExpression}
+        onAdvanceToNext={handleAdvanceToNext}
+        hasUnmappedFields={hasUnmappedFields}
         className="h-full"
       />
     );

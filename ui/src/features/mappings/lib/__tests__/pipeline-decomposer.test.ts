@@ -233,6 +233,70 @@ describe('decomposeExpression — failure cases', () => {
 });
 
 // ---------------------------------------------------------------------------
+// T-03: pipeline branch decomposition
+// ---------------------------------------------------------------------------
+
+describe('decomposeExpression — T-03 pipeline branches', () => {
+  it('T-03-DEC-01: transform chain in then branch → kind=pipeline', () => {
+    const expr = 'if(eq(source("status"), "active"), upper(source("tier")), "inactive")';
+    const result = decomposeExpression(expr);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'conditional' }>;
+    expect(state.thenBranch.kind).toBe('pipeline');
+    if (state.thenBranch.kind === 'pipeline') {
+      expect(state.thenBranch.state.sources[0].path).toBe('tier');
+      expect(state.thenBranch.state.transforms[0].functionName).toBe('upper');
+    }
+  });
+
+  it('T-03-DEC-02: transform chain in else branch → kind=pipeline', () => {
+    const expr = 'if(eq(source("flag"), "yes"), "ok", lower(source("fallback_label")))';
+    const result = decomposeExpression(expr);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'conditional' }>;
+    expect(state.elseBranch.kind).toBe('pipeline');
+    if (state.elseBranch.kind === 'pipeline') {
+      expect(state.elseBranch.state.sources[0].path).toBe('fallback_label');
+      expect(state.elseBranch.state.transforms[0].functionName).toBe('lower');
+    }
+  });
+
+  it('T-03-DEC-03: transform chain on left operand → kind=pipeline with pipelineState', () => {
+    const expr = 'if(gt(length(source("name")), 5), "long", "short")';
+    const result = decomposeExpression(expr);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'conditional' }>;
+    const row = state.condition.conditions[0] as import('../expression-builder-state').ConditionRow;
+    expect(row.leftOperand.kind).toBe('pipeline');
+    if (row.leftOperand.kind === 'pipeline') {
+      expect(row.leftOperand.pipelineState?.sources[0].path).toBe('name');
+      expect(row.leftOperand.pipelineState?.transforms[0].functionName).toBe('length');
+    }
+  });
+
+  it('T-03-DEC-04: roundtrip — pipeline then branch', () => {
+    const expr = 'if(eq(source("status"), "active"), upper(source("tier")), "inactive")';
+    const result = decomposeExpression(expr);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const regenerated = generateExpressionFromState(result.state);
+    expect(regenerated).toBe(expr);
+  });
+
+  it('T-03-DEC-05: roundtrip — pipeline left operand', () => {
+    const expr = 'if(gt(length(source("name")), 5), "long", "short")';
+    const result = decomposeExpression(expr);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const regenerated = generateExpressionFromState(result.state);
+    expect(regenerated).toBe(expr);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Roundtrip tests: generate → decompose → generate produces identical DSL
 // ---------------------------------------------------------------------------
 

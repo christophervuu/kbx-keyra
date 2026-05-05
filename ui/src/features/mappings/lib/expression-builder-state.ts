@@ -33,8 +33,13 @@ export type StaticValue =
   | { readonly type: 'null'; readonly value?: null };
 
 export interface Operand {
-  readonly kind: 'source' | 'static' | 'expression';
+  readonly kind: 'source' | 'static' | 'expression' | 'pipeline';
   readonly value: string;
+  /**
+   * Structured pipeline state for kind:'pipeline' operands (T-03).
+   * Present only when kind === 'pipeline'.
+   */
+  readonly pipelineState?: ValueModeState;
 }
 
 export type ComparisonOperator =
@@ -70,6 +75,12 @@ export type BranchValue =
   | { readonly kind: 'static'; readonly value: string }
   | { readonly kind: 'source'; readonly value: string }
   | { readonly kind: 'expression'; readonly value: string }
+  /**
+   * Inline pipeline branch: a Source + Transform chain built via the inline
+   * mini-builder (T-03). Holds structured ValueModeState so the UI can
+   * re-populate the mini-builder when loading an existing rule.
+   */
+  | { readonly kind: 'pipeline'; readonly state: ValueModeState }
   | { readonly kind: 'conditional'; readonly value: ExpressionBuilderState };
 
 export interface ValueMapEntry {

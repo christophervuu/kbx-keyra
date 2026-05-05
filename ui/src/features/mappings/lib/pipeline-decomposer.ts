@@ -158,6 +158,14 @@ function nodeToBranchValue(node: AstNode): BranchValue {
       return { kind: 'conditional', value: nested.state };
     }
   }
+  // Attempt pipeline decomposition for transform chains (T-03)
+  // e.g. upper(source("tier")) → { kind: 'pipeline', state: { mode: 'value', sources: [...], transforms: [...] } }
+  if (node.type === 'FunctionCall' && TRANSFORM_FUNCTIONS.has(node.name)) {
+    const pipelineResult = decomposeValuePipeline(node as FunctionCallNode);
+    if (pipelineResult.success && pipelineResult.state.mode === 'value') {
+      return { kind: 'pipeline', state: pipelineResult.state };
+    }
+  }
   // Fallback: raw expression string
   return { kind: 'expression', value: nodeToExpressionString(node) };
 }
@@ -179,6 +187,18 @@ function nodeToOperand(node: AstNode): Operand {
   // Number/boolean/null literals → expression (verbatim DSL, no extra quoting)
   if (node.type === 'NumberLiteral' || node.type === 'BooleanLiteral' || node.type === 'NullLiteral') {
     return { kind: 'expression', value: nodeToExpressionString(node) };
+  }
+  // Attempt pipeline decomposition for transform chains on left operand (T-03)
+  // e.g. length(source("name")) → { kind: 'pipeline', pipelineState: { ... } }
+  if (node.type === 'FunctionCall' && TRANSFORM_FUNCTIONS.has(node.name)) {
+    const pipelineResult = decomposeValuePipeline(node as FunctionCallNode);
+    if (pipelineResult.success && pipelineResult.state.mode === 'value') {
+      return {
+        kind: 'pipeline',
+        value: nodeToExpressionString(node),
+        pipelineState: pipelineResult.state,
+      };
+    }
   }
   return { kind: 'expression', value: nodeToExpressionString(node) };
 }

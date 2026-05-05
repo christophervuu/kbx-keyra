@@ -5,13 +5,15 @@
  * Options:
  *  - Static value: text input
  *  - Source field: single-field picker
+ *  - Build expression: inline Source + Transform mini-builder (T-03)
  *  - (else only) Else-if condition: renders nested ConditionalModeBuilder
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 
+import { InlinePipelineBuilder } from './InlinePipelineBuilder';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
-import type { BranchValue, ConditionalModeState } from '../lib/expression-builder-state';
+import type { BranchValue, ConditionalModeState, ValueModeState } from '../lib/expression-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -36,9 +38,11 @@ export interface BranchValueSelectorProps {
   }>;
 }
 
-type BranchKind = 'static' | 'source' | 'conditional';
+type BranchKind = 'static' | 'source' | 'pipeline' | 'conditional';
 
 const MAX_ELSE_IF_DEPTH = 5;
+
+const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', sources: [], transforms: [] };
 
 // ---------------------------------------------------------------------------
 // Component
@@ -69,6 +73,7 @@ export function BranchValueSelector({
 
   const currentKind: BranchKind =
     branch.kind === 'conditional' ? 'conditional' :
+    branch.kind === 'pipeline' ? 'pipeline' :
     branch.kind === 'source' ? 'source' : 'static';
 
   const handleKindChange = useCallback(
@@ -77,6 +82,8 @@ export function BranchValueSelector({
         onBranchChange({ kind: 'static', value: '' });
       } else if (kind === 'source') {
         onBranchChange({ kind: 'source', value: '' });
+      } else if (kind === 'pipeline') {
+        onBranchChange({ kind: 'pipeline', state: EMPTY_PIPELINE_STATE });
       } else if (kind === 'conditional') {
         onBranchChange({
           kind: 'conditional',
@@ -104,6 +111,13 @@ export function BranchValueSelector({
       onBranchChange({ kind: 'source', value: path });
       setSearchQuery('');
       setShowSuggestions(false);
+    },
+    [onBranchChange],
+  );
+
+  const handlePipelineChange = useCallback(
+    (pipelineState: ValueModeState) => {
+      onBranchChange({ kind: 'pipeline', state: pipelineState });
     },
     [onBranchChange],
   );
@@ -144,6 +158,18 @@ export function BranchValueSelector({
           data-testid={`${testIdPrefix}-kind-source`}
         >
           Field
+        </button>
+        <button
+          type="button"
+          onClick={() => { handleKindChange('pipeline'); }}
+          className={[
+            'px-2.5 py-1 focus:outline-none',
+            currentKind === 'pipeline' ? 'bg-blue-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100',
+          ].join(' ')}
+          aria-pressed={currentKind === 'pipeline'}
+          data-testid={`${testIdPrefix}-kind-pipeline`}
+        >
+          Build expression
         </button>
         {allowElseIf && !atDepthCap && (
           <button
@@ -224,6 +250,16 @@ export function BranchValueSelector({
             </ul>
           )}
         </div>
+      )}
+
+      {/* Inline pipeline mini-builder (T-03) */}
+      {currentKind === 'pipeline' && (
+        <InlinePipelineBuilder
+          state={branch.kind === 'pipeline' ? branch.state : EMPTY_PIPELINE_STATE}
+          onChange={handlePipelineChange}
+          parsedSourceSchema={parsedSourceSchema}
+          testIdPrefix={`${testIdPrefix}-pipeline`}
+        />
       )}
 
       {/* Nested else-if conditional */}

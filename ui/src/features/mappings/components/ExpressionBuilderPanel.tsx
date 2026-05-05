@@ -157,6 +157,7 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
     errorDecorations,
     decompositionWarning,
     initialBuilderState: _initialBuilderState,
+    initialUnifiedBuilderState,
   } = builderState;
 
   /** Insert a function from the reference panel into the active mode. */
@@ -215,6 +216,7 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
               parsedSourceSchema={parsedSourceSchema}
               sourceData={resolvedSourceData}
               onSwitchToEditor={switchToEditor}
+              initialState={initialUnifiedBuilderState}
             />
           </div>
         )}

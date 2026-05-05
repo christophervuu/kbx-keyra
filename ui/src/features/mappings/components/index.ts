@@ -84,6 +84,8 @@ export { ConditionRowEditor } from './ConditionRowEditor';
 export type { ConditionRowEditorProps } from './ConditionRowEditor';
 export { BranchValueSelector } from './BranchValueSelector';
 export type { BranchValueSelectorProps } from './BranchValueSelector';
+export { InlinePipelineBuilder } from './InlinePipelineBuilder';
+export type { InlinePipelineBuilderProps } from './InlinePipelineBuilder';
 export { ConditionalModeBuilder } from './ConditionalModeBuilder';
 export type { ConditionalModeBuilderProps } from './ConditionalModeBuilder';
 export { ValueMapModeBuilder } from './ValueMapModeBuilder';

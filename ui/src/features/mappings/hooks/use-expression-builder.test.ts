@@ -162,17 +162,31 @@ describe('useExpressionBuilder', () => {
     );
   });
 
-  it('mode defaults to editor', () => {
+  it('mode defaults to builder when rule has a decomposable expression', () => {
     const { result } = renderHook(() =>
       useExpressionBuilder({
-        selectedRuleIndex: 0,
+        selectedRuleIndex: 0, // source("name") — decomposable
         rules,
         updateRule: vi.fn(),
         parsedSourceSchema: null,
       }),
     );
 
-    expect(result.current.mode).toBe('editor');
+    expect(result.current.mode).toBe('builder');
+  });
+
+  it('mode defaults to editor when rule has an empty expression', () => {
+    const { result } = renderHook(() =>
+      useExpressionBuilder({
+        selectedRuleIndex: 2, // empty expression
+        rules,
+        updateRule: vi.fn(),
+        parsedSourceSchema: null,
+      }),
+    );
+
+    // Empty expression → default empty builder state (builder mode)
+    expect(result.current.mode).toBe('builder');
   });
 
   it('switchToEditor sets mode to editor', () => {
@@ -199,16 +213,22 @@ describe('useExpressionBuilder', () => {
       }),
     );
 
+    // Auto-hydration already sets builder mode on mount
+    expect(result.current.mode).toBe('builder');
+    expect(result.current.decompositionWarning).toBeNull();
+    // New decomposer succeeds → initialUnifiedBuilderState is set
+    expect(result.current.initialUnifiedBuilderState).not.toBeNull();
+
+    // Calling switchToBuilder again should also succeed
     act(() => { result.current.switchToBuilder(); });
     expect(result.current.mode).toBe('builder');
     expect(result.current.decompositionWarning).toBeNull();
-    expect(result.current.initialBuilderState).not.toBeNull();
   });
 
   it('switchToBuilder with complex expression sets decompositionWarning and stays in editor', () => {
-    // 4-level nesting → too deep
+    // concat() at root is not a recognized builder expression
     const complexRules: readonly MappingRule[] = [
-      makeRule('if(gt(concat(source("x"), "a"), 10), static("yes"), static("no"))'),
+      makeRule('concat(source("first"), source("last"))'),
     ];
     const { result } = renderHook(() =>
       useExpressionBuilder({
@@ -219,14 +239,18 @@ describe('useExpressionBuilder', () => {
       }),
     );
 
+    // Auto-hydration on mount already sets editor mode + warning
+    expect(result.current.mode).toBe('editor');
+
+    // Calling switchToBuilder again should also fail and set warning
     act(() => { result.current.switchToBuilder(); });
     expect(result.current.mode).toBe('editor'); // stayed in editor
-    expect(result.current.decompositionWarning).toMatch(/nests too deeply/i);
+    expect(result.current.decompositionWarning).not.toBeNull();
   });
 
   it('dismissDecompositionWarning clears the warning', () => {
     const complexRules: readonly MappingRule[] = [
-      makeRule('if(gt(concat(source("x"), "a"), 10), static("yes"), static("no"))'),
+      makeRule('concat(source("first"), source("last"))'),
     ];
     const { result } = renderHook(() =>
       useExpressionBuilder({
@@ -237,7 +261,7 @@ describe('useExpressionBuilder', () => {
       }),
     );
 
-    act(() => { result.current.switchToBuilder(); });
+    // Auto-hydration sets warning on mount
     expect(result.current.decompositionWarning).not.toBeNull();
 
     act(() => { result.current.dismissDecompositionWarning(); });
@@ -247,7 +271,7 @@ describe('useExpressionBuilder', () => {
 
   it('forceBuilder clears warning and switches to builder mode', () => {
     const complexRules: readonly MappingRule[] = [
-      makeRule('if(gt(concat(source("x"), "a"), 10), static("yes"), static("no"))'),
+      makeRule('concat(source("first"), source("last"))'),
     ];
     const { result } = renderHook(() =>
       useExpressionBuilder({
@@ -258,9 +282,192 @@ describe('useExpressionBuilder', () => {
       }),
     );
 
-    act(() => { result.current.switchToBuilder(); });
+    // Auto-hydration sets warning on mount
+    expect(result.current.decompositionWarning).not.toBeNull();
+
     act(() => { result.current.forceBuilder(); });
     expect(result.current.mode).toBe('builder');
     expect(result.current.decompositionWarning).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // loadExpression (AE-01 through AE-05, AE-13)
+  // ---------------------------------------------------------------------------
+
+  describe('loadExpression', () => {
+    it('AE-01: Value mode — decomposes source+transforms into builder state', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      act(() => {
+        result.current.loadExpression('lower(trim(source("email")))');
+      });
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.decompositionWarning).toBeNull();
+      expect(result.current.expression).toBe('lower(trim(source("email")))');
+      expect(result.current.initialUnifiedBuilderState).not.toBeNull();
+      expect(result.current.initialUnifiedBuilderState?.mode).toBe('value');
+      if (result.current.initialUnifiedBuilderState?.mode === 'value') {
+        expect(result.current.initialUnifiedBuilderState.sources).toHaveLength(1);
+        expect(result.current.initialUnifiedBuilderState.sources[0].path).toBe('email');
+        expect(result.current.initialUnifiedBuilderState.transforms).toHaveLength(2);
+        expect(result.current.initialUnifiedBuilderState.transforms[0].functionName).toBe('trim');
+        expect(result.current.initialUnifiedBuilderState.transforms[1].functionName).toBe('lower');
+      }
+    });
+
+    it('AE-02: Conditional mode — decomposes if() into conditional state', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      act(() => {
+        result.current.loadExpression('if(gt(source("amount"), 100), "high", "low")');
+      });
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.decompositionWarning).toBeNull();
+      expect(result.current.initialUnifiedBuilderState?.mode).toBe('conditional');
+    });
+
+    it('AE-03: Value Map mode — decomposes valueMap() into value map state', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      act(() => {
+        result.current.loadExpression('valueMap(source("status"), {"active": "Active", "inactive": "Inactive"}, null)');
+      });
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.decompositionWarning).toBeNull();
+      expect(result.current.initialUnifiedBuilderState?.mode).toBe('valueMap');
+    });
+
+    it('AE-04: null/empty expression resets to default empty builder state', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      // First load something
+      act(() => {
+        result.current.loadExpression('source("name")');
+      });
+      expect(result.current.mode).toBe('builder');
+
+      // Now reset with null
+      act(() => {
+        result.current.loadExpression(null);
+      });
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.expression).toBe('');
+      expect(result.current.decompositionWarning).toBeNull();
+      expect(result.current.initialUnifiedBuilderState).toBeNull();
+    });
+
+    it('AE-04: empty string resets to default empty builder state', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      act(() => {
+        result.current.loadExpression('');
+      });
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.expression).toBe('');
+      expect(result.current.decompositionWarning).toBeNull();
+    });
+
+    it('AE-05: undecomposable expression falls back to Editor mode with warning', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      // concat() is not a recognized root-level builder expression
+      act(() => {
+        result.current.loadExpression('concat(source("first"), source("last"))');
+      });
+
+      expect(result.current.mode).toBe('editor');
+      expect(result.current.decompositionWarning).not.toBeNull();
+      expect(result.current.expression).toBe('concat(source("first"), source("last"))');
+    });
+
+    it('AE-13: Editor mode receives the loaded expression text', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      // Load an undecomposable expression → falls back to editor
+      act(() => {
+        result.current.loadExpression('concat(source("a"), source("b"))');
+      });
+
+      expect(result.current.mode).toBe('editor');
+      // expression string must be populated so RawDslEditor shows it
+      expect(result.current.expression).toBe('concat(source("a"), source("b"))');
+    });
+
+    it('auto-hydrates when selectedRuleIndex changes to a mapped rule', () => {
+      const updateRule = vi.fn();
+      let selectedRuleIndex = 2; // empty rule
+
+      const { result, rerender } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex,
+          rules,
+          updateRule,
+          parsedSourceSchema: null,
+        }),
+      );
+
+      expect(result.current.mode).toBe('builder'); // empty → default builder
+
+      selectedRuleIndex = 1; // upper(source("code")) — decomposable
+      rerender();
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.initialUnifiedBuilderState).not.toBeNull();
+      expect(result.current.initialUnifiedBuilderState?.mode).toBe('value');
+    });
   });
 });

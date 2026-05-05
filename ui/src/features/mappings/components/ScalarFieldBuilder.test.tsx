@@ -209,4 +209,294 @@ describe('ScalarFieldBuilder', () => {
     );
     expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
   });
+
+  // T-01: Hydration on target field selection
+  it('shows builder mode with decomposed state when a mapped field is selected', () => {
+    renderBuilder({
+      currentExpression: 'source("firstName")',
+      currentStatus: 'mapped',
+    });
+    // Decomposable expression → builder mode
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('expression-editor-slot')).not.toBeInTheDocument();
+  });
+
+  it('shows empty builder state when an unmapped field is selected', () => {
+    renderBuilder({
+      currentExpression: '',
+      currentStatus: 'unmapped',
+    });
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
+  });
+
+  it('falls back to editor mode with warning when expression cannot be decomposed', () => {
+    renderBuilder({
+      // concat() at root is not a recognized builder expression
+      currentExpression: 'concat(source("first"), source("last"))',
+      currentStatus: 'mapped',
+    });
+    expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('decomposition-warning-container')).toBeInTheDocument();
+  });
+
+  it('editor mode shows the loaded expression text when decomposition fails', () => {
+    renderBuilder({
+      currentExpression: 'concat(source("first"), source("last"))',
+      currentStatus: 'mapped',
+    });
+    // RawDslEditor should contain the expression text
+    const textarea = screen.getByRole('textbox');
+    expect(textarea).toHaveValue('concat(source("first"), source("last"))');
+  });
+
+  it('switches to builder mode when target changes to a mapped decomposable field', () => {
+    const { rerender } = renderBuilder({
+      currentExpression: 'concat(source("a"), source("b"))',
+      currentStatus: 'mapped',
+    });
+    // Initially in editor (decomposition failed)
+    expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
+
+    rerender(
+      <ScalarFieldBuilder
+        {...DEFAULT_PROPS}
+        selectedTargetPath="patient.lastName"
+        currentExpression='source("lastName")'
+        currentStatus="mapped"
+      />,
+    );
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
+  });
+
+  it('switches to empty builder state when target changes to an unmapped field', () => {
+    const { rerender } = renderBuilder({
+      currentExpression: 'source("firstName")',
+      currentStatus: 'mapped',
+    });
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+
+    rerender(
+      <ScalarFieldBuilder
+        {...DEFAULT_PROPS}
+        selectedTargetPath="patient.newField"
+        currentExpression=""
+        currentStatus="unmapped"
+      />,
+    );
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
+  });
+
+  // T-02: AE-08 — builder reset on navigation (no stale state)
+  describe('AE-08: builder reset on navigation', () => {
+    it('header updates to new field name after navigation', () => {
+      const { rerender } = renderBuilder({
+        selectedTargetPath: 'patient.firstName',
+        currentExpression: 'source("firstName")',
+        currentStatus: 'mapped',
+      });
+      expect(screen.getByTestId('header-target-path')).toHaveTextContent('patient.firstName');
+
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          selectedTargetPath="patient.lastName"
+          currentExpression='source("lastName")'
+          currentStatus="mapped"
+        />,
+      );
+      expect(screen.getByTestId('header-target-path')).toHaveTextContent('patient.lastName');
+    });
+
+    it('header type badge updates after navigation', () => {
+      const { rerender } = renderBuilder({
+        selectedTargetPath: 'patient.firstName',
+        selectedTargetType: 'string',
+        currentExpression: '',
+      });
+      expect(screen.getByTestId('header-type-badge')).toHaveTextContent('string');
+
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          selectedTargetPath="patient.age"
+          selectedTargetType="number"
+          currentExpression=""
+        />,
+      );
+      expect(screen.getByTestId('header-type-badge')).toHaveTextContent('number');
+    });
+
+    it('warning banner from previous field does not persist after navigation', () => {
+      const { rerender } = renderBuilder({
+        currentExpression: 'concat(source("a"), source("b"))',
+        currentStatus: 'mapped',
+      });
+      // Previous field had decomposition failure → warning shown
+      expect(screen.getByTestId('decomposition-warning-container')).toBeInTheDocument();
+
+      // Navigate to a new unmapped field
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          selectedTargetPath="patient.lastName"
+          currentExpression=""
+          currentStatus="unmapped"
+        />,
+      );
+      // Warning must be gone
+      expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
+    });
+
+    it('editor mode from previous field resets to builder mode for decomposable new field', () => {
+      const { rerender } = renderBuilder({
+        currentExpression: 'concat(source("a"), source("b"))',
+        currentStatus: 'mapped',
+      });
+      // Previous field → editor mode (decomposition failed)
+      expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
+
+      // Navigate to a field with a decomposable expression
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          selectedTargetPath="patient.lastName"
+          currentExpression='source("lastName")'
+          currentStatus="mapped"
+        />,
+      );
+      // New field → builder mode
+      expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    });
+  });
+
+  // T-02: AE-09 — navigation guard fires when unapplied changes exist
+  describe('AE-09: onExpressionChange fires for parent navigation guard', () => {
+    it('calls onExpressionChange when user types in editor mode', () => {
+      const onExpressionChange = vi.fn();
+      renderBuilder({
+        currentExpression: 'concat(source("a"), source("b"))', // forces editor mode
+        onExpressionChange,
+      });
+      // In editor mode, typing fires onExpressionChange
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("x")' } });
+      expect(onExpressionChange).toHaveBeenCalledWith('source("x")');
+    });
+
+    it('does not call onExpressionChange on initial render (no spurious guard trigger)', () => {
+      const onExpressionChange = vi.fn();
+      renderBuilder({ onExpressionChange });
+      // No change events on mount
+      expect(onExpressionChange).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-04: AE-10 — Apply stays on field, Applied state, Next unmapped button
+  // ---------------------------------------------------------------------------
+
+  describe('AE-10: Apply does not auto-advance', () => {
+    it('Apply button is enabled when expression is non-empty and valid', () => {
+      renderBuilder({ currentExpression: 'source("firstName")' });
+      // Apply button should be enabled (expression is valid DSL)
+      const applyBtn = screen.getByTestId('apply-btn');
+      expect(applyBtn).not.toBeDisabled();
+    });
+
+    it('Apply button shows "Applied" state after clicking', async () => {
+      const onApply = vi.fn();
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
+      const applyBtn = screen.getByTestId('apply-btn');
+      fireEvent.click(applyBtn);
+      // After apply, button should show "Applied" text
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+    });
+
+    it('Apply button re-enables after expression changes post-apply', async () => {
+      const onApply = vi.fn();
+      const { rerender } = renderBuilder({ currentExpression: 'source("firstName")', onApply });
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+
+      // Simulate expression change by switching to editor mode and typing
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
+      // Apply button should no longer show "Applied"
+      expect(screen.getByTestId('apply-btn')).not.toHaveTextContent('Applied');
+    });
+
+    it('onApply is called with correct args when Apply is clicked', () => {
+      const onApply = vi.fn();
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    });
+  });
+
+  describe('AE-11: Next unmapped button', () => {
+    it('Next unmapped button is visible when hasUnmappedFields=true and onAdvanceToNext provided', () => {
+      renderBuilder({
+        hasUnmappedFields: true,
+        onAdvanceToNext: vi.fn(),
+      });
+      expect(screen.getByTestId('next-unmapped-btn')).toBeInTheDocument();
+    });
+
+    it('Next unmapped button is hidden when hasUnmappedFields=false', () => {
+      renderBuilder({
+        hasUnmappedFields: false,
+        onAdvanceToNext: vi.fn(),
+      });
+      expect(screen.queryByTestId('next-unmapped-btn')).not.toBeInTheDocument();
+    });
+
+    it('Next unmapped button is hidden when onAdvanceToNext not provided', () => {
+      renderBuilder({ hasUnmappedFields: true });
+      expect(screen.queryByTestId('next-unmapped-btn')).not.toBeInTheDocument();
+    });
+
+    it('clicking Next unmapped button calls onAdvanceToNext', () => {
+      const onAdvanceToNext = vi.fn();
+      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext });
+      fireEvent.click(screen.getByTestId('next-unmapped-btn'));
+      expect(onAdvanceToNext).toHaveBeenCalledOnce();
+    });
+
+    it('Next unmapped button has correct aria-label', () => {
+      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext: vi.fn() });
+      expect(screen.getByTestId('next-unmapped-btn')).toHaveAttribute(
+        'aria-label',
+        'Navigate to next unmapped target field',
+      );
+    });
+  });
+
+  describe('AE-12: Ctrl+] keyboard shortcut', () => {
+    it('Ctrl+] fires onAdvanceToNext', () => {
+      const onAdvanceToNext = vi.fn();
+      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext });
+      fireEvent.keyDown(document, { key: ']', ctrlKey: true });
+      expect(onAdvanceToNext).toHaveBeenCalledOnce();
+    });
+
+    it('Cmd+] fires onAdvanceToNext (macOS)', () => {
+      const onAdvanceToNext = vi.fn();
+      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext });
+      fireEvent.keyDown(document, { key: ']', metaKey: true });
+      expect(onAdvanceToNext).toHaveBeenCalledOnce();
+    });
+
+    it('Ctrl+] does not fire when onAdvanceToNext is not provided', () => {
+      // Should not throw
+      renderBuilder({ hasUnmappedFields: true });
+      expect(() => {
+        fireEvent.keyDown(document, { key: ']', ctrlKey: true });
+      }).not.toThrow();
+    });
+  });
 });

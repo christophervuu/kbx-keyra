@@ -214,6 +214,125 @@ describe('generateExpressionFromState (conditional mode)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// T-03: pipeline kind in branch values and operands
+// ---------------------------------------------------------------------------
+
+describe('generateExpressionFromState — pipeline branch values (T-03)', () => {
+  it('T-03-GEN-01: then branch kind=pipeline generates transform expression', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'status' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: 'active' },
+          },
+        ],
+      },
+      thenBranch: {
+        kind: 'pipeline',
+        state: {
+          mode: 'value',
+          sources: [{ path: 'tier' }],
+          transforms: [{ functionName: 'upper', parameters: [] }],
+        },
+      },
+      elseBranch: { kind: 'static', value: 'inactive' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(eq(source("status"), "active"), upper(source("tier")), "inactive")',
+    );
+  });
+
+  it('T-03-GEN-02: else branch kind=pipeline generates transform expression', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'flag' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: 'yes' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'ok' },
+      elseBranch: {
+        kind: 'pipeline',
+        state: {
+          mode: 'value',
+          sources: [{ path: 'fallback_label' }],
+          transforms: [{ functionName: 'lower', parameters: [] }],
+        },
+      },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(eq(source("flag"), "yes"), "ok", lower(source("fallback_label")))',
+    );
+  });
+
+  it('T-03-GEN-03: left operand kind=pipeline generates transform expression in condition', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: {
+              kind: 'pipeline',
+              value: '',
+              pipelineState: {
+                mode: 'value',
+                sources: [{ path: 'name' }],
+                transforms: [{ functionName: 'length', parameters: [] }],
+              },
+            },
+            comparison: 'gt',
+            rightOperand: { kind: 'expression', value: '5' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'long' },
+      elseBranch: { kind: 'static', value: 'short' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(gt(length(source("name")), 5), "long", "short")',
+    );
+  });
+
+  it('T-03-GEN-04: pipeline branch with empty state returns empty string (no crash)', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'x' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: 'y' },
+          },
+        ],
+      },
+      thenBranch: {
+        kind: 'pipeline',
+        state: { mode: 'value', sources: [], transforms: [] },
+      },
+      elseBranch: { kind: 'static', value: 'no' },
+    };
+
+    // Empty pipeline state → empty string for then branch
+    const result = generateExpressionFromState(state);
+    expect(result).toBe('if(eq(source("x"), "y"), , "no")');
+  });
+});
+
 describe('generateExpressionFromState (valueMap mode)', () => {
   it('AE-06: valueMap with fallback value', () => {
     const state: ExpressionBuilderState = {

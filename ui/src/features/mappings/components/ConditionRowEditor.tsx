@@ -2,7 +2,7 @@
  * ConditionRowEditor — a single condition row in the ConditionalModeBuilder.
  *
  * Renders:
- *  - Left operand: "Source field" or "Value" selector + input
+ *  - Left operand: "Source field", "Value", or "Transform..." selector + input (T-03)
  *  - Comparison operator dropdown (human-readable labels)
  *  - Right operand: same as left (hidden for unary operators isNull/isNotNull)
  *  - Optional remove button
@@ -11,8 +11,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
+import { InlinePipelineBuilder } from './InlinePipelineBuilder';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
-import type { ComparisonOperator, ConditionRow, Operand } from '../lib/expression-builder-state';
+import type { ComparisonOperator, ConditionRow, Operand, ValueModeState } from '../lib/expression-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,8 @@ export const COMPARISON_OPTIONS: { value: ComparisonOperator; label: string }[] 
 ];
 
 const UNARY_OPERATORS = new Set<ComparisonOperator>(['isNull', 'isNotNull']);
+
+const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', sources: [], transforms: [] };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,9 +58,11 @@ interface OperandInputProps {
   parsedSourceSchema: ParsedSchema | null;
   label: string;
   testIdPrefix: string;
+  /** When true, shows the "Transform..." option for pipeline operands (T-03) */
+  allowPipeline?: boolean;
 }
 
-function OperandInput({ operand, onChange, parsedSourceSchema, label, testIdPrefix }: OperandInputProps) {
+function OperandInput({ operand, onChange, parsedSourceSchema, label, testIdPrefix, allowPipeline = false }: OperandInputProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -72,10 +77,15 @@ function OperandInput({ operand, onChange, parsedSourceSchema, label, testIdPref
     return allPaths.filter((p) => q === '' || p.path.toLowerCase().includes(q)).slice(0, 30);
   }, [allPaths, searchQuery]);
 
+  const isPipeline = operand.kind === 'pipeline';
   const isSource = operand.kind === 'source';
 
-  const handleKindChange = (kind: 'source' | 'static') => {
-    onChange({ kind, value: '' });
+  const handleKindChange = (kind: 'source' | 'static' | 'pipeline') => {
+    if (kind === 'pipeline') {
+      onChange({ kind: 'pipeline', value: '', pipelineState: EMPTY_PIPELINE_STATE });
+    } else {
+      onChange({ kind, value: '' });
+    }
     setSearchQuery('');
   };
 
@@ -87,6 +97,10 @@ function OperandInput({ operand, onChange, parsedSourceSchema, label, testIdPref
     onChange({ kind: 'source', value: path });
     setSearchQuery('');
     setShowSuggestions(false);
+  };
+
+  const handlePipelineChange = (pipelineState: ValueModeState) => {
+    onChange({ kind: 'pipeline', value: '', pipelineState });
   };
 
   return (
@@ -110,17 +124,38 @@ function OperandInput({ operand, onChange, parsedSourceSchema, label, testIdPref
           onClick={() => { handleKindChange('static'); }}
           className={[
             'px-2 py-0.5 focus:outline-none',
-            !isSource ? 'bg-blue-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100',
+            operand.kind === 'static' ? 'bg-blue-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100',
           ].join(' ')}
-          aria-pressed={!isSource}
+          aria-pressed={operand.kind === 'static'}
           data-testid={`${testIdPrefix}-kind-static`}
         >
           Value
         </button>
+        {allowPipeline && (
+          <button
+            type="button"
+            onClick={() => { handleKindChange('pipeline'); }}
+            className={[
+              'px-2 py-0.5 focus:outline-none',
+              isPipeline ? 'bg-blue-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100',
+            ].join(' ')}
+            aria-pressed={isPipeline}
+            data-testid={`${testIdPrefix}-kind-pipeline`}
+          >
+            Transform…
+          </button>
+        )}
       </div>
 
       {/* Input */}
-      {isSource ? (
+      {isPipeline ? (
+        <InlinePipelineBuilder
+          state={operand.pipelineState ?? EMPTY_PIPELINE_STATE}
+          onChange={handlePipelineChange}
+          parsedSourceSchema={parsedSourceSchema}
+          testIdPrefix={`${testIdPrefix}-pipeline`}
+        />
+      ) : isSource ? (
         <div className="relative">
           <input
             ref={inputRef}
@@ -216,13 +251,14 @@ export function ConditionRowEditor({
       className="flex items-start gap-2 flex-wrap"
       data-testid={`condition-row-${rowIndex}`}
     >
-      {/* Left operand */}
+      {/* Left operand — supports pipeline transforms (T-03) */}
       <OperandInput
         operand={condition.leftOperand}
         onChange={handleLeftChange}
         parsedSourceSchema={parsedSourceSchema}
         label="Left"
         testIdPrefix={`condition-left-${rowIndex}`}
+        allowPipeline
       />
 
       {/* Operator */}

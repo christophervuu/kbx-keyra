@@ -55,6 +55,12 @@ export interface UnifiedExpressionBuilderProps {
   readonly sourceData?: unknown;
   /** Fires when user clicks the live expression to switch to Editor mode (T-07) */
   readonly onSwitchToEditor?: () => void;
+  /**
+   * Pre-decomposed builder state to hydrate from (T-01).
+   * When provided, the component initializes its internal state from this value
+   * instead of starting empty. Changing this prop resets the builder state.
+   */
+  readonly initialState?: ExpressionBuilderState | null;
   readonly className?: string;
 }
 
@@ -137,6 +143,7 @@ export function UnifiedExpressionBuilder({
   parsedSourceSchema,
   sourceData,
   onSwitchToEditor,
+  initialState,
   className,
 }: UnifiedExpressionBuilderProps) {
   const [activeMode, setActiveMode] = useState<ActiveMode>('value');
@@ -145,6 +152,17 @@ export function UnifiedExpressionBuilder({
   const [pendingMode, setPendingMode] = useState<ActiveMode | null>(null);
   const [showDirectCopyToast, setShowDirectCopyToast] = useState(false);
   const [currentExpression, setCurrentExpression] = useState('');
+
+  // Hydrate from initialState when it changes (T-01)
+  useEffect(() => {
+    if (initialState != null) {
+      setBuilderState(initialState);
+      setActiveMode(initialState.mode);
+    } else {
+      setBuilderState(makeEmptyValueState());
+      setActiveMode('value');
+    }
+  }, [initialState]);
 
   // Sync expression out whenever builderState changes
   useEffect(() => {

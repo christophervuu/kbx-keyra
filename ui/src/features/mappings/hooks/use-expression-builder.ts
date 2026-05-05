@@ -52,6 +52,15 @@ export interface ExpressionBuilderResult {
    * Clears the warning and sets mode to 'builder' with a blank/partial state.
    */
   readonly forceBuilder: () => void;
+  /**
+   * Load an expression from an external source (e.g. target field selection).
+   *
+   * - `null` or empty string → reset to default empty state (Value mode, Builder).
+   * - Non-empty string → attempt decomposition:
+   *   - Success: set ExpressionBuilderState, switch to Builder mode, clear warning.
+   *   - Failure: load raw expression into Editor mode, set decompositionWarning.
+   */
+  readonly loadExpression: (expression: string | null) => void;
   /** Current expression string in local (working) state */
   readonly expression: string;
   /** Update the local expression string */
@@ -156,23 +165,70 @@ export function useExpressionBuilder({
   } = useDslValidation(expression);
 
   // -------------------------------------------------------------------------
+  // Core loadExpression logic (shared by the effect below and the public API)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Internal helper: decompose `expr` and update all relevant state atoms.
+   * Does NOT touch committedExpressionRef — callers manage that.
+   */
+  const applyLoadExpression = useCallback((expr: string | null) => {
+    const normalized = expr ?? '';
+    setExpressionLocal(normalized);
+
+    if (!normalized) {
+      // Empty / unmapped → reset to default empty state
+      setDecompositionWarning(null);
+      setInitialBuilderState(null);
+      setInitialUnifiedBuilderState(null);
+      setMode('builder');
+      return;
+    }
+
+    // Attempt decomposition with the new decomposer (FS-023)
+    const newResult = decomposeExpressionNew(normalized);
+    if (newResult.success) {
+      setInitialUnifiedBuilderState(newResult.state);
+      setInitialBuilderState(null);
+      setDecompositionWarning(null);
+      setMode('builder');
+      return;
+    }
+
+    // Fall back to old decomposer for backward compat
+    const oldResult = decomposeExpression(normalized);
+    if (oldResult.success && oldResult.builderState) {
+      setInitialBuilderState(oldResult.builderState);
+      setInitialUnifiedBuilderState(null);
+      setDecompositionWarning(null);
+      setMode('builder');
+      return;
+    }
+
+    // Decomposition failed → Editor mode with warning
+    setInitialBuilderState(null);
+    setInitialUnifiedBuilderState(null);
+    setDecompositionWarning(
+      newResult.reason ?? oldResult.reason ?? 'Expression cannot be loaded into the guided builder.',
+    );
+    setMode('editor');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -------------------------------------------------------------------------
   // Load expression from selected rule when the selection changes
   // -------------------------------------------------------------------------
   useEffect(() => {
     const incoming = selectedRule?.expression ?? '';
-    setExpressionLocal(incoming);
     committedExpressionRef.current = incoming;
-    // Reset mode-transition state on rule change
-    setDecompositionWarning(null);
-    setInitialBuilderState(null);
-    setInitialUnifiedBuilderState(null);
-    setMode('editor');
 
     // Cancel any pending commit debounce from the previous selection
     if (commitTimerRef.current !== null) {
       clearTimeout(commitTimerRef.current);
       commitTimerRef.current = null;
     }
+
+    // Hydrate builder state from the incoming expression
+    applyLoadExpression(incoming);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRuleIndex]);
 
@@ -287,6 +343,15 @@ export function useExpressionBuilder({
     setMode('builder');
   }, []);
 
+  /**
+   * Load an expression from an external source (e.g. target field selection).
+   * Null or empty → reset to default empty state.
+   * Non-empty → decompose; on success → Builder mode; on failure → Editor mode + warning.
+   */
+  const loadExpression = useCallback((expression: string | null) => {
+    applyLoadExpression(expression);
+  }, [applyLoadExpression]);
+
   const setExpression = useCallback((expr: string) => {
     setExpressionLocal(expr);
   }, []);
@@ -318,6 +383,7 @@ export function useExpressionBuilder({
     switchToBuilder,
     dismissDecompositionWarning,
     forceBuilder,
+    loadExpression,
     expression,
     setExpression,
     validationResult,
