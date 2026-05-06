@@ -30,6 +30,14 @@ function isInferred(fmt: DetectedFormat): boolean {
   return fmt === 'sample-json' || fmt === 'sample-xml';
 }
 
+function defaultPasteName(fmt: DetectedFormat): string {
+  switch (fmt) {
+    case 'json-schema': return 'Pasted JSON Schema';
+    case 'sample-json': return 'Pasted Sample JSON';
+    default: return 'Pasted Schema';
+  }
+}
+
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -43,6 +51,8 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 
 export type SchemaScope = 'global' | 'project-level';
 
+type InputMode = 'file' | 'paste';
+
 export interface SchemaUploadDialogProps {
   open: boolean;
   onClose: () => void;
@@ -51,7 +61,7 @@ export interface SchemaUploadDialogProps {
 }
 
 interface ParsedFileInfo {
-  filename: string;
+  filename?: string;
   content: string;
   format: DetectedFormat;
   parsedContent: unknown;
@@ -61,11 +71,118 @@ interface ParsedFileInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Shared parse helper
+// ---------------------------------------------------------------------------
+
+function parseContentInfo(
+  text: string,
+  filename?: string,
+): { info: ParsedFileInfo } | { error: string } {
+  const detection = detectSchemaFormat(text, filename);
+
+  if (detection.format === 'unknown') {
+    return {
+      error: 'Could not determine file format. Supported: JSON Schema (.json), XSD (.xsd), sample JSON/XML.',
+    };
+  }
+
+  let fieldCount = 0;
+  let parseError = false;
+  const inferredFlag = isInferred(detection.format);
+
+  try {
+    if (detection.format === 'json-schema') {
+      const parsed = parseJsonSchema(detection.parsedContent as object);
+      fieldCount = parsed.nodes.length;
+    } else if (detection.format === 'xsd') {
+      const parsed = parseXsd(text);
+      fieldCount = parsed.nodes.length;
+    } else {
+      const parsed = parseInferredSchema(
+        detection.format === 'sample-json'
+          ? JSON.stringify(detection.parsedContent)
+          : text,
+      );
+      fieldCount = parsed.nodes.length;
+    }
+  } catch {
+    parseError = true;
+    fieldCount = 0;
+  }
+
+  return {
+    info: {
+      filename,
+      content: text,
+      format: detection.format,
+      parsedContent: detection.parsedContent,
+      fieldCount,
+      parseError,
+      isInferredFlag: inferredFlag,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+interface ContentInfoPanelProps {
+  info: ParsedFileInfo;
+  testIdPrefix?: string;
+}
+
+function ContentInfoPanel({ info, testIdPrefix = '' }: ContentInfoPanelProps) {
+  return (
+    <div
+      className="mb-4 rounded-md border border-slate-700 bg-slate-800 p-3"
+      data-testid={testIdPrefix ? `${testIdPrefix}-info` : 'file-info'}
+    >
+      {info.filename && (
+        <p className="mb-1 text-xs text-slate-300">
+          <span className="font-medium">File:</span> {info.filename}
+        </p>
+      )}
+
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-xs text-slate-400">Format:</span>
+        <span
+          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+            info.isInferredFlag
+              ? 'bg-yellow-900 text-yellow-300'
+              : 'bg-blue-900 text-blue-300'
+          }`}
+          data-testid="format-badge"
+        >
+          {formatLabel(info.format)}
+        </span>
+      </div>
+
+      {info.isInferredFlag && (
+        <p className="mb-1 text-xs text-yellow-400" data-testid="inferred-warning">
+          ⚠ This file will be treated as sample data. Schema structure will be inferred.
+        </p>
+      )}
+
+      {info.parseError ? (
+        <p className="text-xs text-yellow-400" data-testid="parse-warning">
+          ⚠ Could not parse schema structure. Field count will be estimated.
+        </p>
+      ) : (
+        <p className="text-xs text-slate-400" data-testid="field-count">
+          {info.fieldCount} field{info.fieldCount !== 1 ? 's' : ''} detected
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 /**
- * Modal dialog for uploading a schema file, detecting its format, and
+ * Modal dialog for uploading or pasting a schema, detecting its format, and
  * persisting it via the adapter.
  */
 export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUploadDialogProps) {
@@ -73,11 +190,41 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   const dialogRef = useRef<HTMLDivElement>(null);
   const prevFocusRef = useRef<HTMLElement | null>(null);
 
+  // Input mode
+  const [inputMode, setInputMode] = useState<InputMode>('file');
+
+  // File mode state
   const [fileInfo, setFileInfo] = useState<ParsedFileInfo | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+
+  // Paste mode state
+  const [pasteText, setPasteText] = useState('');
+  const [pasteInfo, setPasteInfo] = useState<ParsedFileInfo | null>(null);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // Shared state
+  const [schemaName, setSchemaName] = useState('');
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [scope, setScope] = useState<SchemaScope>('project-level');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Reset all state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setInputMode('file');
+      setFileInfo(null);
+      setFileError(null);
+      setPasteText('');
+      setPasteInfo(null);
+      setPasteError(null);
+      setSchemaName('');
+      setNameManuallyEdited(false);
+      setScope('project-level');
+      setUploading(false);
+      setUploadError(null);
+    }
+  }, [open]);
 
   // Focus management
   useEffect(() => {
@@ -130,6 +277,9 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     setFileInfo(null);
     setFileError(null);
     setUploadError(null);
+    // Always reset name on new file selection
+    setSchemaName('');
+    setNameManuallyEdited(false);
 
     if (!file) return;
 
@@ -142,49 +292,13 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         return;
       }
 
-      const detection = detectSchemaFormat(text);
-
-      if (detection.format === 'unknown') {
-        setFileError(
-          'Could not determine file format. Supported: JSON Schema (.json), XSD (.xsd), sample JSON/XML.',
-        );
-        return;
+      const result = parseContentInfo(text, file.name);
+      if ('error' in result) {
+        setFileError(result.error);
+      } else {
+        setFileInfo(result.info);
+        setSchemaName(stripExtension(file.name));
       }
-
-      let fieldCount = 0;
-      let parseError = false;
-      const inferredFlag = isInferred(detection.format);
-
-      try {
-        if (detection.format === 'json-schema') {
-          const parsed = parseJsonSchema(detection.parsedContent as object);
-          fieldCount = parsed.nodes.length;
-        } else if (detection.format === 'xsd') {
-          const parsed = parseXsd(text);
-          fieldCount = parsed.nodes.length;
-        } else {
-          // sample-json or sample-xml — use inferred schema parser
-          const parsed = parseInferredSchema(
-            detection.format === 'sample-json'
-              ? JSON.stringify(detection.parsedContent)
-              : text,
-          );
-          fieldCount = parsed.nodes.length;
-        }
-      } catch {
-        parseError = true;
-        fieldCount = 0;
-      }
-
-      setFileInfo({
-        filename: file.name,
-        content: text,
-        format: detection.format,
-        parsedContent: detection.parsedContent,
-        fieldCount,
-        parseError,
-        isInferredFlag: inferredFlag,
-      });
     };
 
     reader.onerror = () => {
@@ -195,31 +309,76 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   }
 
   // -------------------------------------------------------------------------
+  // Paste analysis
+  // -------------------------------------------------------------------------
+
+  function analyzePasteContent(text: string) {
+    setPasteInfo(null);
+    setPasteError(null);
+    setUploadError(null);
+
+    if (!text.trim()) return;
+
+    const result = parseContentInfo(text);
+    if ('error' in result) {
+      // For paste mode, reject XSD/XML formats with a clearer message
+      if (result.error.includes('Supported:')) {
+        setPasteError('Could not determine format. Paste valid JSON Schema or sample JSON data.');
+      } else {
+        setPasteError(result.error);
+      }
+    } else if (result.info.format === 'xsd' || result.info.format === 'sample-xml') {
+      setPasteError('Could not determine format. Paste valid JSON Schema or sample JSON data.');
+    } else {
+      setPasteInfo(result.info);
+      if (!nameManuallyEdited) {
+        setSchemaName(defaultPasteName(result.info.format));
+      }
+    }
+  }
+
+  function handlePasteTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const text = e.target.value;
+    setPasteText(text);
+    // Clear previous analysis when content changes
+    if (pasteInfo || pasteError) {
+      setPasteInfo(null);
+      setPasteError(null);
+    }
+  }
+
+  function handlePasteBlur() {
+    if (pasteText.trim()) {
+      analyzePasteContent(pasteText);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Upload
   // -------------------------------------------------------------------------
 
   async function handleUpload() {
-    if (!fileInfo) return;
+    const activeInfo = inputMode === 'file' ? fileInfo : pasteInfo;
+    if (!activeInfo) return;
 
     setUploadError(null);
     setUploading(true);
 
     try {
-      // Determine schema format for adapter
       const adapterFormat =
-        fileInfo.format === 'json-schema'
+        activeInfo.format === 'json-schema'
           ? 'json-schema'
-          : fileInfo.format === 'xsd'
+          : activeInfo.format === 'xsd'
             ? 'xsd'
             : 'json-schema'; // inferred sample data stored as json-schema
 
       const content =
-        fileInfo.format === 'xsd' || fileInfo.format === 'sample-xml'
-          ? fileInfo.content
-          : (fileInfo.parsedContent as Record<string, unknown>);
+        activeInfo.format === 'xsd' || activeInfo.format === 'sample-xml'
+          ? activeInfo.content
+          : (activeInfo.parsedContent as Record<string, unknown>);
 
       const created = await adapter.createSchema({
-        name: stripExtension(fileInfo.filename),
+        name: schemaName.trim(),
         format: adapterFormat,
         origin: scope === 'global' ? 'library' : 'local',
         content: content as Record<string, unknown>,
@@ -236,6 +395,13 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       setUploading(false);
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Derived state
+  // -------------------------------------------------------------------------
+
+  const activeInfo = inputMode === 'file' ? fileInfo : pasteInfo;
+  const isSubmitEnabled = activeInfo !== null && schemaName.trim().length > 0 && !uploading;
 
   // -------------------------------------------------------------------------
   // Render
@@ -267,71 +433,128 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         data-testid="schema-upload-dialog"
       >
         <h2 id="schema-upload-title" className="mb-4 text-sm font-semibold text-slate-100">
-          Upload Schema
+          Add Schema
         </h2>
 
-        {/* File picker */}
-        <div className="mb-4">
-          <label htmlFor="schema-file-input" className="mb-1 block text-xs font-medium text-slate-400">
-            Select file
-          </label>
-          <input
-            id="schema-file-input"
-            type="file"
-            accept=".json,.xsd,.xml"
-            onChange={handleFileChange}
-            className="w-full text-sm text-slate-300 file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-xs file:text-slate-200 hover:file:bg-slate-600"
-            data-testid="file-input"
-          />
+        {/* Mode toggle */}
+        <div
+          role="tablist"
+          aria-label="Input method"
+          className="mb-4 flex rounded-md border border-slate-700 bg-slate-800 p-0.5"
+          data-testid="mode-toggle"
+        >
+          <button
+            role="tab"
+            type="button"
+            aria-selected={inputMode === 'file'}
+            onClick={() => setInputMode('file')}
+            className={`flex-1 rounded py-1.5 text-xs font-medium transition-colors ${
+              inputMode === 'file'
+                ? 'bg-slate-700 text-white'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+            data-testid="mode-tab-file"
+          >
+            Upload File
+          </button>
+          <button
+            role="tab"
+            type="button"
+            aria-selected={inputMode === 'paste'}
+            onClick={() => setInputMode('paste')}
+            className={`flex-1 rounded py-1.5 text-xs font-medium transition-colors ${
+              inputMode === 'paste'
+                ? 'bg-slate-700 text-white'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+            data-testid="mode-tab-paste"
+          >
+            Paste Content
+          </button>
         </div>
 
-        {/* File error */}
-        {fileError && (
-          <p
-            role="alert"
-            className="mb-3 text-xs text-red-400"
-            data-testid="file-error"
-          >
-            {fileError}
-          </p>
-        )}
-
-        {/* File info */}
-        {fileInfo && (
-          <div className="mb-4 rounded-md border border-slate-700 bg-slate-800 p-3" data-testid="file-info">
-            <p className="mb-1 text-xs text-slate-300">
-              <span className="font-medium">File:</span> {fileInfo.filename}
-            </p>
-
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-xs text-slate-400">Format:</span>
-              <span
-                className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
-                  fileInfo.isInferredFlag
-                    ? 'bg-yellow-900 text-yellow-300'
-                    : 'bg-blue-900 text-blue-300'
-                }`}
-                data-testid="format-badge"
-              >
-                {formatLabel(fileInfo.format)}
-              </span>
+        {/* File mode */}
+        {inputMode === 'file' && (
+          <>
+            <div className="mb-4">
+              <label htmlFor="schema-file-input" className="mb-1 block text-xs font-medium text-slate-400">
+                Select file
+              </label>
+              <input
+                id="schema-file-input"
+                type="file"
+                accept=".json,.xsd,.xml"
+                onChange={handleFileChange}
+                className="w-full text-sm text-slate-300 file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-xs file:text-slate-200 hover:file:bg-slate-600"
+                data-testid="file-input"
+              />
             </div>
 
-            {fileInfo.isInferredFlag && (
-              <p className="mb-1 text-xs text-yellow-400" data-testid="inferred-warning">
-                ⚠ This file will be treated as sample data. Schema structure will be inferred.
+            {fileError && (
+              <p
+                role="alert"
+                className="mb-3 text-xs text-red-400"
+                data-testid="file-error"
+              >
+                {fileError}
               </p>
             )}
 
-            {fileInfo.parseError ? (
-              <p className="text-xs text-yellow-400" data-testid="parse-warning">
-                ⚠ Could not parse schema structure. Field count will be estimated.
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400" data-testid="field-count">
-                {fileInfo.fieldCount} field{fileInfo.fieldCount !== 1 ? 's' : ''} detected
+            {fileInfo && <ContentInfoPanel info={fileInfo} />}
+          </>
+        )}
+
+        {/* Paste mode */}
+        {inputMode === 'paste' && (
+          <>
+            <div className="mb-4">
+              <label htmlFor="schema-paste-input" className="mb-1 block text-xs font-medium text-slate-400">
+                Paste content
+              </label>
+              <textarea
+                id="schema-paste-input"
+                value={pasteText}
+                onChange={handlePasteTextChange}
+                onBlur={handlePasteBlur}
+                placeholder="Paste JSON Schema or sample JSON data..."
+                rows={6}
+                className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-xs text-slate-300 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                data-testid="paste-input"
+              />
+            </div>
+
+            {pasteError && (
+              <p
+                role="alert"
+                className="mb-3 text-xs text-red-400"
+                data-testid="paste-error"
+              >
+                {pasteError}
               </p>
             )}
+
+            {pasteInfo && <ContentInfoPanel info={pasteInfo} testIdPrefix="paste" />}
+          </>
+        )}
+
+        {/* Schema Name */}
+        {activeInfo && (
+          <div className="mb-4">
+            <label htmlFor="schema-name-input" className="mb-1 block text-xs font-medium text-slate-400">
+              Schema Name
+            </label>
+            <input
+              id="schema-name-input"
+              type="text"
+              value={schemaName}
+              onChange={(e) => {
+                setSchemaName(e.target.value);
+                setNameManuallyEdited(true);
+              }}
+              placeholder="Enter a name for this schema"
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              data-testid="schema-name-input"
+            />
           </div>
         )}
 
@@ -391,11 +614,11 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
             variant="primary"
             size="sm"
             loading={uploading}
-            disabled={!fileInfo}
+            disabled={!isSubmitEnabled}
             onClick={() => void handleUpload()}
             data-testid="upload-button"
           >
-            Upload
+            Add Schema
           </Button>
         </div>
       </div>

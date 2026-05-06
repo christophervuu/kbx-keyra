@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
@@ -156,7 +156,7 @@ describe('SchemaUploadDialog', () => {
   it('renders dialog when open=true', () => {
     renderDialog(createMockAdapter());
     expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
-    expect(screen.getByText('Upload Schema')).toBeInTheDocument();
+    expect(screen.getByText('Add Schema')).toBeInTheDocument();
   });
 
   it('file input accepts correct extensions', () => {
@@ -273,5 +273,358 @@ describe('SchemaUploadDialog', () => {
     expect(screen.getByTestId('scope-project-level')).toBeInTheDocument();
     // Project-level is default selected
     expect((screen.getByTestId('scope-project-level') as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mode toggle tests
+// ---------------------------------------------------------------------------
+
+describe('SchemaUploadDialog — mode toggle', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders mode toggle with Upload File and Paste Content tabs', () => {
+    renderDialog(createMockAdapter());
+    expect(screen.getByTestId('mode-toggle')).toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-file')).toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-paste')).toBeInTheDocument();
+  });
+
+  it('Upload File tab is active by default', () => {
+    renderDialog(createMockAdapter());
+    expect(screen.getByTestId('mode-tab-file')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('mode-tab-paste')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByTestId('file-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('paste-input')).not.toBeInTheDocument();
+  });
+
+  it('clicking Paste Content shows textarea and hides file input', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    expect(screen.getByTestId('paste-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('file-input')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mode-tab-paste')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('clicking Upload File restores file input after switching to paste', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+    await user.click(screen.getByTestId('mode-tab-file'));
+
+    expect(screen.getByTestId('file-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('paste-input')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Paste mode tests (AE-01, AE-02, AE-03, AE-08)
+// ---------------------------------------------------------------------------
+
+describe('SchemaUploadDialog — paste mode', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('AE-01: pasting valid JSON Schema shows format badge, field count, and default name', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON Schema');
+    });
+
+    expect(screen.getByTestId('field-count')).toBeInTheDocument();
+    expect(screen.queryByTestId('inferred-warning')).not.toBeInTheDocument();
+
+    const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('Pasted JSON Schema');
+
+    expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+  });
+
+  it('AE-02: pasting sample JSON shows inferred warning and default name', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: SAMPLE_JSON } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('format-badge')).toHaveTextContent('Sample JSON');
+    });
+
+    expect(screen.getByTestId('inferred-warning')).toBeInTheDocument();
+
+    const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('Pasted Sample JSON');
+  });
+
+  it('AE-03: pasting invalid content shows error and disables Add Schema button', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: 'this is not json' } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('paste-error')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('paste-error')).toHaveTextContent(
+      /could not determine format/i,
+    );
+    expect(screen.getByTestId('upload-button')).toBeDisabled();
+  });
+
+  it('AE-08: paste analysis does not run until textarea is blurred', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    // Set value without blurring
+    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+
+    // No info panel yet
+    expect(screen.queryByTestId('format-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schema-name-input')).not.toBeInTheDocument();
+
+    // Now blur
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('format-badge')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+  });
+
+  it('paste mode creates schema via adapter on Add Schema click', async () => {
+    const createSchema = vi.fn().mockResolvedValue(CREATED_SCHEMA);
+    const onSchemaCreated = vi.fn().mockResolvedValue(undefined);
+    const adapter = createMockAdapter({ createSchema });
+    const user = userEvent.setup();
+    renderDialog(adapter, { onSchemaCreated });
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByTestId('upload-button'));
+
+    await waitFor(() => {
+      expect(createSchema).toHaveBeenCalled();
+      expect(onSchemaCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ schemaId: 'schema-new' }),
+      );
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema name field tests (AE-04, AE-05, AE-06)
+// ---------------------------------------------------------------------------
+
+describe('SchemaUploadDialog — schema name field', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('AE-04: file upload pre-populates name with filename sans extension', async () => {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    const file = new File([VALID_JSON_SCHEMA], 'patient-record.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('patient-record');
+  });
+
+  it('AE-04: edited name is used when creating schema in file mode', async () => {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const createSchema = vi.fn().mockResolvedValue(CREATED_SCHEMA);
+    const adapter = createMockAdapter({ createSchema });
+    const user = userEvent.setup();
+    renderDialog(adapter);
+
+    const file = new File([VALID_JSON_SCHEMA], 'patient-record.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByTestId('schema-name-input');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Patient Record v2');
+
+    await user.click(screen.getByTestId('upload-button'));
+
+    await waitFor(() => {
+      expect(createSchema).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Patient Record v2' }),
+      );
+    });
+  });
+
+  it('AE-05: edited name is used when creating schema in paste mode', async () => {
+    const createSchema = vi.fn().mockResolvedValue(CREATED_SCHEMA);
+    const adapter = createMockAdapter({ createSchema });
+    const user = userEvent.setup();
+    renderDialog(adapter);
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByTestId('schema-name-input');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Order Response Schema');
+
+    await user.click(screen.getByTestId('upload-button'));
+
+    await waitFor(() => {
+      expect(createSchema).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Order Response Schema' }),
+      );
+    });
+  });
+
+  it('AE-06: clearing name disables Add Schema button', async () => {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    const file = new File([VALID_JSON_SCHEMA], 'my-schema.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+    });
+
+    const nameInput = screen.getByTestId('schema-name-input');
+    await user.clear(nameInput);
+
+    expect(screen.getByTestId('upload-button')).toBeDisabled();
+  });
+
+  it('AE-06: whitespace-only name disables Add Schema button', async () => {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    const file = new File([VALID_JSON_SCHEMA], 'my-schema.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+    });
+
+    const nameInput = screen.getByTestId('schema-name-input');
+    await user.clear(nameInput);
+    await user.type(nameInput, '   ');
+
+    expect(screen.getByTestId('upload-button')).toBeDisabled();
+  });
+
+  it('file re-selection resets name to new filename default', async () => {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    // Upload first file
+    const file1 = new File([VALID_JSON_SCHEMA], 'first-schema.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file1);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+    });
+
+    // Edit the name
+    const nameInput = screen.getByTestId('schema-name-input');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'My Custom Name');
+    expect((nameInput as HTMLInputElement).value).toBe('My Custom Name');
+
+    // Upload a second file — name should reset
+    const file2 = new File([VALID_JSON_SCHEMA], 'second-schema.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file2);
+
+    await waitFor(() => {
+      expect((screen.getByTestId('schema-name-input') as HTMLInputElement).value).toBe('second-schema');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mode toggle state preservation test (AE-07)
+// ---------------------------------------------------------------------------
+
+describe('SchemaUploadDialog — mode toggle state preservation (AE-07)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('AE-07: switching to paste and back preserves file info', async () => {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    // Upload a file
+    const file = new File([VALID_JSON_SCHEMA], 'my-schema.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('file-info')).toBeInTheDocument();
+    });
+
+    // Switch to paste mode
+    await user.click(screen.getByTestId('mode-tab-paste'));
+    expect(screen.queryByTestId('file-info')).not.toBeInTheDocument();
+
+    // Switch back to file mode
+    await user.click(screen.getByTestId('mode-tab-file'));
+
+    // File info should still be visible
+    expect(screen.getByTestId('file-info')).toBeInTheDocument();
+    expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON Schema');
   });
 });
