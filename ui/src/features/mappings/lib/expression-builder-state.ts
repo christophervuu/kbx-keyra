@@ -21,6 +21,8 @@ export interface TransformStep {
 
 export interface ValueModeState {
   readonly mode: 'value';
+  /** Whether the value comes from a source field selection or a static literal. */
+  readonly inputType: 'source' | 'static';
   readonly sources: readonly SourceSelection[];
   readonly transforms: readonly TransformStep[];
   readonly staticValue?: StaticValue;

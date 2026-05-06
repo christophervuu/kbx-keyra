@@ -316,6 +316,37 @@ interface SaveTestCaseModalProps {
 
 const MAX_PREVIEW_LINES = 10;
 
+const EXPANDABLE_TEXT_THRESHOLD = 150;
+
+/**
+ * ExpandableText — renders text with wrap. For long text (>150 chars), shows
+ * a collapsed preview with a "Show more" / "Show less" toggle (T-11 / AE-12).
+ */
+function ExpandableText({ text, className }: { text: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > EXPANDABLE_TEXT_THRESHOLD;
+
+  if (!isLong) {
+    return <span className={['break-words', className ?? ''].filter(Boolean).join(' ')}>{text}</span>;
+  }
+
+  return (
+    <span className={['break-words', className ?? ''].filter(Boolean).join(' ')}>
+      {expanded ? text : `${text.slice(0, EXPANDABLE_TEXT_THRESHOLD)}…`}
+      {' '}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+        className="text-[10px] text-blue-400 hover:text-blue-300 focus:outline-none focus-visible:underline"
+        data-testid={expanded ? 'diagnostic-show-less' : 'diagnostic-show-more'}
+        aria-label={expanded ? 'Show less' : 'Show more'}
+      >
+        {expanded ? 'Show less' : 'Show more'}
+      </button>
+    </span>
+  );
+}
+
 function truncateForPreview(text: string): string {
   const lines = text.split('\n');
   if (lines.length <= MAX_PREVIEW_LINES) return text;
@@ -643,9 +674,9 @@ export function InlinePreviewStrip({
         }
       `}</style>
       <div
-        className={`flex shrink-0 flex-col border-t border-slate-800 bg-slate-950 ${className}`}
-      data-testid="inline-preview-strip"
-    >
+        className={`flex h-full flex-col border-t border-slate-800 bg-slate-950 ${className}`}
+        data-testid="inline-preview-strip"
+      >
       {/* Toolbar row */}
       <div
         className="flex h-8 shrink-0 items-center gap-2 border-b border-slate-800 px-3"
@@ -776,7 +807,7 @@ export function InlinePreviewStrip({
       <div className="flex min-h-0 flex-1 divide-x divide-slate-800">
         {/* Source JSON pane — ~35% */}
         <div
-          className="flex w-[35%] shrink-0 flex-col"
+          className="flex min-h-0 w-[35%] shrink-0 flex-col"
           data-testid="strip-source-pane"
         >
           {/* Pane header */}
@@ -797,11 +828,10 @@ export function InlinePreviewStrip({
             </button>
           </div>
           {/* Content */}
-          <div className="flex flex-1 flex-col gap-1 p-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-1 p-2">
             <textarea
               id="strip-source-input"
               data-testid="strip-source-input"
-              rows={3}
               value={sourceData}
               onChange={(e) => onSourceDataChange(e.target.value)}
               placeholder="Paste source JSON…"
@@ -813,7 +843,7 @@ export function InlinePreviewStrip({
 
         {/* Output pane — ~40% */}
         <div
-          className="flex min-w-0 flex-1 flex-col"
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
           data-testid="strip-output-pane"
         >
           {/* Pane header */}
@@ -834,7 +864,7 @@ export function InlinePreviewStrip({
             </button>
           </div>
           {/* Content */}
-          <div className="flex flex-1 flex-col p-2">
+          <div className="flex min-h-0 flex-1 flex-col p-2">
             <pre
               data-testid="strip-output"
               aria-label="Preview output"
@@ -860,7 +890,7 @@ export function InlinePreviewStrip({
 
         {/* Diagnostics pane — ~25% */}
         <div
-          className="flex w-[25%] shrink-0 flex-col"
+          className="flex min-h-0 w-[25%] shrink-0 flex-col"
           data-testid="strip-diagnostics-pane"
         >
           {/* Pane header */}
@@ -917,11 +947,11 @@ export function InlinePreviewStrip({
                       </span>
                       {/* Entry text */}
                       <span className="flex min-w-0 flex-col gap-0.5">
-                        <span className="flex items-center gap-1">
-                          <span className="font-mono text-[10px] text-slate-400">{d.code}</span>
-                          <span className="truncate text-xs text-slate-300">{d.message}</span>
+                        <span className="flex items-start gap-1">
+                          <span className="shrink-0 font-mono text-[10px] text-slate-400">{d.code}</span>
+                          <ExpandableText text={d.message} className="text-xs text-slate-300" />
                         </span>
-                        <span className="truncate text-[10px] text-slate-500">{d.ruleName}</span>
+                        <span className="break-words text-[10px] text-slate-500">{d.ruleName}</span>
                       </span>
                     </button>
                   </li>

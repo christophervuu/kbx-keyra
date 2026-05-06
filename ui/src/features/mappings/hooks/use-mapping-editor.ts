@@ -21,6 +21,8 @@ export interface MappingEditorActions {
   updateRule: (index: number, rule: Pick<MappingRule, 'target' | 'expression' | 'description'>) => void;
   /** Delete a rule by index */
   deleteRule: (index: number) => void;
+  /** Delete the rule for a given target path (T-08) */
+  deleteRuleByTarget: (targetPath: string) => void;
   /** Reorder a rule from one index to another */
   reorderRules: (fromIndex: number, toIndex: number) => void;
   /** Delete multiple rules by indices (in descending order) */
@@ -454,6 +456,11 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     setSaveState('idle');
   }, []);
 
+  const deleteRuleByTarget = useCallback((targetPath: string) => {
+    setRules((prev) => prev.filter((r) => r.target !== targetPath));
+    setSaveState('idle');
+  }, []);
+
   const reorderRules = useCallback((fromIndex: number, toIndex: number) => {
     setRules((prev) => moveItem(prev, fromIndex, toIndex));
     setSaveState('idle');
@@ -587,6 +594,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       addRule,
       updateRule,
       deleteRule,
+      deleteRuleByTarget,
       reorderRules,
       bulkDelete,
       bulkDuplicate,
@@ -598,7 +606,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       retry,
       canNavigateAway,
     }),
-    [addRule, updateRule, deleteRule, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore, applyRule, save, retry, canNavigateAway],
+    [addRule, updateRule, deleteRule, deleteRuleByTarget, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore, applyRule, save, retry, canNavigateAway],
   );
 
   // ---------------------------------------------------------------------------

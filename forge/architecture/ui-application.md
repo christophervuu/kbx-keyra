@@ -96,8 +96,8 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode; onApply/onExpressionChange callbacks (FS-021, FS-023)
-        ObjectSummaryPanel.tsx Right panel: object node coverage + child status
+        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode; onApply/onExpressionChange callbacks; compressed header (type badge left, Builder|Editor toggle in header row); conditional Suggested Sources (hidden when empty); Clear mapping action; live result display wired to PreviewContext (FS-021, FS-023, FS-027)
+        ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
         InlinePreviewStrip.tsx Collapsed bar + expanded strip; unconditional auto-preview on Apply when sourceData is present; test case selector; output flash animation; Run disabled when sourceData empty (FS-022)
@@ -127,7 +127,7 @@ ui/src/
         AutocompleteDropdown.tsx    Portal dropdown for DSL autocomplete suggestions
       hooks/
         use-engine-validation.ts  Debounced engine validate() integration hook
-        use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring); applyRule(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02)
+        use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring); applyRule(), deleteRuleByTarget(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02, FS-027 T-08)
         use-expression-builder.ts  Rules View expression orchestration + mode switch/decomposition flow (pipeline-decomposer first, legacy fallback) + debounced commit (FS-023)
         use-expression-preview.ts  Single-expression parse/evaluate preview hook
         use-dsl-autocomplete.ts    Context-aware DSL autocomplete state hook
@@ -144,7 +144,7 @@ ui/src/
       lib/
         infer-rule-type.ts    Expression outer-function -> display label mapping
         dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
-        expression-builder-state.ts Discriminated union state model for UnifiedExpressionBuilder modes (Value/Conditional/ValueMap) (FS-023)
+        expression-builder-state.ts Discriminated union state model for UnifiedExpressionBuilder modes (Value/Conditional/ValueMap); ValueModeState includes `inputType: 'source' | 'static'` and `staticValue?: StaticValue` (FS-023, FS-027 T-06)
         pipeline-expression-generator.ts Pure state -> DSL generator for UnifiedExpressionBuilder (FS-023)
         pipeline-decomposer.ts DSL -> ExpressionBuilderState decomposer with mode auto-detection and failure reason (FS-023)
         expression-generator.ts  Legacy guided-builder state -> DSL expression generator
@@ -537,7 +537,7 @@ Derivation logic:
 1. All paths start as `'unmapped'`
 2. Paths with a matching rule become `'mapped'`
 3. Paths with rule diagnostics (warning/error severity) become `'warning'` or `'error'`
-4. Object/array nodes derive coverage from their direct children's status
+4. Object/array nodes derive coverage from their **recursive leaf descendants** (not direct children); an object node's coverage ratio is `leafDescendantsMapped / leafDescendantsTotal` (FS-027 T-12)
 
 ### `useArrayBuilder` Hook Contract
 
@@ -613,8 +613,9 @@ The editor uses a **two-tier save model** to separate expression authoring from 
 - `MappingEditor.tsx` uses React Router v6 `useBlocker` to intercept navigation when `!canNavigateAway()`.
 - A confirmation dialog is shown: "You have unapplied changes. Leave anyway?" with Confirm/Cancel.
 
-**`useMappingEditor` additions (FS-021 T-02):**
+**`useMappingEditor` additions (FS-021 T-02, FS-027 T-08):**
 - `applyRule(targetPath: string, expression: string): void` — upserts rule, increments `unsavedRuleCount`
+- `deleteRuleByTarget(targetPath: string): void` — removes the rule for a given target path from working session; marks session as having unsaved changes (FS-027 T-08)
 - `unsavedRuleCount: number` — count of applied-but-not-saved rules
 - `canNavigateAway(): boolean` — returns `unsavedRuleCount === 0`
 - `onRuleApplied?: () => void` — optional callback fired after each `applyRule()` call; used by `ConnectedInlinePreviewStrip` to trigger auto-preview
@@ -822,9 +823,10 @@ Rules:
 - Canonical generator: `generateExpressionFromState(state)` (`pipeline-expression-generator.ts`)
 - Pattern: pure state -> DSL transform
 - Value mode uses nested wrapping semantics:
-  - innermost: source/static
+  - innermost: `source("path")` for `inputType === 'source'`; bare DSL literal (`"hello"`, `42`, `true`, `null`) for `inputType === 'static'` (FS-027 T-06)
   - each transform wraps prior output
   - final string matches pipeline order
+- Static value DSL: string → `"value"`, number → `42`, boolean → `true`/`false`, null → `null`. No `static()` wrapper in new expressions; `static()` is accepted by the decomposer for backward compatibility.
 - Conditional mode generates `if(condition, then, else)` with nested `if()` for else-if branches
 - Value Map mode generates `valueMap(source("field"), {...}, fallback)`
 
@@ -835,7 +837,9 @@ Rules:
 - Mode auto-detection from outer AST structure:
   - `if(...)` -> conditional mode
   - `valueMap(...)` -> value-map mode
-  - transform/source pipeline -> value mode
+  - transform/source pipeline -> value mode (`inputType: 'source'`)
+  - bare literal at root (`"hello"`, `42`, `true`, `false`, `null`) -> value mode (`inputType: 'static'`) (FS-027 T-06)
+  - `static(...)` wrapper -> value mode (`inputType: 'static'`, backward compat)
 - Failure path: remain in editor mode and show warning banner ("Complex expression -- edit in Editor mode.")
 
 #### Hook contracts

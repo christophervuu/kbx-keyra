@@ -153,3 +153,67 @@ describe('useTargetStatus', () => {
     expect(result.current.coverageMap.has('firstName')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-12: Leaf-field coverage tests (AE-13)
+// ---------------------------------------------------------------------------
+
+describe('useTargetStatus — leaf-field coverage (AE-13)', () => {
+  // address
+  //   street (string)          ← leaf
+  //   location (object)
+  //     lat (number)           ← leaf
+  //     lng (number)           ← leaf
+  // Total leaf descendants of address = 3
+
+  const latNode = makeNode('address.location.lat', 'lat', 'number', 2);
+  const lngNode = makeNode('address.location.lng', 'lng', 'number', 2);
+  const locationNode = makeNode('address.location', 'location', 'object', 1, [latNode, lngNode]);
+  const streetNode = makeNode('address.street', 'street', 'string', 1);
+  const addressNode = makeNode('address', 'address', 'object', 0, [streetNode, locationNode]);
+
+  const DEEP_NODES: SchemaTreeNode[] = [
+    addressNode,
+    streetNode,
+    locationNode,
+    latNode,
+    lngNode,
+  ];
+
+  it('AE-13: counts 3 leaf descendants for address with nested location object', () => {
+    const { result } = renderHook(() => useTargetStatus([], null, DEEP_NODES));
+    const coverage = result.current.coverageMap.get('address');
+    expect(coverage).toEqual({ mapped: 0, total: 3 });
+  });
+
+  it('AE-13: with one rule for address.street, coverage is { mapped: 1, total: 3 }', () => {
+    const rules = [makeRule('address.street')];
+    const { result } = renderHook(() => useTargetStatus(rules, null, DEEP_NODES));
+    const coverage = result.current.coverageMap.get('address');
+    expect(coverage).toEqual({ mapped: 1, total: 3 });
+  });
+
+  it('AE-13: adding rule for address.location.lat updates to { mapped: 2, total: 3 }', () => {
+    const rules = [makeRule('address.street'), makeRule('address.location.lat')];
+    const { result } = renderHook(() => useTargetStatus(rules, null, DEEP_NODES));
+    const coverage = result.current.coverageMap.get('address');
+    expect(coverage).toEqual({ mapped: 2, total: 3 });
+  });
+
+  it('AE-13: removing a rule decrements mapped count', () => {
+    const rules = [makeRule('address.street'), makeRule('address.location.lat'), makeRule('address.location.lng')];
+    const { result: fullResult } = renderHook(() => useTargetStatus(rules, null, DEEP_NODES));
+    expect(fullResult.current.coverageMap.get('address')).toEqual({ mapped: 3, total: 3 });
+
+    const rulesAfterRemoval = [makeRule('address.street')];
+    const { result: reducedResult } = renderHook(() => useTargetStatus(rulesAfterRemoval, null, DEEP_NODES));
+    expect(reducedResult.current.coverageMap.get('address')).toEqual({ mapped: 1, total: 3 });
+  });
+
+  it('AE-13: location object also gets its own leaf coverage entry', () => {
+    const rules = [makeRule('address.location.lat')];
+    const { result } = renderHook(() => useTargetStatus(rules, null, DEEP_NODES));
+    const locationCoverage = result.current.coverageMap.get('address.location');
+    expect(locationCoverage).toEqual({ mapped: 1, total: 2 });
+  });
+});

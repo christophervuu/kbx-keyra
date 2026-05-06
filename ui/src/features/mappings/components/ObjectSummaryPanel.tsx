@@ -33,7 +33,7 @@ export interface ObjectSummaryPanelProps {
   objectPath: string;
   /** Direct children of this object node */
   childFields: ChildFieldInfo[];
-  /** Coverage data for this object node */
+  /** Coverage data for this object node (leaf-field counts) */
   coverage: { mapped: number; total: number };
   /** Fired when "Auto-map section" is clicked (currently disabled — placeholder) */
   onAutoMap?: (objectPath: string) => void;
@@ -41,6 +41,8 @@ export interface ObjectSummaryPanelProps {
   onFilterRequired: (objectPath: string) => void;
   /** Fired when "Validate section" is clicked */
   onValidateSection: (objectPath: string) => void;
+  /** Fired when a child field row is clicked — navigates to that child's builder */
+  onNavigateToChild?: (childPath: string) => void;
   /** Optional className */
   className?: string;
 }
@@ -91,6 +93,7 @@ export function ObjectSummaryPanel({
   coverage,
   onFilterRequired,
   onValidateSection,
+  onNavigateToChild,
   className = '',
 }: ObjectSummaryPanelProps) {
   const coveragePercent =
@@ -145,36 +148,49 @@ export function ObjectSummaryPanel({
           </span>
         </div>
 
-        <ul role="list" data-testid="child-list" className="divide-y divide-slate-800/60">
-          {childFields.map((child) => (
-            <li
-              key={child.path}
-              data-testid={`child-row-${child.path}`}
-              className={[
-                'flex items-center gap-2 px-4 py-2',
-                child.status === 'error' ? 'bg-red-950/10' : '',
-                child.status === 'warning' ? 'bg-amber-950/10' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <StatusIcon status={child.status} />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200">
-                {child.fieldName}
-                {child.required && (
-                  <span className="ml-0.5 text-red-400" aria-label="Required">
-                    *
+        {childFields.length === 0 ? (
+          <p
+            className="px-4 py-3 text-xs text-slate-500"
+            data-testid="child-list-empty"
+          >
+            No child fields
+          </p>
+        ) : (
+          <ul role="list" data-testid="child-list" className="divide-y divide-slate-800/60">
+            {childFields.map((child) => (
+              <li key={child.path}>
+                <button
+                  type="button"
+                  data-testid={`child-row-${child.path}`}
+                  onClick={() => onNavigateToChild?.(child.path)}
+                  className={[
+                    'flex w-full items-center gap-2 px-4 py-2 text-left transition-colors',
+                    'hover:bg-slate-800/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                    child.status === 'error' ? 'bg-red-950/10' : '',
+                    child.status === 'warning' ? 'bg-amber-950/10' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
+                  <StatusIcon status={child.status} />
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200">
+                    {child.fieldName}
+                    {child.required && (
+                      <span className="ml-0.5 text-red-400" aria-label="Required">
+                        *
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              <span
-                className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[child.fieldType]}`}
-              >
-                {child.fieldType}
-              </span>
-            </li>
-          ))}
-        </ul>
+                  <span
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[child.fieldType]}`}
+                  >
+                    {child.fieldType}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* ------------------------------------------------------------------ */}

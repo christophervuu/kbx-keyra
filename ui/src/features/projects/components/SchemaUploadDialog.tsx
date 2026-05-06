@@ -332,7 +332,19 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     } else {
       setPasteInfo(result.info);
       if (!nameManuallyEdited) {
-        setSchemaName(defaultPasteName(result.info.format));
+        // Prefer title from JSON Schema; fall back to generic default name
+        let autoName = defaultPasteName(result.info.format);
+        if (result.info.format === 'json-schema') {
+          try {
+            const parsed = result.info.parsedContent as Record<string, unknown>;
+            if (typeof parsed.title === 'string' && parsed.title.trim()) {
+              autoName = parsed.title.trim();
+            }
+          } catch {
+            // ignore
+          }
+        }
+        setSchemaName(autoName);
       }
     }
   }
@@ -344,6 +356,19 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     if (pasteInfo || pasteError) {
       setPasteInfo(null);
       setPasteError(null);
+    }
+    // Auto-fill Schema Name from JSON Schema title immediately on change
+    if (!nameManuallyEdited) {
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        if (typeof parsed.title === 'string' && parsed.title.trim()) {
+          setSchemaName(parsed.title.trim());
+        } else {
+          setSchemaName('');
+        }
+      } catch {
+        setSchemaName('');
+      }
     }
   }
 
@@ -538,25 +563,23 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         )}
 
         {/* Schema Name */}
-        {activeInfo && (
-          <div className="mb-4">
-            <label htmlFor="schema-name-input" className="mb-1 block text-xs font-medium text-slate-400">
-              Schema Name
-            </label>
-            <input
-              id="schema-name-input"
-              type="text"
-              value={schemaName}
-              onChange={(e) => {
-                setSchemaName(e.target.value);
-                setNameManuallyEdited(true);
-              }}
-              placeholder="Enter a name for this schema"
-              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              data-testid="schema-name-input"
-            />
-          </div>
-        )}
+        <div className="mb-4">
+          <label htmlFor="schema-name-input" className="mb-1 block text-xs font-medium text-slate-400">
+            Schema Name
+          </label>
+          <input
+            id="schema-name-input"
+            type="text"
+            value={schemaName}
+            onChange={(e) => {
+              setSchemaName(e.target.value);
+              setNameManuallyEdited(true);
+            }}
+            placeholder="Enter a name for this schema"
+            className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            data-testid="schema-name-input"
+          />
+        </div>
 
         {/* Scope selection */}
         <fieldset className="mb-4">

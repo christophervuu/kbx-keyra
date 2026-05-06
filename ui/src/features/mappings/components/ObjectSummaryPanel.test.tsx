@@ -124,3 +124,61 @@ describe('ObjectSummaryPanel', () => {
     expect(onValidateSection).toHaveBeenCalledWith('patient');
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-04: Clickable child rows and empty state (AE-06)
+// ---------------------------------------------------------------------------
+
+describe('ObjectSummaryPanel — clickable child rows (AE-06)', () => {
+  it('child rows are rendered as buttons', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} />);
+    const row = screen.getByTestId('child-row-patient.firstName');
+    expect(row.tagName).toBe('BUTTON');
+  });
+
+  it('clicking a child row fires onNavigateToChild with the child path', () => {
+    const onNavigateToChild = vi.fn();
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} onNavigateToChild={onNavigateToChild} />);
+    fireEvent.click(screen.getByTestId('child-row-patient.lastName'));
+    expect(onNavigateToChild).toHaveBeenCalledWith('patient.lastName');
+  });
+
+  it('clicking a mapped child row fires onNavigateToChild with correct path', () => {
+    const onNavigateToChild = vi.fn();
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} onNavigateToChild={onNavigateToChild} />);
+    fireEvent.click(screen.getByTestId('child-row-patient.firstName'));
+    expect(onNavigateToChild).toHaveBeenCalledWith('patient.firstName');
+  });
+
+  it('clicking a child row without onNavigateToChild does not throw', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} />);
+    expect(() => {
+      fireEvent.click(screen.getByTestId('child-row-patient.firstName'));
+    }).not.toThrow();
+  });
+
+  it('renders empty state when childFields is empty', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} childFields={[]} coverage={{ mapped: 0, total: 0 }} />);
+    expect(screen.getByTestId('child-list-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('child-list-empty')).toHaveTextContent('No child fields');
+    expect(screen.queryByTestId('child-list')).not.toBeInTheDocument();
+  });
+
+  it('renders object name and type badge in header (AE-06)', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} />);
+    expect(screen.getByTestId('object-path')).toHaveTextContent('patient');
+    // type badge is always rendered as "object"
+    expect(screen.getByText('object')).toBeInTheDocument();
+  });
+
+  it('renders correct mapped ratio from coverage prop (AE-06)', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} coverage={{ mapped: 3, total: 7 }} />);
+    expect(screen.getByTestId('coverage-indicator')).toHaveTextContent('3/7 mapped');
+  });
+
+  it('unmapped child shows unmapped indicator', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} />);
+    const row = screen.getByTestId('child-row-patient.lastName');
+    expect(row.querySelector('[aria-label="Unmapped"]')).toBeInTheDocument();
+  });
+});

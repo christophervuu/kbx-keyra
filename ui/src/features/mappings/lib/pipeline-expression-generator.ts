@@ -127,7 +127,21 @@ function comparisonToFunction(operator: Exclude<ComparisonOperator, 'isNotNull'>
 }
 
 export function generateValueExpression(state: Extract<ExpressionBuilderState, { mode: 'value' }>): string {
-  if (state.staticValue) {
+  if (state.inputType === 'static' && state.staticValue !== undefined) {
+    // Emit bare DSL literal (no static() wrapper)
+    const baseLiteral = staticLiteral(state.staticValue);
+
+    // Transforms can still be applied on top of a static literal
+    let expression = baseLiteral;
+    for (const transform of state.transforms) {
+      const additionalArgs = transform.parameters.map((param) => literal(param.value));
+      expression = `${transform.functionName}(${[expression, ...additionalArgs].join(', ')})`;
+    }
+    return expression;
+  }
+
+  // Legacy: staticValue present without explicit inputType (backward compat)
+  if (state.staticValue && state.inputType !== 'source') {
     return `static(${staticLiteral(state.staticValue)})`;
   }
 

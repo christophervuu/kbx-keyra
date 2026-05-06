@@ -15,7 +15,6 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Zap } from 'lucide-react';
 
 import { ConfirmDialog } from './ConfirmDialog';
 import { ConditionalModeBuilder } from './ConditionalModeBuilder';
@@ -77,7 +76,7 @@ const MODE_LABELS: { id: ActiveMode; label: string }[] = [
 // ---------------------------------------------------------------------------
 
 function makeEmptyValueState(): ValueModeState {
-  return { mode: 'value', sources: [], transforms: [] };
+  return { mode: 'value', inputType: 'source', sources: [], transforms: [] };
 }
 
 function isStateNonEmpty(state: ExpressionBuilderState): boolean {
@@ -107,28 +106,6 @@ function makeEmptyStateForMode(mode: ActiveMode): ExpressionBuilderState {
 }
 
 // ---------------------------------------------------------------------------
-// Direct Copy toast
-// ---------------------------------------------------------------------------
-
-interface DirectCopyToastProps {
-  visible: boolean;
-}
-
-function DirectCopyToast({ visible }: DirectCopyToastProps) {
-  if (!visible) return null;
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-green-700 px-3 py-1 text-xs text-white shadow-lg pointer-events-none"
-      data-testid="direct-copy-toast"
-    >
-      Direct copy applied
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -138,8 +115,8 @@ function DirectCopyToast({ visible }: DirectCopyToastProps) {
 export function UnifiedExpressionBuilder({
   expression: _expression,
   onExpressionChange,
-  onApply,
-  selectedTargetPath,
+  onApply: _onApply,
+  selectedTargetPath: _selectedTargetPath,
   parsedSourceSchema,
   sourceData,
   onSwitchToEditor,
@@ -150,7 +127,6 @@ export function UnifiedExpressionBuilder({
   const [builderState, setBuilderState] = useState<ExpressionBuilderState>(makeEmptyValueState);
   const [showModeConfirmation, setShowModeConfirmation] = useState(false);
   const [pendingMode, setPendingMode] = useState<ActiveMode | null>(null);
-  const [showDirectCopyToast, setShowDirectCopyToast] = useState(false);
   const [currentExpression, setCurrentExpression] = useState('');
 
   // Hydrate from initialState when it changes (T-01)
@@ -224,10 +200,10 @@ export function UnifiedExpressionBuilder({
       setBuilderState((prev) => {
         if (prev.mode !== 'value') return prev;
         if (enabled) {
-          return { ...prev, sources: [], staticValue: { type: 'string', value: '' } };
+          return { ...prev, inputType: 'static', sources: [], staticValue: { type: 'string', value: '' } };
         }
         const { staticValue: _sv, ...rest } = prev;
-        return { ...rest, sources: [] };
+        return { ...rest, inputType: 'source', sources: [] };
       });
     },
     [],
@@ -258,25 +234,6 @@ export function UnifiedExpressionBuilder({
   );
 
   // -------------------------------------------------------------------------
-  // Direct Copy
-  // -------------------------------------------------------------------------
-
-  const canDirectCopy =
-    builderState.mode === 'value' &&
-    builderState.sources.length === 1 &&
-    builderState.transforms.length === 0 &&
-    !builderState.staticValue;
-
-  const handleDirectCopy = useCallback(() => {
-    if (!canDirectCopy || builderState.mode !== 'value') return;
-    const path = builderState.sources[0].path;
-    const expr = `source("${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
-    onApply(selectedTargetPath, expr);
-    setShowDirectCopyToast(true);
-    setTimeout(() => { setShowDirectCopyToast(false); }, 2000);
-  }, [canDirectCopy, builderState, onApply, selectedTargetPath]);
-
-  // -------------------------------------------------------------------------
   // Conditional mode: state changes
   // -------------------------------------------------------------------------
 
@@ -303,7 +260,7 @@ export function UnifiedExpressionBuilder({
   // -------------------------------------------------------------------------
 
   const valueModeState = builderState.mode === 'value' ? builderState : null;
-  const isStaticMode = valueModeState?.staticValue !== undefined;
+  const isStaticMode = valueModeState?.inputType === 'static';
 
   // Compute source description for the pipeline's auto-wired label
   const sourceDescription: string = (() => {
@@ -372,22 +329,6 @@ export function UnifiedExpressionBuilder({
               onStaticValueChange={handleStaticValueChange}
             />
           </div>
-
-          {/* Direct Copy shortcut */}
-          {canDirectCopy && (
-            <div className="relative flex justify-start">
-              <DirectCopyToast visible={showDirectCopyToast} />
-              <button
-                type="button"
-                onClick={handleDirectCopy}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
-                data-testid="direct-copy-btn"
-              >
-                <Zap className="h-3.5 w-3.5" aria-hidden="true" />
-                Direct Copy
-              </button>
-            </div>
-          )}
 
           {/* Transform pipeline (T-04) */}
           {!isStaticMode && (

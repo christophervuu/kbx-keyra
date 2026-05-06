@@ -37,7 +37,7 @@ const STATIC_BRANCH: BranchValue = { kind: 'static', value: '' };
 const SOURCE_BRANCH: BranchValue = { kind: 'source', value: 'status' };
 const PIPELINE_BRANCH: BranchValue = {
   kind: 'pipeline',
-  state: { mode: 'value', sources: [{ path: 'tier' }], transforms: [{ functionName: 'upper', parameters: [] }] },
+  state: { mode: 'value', inputType: 'source', sources: [{ path: 'tier' }], transforms: [{ functionName: 'upper', parameters: [] }] },
 };
 
 // ---------------------------------------------------------------------------

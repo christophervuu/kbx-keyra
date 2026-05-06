@@ -4,11 +4,9 @@
  *
  * Allows the user to:
  * - Search and select source schema fields (displayed as removable chips)
- * - Toggle to "Use a static value instead" mode with a type selector
+ * - Toggle to "Static value" mode with a type selector
  *
- * Differs from the old SourceFieldPicker in that it uses a chip/tag pattern
- * rather than a list-with-checkboxes, and is designed for the new single-form
- * multi-mode builder layout.
+ * Input-type selector is a segmented control: "Source field" | "Static value"
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -180,6 +178,7 @@ function StaticValueInput({ staticValue, onChange }: StaticValueInputProps) {
 
 /**
  * Chip-based multi-select source field picker for the UnifiedExpressionBuilder.
+ * Includes a segmented input-type selector: "Source field" | "Static value".
  */
 export function SourceChipPicker({
   parsedSourceSchema,
@@ -244,126 +243,135 @@ export function SourceChipPicker({
     [suggestions, handleSelect],
   );
 
-  // -------------------------------------------------------------------------
-  // Static value mode
-  // -------------------------------------------------------------------------
-  if (staticMode) {
-    return (
-      <div
-        className={['space-y-3', className ?? ''].filter(Boolean).join(' ')}
-        data-testid="source-chip-picker"
-      >
-        <button
-          type="button"
-          onClick={() => { onStaticModeChange(false); }}
-          className="text-xs text-zinc-400 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded underline underline-offset-2"
-          aria-pressed={true}
-          data-testid="static-mode-toggle"
-        >
-          ← Use source field instead
-        </button>
-        <StaticValueInput
-          staticValue={staticValue}
-          onChange={onStaticValueChange ?? (() => {})}
-        />
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Field selection mode
-  // -------------------------------------------------------------------------
   return (
     <div
       className={['space-y-3', className ?? ''].filter(Boolean).join(' ')}
       data-testid="source-chip-picker"
     >
-      {/* Selected source chips */}
-      {selectedSources.length > 0 && (
-        <div
-          className="flex flex-wrap gap-2"
-          aria-label="Selected source fields"
-          data-testid="selected-sources"
+      {/* Input-type segmented control */}
+      <div
+        role="tablist"
+        aria-label="Input type"
+        className="flex rounded-md border border-zinc-700 overflow-hidden w-fit"
+        data-testid="input-type-selector"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!staticMode}
+          onClick={() => { onStaticModeChange(false); }}
+          className={[
+            'px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            !staticMode
+              ? 'bg-blue-600 text-white'
+              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700',
+          ].join(' ')}
+          data-testid="input-type-source"
         >
-          {selectedSources.map((source) => {
-            const entry = allPaths.find((p) => p.path === source.path);
-            return (
-              <SourceChip
-                key={source.path}
-                path={source.path}
-                fieldType={entry?.type ?? source.type ?? 'any'}
-                onRemove={() => { handleRemove(source.path); }}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {/* Search input */}
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          role="combobox"
-          aria-expanded={showSuggestions && suggestions.length > 0}
-          aria-label="Search source fields"
-          aria-autocomplete="list"
-          value={searchQuery}
-          onChange={(e) => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
-          onFocus={() => { setShowSuggestions(true); }}
-          onBlur={() => { setTimeout(() => { setShowSuggestions(false); }, 150); }}
-          onKeyDown={handleInputKeyDown}
-          placeholder={selectedSources.length > 0 ? 'Add another field…' : 'Search source fields…'}
-          className="w-full bg-zinc-800 border border-zinc-600 rounded-md px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
-          data-testid="source-search-input"
-        />
-
-        {/* Suggestions dropdown */}
-        {showSuggestions && suggestions.length > 0 && (
-          <ul
-            role="listbox"
-            aria-label="Source field suggestions"
-            className="absolute left-0 right-0 top-full mt-1 z-20 bg-zinc-800 border border-zinc-600 rounded-md shadow-lg max-h-48 overflow-y-auto"
-            data-testid="source-suggestions"
-          >
-            {suggestions.slice(0, 50).map((entry) => (
-              <li key={entry.path} role="option" aria-selected={false}>
-                <button
-                  type="button"
-                  onMouseDown={(e) => { e.preventDefault(); }}
-                  onClick={() => { handleSelect(entry); }}
-                  className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
-                  data-testid={`suggestion-${entry.path}`}
-                >
-                  <span className="text-xs font-mono text-zinc-400 shrink-0 w-4 text-center">
-                    {TYPE_ICON[entry.type] ?? '?'}
-                  </span>
-                  <span className="font-mono text-xs text-zinc-100 truncate">{entry.path}</span>
-                  {entry.description && (
-                    <span className="text-xs text-zinc-500 truncate ml-auto">{entry.description}</span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+          Source field
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={staticMode}
+          onClick={() => { onStaticModeChange(true); }}
+          className={[
+            'px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            staticMode
+              ? 'bg-blue-600 text-white'
+              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700',
+          ].join(' ')}
+          data-testid="input-type-static"
+        >
+          Static value
+        </button>
       </div>
 
-      {/* No schema message */}
-      {parsedSourceSchema === null && (
-        <p className="text-sm text-zinc-500 italic">No source schema loaded.</p>
-      )}
+      {/* Content area — source picker or static value input */}
+      {staticMode ? (
+        <StaticValueInput
+          staticValue={staticValue}
+          onChange={onStaticValueChange ?? (() => {})}
+        />
+      ) : (
+        <>
+          {/* Selected source chips */}
+          {selectedSources.length > 0 && (
+            <div
+              className="flex flex-wrap gap-2"
+              aria-label="Selected source fields"
+              data-testid="selected-sources"
+            >
+              {selectedSources.map((source) => {
+                const entry = allPaths.find((p) => p.path === source.path);
+                return (
+                  <SourceChip
+                    key={source.path}
+                    path={source.path}
+                    fieldType={entry?.type ?? source.type ?? 'any'}
+                    onRemove={() => { handleRemove(source.path); }}
+                  />
+                );
+              })}
+            </div>
+          )}
 
-      {/* Static value toggle */}
-      <button
-        type="button"
-        onClick={() => { onStaticModeChange(true); }}
-        className="text-xs text-zinc-400 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded underline underline-offset-2"
-        aria-pressed={false}
-        data-testid="static-mode-toggle"
-      >
-        Use a static value instead
-      </button>
+          {/* Search input */}
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              role="combobox"
+              aria-expanded={showSuggestions && suggestions.length > 0}
+              aria-label="Search source fields"
+              aria-autocomplete="list"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => { setShowSuggestions(true); }}
+              onBlur={() => { setTimeout(() => { setShowSuggestions(false); }, 150); }}
+              onKeyDown={handleInputKeyDown}
+              placeholder={selectedSources.length > 0 ? 'Add another field…' : 'Search source fields…'}
+              className="w-full bg-zinc-800 border border-zinc-600 rounded-md px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+              data-testid="source-search-input"
+            />
+
+            {/* Suggestions dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Source field suggestions"
+                className="absolute left-0 right-0 top-full mt-1 z-20 bg-zinc-800 border border-zinc-600 rounded-md shadow-lg max-h-48 overflow-y-auto"
+                data-testid="source-suggestions"
+              >
+                {suggestions.slice(0, 50).map((entry) => (
+                  <li key={entry.path} role="option" aria-selected={false}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); }}
+                      onClick={() => { handleSelect(entry); }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
+                      data-testid={`suggestion-${entry.path}`}
+                    >
+                      <span className="text-xs font-mono text-zinc-400 shrink-0 w-4 text-center">
+                        {TYPE_ICON[entry.type] ?? '?'}
+                      </span>
+                      <span className="font-mono text-xs text-zinc-100 truncate">{entry.path}</span>
+                      {entry.description && (
+                        <span className="text-xs text-zinc-500 truncate ml-auto">{entry.description}</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* No schema message */}
+          {parsedSourceSchema === null && (
+            <p className="text-sm text-zinc-500 italic">No source schema loaded.</p>
+          )}
+        </>
+      )}
     </div>
   );
 }

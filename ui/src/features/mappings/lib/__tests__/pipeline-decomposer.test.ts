@@ -334,14 +334,93 @@ describe('roundtrip: generateExpressionFromState ↔ decomposeExpression', () =>
     expect(roundtrip(expr)).toBe(expr);
   });
 
-  it('static string roundtrip', () => {
+  it('static string roundtrip (T-06: bare literal)', () => {
     const state: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'static',
       sources: [],
       transforms: [],
       staticValue: { type: 'string', value: 'hello' },
     };
     const expr = generateExpressionFromState(state);
+    // expr is now `"hello"` (bare literal)
+    expect(expr).toBe('"hello"');
     expect(roundtrip(expr)).toBe(expr);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-06: bare literal decomposition
+// ---------------------------------------------------------------------------
+
+describe('decomposeExpression — T-06 bare literals at root', () => {
+  it('T-06-DEC-01: bare string literal → static value state', () => {
+    const result = decomposeExpression('"hello"');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.state.mode).toBe('value');
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.inputType).toBe('static');
+    expect(state.staticValue).toMatchObject({ type: 'string', value: 'hello' });
+  });
+
+  it('T-06-DEC-02: bare number literal → static value state', () => {
+    const result = decomposeExpression('42');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.inputType).toBe('static');
+    expect(state.staticValue).toMatchObject({ type: 'number', value: 42 });
+  });
+
+  it('T-06-DEC-03: bare true → static boolean', () => {
+    const result = decomposeExpression('true');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.inputType).toBe('static');
+    expect(state.staticValue).toMatchObject({ type: 'boolean', value: true });
+  });
+
+  it('T-06-DEC-04: bare false → static boolean', () => {
+    const result = decomposeExpression('false');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.staticValue).toMatchObject({ type: 'boolean', value: false });
+  });
+
+  it('T-06-DEC-05: bare null → static null', () => {
+    const result = decomposeExpression('null');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.inputType).toBe('static');
+    expect(state.staticValue?.type).toBe('null');
+  });
+
+  it('T-06-DEC-06: source() decomposition has inputType=source', () => {
+    const result = decomposeExpression('source("email")');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.inputType).toBe('source');
+  });
+
+  it('T-06-DEC-07: legacy static("N/A") → inputType=static (backward compat)', () => {
+    const result = decomposeExpression('static("N/A")');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'value' }>;
+    expect(state.inputType).toBe('static');
+    expect(state.staticValue).toMatchObject({ type: 'string', value: 'N/A' });
+  });
+
+  it('T-06-DEC-08: bare literal roundtrip — "hello" → decompose → generate → "hello"', () => {
+    expect(roundtrip('"hello"')).toBe('"hello"');
+  });
+
+  it('T-06-DEC-09: bare number roundtrip — 99 → decompose → generate → 99', () => {
+    expect(roundtrip('99')).toBe('99');
   });
 });

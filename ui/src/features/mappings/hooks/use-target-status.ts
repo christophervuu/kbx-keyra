@@ -43,6 +43,29 @@ function collectAllPaths(nodes: readonly SchemaTreeNode[]): Set<string> {
 }
 
 /**
+ * Returns all leaf descendant paths of a given node.
+ * Leaf = a node whose type is not 'object' or 'array'.
+ * Traverses the children tree recursively.
+ */
+function getLeafDescendants(node: SchemaTreeNode): string[] {
+  const leaves: string[] = [];
+  function traverse(n: SchemaTreeNode) {
+    if (n.type !== 'object' && n.type !== 'array') {
+      leaves.push(n.path);
+    } else {
+      for (const child of n.children) {
+        traverse(child);
+      }
+    }
+  }
+  // Start from children (not the node itself)
+  for (const child of node.children) {
+    traverse(child);
+  }
+  return leaves;
+}
+
+/**
  * Builds a map from target path → worst-severity diagnostic status.
  * Uses `targetPath` on each diagnostic when available; falls back to
  * `ruleIndex` to look up the rule's target path.
@@ -127,18 +150,19 @@ export function useTargetStatus(
       }
     }
 
-    // Step 4: compute coverage for object/array nodes
+    // Step 4: compute coverage for object/array nodes using leaf descendants
     for (const node of nodes) {
       if (node.childCount > 0 && node.children.length > 0) {
+        const leafPaths = getLeafDescendants(node);
+        if (leafPaths.length === 0) continue;
         let mapped = 0;
-        const total = node.children.length;
-        for (const child of node.children) {
-          const childStatus = statusMap.get(child.path);
-          if (childStatus !== undefined && childStatus !== 'unmapped') {
+        for (const leafPath of leafPaths) {
+          const leafStatus = statusMap.get(leafPath);
+          if (leafStatus !== undefined && leafStatus !== 'unmapped') {
             mapped++;
           }
         }
-        coverageMap.set(node.path, { mapped, total });
+        coverageMap.set(node.path, { mapped, total: leafPaths.length });
       }
     }
 

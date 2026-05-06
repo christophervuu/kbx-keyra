@@ -22,7 +22,7 @@ import {
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
-import { useMappingEditor, useVersionHistory } from '@/features/mappings/hooks';
+import { useMappingEditor, useVersionHistory, useTargetStatus } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
@@ -217,13 +217,21 @@ export default function MappingEditor() {
   const [pendingTargetPath, setPendingTargetPath] = useState<string | null>(null);
   // Whether the unapplied-changes dialog is open
   const [unappliedDialogOpen, setUnappliedDialogOpen] = useState(false);
-  // The current unapplied expression (set by ScalarFieldBuilder via callback)
+  // The current expression as reported by ScalarFieldBuilder on every change
   const [unappliedExpression, setUnappliedExpression] = useState<string>('');
+  // The "clean" baseline expression for the currently selected field.
+  // Dirty = unappliedExpression !== lastAppliedExpressionRef.current.
+  // Using a ref avoids triggering re-renders when the baseline is updated.
+  const lastAppliedExpressionRef = useRef<string>('');
 
   const handleSelectTargetNode = useCallback(
     (path: string) => {
-      if (unappliedExpression.trim() && selectedTargetPath !== null && path !== selectedTargetPath) {
-        // There is an unapplied expression — show the guard dialog
+      if (
+        selectedTargetPath !== null &&
+        path !== selectedTargetPath &&
+        unappliedExpression !== lastAppliedExpressionRef.current
+      ) {
+        // Expression has been edited since last apply — show the guard dialog
         setPendingTargetPath(path);
         setUnappliedDialogOpen(true);
       } else {
@@ -241,6 +249,7 @@ export default function MappingEditor() {
     }
     setUnappliedDialogOpen(false);
     setUnappliedExpression('');
+    lastAppliedExpressionRef.current = '';
     if (pendingTargetPath !== null) {
       setSelectedTargetPath(pendingTargetPath);
       setPendingTargetPath(null);
@@ -251,6 +260,7 @@ export default function MappingEditor() {
   const handleUnappliedDiscard = useCallback(() => {
     setUnappliedDialogOpen(false);
     setUnappliedExpression('');
+    lastAppliedExpressionRef.current = '';
     if (pendingTargetPath !== null) {
       setSelectedTargetPath(pendingTargetPath);
       setPendingTargetPath(null);
@@ -298,6 +308,29 @@ export default function MappingEditor() {
     return statusMap;
   }, [editor.parsedTargetSchema, editor.rules, editor.validation]);
 
+  // Leaf-field coverage map — used by ObjectSummaryPanel for accurate x/y ratio
+  const { coverageMap: leafCoverageMap } = useTargetStatus(
+    editor.rules,
+    editor.validation.result ?? null,
+    editor.parsedTargetSchema?.nodes ?? [],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Sync the "clean" baseline expression when the selected target field changes.
+  // We update a ref (not state) so this does not trigger an extra render.
+  // The baseline is the expression already applied for this field (or "" if
+  // unmapped). Dirty = unappliedExpression !== lastAppliedExpressionRef.current.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const existing =
+      selectedTargetPath !== null
+        ? (editor.rules.find((r) => r.target === selectedTargetPath)?.expression ?? '')
+        : '';
+    lastAppliedExpressionRef.current = existing;
+  // Intentionally only re-runs when the selected field changes, not on every rules update.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargetPath]);
+
   // ---------------------------------------------------------------------------
   // "Start with required fields" CTA from BuilderEmptyState
   // ---------------------------------------------------------------------------
@@ -328,6 +361,7 @@ export default function MappingEditor() {
     (targetPath: string, expression: string) => {
       editor.actions.applyRule(targetPath, expression);
       setUnappliedExpression('');
+      lastAppliedExpressionRef.current = expression;
       // NOTE: Auto-advance removed (FS-025 T-04 / AE-10).
       // Navigation is now explicit via "Next unmapped →" button or Ctrl+].
     },
@@ -486,14 +520,15 @@ export default function MappingEditor() {
           status: (targetMappingStatus?.get(child.path) as 'unmapped' | 'mapped' | 'warning' | 'error') ?? 'unmapped',
           required: child.isRequired,
         }));
-        const mapped = children.filter((c) => c.status !== 'unmapped').length;
+        const leafCoverage = leafCoverageMap.get(selectedNode.path) ?? { mapped: 0, total: children.length };
         return (
           <ObjectSummaryPanel
             objectPath={selectedNode.path}
             childFields={children}
-            coverage={{ mapped, total: children.length }}
+            coverage={leafCoverage}
             onFilterRequired={(path: string) => setSelectedTargetPath(path)}
             onValidateSection={() => {/* no-op placeholder */}}
+            onNavigateToChild={(path) => setSelectedTargetPath(path)}
             className="h-full"
           />
         );
@@ -527,6 +562,7 @@ export default function MappingEditor() {
         onExpressionChange={setUnappliedExpression}
         onAdvanceToNext={handleAdvanceToNext}
         hasUnmappedFields={hasUnmappedFields}
+        onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
         className="h-full"
       />
     );

@@ -13,7 +13,7 @@
  */
 
 import { Check, ChevronRight, Lightbulb, Sparkles, Wand2, Wrench } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
 import { RawDslEditor } from './RawDslEditor';
@@ -26,6 +26,7 @@ import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import type { ExpressionBuilderState } from '../lib/expression-builder-state';
+import { PreviewContext } from '../context/preview-context';
 
 import type { ParsedSchema } from '@/lib/types/domain';
 
@@ -63,6 +64,11 @@ export interface ScalarFieldBuilderProps {
    * Controls visibility of the "Next unmapped →" button.
    */
   hasUnmappedFields?: boolean;
+  /**
+   * Fires when the user clicks "Clear mapping" (T-08).
+   * The parent removes the rule from the working session.
+   */
+  onClearMapping?: (targetPath: string) => void;
   /** Optional className */
   className?: string;
 }
@@ -176,6 +182,7 @@ export function ScalarFieldBuilder({
   onExpressionChange,
   onAdvanceToNext,
   hasUnmappedFields = false,
+  onClearMapping,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
@@ -229,6 +236,10 @@ export function ScalarFieldBuilder({
   }, [selectedTargetPath, currentExpression]);
 
   const { isValid, isValidating, errorDecorations } = useDslValidation(expression);
+
+  // Read sourceData from PreviewContext for live result display (T-10)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
   const suggestions = suggestSourceFields(
     selectedTargetPath,
@@ -284,10 +295,18 @@ export function ScalarFieldBuilder({
       className={`flex flex-col gap-0 overflow-y-auto ${className}`}
     >
       {/* ------------------------------------------------------------------ */}
-      {/* Header: target context                                              */}
+      {/* Header: target context + Builder|Editor toggle (T-07)              */}
       {/* ------------------------------------------------------------------ */}
       <div className="shrink-0 border-b border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2">
+          {/* Type badge — left side (T-07) */}
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[selectedTargetType]}`}
+            data-testid="header-type-badge"
+          >
+            {selectedTargetType}
+          </span>
+
           {/* Target path */}
           <span
             className="min-w-0 flex-1 truncate font-mono text-sm text-slate-100"
@@ -297,13 +316,8 @@ export function ScalarFieldBuilder({
             {selectedTargetPath}
           </span>
 
-          {/* Type badge */}
-          <span
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[selectedTargetType]}`}
-            data-testid="header-type-badge"
-          >
-            {selectedTargetType}
-          </span>
+          {/* Builder | Editor toggle — in header row (T-07) */}
+          <ModeToggle mode={mode} onSwitch={setMode} />
         </div>
 
         <div className="mt-1 flex items-center gap-3">
@@ -326,36 +340,21 @@ export function ScalarFieldBuilder({
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Suggested Sources                                                   */}
+      {/* Suggested Sources — hidden when empty (T-07)                        */}
       {/* ------------------------------------------------------------------ */}
-      <div className="shrink-0 border-b border-slate-700 px-4 py-3">
-        <div className="mb-2 flex items-center gap-1.5">
-          <Lightbulb size={12} className="text-slate-500" aria-hidden="true" />
-          <span className="text-xs font-medium text-slate-400">Suggested Sources</span>
-        </div>
-
-        {suggestions.length > 0 ? (
+      {suggestions.length > 0 && (
+        <div className="shrink-0 border-b border-slate-700 px-4 py-3" data-testid="suggested-sources-section">
+          <div className="mb-2 flex items-center gap-1.5">
+            <Lightbulb size={12} className="text-slate-500" aria-hidden="true" />
+            <span className="text-xs font-medium text-slate-400">Suggested Sources</span>
+          </div>
           <div className="flex flex-wrap gap-1.5" data-testid="suggestions-list">
             {suggestions.map((s) => (
               <SuggestionPill key={s.path} suggestion={s} onSelect={handleSuggestionSelect} />
             ))}
           </div>
-        ) : (
-          <p className="text-xs text-slate-500" data-testid="suggestions-empty">
-            No suggestions — select a source field manually
-          </p>
-        )}
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Expression Builder                                                  */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-          Expression
-        </span>
-        <ModeToggle mode={mode} onSwitch={setMode} />
-      </div>
+        </div>
+      )}
 
       <div
         className={[
@@ -402,6 +401,7 @@ export function ScalarFieldBuilder({
               onApply={onApply}
               selectedTargetPath={selectedTargetPath}
               parsedSourceSchema={parsedSourceSchema}
+              sourceData={sourceData}
               onSwitchToEditor={() => { setMode('editor'); }}
               initialState={initialUnifiedBuilderState}
             />
@@ -448,6 +448,19 @@ export function ScalarFieldBuilder({
             <Wrench size={12} aria-hidden="true" />
             Fix
           </button>
+
+          {/* Clear mapping button (T-08) — only shown when target has an applied rule */}
+          {currentStatus === 'mapped' && onClearMapping && (
+            <button
+              type="button"
+              data-testid="clear-mapping-btn"
+              onClick={() => { onClearMapping(selectedTargetPath); }}
+              aria-label={`Clear mapping for ${selectedTargetPath}`}
+              className="flex items-center gap-1 rounded border border-red-800/60 px-2 py-1 text-xs text-red-400 transition-colors hover:border-red-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500"
+            >
+              Clear
+            </button>
+          )}
 
           {/* Spacer */}
           <span className="flex-1" />

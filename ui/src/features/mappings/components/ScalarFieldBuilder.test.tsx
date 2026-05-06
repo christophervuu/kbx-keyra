@@ -93,12 +93,13 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('suggestion-firstName')).toBeInTheDocument();
   });
 
-  it('shows fallback message when no suggestions match', () => {
+  it('hides Suggested Sources section when no suggestions match (T-07)', () => {
     renderBuilder({
       selectedTargetPath: 'zzznomatch',
       selectedTargetType: 'string',
     });
-    expect(screen.getByTestId('suggestions-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('suggested-sources-section')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('suggestions-empty')).not.toBeInTheDocument();
   });
 
   it('shows at most 5 suggestions', () => {
@@ -497,6 +498,104 @@ describe('ScalarFieldBuilder', () => {
       expect(() => {
         fireEvent.keyDown(document, { key: ']', ctrlKey: true });
       }).not.toThrow();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-07: Header compression — type badge left, toggle in header, suggestions hidden when empty
+  // ---------------------------------------------------------------------------
+
+  describe('T-07: header compression', () => {
+    it('type badge appears before target path in the DOM (left side)', () => {
+      renderBuilder();
+      const badge = screen.getByTestId('header-type-badge');
+      const path = screen.getByTestId('header-target-path');
+      // badge should come before path in document order
+      expect(badge.compareDocumentPosition(path) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('Builder|Editor toggle is rendered within the header section', () => {
+      renderBuilder();
+      const header = screen.getByTestId('header-target-path').closest('[class*="border-b"]');
+      expect(header).toContainElement(screen.getByTestId('mode-toggle-builder'));
+      expect(header).toContainElement(screen.getByTestId('mode-toggle-editor'));
+    });
+
+    it('Suggested Sources section is shown when suggestions exist', () => {
+      renderBuilder(); // 'patient.firstName' → 'firstName' exact match
+      expect(screen.getByTestId('suggested-sources-section')).toBeInTheDocument();
+    });
+
+    it('Suggested Sources section is hidden when no suggestions exist', () => {
+      renderBuilder({ selectedTargetPath: 'zzznomatch', selectedTargetType: 'string' });
+      expect(screen.queryByTestId('suggested-sources-section')).not.toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-08: Clear mapping button
+  // ---------------------------------------------------------------------------
+
+  describe('T-08: clear mapping button', () => {
+    it('Clear mapping button is visible when currentStatus=mapped and onClearMapping provided', () => {
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+      expect(screen.getByTestId('clear-mapping-btn')).toBeInTheDocument();
+    });
+
+    it('Clear mapping button is hidden when currentStatus=unmapped', () => {
+      renderBuilder({
+        currentStatus: 'unmapped',
+        onClearMapping: vi.fn(),
+      });
+      expect(screen.queryByTestId('clear-mapping-btn')).not.toBeInTheDocument();
+    });
+
+    it('Clear mapping button is hidden when onClearMapping not provided', () => {
+      renderBuilder({ currentStatus: 'mapped', currentExpression: 'source("firstName")' });
+      expect(screen.queryByTestId('clear-mapping-btn')).not.toBeInTheDocument();
+    });
+
+    it('clicking Clear mapping calls onClearMapping with target path', () => {
+      const onClearMapping = vi.fn();
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping,
+      });
+      fireEvent.click(screen.getByTestId('clear-mapping-btn'));
+      expect(onClearMapping).toHaveBeenCalledWith('patient.firstName');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-09: Apply single-click commit
+  // ---------------------------------------------------------------------------
+
+  describe('T-09: Apply single-click commit', () => {
+    it('Apply button is disabled after clicking once (no double-click required)', () => {
+      const onApply = vi.fn();
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
+      const btn = screen.getByTestId('apply-btn');
+      fireEvent.click(btn);
+      expect(btn).toBeDisabled();
+    });
+
+    it('Apply button shows "Applied" text immediately after single click', () => {
+      const onApply = vi.fn();
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+    });
+
+    it('onApply is called exactly once per click', () => {
+      const onApply = vi.fn();
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(onApply).toHaveBeenCalledTimes(1);
     });
   });
 });

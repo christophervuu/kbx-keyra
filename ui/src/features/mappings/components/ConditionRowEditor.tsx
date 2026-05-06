@@ -34,7 +34,7 @@ export const COMPARISON_OPTIONS: { value: ComparisonOperator; label: string }[] 
 
 const UNARY_OPERATORS = new Set<ComparisonOperator>(['isNull', 'isNotNull']);
 
-const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', sources: [], transforms: [] };
+const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', inputType: 'source', sources: [], transforms: [] };
 
 // ---------------------------------------------------------------------------
 // Types

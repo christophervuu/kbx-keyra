@@ -395,19 +395,21 @@ describe('SchemaUploadDialog — paste mode', () => {
     expect(screen.getByTestId('upload-button')).toBeDisabled();
   });
 
-  it('AE-08: paste analysis does not run until textarea is blurred', async () => {
+  it('AE-08: format badge does not appear until textarea is blurred, but name input is always visible', async () => {
     const user = userEvent.setup();
     renderDialog(createMockAdapter());
 
     await user.click(screen.getByTestId('mode-tab-paste'));
 
+    // Schema Name input is always visible — even before any content is pasted
+    expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+
     const textarea = screen.getByTestId('paste-input');
     // Set value without blurring
     fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
 
-    // No info panel yet
+    // Format badge not yet shown (analysis runs on blur)
     expect(screen.queryByTestId('format-badge')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('schema-name-input')).not.toBeInTheDocument();
 
     // Now blur
     fireEvent.blur(textarea);
@@ -415,8 +417,86 @@ describe('SchemaUploadDialog — paste mode', () => {
     await waitFor(() => {
       expect(screen.getByTestId('format-badge')).toBeInTheDocument();
     });
+  });
+
+  it('schema name input is visible immediately in paste mode before any content', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
 
     expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+  });
+
+  it('AE-03: pasting JSON Schema with title auto-fills Schema Name immediately (no blur needed)', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const schemaWithTitle = JSON.stringify({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: 'Patient Record',
+      type: 'object',
+      properties: { id: { type: 'string' } },
+    });
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: schemaWithTitle } });
+
+    // Name auto-filled immediately — no blur required
+    const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('Patient Record');
+  });
+
+  it('AE-04: manual edit to Schema Name is preserved when pasting JSON with a different title', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    // Manually set a name
+    const nameInput = screen.getByTestId('schema-name-input');
+    await user.type(nameInput, 'My Custom Name');
+
+    // Now paste JSON with a title
+    const schemaWithTitle = JSON.stringify({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: 'Should Not Overwrite',
+      type: 'object',
+    });
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: schemaWithTitle } });
+
+    // Name should remain as manually entered
+    expect((screen.getByTestId('schema-name-input') as HTMLInputElement).value).toBe('My Custom Name');
+  });
+
+  it('pasting JSON without title leaves Schema Name empty', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+
+    const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('');
+  });
+
+  it('pasting invalid JSON does not crash and leaves Schema Name empty', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: 'not valid json {{' } });
+
+    const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
+    expect(nameInput.value).toBe('');
   });
 
   it('paste mode creates schema via adapter on Add Schema click', async () => {

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -212,97 +212,80 @@ describe('UnifiedExpressionBuilder — source chip picker', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Static value toggle (AE-14)
+// Static value toggle — segmented control (T-06 / AE-14)
 // ---------------------------------------------------------------------------
 
-describe('UnifiedExpressionBuilder — static value toggle', () => {
-  it('clicking "Use a static value instead" shows static value input', async () => {
+describe('UnifiedExpressionBuilder — static value toggle (T-06)', () => {
+  it('clicking "Static value" segment shows static value input', async () => {
     const user = userEvent.setup();
     renderBuilder();
-    await user.click(screen.getByTestId('static-mode-toggle'));
+    await user.click(screen.getByTestId('input-type-static'));
     expect(screen.getByTestId('static-value-input')).toBeInTheDocument();
     expect(screen.queryByTestId('source-search-input')).not.toBeInTheDocument();
   });
 
-  it('clicking "← Use source field instead" returns to field picker', async () => {
+  it('clicking "Source field" segment returns to field picker', async () => {
     const user = userEvent.setup();
     renderBuilder();
-    await user.click(screen.getByTestId('static-mode-toggle'));
-    await user.click(screen.getByTestId('static-mode-toggle'));
+    await user.click(screen.getByTestId('input-type-static'));
+    await user.click(screen.getByTestId('input-type-source'));
     expect(screen.getByTestId('source-search-input')).toBeInTheDocument();
     expect(screen.queryByTestId('static-value-input')).not.toBeInTheDocument();
   });
 
-  it('static value input generates static() expression (AE-14)', async () => {
+  it('static value input generates bare literal expression (AE-14 / T-06)', async () => {
     const user = userEvent.setup();
     const onExpressionChange = vi.fn();
     renderBuilder({ onExpressionChange });
-    await user.click(screen.getByTestId('static-mode-toggle'));
+    await user.click(screen.getByTestId('input-type-static'));
     const input = screen.getByRole('textbox', { name: /static string value/i });
     await user.clear(input);
     await user.type(input, 'hello');
-    // Last call should be static("hello")
+    // Last call should be bare literal "hello"
     const calls = onExpressionChange.mock.calls;
     const lastCall = calls[calls.length - 1][0] as string;
-    expect(lastCall).toBe('static("hello")');
+    expect(lastCall).toBe('"hello"');
+  });
+
+  it('segmented control shows "Source field" selected by default', () => {
+    renderBuilder();
+    expect(screen.getByTestId('input-type-source')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('input-type-static')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('segmented control shows "Static value" selected after toggle', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await user.click(screen.getByTestId('input-type-static'));
+    expect(screen.getByTestId('input-type-static')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('input-type-source')).toHaveAttribute('aria-selected', 'false');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Direct Copy button (AE-01)
+// Direct Copy removed (AE-15)
 // ---------------------------------------------------------------------------
 
-describe('UnifiedExpressionBuilder — Direct Copy button', () => {
-  it('Direct Copy button is hidden when no source is selected', () => {
+describe('UnifiedExpressionBuilder — Direct Copy removed (AE-15)', () => {
+  it('does not render a Direct Copy button at any point', () => {
     renderBuilder();
     expect(screen.queryByTestId('direct-copy-btn')).not.toBeInTheDocument();
   });
 
-  it('Direct Copy button appears when exactly 1 source is selected', async () => {
+  it('Direct Copy button is absent even after selecting a source field', async () => {
     const user = userEvent.setup();
     renderBuilder();
     await user.click(screen.getByTestId('source-search-input'));
     await user.click(screen.getByTestId('suggestion-email'));
-    expect(screen.getByTestId('direct-copy-btn')).toBeInTheDocument();
-  });
-
-  it('Direct Copy button is hidden when 2 sources are selected', async () => {
-    const user = userEvent.setup();
-    renderBuilder();
-    // Select first source
-    await user.click(screen.getByTestId('source-search-input'));
-    await user.click(screen.getByTestId('suggestion-email'));
-    // Type a character to re-open dropdown and show remaining suggestions
-    const input = screen.getByTestId('source-search-input');
-    await user.type(input, 'n');
-    await user.click(screen.getByTestId('suggestion-name'));
     expect(screen.queryByTestId('direct-copy-btn')).not.toBeInTheDocument();
   });
 
-  it('clicking Direct Copy fires onApply with source("email") (AE-01)', async () => {
+  it('selecting a source field with no transforms still fires onExpressionChange with source("path")', async () => {
     const user = userEvent.setup();
-    const onApply = vi.fn();
-    renderBuilder({ onApply, selectedTargetPath: 'target.email' });
+    const onExpressionChange = vi.fn();
+    renderBuilder({ onExpressionChange });
     await user.click(screen.getByTestId('source-search-input'));
     await user.click(screen.getByTestId('suggestion-email'));
-    await user.click(screen.getByTestId('direct-copy-btn'));
-    expect(onApply).toHaveBeenCalledWith('target.email', 'source("email")');
-  });
-
-  it('clicking Direct Copy shows toast confirmation', async () => {
-    const user = userEvent.setup();
-    renderBuilder();
-    await user.click(screen.getByTestId('source-search-input'));
-    await user.click(screen.getByTestId('suggestion-email'));
-    await user.click(screen.getByTestId('direct-copy-btn'));
-    expect(screen.getByTestId('direct-copy-toast')).toBeInTheDocument();
-    expect(screen.getByText(/direct copy applied/i)).toBeInTheDocument();
-  });
-
-  it('Direct Copy button is hidden in static value mode', async () => {
-    const user = userEvent.setup();
-    renderBuilder();
-    await user.click(screen.getByTestId('static-mode-toggle'));
-    expect(screen.queryByTestId('direct-copy-btn')).not.toBeInTheDocument();
+    expect(onExpressionChange).toHaveBeenCalledWith('source("email")');
   });
 });

@@ -429,6 +429,7 @@ function decomposeValuePipeline(node: FunctionCallNode): PipelineDecompositionRe
       transforms.reverse();
       return ok({
         mode: 'value',
+        inputType: 'source',
         sources: [{ path }],
         transforms,
       });
@@ -477,6 +478,20 @@ export function decomposeExpression(expression: string): PipelineDecompositionRe
 
   const ast = result.ast;
 
+  // Bare literals at root → static value state
+  if (ast.type === 'StringLiteral') {
+    return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'string', value: ast.value } });
+  }
+  if (ast.type === 'NumberLiteral') {
+    return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'number', value: ast.value } });
+  }
+  if (ast.type === 'BooleanLiteral') {
+    return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'boolean', value: ast.value } });
+  }
+  if (ast.type === 'NullLiteral') {
+    return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'null' } });
+  }
+
   if (ast.type !== 'FunctionCall') {
     return fail('Expression is not a function call and cannot be loaded into the guided builder.');
   }
@@ -496,26 +511,26 @@ export function decomposeExpression(expression: string): PipelineDecompositionRe
         return fail(`'source' must have exactly one string path argument.`);
       }
       const path = (root.arguments[0] as Extract<AstNode, { type: 'StringLiteral' }>).value;
-      return ok({ mode: 'value', sources: [{ path }], transforms: [] });
+      return ok({ mode: 'value', inputType: 'source', sources: [{ path }], transforms: [] });
     }
 
     case 'static': {
-      // Static value
+      // static() wrapper — legacy / backward compat
       if (root.arguments.length !== 1) {
         return fail(`'static' must have exactly one argument.`);
       }
       const inner = root.arguments[0];
       if (inner.type === 'StringLiteral') {
-        return ok({ mode: 'value', sources: [], transforms: [], staticValue: { type: 'string', value: inner.value } });
+        return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'string', value: inner.value } });
       }
       if (inner.type === 'NumberLiteral') {
-        return ok({ mode: 'value', sources: [], transforms: [], staticValue: { type: 'number', value: inner.value } });
+        return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'number', value: inner.value } });
       }
       if (inner.type === 'BooleanLiteral') {
-        return ok({ mode: 'value', sources: [], transforms: [], staticValue: { type: 'boolean', value: inner.value } });
+        return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'boolean', value: inner.value } });
       }
       if (inner.type === 'NullLiteral') {
-        return ok({ mode: 'value', sources: [], transforms: [], staticValue: { type: 'null' } });
+        return ok({ mode: 'value', inputType: 'static', sources: [], transforms: [], staticValue: { type: 'null' } });
       }
       return fail(`'static' argument must be a literal value.`);
     }

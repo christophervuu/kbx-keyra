@@ -7,6 +7,7 @@ describe('generateExpressionFromState (value mode)', () => {
   it('AE-01: direct copy -> source("email")', () => {
     const state: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'source',
       sources: [{ path: 'email' }],
       transforms: [],
     };
@@ -17,6 +18,7 @@ describe('generateExpressionFromState (value mode)', () => {
   it('AE-02: 2-step pipeline trim -> lower', () => {
     const state: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'source',
       sources: [{ path: 'email' }],
       transforms: [
         { functionName: 'trim', parameters: [] },
@@ -30,6 +32,7 @@ describe('generateExpressionFromState (value mode)', () => {
   it('AE-03: substring with additional parameters', () => {
     const state: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'source',
       sources: [{ path: 'code' }],
       transforms: [
         {
@@ -45,20 +48,22 @@ describe('generateExpressionFromState (value mode)', () => {
     expect(generateExpressionFromState(state)).toBe('substring(source("code"), 0, 3)');
   });
 
-  it('AE-14: static string value', () => {
+  it('AE-14: static string value emits bare literal (T-06)', () => {
     const state: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'static',
       sources: [],
       transforms: [],
       staticValue: { type: 'string', value: 'default@example.com' },
     };
 
-    expect(generateExpressionFromState(state)).toBe('static("default@example.com")');
+    expect(generateExpressionFromState(state)).toBe('"default@example.com"');
   });
 
   it('uses first source as primary source in multi-source edge case', () => {
     const state: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'source',
       sources: [{ path: 'firstName' }, { path: 'lastName' }],
       transforms: [{ functionName: 'upper', parameters: [] }],
     };
@@ -69,19 +74,21 @@ describe('generateExpressionFromState (value mode)', () => {
   it('escapes special chars in source path and static value', () => {
     const sourceState: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'source',
       sources: [{ path: 'a"b\\c' }],
       transforms: [],
     };
 
     const staticState: ExpressionBuilderState = {
       mode: 'value',
+      inputType: 'static',
       sources: [],
       transforms: [],
       staticValue: { type: 'string', value: 'x"y\\z' },
     };
 
     expect(generateExpressionFromState(sourceState)).toBe('source("a\\"b\\\\c")');
-    expect(generateExpressionFromState(staticState)).toBe('static("x\\"y\\\\z")');
+    expect(generateExpressionFromState(staticState)).toBe('"x\\"y\\\\z"');
   });
 });
 
@@ -236,6 +243,7 @@ describe('generateExpressionFromState — pipeline branch values (T-03)', () => 
         kind: 'pipeline',
         state: {
           mode: 'value',
+          inputType: 'source',
           sources: [{ path: 'tier' }],
           transforms: [{ functionName: 'upper', parameters: [] }],
         },
@@ -266,6 +274,7 @@ describe('generateExpressionFromState — pipeline branch values (T-03)', () => 
         kind: 'pipeline',
         state: {
           mode: 'value',
+          inputType: 'source',
           sources: [{ path: 'fallback_label' }],
           transforms: [{ functionName: 'lower', parameters: [] }],
         },
@@ -289,6 +298,7 @@ describe('generateExpressionFromState — pipeline branch values (T-03)', () => 
               value: '',
               pipelineState: {
                 mode: 'value',
+                inputType: 'source',
                 sources: [{ path: 'name' }],
                 transforms: [{ functionName: 'length', parameters: [] }],
               },
@@ -322,7 +332,7 @@ describe('generateExpressionFromState — pipeline branch values (T-03)', () => 
       },
       thenBranch: {
         kind: 'pipeline',
-        state: { mode: 'value', sources: [], transforms: [] },
+        state: { mode: 'value', inputType: 'source', sources: [], transforms: [] },
       },
       elseBranch: { kind: 'static', value: 'no' },
     };
@@ -387,5 +397,77 @@ describe('generateExpressionFromState (valueMap mode)', () => {
     expect(generateExpressionFromState(emptyMappings)).toBe(
       'valueMap(source("country"), {}, "Other")',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-06: bare literal emission for static inputType
+// ---------------------------------------------------------------------------
+
+describe('generateExpressionFromState — T-06 bare literals (inputType=static)', () => {
+  it('T-06-GEN-01: static string emits bare quoted string', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'value',
+      inputType: 'static',
+      sources: [],
+      transforms: [],
+      staticValue: { type: 'string', value: 'hello' },
+    };
+    expect(generateExpressionFromState(state)).toBe('"hello"');
+  });
+
+  it('T-06-GEN-02: static number emits bare number', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'value',
+      inputType: 'static',
+      sources: [],
+      transforms: [],
+      staticValue: { type: 'number', value: 42 },
+    };
+    expect(generateExpressionFromState(state)).toBe('42');
+  });
+
+  it('T-06-GEN-03: static boolean true emits bare true', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'value',
+      inputType: 'static',
+      sources: [],
+      transforms: [],
+      staticValue: { type: 'boolean', value: true },
+    };
+    expect(generateExpressionFromState(state)).toBe('true');
+  });
+
+  it('T-06-GEN-04: static boolean false emits bare false', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'value',
+      inputType: 'static',
+      sources: [],
+      transforms: [],
+      staticValue: { type: 'boolean', value: false },
+    };
+    expect(generateExpressionFromState(state)).toBe('false');
+  });
+
+  it('T-06-GEN-05: static null emits bare null', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'value',
+      inputType: 'static',
+      sources: [],
+      transforms: [],
+      staticValue: { type: 'null' },
+    };
+    expect(generateExpressionFromState(state)).toBe('null');
+  });
+
+  it('T-06-GEN-06: static string with transform emits transform(literal)', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'value',
+      inputType: 'static',
+      sources: [],
+      transforms: [{ functionName: 'upper', parameters: [] }],
+      staticValue: { type: 'string', value: 'hello' },
+    };
+    expect(generateExpressionFromState(state)).toBe('upper("hello")');
   });
 });

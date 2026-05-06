@@ -42,7 +42,7 @@ type BranchKind = 'static' | 'source' | 'pipeline' | 'conditional';
 
 const MAX_ELSE_IF_DEPTH = 5;
 
-const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', sources: [], transforms: [] };
+const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', inputType: 'source', sources: [], transforms: [] };
 
 // ---------------------------------------------------------------------------
 // Component
