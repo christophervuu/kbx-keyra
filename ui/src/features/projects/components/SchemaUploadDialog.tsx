@@ -201,6 +201,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   const [pasteText, setPasteText] = useState('');
   const [pasteInfo, setPasteInfo] = useState<ParsedFileInfo | null>(null);
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const pasteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Shared state
   const [schemaName, setSchemaName] = useState('');
@@ -212,6 +213,10 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   // Reset all state when dialog closes
   useEffect(() => {
     if (!open) {
+      if (pasteDebounceRef.current !== null) {
+        clearTimeout(pasteDebounceRef.current);
+        pasteDebounceRef.current = null;
+      }
       setInputMode('file');
       setFileInfo(null);
       setFileError(null);
@@ -332,19 +337,23 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     } else {
       setPasteInfo(result.info);
       if (!nameManuallyEdited) {
-        // Prefer title from JSON Schema; fall back to generic default name
-        let autoName = defaultPasteName(result.info.format);
         if (result.info.format === 'json-schema') {
+          // For JSON Schema: only set name from title — fast-path already handled
+          // the empty-string case, so don't overwrite with a generic fallback.
           try {
             const parsed = result.info.parsedContent as Record<string, unknown>;
             if (typeof parsed.title === 'string' && parsed.title.trim()) {
-              autoName = parsed.title.trim();
+              setSchemaName(parsed.title.trim());
             }
+            // No else: fast-path already set '' for no-title case
           } catch {
             // ignore
           }
+        } else {
+          // For non-JSON-Schema formats (sample-json), fast-path can't extract a
+          // title, so apply the generic default name.
+          setSchemaName(defaultPasteName(result.info.format));
         }
-        setSchemaName(autoName);
       }
     }
   }
@@ -370,11 +379,26 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         setSchemaName('');
       }
     }
+    // Debounce full content analysis (format detection + field count)
+    if (pasteDebounceRef.current !== null) {
+      clearTimeout(pasteDebounceRef.current);
+    }
+    if (text.trim()) {
+      pasteDebounceRef.current = setTimeout(() => {
+        pasteDebounceRef.current = null;
+        analyzePasteContent(text);
+      }, 300);
+    }
   }
 
   function handlePasteBlur() {
-    if (pasteText.trim()) {
-      analyzePasteContent(pasteText);
+    // If debounce hasn't fired yet, run analysis immediately
+    if (pasteDebounceRef.current !== null) {
+      clearTimeout(pasteDebounceRef.current);
+      pasteDebounceRef.current = null;
+      if (pasteText.trim()) {
+        analyzePasteContent(pasteText);
+      }
     }
   }
 
@@ -395,18 +419,24 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
           ? 'json-schema'
           : activeInfo.format === 'xsd'
             ? 'xsd'
-            : 'json-schema'; // inferred sample data stored as json-schema
+            : activeInfo.format === 'sample-xml'
+              ? 'xsd'
+              : 'json-schema'; // inferred sample data retains engine-compatible format
 
       const content =
         activeInfo.format === 'xsd' || activeInfo.format === 'sample-xml'
           ? activeInfo.content
-          : (activeInfo.parsedContent as Record<string, unknown>);
+          : activeInfo.format === 'sample-json'
+            ? activeInfo.content
+            : (activeInfo.parsedContent as Record<string, unknown>);
 
       const created = await adapter.createSchema({
         name: schemaName.trim(),
         format: adapterFormat,
         origin: scope === 'global' ? 'library' : 'local',
-        content: content as Record<string, unknown>,
+        content: content,
+        fieldCount: activeInfo.fieldCount,
+        inferred: activeInfo.isInferredFlag,
         source: { type: 'upload' },
       });
 

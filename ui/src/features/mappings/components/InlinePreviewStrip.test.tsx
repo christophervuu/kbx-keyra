@@ -767,4 +767,123 @@ describe('InlinePreviewStrip', () => {
     // After selection the value resets to '' (placeholder)
     expect(selector.value).toBe('');
   });
+
+  // ---------------------------------------------------------------------------
+  // Fill-height layout (T-03 / AE-04)
+  // ---------------------------------------------------------------------------
+
+  it('expanded root has h-full class to fill parent height constraint', () => {
+    renderStrip();
+    const root = screen.getByTestId('inline-preview-strip');
+    expect(root.className).toContain('h-full');
+  });
+
+  it('expanded root has flex flex-col classes for vertical layout', () => {
+    renderStrip();
+    const root = screen.getByTestId('inline-preview-strip');
+    expect(root.className).toContain('flex');
+    expect(root.className).toContain('flex-col');
+  });
+
+  it('source textarea has flex-1 class to fill available height', () => {
+    renderStrip();
+    const textarea = screen.getByTestId('strip-source-input');
+    expect(textarea.className).toContain('flex-1');
+  });
+
+  it('output pre has flex-1 class to fill available height', () => {
+    renderStrip();
+    const output = screen.getByTestId('strip-output');
+    expect(output.className).toContain('flex-1');
+  });
+
+  it('output pre has overflow-y-auto class for internal scroll', () => {
+    renderStrip();
+    const output = screen.getByTestId('strip-output');
+    expect(output.className).toContain('overflow-y-auto');
+  });
+
+  it('source pane has min-h-0 class to allow shrinking below content size', () => {
+    renderStrip();
+    const pane = screen.getByTestId('strip-source-pane');
+    expect(pane.className).toContain('min-h-0');
+  });
+
+  it('output pane has min-h-0 class to allow shrinking below content size', () => {
+    renderStrip();
+    const pane = screen.getByTestId('strip-output-pane');
+    expect(pane.className).toContain('min-h-0');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Diagnostics ExpandableText (T-05 / AE-07 / AE-08)
+  // ---------------------------------------------------------------------------
+
+  it('diagnostic message shorter than 150 chars renders without Show more toggle', () => {
+    const diagnostics = [
+      { severity: 'error' as const, code: 'E001', message: 'Short error', ruleIndex: 0, ruleName: 'Rule 1' },
+    ];
+    renderStrip({ diagnostics });
+    expect(screen.queryByTestId('diagnostic-show-more')).not.toBeInTheDocument();
+    expect(screen.getByText('Short error')).toBeInTheDocument();
+  });
+
+  it('diagnostic message longer than 150 chars renders with Show more toggle', () => {
+    const longMessage = 'A'.repeat(160);
+    const diagnostics = [
+      { severity: 'error' as const, code: 'E001', message: longMessage, ruleIndex: 0, ruleName: 'Rule 1' },
+    ];
+    renderStrip({ diagnostics });
+    expect(screen.getByTestId('diagnostic-show-more')).toBeInTheDocument();
+  });
+
+  it('clicking Show more reveals full diagnostic message', () => {
+    const longMessage = 'A'.repeat(160);
+    const diagnostics = [
+      { severity: 'error' as const, code: 'E001', message: longMessage, ruleIndex: 0, ruleName: 'Rule 1' },
+    ];
+    renderStrip({ diagnostics });
+    fireEvent.click(screen.getByTestId('diagnostic-show-more'));
+    expect(screen.getByTestId('diagnostic-show-less')).toBeInTheDocument();
+    expect(screen.queryByTestId('diagnostic-show-more')).not.toBeInTheDocument();
+  });
+
+  it('clicking Show less collapses diagnostic message back', () => {
+    const longMessage = 'A'.repeat(160);
+    const diagnostics = [
+      { severity: 'error' as const, code: 'E001', message: longMessage, ruleIndex: 0, ruleName: 'Rule 1' },
+    ];
+    renderStrip({ diagnostics });
+    fireEvent.click(screen.getByTestId('diagnostic-show-more'));
+    fireEvent.click(screen.getByTestId('diagnostic-show-less'));
+    expect(screen.getByTestId('diagnostic-show-more')).toBeInTheDocument();
+  });
+
+  it('multiple diagnostics have independent expand/collapse state', () => {
+    const longMessage = 'B'.repeat(160);
+    const diagnostics = [
+      { severity: 'error' as const, code: 'E001', message: longMessage, ruleIndex: 0, ruleName: 'Rule 1' },
+      { severity: 'warning' as const, code: 'W001', message: longMessage, ruleIndex: 1, ruleName: 'Rule 2' },
+    ];
+    renderStrip({ diagnostics });
+    const showMoreButtons = screen.getAllByTestId('diagnostic-show-more');
+    expect(showMoreButtons).toHaveLength(2);
+    // Expand only the first
+    fireEvent.click(showMoreButtons[0]);
+    expect(screen.getAllByTestId('diagnostic-show-more')).toHaveLength(1);
+    expect(screen.getAllByTestId('diagnostic-show-less')).toHaveLength(1);
+  });
+
+  it('diagnostic description element does not have truncate class (AE-07)', () => {
+    const diagnostics = [
+      { severity: 'error' as const, code: 'E001', message: 'Some error message', ruleIndex: 0, ruleName: 'Rule 1' },
+    ];
+    renderStrip({ diagnostics });
+    const entry = screen.getByTestId('diagnostic-entry-0');
+    // Walk all descendant text spans — none should have truncate
+    const spans = entry.querySelectorAll('span');
+    spans.forEach((span) => {
+      expect(span.className).not.toContain('truncate');
+    });
+  });
 });

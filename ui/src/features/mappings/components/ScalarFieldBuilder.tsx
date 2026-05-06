@@ -109,6 +109,10 @@ const MATCH_KIND_LABEL: Record<SuggestedField['matchKind'], string> = {
 
 const AI_COMING_SOON = 'Coming soon \u2014 AI features available in a future release';
 
+function normalizeExpression(value: string): string {
+  return value.trim();
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -191,6 +195,7 @@ export function ScalarFieldBuilder({
   const [initialUnifiedBuilderState, setInitialUnifiedBuilderState] = useState<ExpressionBuilderState | null>(null);
   // Track whether the current expression has been applied (AE-10)
   const [appliedExpression, setAppliedExpression] = useState<string | null>(null);
+  const prevHydratedTargetRef = useRef<string>(selectedTargetPath);
 
   // Keep onExpressionChange in a ref to avoid stale closure issues
   const onExpressionChangeRef = useRef(onExpressionChange);
@@ -199,19 +204,32 @@ export function ScalarFieldBuilder({
   });
 
   const handleExpressionChange = useCallback((next: string) => {
+    // Ignore no-op emissions from builder/editor re-hydration so
+    // the Applied visual state is not cleared spuriously.
+    if (next === expression) {
+      return;
+    }
+
     setExpression(next);
-    // Reset applied state when expression changes (AE-10)
+    // Reset applied state only on real expression changes (AE-10)
     setAppliedExpression(null);
     onExpressionChangeRef.current?.(next);
-  }, []);
+  }, [expression]);
 
   const rawDslRef = useRef<RawDslEditorRef>(null);
 
   // Hydrate builder state when target field or its expression changes
   useEffect(() => {
     const expr = currentExpression ?? '';
+    const targetChanged = selectedTargetPath !== prevHydratedTargetRef.current;
+
     setExpression(expr);
-    setAppliedExpression(null); // Reset applied state on field navigation (AE-10)
+    if (targetChanged) {
+      // Clear applied state when navigating to a different target field.
+      // For same-field parent re-sync, keep applied visual state sticky.
+      setAppliedExpression(null);
+    }
+    prevHydratedTargetRef.current = selectedTargetPath;
 
     if (!expr) {
       // Unmapped / empty → reset to default empty builder state
@@ -236,6 +254,7 @@ export function ScalarFieldBuilder({
   }, [selectedTargetPath, currentExpression]);
 
   const { isValid, isValidating, errorDecorations } = useDslValidation(expression);
+  const isDirty = normalizeExpression(expression) !== normalizeExpression(currentExpression ?? '');
 
   // Read sourceData from PreviewContext for live result display (T-10)
   const previewCtx = useContext(PreviewContext);
@@ -287,7 +306,8 @@ export function ScalarFieldBuilder({
   }, []);
 
   const isApplied = appliedExpression !== null && appliedExpression === expression;
-  const canSave = expression.trim().length > 0 && isValid && !isValidating && !isApplied;
+  const canSave =
+    isDirty && expression.trim().length > 0 && isValid && !isValidating && !isApplied;
 
   return (
     <div

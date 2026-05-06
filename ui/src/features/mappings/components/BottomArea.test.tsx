@@ -139,4 +139,26 @@ describe('BottomArea', () => {
     fireEvent.change(selector, { target: { value: 'tc-1' } });
     expect(selector.value).toBe('');
   });
+
+  // ---------------------------------------------------------------------------
+  // Fill-height layout (T-03 / AE-04)
+  // ---------------------------------------------------------------------------
+
+  it('outer container has h-full class to fill parent height constraint', () => {
+    render(<BottomArea {...DEFAULT_CONTENT} />);
+    const container = screen.getByTestId('bottom-area');
+    expect(container.className).toContain('h-full');
+  });
+
+  it('active tab panel has flex-1 class to fill remaining height', () => {
+    render(<BottomArea {...DEFAULT_CONTENT} />);
+    const panel = screen.getByTestId('bottom-panel-preview');
+    expect(panel.className).toContain('flex-1');
+  });
+
+  it('active tab panel has min-h-0 class to allow shrinking below content size', () => {
+    render(<BottomArea {...DEFAULT_CONTENT} />);
+    const panel = screen.getByTestId('bottom-panel-preview');
+    expect(panel.className).toContain('min-h-0');
+  });
 });

@@ -1,6 +1,6 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
@@ -156,7 +156,7 @@ describe('SchemaUploadDialog', () => {
   it('renders dialog when open=true', () => {
     renderDialog(createMockAdapter());
     expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
-    expect(screen.getByText('Add Schema')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Add Schema' })).toBeInTheDocument();
   });
 
   it('file input accepts correct extensions', () => {
@@ -332,7 +332,11 @@ describe('SchemaUploadDialog — paste mode', () => {
     vi.unstubAllGlobals();
   });
 
-  it('AE-01: pasting valid JSON Schema shows format badge, field count, and default name', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('AE-01: pasting valid JSON Schema shows format badge and field count', async () => {
     const user = userEvent.setup();
     renderDialog(createMockAdapter());
 
@@ -349,10 +353,12 @@ describe('SchemaUploadDialog — paste mode', () => {
     expect(screen.getByTestId('field-count')).toBeInTheDocument();
     expect(screen.queryByTestId('inferred-warning')).not.toBeInTheDocument();
 
+    // No title in VALID_JSON_SCHEMA — name stays empty (user must type manually)
     const nameInput = screen.getByTestId('schema-name-input') as HTMLInputElement;
-    expect(nameInput.value).toBe('Pasted JSON Schema');
+    expect(nameInput.value).toBe('');
 
-    expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+    // Upload button disabled because name is empty
+    expect(screen.getByTestId('upload-button')).toBeDisabled();
   });
 
   it('AE-02: pasting sample JSON shows inferred warning and default name', async () => {
@@ -395,11 +401,14 @@ describe('SchemaUploadDialog — paste mode', () => {
     expect(screen.getByTestId('upload-button')).toBeDisabled();
   });
 
-  it('AE-08: format badge does not appear until textarea is blurred, but name input is always visible', async () => {
-    const user = userEvent.setup();
+  it('AE-01: format badge appears after debounce on change — no blur required', async () => {
+    vi.useFakeTimers();
     renderDialog(createMockAdapter());
 
-    await user.click(screen.getByTestId('mode-tab-paste'));
+    await act(async () => {
+      const tab = screen.getByTestId('mode-tab-paste');
+      tab.click();
+    });
 
     // Schema Name input is always visible — even before any content is pasted
     expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
@@ -408,10 +417,31 @@ describe('SchemaUploadDialog — paste mode', () => {
     // Set value without blurring
     fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
 
-    // Format badge not yet shown (analysis runs on blur)
+    // Format badge not yet shown (debounce hasn't fired)
     expect(screen.queryByTestId('format-badge')).not.toBeInTheDocument();
 
-    // Now blur
+    // Advance timers past the 300ms debounce
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // Format badge now visible — no blur required
+    expect(screen.getByTestId('format-badge')).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it('blur before debounce fires triggers analysis immediately', async () => {
+    renderDialog(createMockAdapter());
+
+    await act(async () => {
+      screen.getByTestId('mode-tab-paste').click();
+    });
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+
+    // Blur before debounce fires — should trigger analysis synchronously
     fireEvent.blur(textarea);
 
     await waitFor(() => {
@@ -454,6 +484,9 @@ describe('SchemaUploadDialog — paste mode', () => {
     renderDialog(createMockAdapter());
 
     await user.click(screen.getByTestId('mode-tab-paste'));
+    await waitFor(() => {
+      expect(screen.getByTestId('paste-input')).toBeInTheDocument();
+    });
 
     // Manually set a name
     const nameInput = screen.getByTestId('schema-name-input');
@@ -471,6 +504,39 @@ describe('SchemaUploadDialog — paste mode', () => {
 
     // Name should remain as manually entered
     expect((screen.getByTestId('schema-name-input') as HTMLInputElement).value).toBe('My Custom Name');
+  });
+
+  it('manual Schema Name is preserved through debounced analysis path', async () => {
+    vi.useFakeTimers();
+    renderDialog(createMockAdapter());
+
+    await act(async () => {
+      screen.getByTestId('mode-tab-paste').click();
+    });
+
+    // Manually type a name first
+    const nameInput = screen.getByTestId('schema-name-input');
+    fireEvent.change(nameInput, { target: { value: 'My Preserved Name' } });
+
+    // Paste JSON with a title
+    const schemaWithTitle = JSON.stringify({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: 'Should Not Overwrite',
+      type: 'object',
+      properties: { id: { type: 'string' } },
+    });
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: schemaWithTitle } });
+
+    // Advance past debounce — analysis fires
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // Name must still be the manually entered value
+    expect((screen.getByTestId('schema-name-input') as HTMLInputElement).value).toBe('My Preserved Name');
+
+    vi.useRealTimers();
   });
 
   it('pasting JSON without title leaves Schema Name empty', async () => {
@@ -508,8 +574,18 @@ describe('SchemaUploadDialog — paste mode', () => {
 
     await user.click(screen.getByTestId('mode-tab-paste'));
 
+    // Use a schema with a title so Schema Name auto-fills and upload button enables
+    const schemaWithTitle = JSON.stringify({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: 'Order',
+      type: 'object',
+      properties: { id: { type: 'string' } },
+    });
+
     const textarea = screen.getByTestId('paste-input');
-    fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+    fireEvent.change(textarea, { target: { value: schemaWithTitle } });
+
+    // Trigger analysis via blur (fallback path)
     fireEvent.blur(textarea);
 
     await waitFor(() => {
@@ -522,6 +598,35 @@ describe('SchemaUploadDialog — paste mode', () => {
       expect(createSchema).toHaveBeenCalled();
       expect(onSchemaCreated).toHaveBeenCalledWith(
         expect.objectContaining({ schemaId: 'schema-new' }),
+      );
+    });
+  });
+
+  it('paste mode sample JSON persists inferred metadata and raw JSON string content', async () => {
+    const createSchema = vi.fn().mockResolvedValue(CREATED_SCHEMA);
+    const adapter = createMockAdapter({ createSchema });
+    const user = userEvent.setup();
+    renderDialog(adapter);
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: SAMPLE_JSON } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByTestId('upload-button'));
+
+    await waitFor(() => {
+      expect(createSchema).toHaveBeenCalledWith(
+        expect.objectContaining({
+          format: 'json-schema',
+          inferred: true,
+          content: SAMPLE_JSON,
+        }),
       );
     });
   });
@@ -589,6 +694,7 @@ describe('SchemaUploadDialog — schema name field', () => {
 
     const textarea = screen.getByTestId('paste-input');
     fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });
+    // Use blur to trigger analysis immediately (fallback path)
     fireEvent.blur(textarea);
 
     await waitFor(() => {

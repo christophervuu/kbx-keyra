@@ -92,7 +92,7 @@ export function BottomArea({
     <div
       data-testid="bottom-area"
       className={[
-        'flex flex-col border-t border-slate-700 bg-slate-950',
+        'flex h-full flex-col border-t border-slate-700 bg-slate-950',
         className,
       ].join(' ')}
     >

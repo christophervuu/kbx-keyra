@@ -70,6 +70,10 @@ function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldT
   }
 }
 
+function normalizeExpression(value: string): string {
+  return value.trim();
+}
+
 // ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
@@ -229,14 +233,14 @@ export default function MappingEditor() {
       if (
         selectedTargetPath !== null &&
         path !== selectedTargetPath &&
-        unappliedExpression !== lastAppliedExpressionRef.current
+        normalizeExpression(unappliedExpression) !==
+          normalizeExpression(lastAppliedExpressionRef.current)
       ) {
         // Expression has been edited since last apply — show the guard dialog
         setPendingTargetPath(path);
         setUnappliedDialogOpen(true);
       } else {
         setSelectedTargetPath(path);
-        setUnappliedExpression('');
       }
     },
     [unappliedExpression, selectedTargetPath],
@@ -244,7 +248,7 @@ export default function MappingEditor() {
 
   // "Apply & Continue" — apply current expression then navigate to the clicked field
   const handleUnappliedApplyAndContinue = useCallback(() => {
-    if (selectedTargetPath && unappliedExpression.trim()) {
+    if (selectedTargetPath && normalizeExpression(unappliedExpression)) {
       editor.actions.applyRule(selectedTargetPath, unappliedExpression);
     }
     setUnappliedDialogOpen(false);
@@ -327,6 +331,7 @@ export default function MappingEditor() {
         ? (editor.rules.find((r) => r.target === selectedTargetPath)?.expression ?? '')
         : '';
     lastAppliedExpressionRef.current = existing;
+    setUnappliedExpression(existing);
   // Intentionally only re-runs when the selected field changes, not on every rules update.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath]);
@@ -360,7 +365,7 @@ export default function MappingEditor() {
   const handleApplyExpression = useCallback(
     (targetPath: string, expression: string) => {
       editor.actions.applyRule(targetPath, expression);
-      setUnappliedExpression('');
+      setUnappliedExpression(expression);
       lastAppliedExpressionRef.current = expression;
       // NOTE: Auto-advance removed (FS-025 T-04 / AE-10).
       // Navigation is now explicit via "Next unmapped →" button or Ctrl+].

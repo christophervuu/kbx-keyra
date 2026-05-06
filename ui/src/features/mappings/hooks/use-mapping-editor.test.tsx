@@ -74,6 +74,38 @@ const MOCK_TARGET_SCHEMA: SchemaDetail = {
   },
 };
 
+const MOCK_INFERRED_SOURCE_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'source-schema-1',
+    name: 'Inferred Source Schema',
+    format: 'json-schema',
+    fieldCount: 2,
+    origin: 'local',
+    status: 'ready',
+    inferred: true,
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: JSON.stringify({ x: 'abc', y: 123 }),
+};
+
+const MOCK_INFERRED_TARGET_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'target-schema-1',
+    name: 'Inferred Target Schema',
+    format: 'json-schema',
+    fieldCount: 2,
+    origin: 'local',
+    status: 'ready',
+    inferred: true,
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: JSON.stringify({ A: { B: 'text' } }),
+};
+
 // ---------------------------------------------------------------------------
 // Mock adapter factory
 // ---------------------------------------------------------------------------
@@ -207,6 +239,31 @@ describe('useMappingEditor', () => {
       expect(result.current.parsedSourceSchema).not.toBeNull();
       expect(result.current.parsedSourceSchema?.format).toBe('json-schema');
       expect(result.current.parsedTargetSchema).not.toBeNull();
+    });
+
+    it('parses inferred schemas for source/target tree display', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_INFERRED_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') return Promise.resolve(MOCK_INFERRED_TARGET_SCHEMA);
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      expect(result.current.parsedSourceSchema).not.toBeNull();
+      expect(result.current.parsedSourceSchema?.inferred).toBe(true);
+      expect(result.current.parsedSourceSchema?.nodes.length ?? 0).toBeGreaterThan(0);
+      expect(result.current.parsedTargetSchema).not.toBeNull();
+      expect(result.current.parsedTargetSchema?.inferred).toBe(true);
+      expect(result.current.parsedTargetSchema?.nodes.length ?? 0).toBeGreaterThan(0);
     });
 
     it('transitions to error state on config load failure', async () => {
@@ -1030,6 +1087,27 @@ describe('useMappingEditor', () => {
       act(() => { result.current.actions.applyRule('A.C', 'static("y")'); });
 
       expect(result.current.unsavedRuleCount).toBe(2);
+    });
+
+    it('does not increment unsavedRuleCount for duplicate apply of same expression', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.applyRule('A.B', 'source("x")');
+      });
+
+      const firstCount = result.current.unsavedRuleCount;
+
+      act(() => {
+        result.current.actions.applyRule('A.B', 'source("x")');
+      });
+
+      expect(result.current.unsavedRuleCount).toBe(firstCount);
     });
 
     it('fires onRuleApplied callback after applyRule', async () => {

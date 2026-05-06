@@ -1,8 +1,11 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import React, { useEffect } from 'react';
 
 import { ScalarFieldBuilder } from './ScalarFieldBuilder';
 import type { ScalarFieldBuilderProps } from './ScalarFieldBuilder';
+import { PreviewProvider } from '../context/preview-context';
+import { usePreviewSetters } from '../context/preview-context';
 
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
@@ -163,13 +166,16 @@ describe('ScalarFieldBuilder', () => {
   it('fires onApply with target path and expression when apply is clicked with valid expression', async () => {
     const onApply = vi.fn();
     renderBuilder({ currentExpression: 'source("firstName")', onApply });
+    fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
     // Wait for debounced validation to settle
     await new Promise((r) => setTimeout(r, 400));
     const applyBtn = screen.getByTestId('apply-btn');
-    if (!applyBtn.hasAttribute('disabled')) {
-      fireEvent.click(applyBtn);
-      expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
-    }
+    expect(applyBtn).not.toBeDisabled();
+    fireEvent.click(applyBtn);
+    expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("lastName")');
   });
 
   // AI buttons
@@ -400,16 +406,20 @@ describe('ScalarFieldBuilder', () => {
   // ---------------------------------------------------------------------------
 
   describe('AE-10: Apply does not auto-advance', () => {
-    it('Apply button is enabled when expression is non-empty and valid', () => {
+    it('Apply button is disabled when expression is unchanged from current mapping', () => {
       renderBuilder({ currentExpression: 'source("firstName")' });
-      // Apply button should be enabled (expression is valid DSL)
       const applyBtn = screen.getByTestId('apply-btn');
-      expect(applyBtn).not.toBeDisabled();
+      expect(applyBtn).toBeDisabled();
     });
 
     it('Apply button shows "Applied" state after clicking', async () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
       const applyBtn = screen.getByTestId('apply-btn');
       fireEvent.click(applyBtn);
       // After apply, button should show "Applied" text
@@ -418,14 +428,17 @@ describe('ScalarFieldBuilder', () => {
 
     it('Apply button re-enables after expression changes post-apply', async () => {
       const onApply = vi.fn();
-      const { rerender } = renderBuilder({ currentExpression: 'source("firstName")', onApply });
-      fireEvent.click(screen.getByTestId('apply-btn'));
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
 
-      // Simulate expression change by switching to editor mode and typing
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+
+      // Simulate expression change by typing a different expression
+      fireEvent.change(textarea, { target: { value: 'source("age")' } });
 
       // Apply button should no longer show "Applied"
       expect(screen.getByTestId('apply-btn')).not.toHaveTextContent('Applied');
@@ -434,8 +447,13 @@ describe('ScalarFieldBuilder', () => {
     it('onApply is called with correct args when Apply is clicked', () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("age")' } });
+
       fireEvent.click(screen.getByTestId('apply-btn'));
-      expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+      expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("age")');
     });
   });
 
@@ -579,6 +597,11 @@ describe('ScalarFieldBuilder', () => {
     it('Apply button is disabled after clicking once (no double-click required)', () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
       const btn = screen.getByTestId('apply-btn');
       fireEvent.click(btn);
       expect(btn).toBeDisabled();
@@ -587,6 +610,11 @@ describe('ScalarFieldBuilder', () => {
     it('Apply button shows "Applied" text immediately after single click', () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
       fireEvent.click(screen.getByTestId('apply-btn'));
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
     });
@@ -594,8 +622,107 @@ describe('ScalarFieldBuilder', () => {
     it('onApply is called exactly once per click', () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
       fireEvent.click(screen.getByTestId('apply-btn'));
       expect(onApply).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps "Applied" state after parent re-render with same expression', () => {
+      const onApply = vi.fn();
+      const { rerender } = renderBuilder({
+        currentExpression: 'source("firstName")',
+        onApply,
+      });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          currentExpression={'source("lastName")'}
+          onApply={onApply}
+        />,
+      );
+
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+    });
+
+    it('keeps "Applied" state on same-value editor change event', () => {
+      const onApply = vi.fn();
+      renderBuilder({ currentExpression: 'source("firstName")', onApply });
+
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
+      fireEvent.click(screen.getByTestId('apply-btn'));
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+
+      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
+
+      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-04: LiveResultDisplay wired from PreviewContext (AE-05 / AE-06)
+  // ---------------------------------------------------------------------------
+
+  describe('T-04: LiveResultDisplay sourceData from PreviewContext', () => {
+    /** Wrapper that seeds PreviewContext with a parsed sourceData value */
+    function WithSourceData({
+      sourceData,
+      children,
+    }: {
+      sourceData: unknown | null;
+      children: React.ReactNode;
+    }) {
+      const { setSourceData } = usePreviewSetters();
+      useEffect(() => {
+        setSourceData(sourceData);
+      }, [sourceData, setSourceData]);
+      return <>{children}</>;
+    }
+
+    function renderBuilderWithContext(
+      overrides: Partial<ScalarFieldBuilderProps> = {},
+      sourceData: unknown | null = null,
+    ) {
+      const props = { ...DEFAULT_PROPS, ...overrides };
+      return render(
+        <PreviewProvider>
+          <WithSourceData sourceData={sourceData}>
+            <ScalarFieldBuilder {...props} />
+          </WithSourceData>
+        </PreviewProvider>,
+      );
+    }
+
+    it('shows "Load test data to see live results." when no sourceData in context (AE-06)', () => {
+      renderBuilderWithContext({}, null);
+      expect(screen.getByTestId('live-result-no-data')).toHaveTextContent(
+        'Load test data to see live results.',
+      );
+    });
+
+    it('LiveResultDisplay is present in the builder (AE-05)', () => {
+      renderBuilderWithContext({}, null);
+      expect(screen.getByTestId('live-result-display')).toBeInTheDocument();
+    });
+
+    it('does not show no-data message when sourceData is provided (AE-05)', () => {
+      renderBuilderWithContext({}, { firstName: 'Alice' });
+      // The no-data placeholder should not be visible when sourceData is set
+      expect(screen.queryByTestId('live-result-no-data')).not.toBeInTheDocument();
     });
   });
 });

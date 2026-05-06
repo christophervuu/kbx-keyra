@@ -6,7 +6,7 @@ import type { EngineValidationState } from './use-engine-validation';
 import { useAdapter } from '@/lib/api';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 import type { SaveStatus } from '../components/EditorTopBar';
-import { parseJsonSchema, parseXsd } from '@/features/schemas';
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,6 +150,13 @@ function moveItem<T>(array: readonly T[], from: number, to: number): T[] {
  */
 function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
   try {
+    if (schema.metadata.inferred) {
+      const contentStr =
+        typeof schema.content === 'string' ? schema.content : JSON.stringify(schema.content);
+      const inferredFormat = schema.metadata.format === 'xsd' ? 'xml' : 'json';
+      return parseInferredSchema(contentStr, inferredFormat);
+    }
+
     if (schema.metadata.format === 'json-schema') {
       return parseJsonSchema(schema.content);
     }
@@ -557,6 +564,11 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
   const applyRule = useCallback(
     (targetPath: string, expression: string) => {
+      const existing = rules.find((r) => r.target === targetPath);
+      if (existing?.expression === expression) {
+        return;
+      }
+
       setRules((prev) => {
         const idx = prev.findIndex((r) => r.target === targetPath);
         if (idx >= 0) {
@@ -566,12 +578,13 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
         }
         return [...prev, { target: targetPath, type: 'string', expression }];
       });
+
       setUnsavedRuleCount((n) => n + 1);
       setSaveState('idle');
       // Fire auto-preview callback (T-05)
       onRuleAppliedRef.current?.();
     },
-    [],
+    [rules],
   );
 
   // ---------------------------------------------------------------------------

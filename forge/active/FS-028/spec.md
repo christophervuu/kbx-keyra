@@ -345,8 +345,7 @@ After this spec is implemented:
 
 ## Open Questions
 
-- `Q1.` The `SchemaUploadDialog` code already has `handlePasteTextChange` extracting `title` on every change and the Schema Name input is always rendered. If this is already working correctly in production, the remaining fix is only about making `analyzePasteContent` (info panel) run on change instead of blur. Confirm whether the problem report is about (a) the Schema Name input visibility, (b) the info panel appearance, or (c) both.
-- `Q2.` `LiveResultDisplay` is already rendered in `UnifiedExpressionBuilder`. If `sourceData` is already correctly threaded from `PreviewContext`, the live result may already work. Confirm whether the issue is (a) `sourceData` not being passed, (b) `sourceData` being in string form but needing parsing, or (c) the component not rendering when the expression is mid-edit.
+- none
 
 ---
 
@@ -387,4 +386,4 @@ Tasks 1 and 2 are closely related but separable (analysis vs name inference). Ta
 - Rev 1 — 2026-05-06
   - Initial draft from requirements
   - Noted overlap with FS-027 tasks T-02, T-03, T-10, T-11 — this spec intentionally separates import UX, preview layout, and diagnostics readability from Builder/Editor panel state fixes
-  - Open questions Q1, Q2 captured for potential already-resolved behavior
+  - No open questions
