@@ -105,7 +105,8 @@ ui/src/
         TestLabPage.tsx      Full-page test lab: multi-panel simultaneous layout (2×2 wide, vertical stack medium, tab fallback narrow); resizable main split; ExecutionSummaryBar; ResultPanel wrappers; useTestLabLayout hook; own isolated PreviewProvider (FS-021 T-06, FS-032, FS-033)
         preview/
           ResultPanel.tsx      Reusable panel chrome: header (title + badge + collapse toggle) + content area; children always mounted; CSS hidden for collapse; ARIA aria-expanded on toggle (FS-033)
-          ExecutionSummaryBar.tsx  Sticky compact bar: idle | executing | success (duration + rule stats + diagnostic severity badges) | error | timeout; pure component from PreviewExecutionState (FS-033)
+          ExecutionSummaryBar.tsx  Sticky compact bar: hidden when idle; executing (spinner); pass (green) | fail (red) | error (amber) verdict with duration, diagnostic severity badges, rules summary, version badge, environment badge, optional diff summary label; verdict derived via deriveExecutionVerdict (FS-033, FS-035)
+          SuiteSummary.tsx         Inline batch suite summary: header with total/passed/failed/errored counts; scrollable per-test rows with verdict icon, name, duration, error count; clickable rows load test results into standard tabs (FS-035)
         TargetFieldRow.tsx    Atomic target field row (status icon, type badge, expression summary)
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
@@ -147,8 +148,8 @@ ui/src/
         use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04)
         use-resizable-layout.ts    Resizable layout state hook (source/target widths, bottom height, collapse state, drag handle props, localStorage persistence)
         use-test-cases.ts          Test case CRUD hook keyed by mappingId (FS-012 T-05, FS-034 T-01): save/load/delete/rename/duplicate/update; localStorage key keyra:testcases:{id}
-        use-test-run-results.ts    Test run result persistence hook keyed by mappingId (FS-034 T-02): recordResult/clearResult/clearAll; localStorage key keyra:testresults:{id}; results stored as Record<string, TestRunResult> for O(1) lookup
-        use-batch-execution.ts     Sequential batch execution hook (FS-034 T-05): runAll/rerunFailed/cancel; pass/fail from zero-error-diagnostic rule; onCaseComplete callback; cancellation ref; unmount cleanup
+        use-test-run-results.ts    Test run result persistence hook keyed by mappingId (FS-034 T-02, FS-035 T-05): recordResult/clearResult/clearAll; sessionStorage key keyra:test-results:{id}; results stored as Record<string, TestRunResult> for O(1) lookup; cleared on tab/window close
+        use-batch-execution.ts     Sequential batch execution hook (FS-034 T-05): runAll/rerunFailed/cancel; pass/fail/error from error diagnostics or engine throw; onCaseComplete callback; cancellation ref; unmount cleanup
         use-test-lab-layout.ts     Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence (keyra:testlab-layout) (FS-033)
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
@@ -167,6 +168,7 @@ ui/src/
         suggest-source-fields.ts  Heuristic source field suggestions (exact/case/contains + type)
         truncate-expression.ts    Expression display truncation utility (max 60 chars)
         array-expression-generator.ts  Array pattern -> DSL expression generator
+        execution-result-utils.ts  Pass/fail verdict derivation (deriveExecutionVerdict: idle/executing/pass/fail/error) + diff summary label formatting (formatDiffSummary) (FS-035 T-03, T-04)
 
   lib/
     api/
@@ -712,9 +714,15 @@ A dedicated full-page testing surface that provides simultaneous visibility of a
 
 **Execution Summary Bar (`ExecutionSummaryBar`):**
 - Sticky bar between top bar and result area; renders at all breakpoints
-- Displays: idle message | executing spinner | success (green dot + duration + rule stats + diagnostic severity badges) | error (red dot + message) | timeout (amber dot)
-- Props: `state: PreviewExecutionState`
-- Diagnostic badges only shown for severities with count > 0
+- **Hidden when idle** (no execution has run yet)
+- Executing: spinner + "Executing…"
+- Pass (green tint): CheckCircle2 icon + "Passed" + duration badge + rules summary + diagnostic severity badges
+- Fail (red tint): XCircle icon + "Failed" + same stats
+- Error (amber tint): AlertTriangle icon + "Error" + error message or "Execution timed out"
+- Right side: optional `v{n}` version badge + environment badge (default "Local")
+- Optional `diffSummaryLabel` badge (wired by diff-first UX) shown when diff mismatches exist
+- Props: `state: PreviewExecutionState`, `diffResult?: DiffResult | null`, `diffSummaryLabel?: string`, `mappingVersion?: number`, `environmentLabel?: string`
+- Verdict derived via `deriveExecutionVerdict(state, diffResult)` from `execution-result-utils.ts`
 
 **`ResultPanel` component:**
 - Reusable wrapper for each result panel
@@ -744,7 +752,7 @@ A dedicated full-page testing surface that provides simultaneous visibility of a
 - `usePreviewExecution({ config, sourceSchemaDetail, targetSchemaDetail, sourceDataRaw })` — execution lifecycle.
 - `useTestLabLayout({ traceEnabled })` — panel layout state, breakpoint detection, persistence.
 - `useTestCases(mappingId)` — test case CRUD (save/load/delete/rename/duplicate/update); reads from `keyra:testcases:{mappingId}`.
-- `useTestRunResults(mappingId)` — run result persistence; reads from `keyra:testresults:{mappingId}`.
+- `useTestRunResults(mappingId)` — run result persistence; reads from `keyra:test-results:{mappingId}` (sessionStorage — cleared on tab/window close).
 - `useBatchExecution({ config, sourceSchema, targetSchema, onCaseComplete })` — sequential batch execution; fires `onCaseComplete` after each case; parent calls `recordResult`.
 
 **`PreviewProvider` isolation:** the Test Lab page wraps its content in its own `<PreviewProvider>`, independent from the editor's provider. Both pages independently access the same localStorage keys via their respective hook instances. This avoids stale-reference risk and is future-proof for `HttpAdapter` migration.
@@ -762,7 +770,7 @@ The Test Lab page provides a full test case management sidebar (`TestCaseListPan
 **`TestCaseListPanel` component:**
 - Props: `testCases`, `selectedId`, `runResults`, `onSelect`, `onSelectScratchpad`, `onRename`, `onDuplicate`, `onDelete`, `onAddNew`, `onSaveCurrentInput`, `sourceDataRaw`, `onRunAll`, `onRerunFailed`, `onCancel`, `batchState`, `toolbarSlot?`
 - Permanent Scratchpad pseudo-entry at top of list (non-deletable, non-renamable)
-- Status badges: green = pass, red = fail, gray = not run
+- Status indicators: CheckCircle2 (green) = pass, XCircle (red) = fail, AlertCircle (amber) = error, gray dot = not run (FS-035 T-05)
 - Inline rename: double-click name → input → Enter confirms, Escape/blur cancels
 - Delete confirmation when run results exist for the case
 - Add New / Save As toolbar row (primary)
@@ -772,7 +780,7 @@ The Test Lab page provides a full test case management sidebar (`TestCaseListPan
 ```ts
 interface TestRunResult {
   testCaseId: string;
-  status: 'pass' | 'fail';
+  status: 'pass' | 'fail' | 'error';
   errorCount: number;
   warningCount: number;
   executedAt: ISODateString;
@@ -780,7 +788,7 @@ interface TestRunResult {
   outputSnapshot?: unknown;
 }
 ```
-Storage key: `keyra:testresults:{mappingId}` — stored as `Record<string, TestRunResult>` for O(1) lookup by `testCaseId`. Separate from `keyra:testcases:{mappingId}` to preserve backward compatibility with existing `TestCase` data.
+Storage key: `keyra:test-results:{mappingId}` (sessionStorage) — stored as `Record<string, TestRunResult>` for O(1) lookup by `testCaseId`. Cleared on tab/window close. Separate from `keyra:testcases:{mappingId}` to preserve backward compatibility with existing `TestCase` data.
 
 **`useTestRunResults` hook:**
 - Input: `mappingId: string`
@@ -792,15 +800,68 @@ Storage key: `keyra:testresults:{mappingId}` — stored as `Record<string, TestR
 - Input: `{ config, sourceSchema, targetSchema, onCaseComplete? }`
 - Output: `{ isRunning, progress: { current, total }, runAll, rerunFailed, cancel }`
 - Sequential execution: one test case at a time, yields to event loop between cases
-- Pass/fail: zero error-severity diagnostics = pass; any errors, invalid JSON, or engine throw = fail
+- Pass/fail/error: zero error-severity diagnostics = pass; any errors = fail; invalid JSON or engine throw = error
 - `rerunFailed` filters to cases with `status === 'fail'` in the provided results map
 - Cancellation: `cancel()` sets a ref flag checked before each case; current case always completes
 - Cleanup: cancels on unmount via `useEffect` cleanup
 - Does not own result persistence — fires `onCaseComplete(testCaseId, result)` and caller persists via `recordResult`
 
+**`SuiteSummary` component (FS-035 T-06):**
+- Renders inline above tab content after batch execution completes
+- Props: `rows: readonly SuiteSummaryRow[]`, `onSelectTest: (testCaseId: string) => void`
+- Header: total/passed/failed/errored counts with color-coded labels
+- Scrollable per-test rows: verdict icon, test case name, duration badge, error count badge
+- Clicking a row fires `onSelectTest(testCaseId)` to load that test's results into the standard tabs
+
 **Batch summary:**
 - After `runAll` or `rerunFailed` completes, `TestLabInner` computes `{ passed, failed }` from the updated `runResults` and passes it to `TestCaseListPanel` as `batchState.summary`
 - Summary is shown inline in the batch toolbar row; cleared when a new batch starts
+- `SuiteSummaryRows` are also populated after batch completion and rendered above the tab content
+
+### Diff Infrastructure and Diff-First UX (FS-035)
+
+**Categorized Diff Mismatch Types (`DiffChangeType`):**
+
+Six specific categories replace the coarse `added | removed | changed` union:
+
+| Category | Meaning |
+|---|---|
+| `missing_field` | Path exists in expected, absent in actual |
+| `extra_field` | Path exists in actual, absent in expected |
+| `value_mismatch` | Same path, same JS type, different value |
+| `type_mismatch` | Same path, different JS types (e.g. string vs number) |
+| `null_mismatch` | Same path, one side is null and the other is not |
+| `structural_mismatch` | Same path, object/array vs primitive (or array vs object) |
+
+Classification priority: null_mismatch → structural_mismatch → type_mismatch → value_mismatch.
+
+**`DiffEntry` type:** includes optional `actualType` / `expectedType` string fields populated for type/null/structural mismatches.
+
+**`DiffSummary` type:** `{ total: number; byCategory: Record<DiffChangeType, number> }` — always a complete record with all six categories initialized to 0.
+
+**`DiffResult` type:** `{ entries: readonly DiffEntry[]; isEqual: boolean; summary: DiffSummary }`.
+
+**`DiffDisplay` component (FS-035 T-02):**
+- Renders a diff summary header with per-category breakdown when mismatches exist
+- Each entry row shows: category badge (label + Lucide icon + color), path, type annotation for type/null/structural mismatches, value display (expected-only for missing_field, actual-only for extra_field, both for others)
+- Category colors: missing_field/type_mismatch/structural_mismatch = red; extra_field/value_mismatch/null_mismatch = amber
+
+**Diff-first UX (FS-035 T-04):**
+- After execution completes (executing → success transition), if expected output is available and parseable, `computeDiff` is called and the result stored in `diffResult` state
+- `activeTab` auto-switches to `'diff'` when expected output exists
+- `diffResult` is passed to `ExecutionSummaryBar` (affects verdict + shows diff summary label badge)
+- Diff tab label shows a mismatch count badge (red) when mismatches exist, or a green check when output matches
+- `deriveExecutionVerdict` considers `diffResult.isEqual` — a diff mismatch causes `'fail'` verdict even with no error diagnostics
+
+**`deriveExecutionVerdict(state, diffResult?)` utility:**
+- `idle` → `'idle'`; `executing` → `'executing'`; `error | timeout` → `'error'`
+- `success` + error diagnostics → `'fail'`; `success` + diff mismatch → `'fail'`; otherwise → `'pass'`
+- When `diffResult` is `undefined` or `null` (no expected output), verdict is `'pass'` if no error diagnostics (AE-06)
+
+**`formatDiffSummary(summary)` utility:**
+- Generates human-readable label: `"3 mismatches: 1 missing, 2 value"` or `"1 mismatch: 1 type"`
+- Returns empty string when `total === 0`
+- Uses short category labels: missing, extra, value, type, null, structural
 
 `RuleList` includes a local search bar for filtering visible rules by case-insensitive substring match against:
 

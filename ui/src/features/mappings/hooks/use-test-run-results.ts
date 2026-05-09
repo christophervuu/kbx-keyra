@@ -6,7 +6,7 @@ import type { TestRunResult } from '@/lib/types/domain';
 // Constants
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY_PREFIX = 'keyra:testresults:';
+const STORAGE_KEY_PREFIX = 'keyra:test-results:';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -18,19 +18,19 @@ function storageKey(mappingId: string): string {
 
 function readFromStorage(mappingId: string): Readonly<Record<string, TestRunResult>> {
   try {
-    const raw = localStorage.getItem(storageKey(mappingId));
+    const raw = sessionStorage.getItem(storageKey(mappingId));
     if (raw === null) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       console.warn(
-        `[useTestRunResults] Corrupted localStorage value for key "${storageKey(mappingId)}" — resetting to empty record.`,
+        `[useTestRunResults] Corrupted sessionStorage value for key "${storageKey(mappingId)}" — resetting to empty record.`,
       );
       return {};
     }
     return parsed as Record<string, TestRunResult>;
   } catch {
     console.warn(
-      `[useTestRunResults] Failed to parse localStorage value for key "${storageKey(mappingId)}" — resetting to empty record.`,
+      `[useTestRunResults] Failed to parse sessionStorage value for key "${storageKey(mappingId)}" — resetting to empty record.`,
     );
     return {};
   }
@@ -41,7 +41,7 @@ function writeToStorage(
   results: Readonly<Record<string, TestRunResult>>,
 ): { ok: true } | { ok: false; error: string } {
   try {
-    localStorage.setItem(storageKey(mappingId), JSON.stringify(results));
+    sessionStorage.setItem(storageKey(mappingId), JSON.stringify(results));
     return { ok: true };
   } catch (err) {
     if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22)) {

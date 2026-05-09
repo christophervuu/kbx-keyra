@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 
 import {
   DiagnosticsDisplay,
@@ -10,10 +10,11 @@ import {
   OutputDisplay,
   ResultPanel,
   SourceDataInput,
+  SuiteSummary,
   TestCaseListPanel,
   TraceDisplay,
 } from './preview';
-import type { BatchState } from './preview';
+import type { BatchState, SuiteSummaryRow } from './preview';
 import { PreviewProvider } from '../context/preview-context';
 import { usePreviewExecution } from '../hooks/use-preview-execution';
 import { useMappingEditor } from '../hooks/use-mapping-editor';
@@ -21,7 +22,10 @@ import { useTestLabLayout } from '../hooks/use-test-lab-layout';
 import { useTestCases } from '../hooks/use-test-cases';
 import { useTestRunResults } from '../hooks/use-test-run-results';
 import { useBatchExecution } from '../hooks/use-batch-execution';
+import { computeDiff } from '@/lib/utils/json-diff';
+import { formatDiffSummary } from '../lib/execution-result-utils';
 
+import type { DiffResult } from '@/lib/types/diff';
 import type { TestCase, TestRunResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -193,9 +197,14 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
   // Batch state for UI
   const [batchSummary, setBatchSummary] = useState<{ passed: number; failed: number } | null>(null);
+  // Suite summary rows shown after batch completes
+  const [suiteSummaryRows, setSuiteSummaryRows] = useState<readonly SuiteSummaryRow[]>([]);
 
   // Narrow fallback tab state — only used at narrow breakpoint
   const [activeTab, setActiveTab] = useState<TabId>('output');
+
+  // Diff result computed after each successful execution when expected output exists
+  const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
 
   const { state, run, autoRun, setAutoRun, traceEnabled, setTraceEnabled } = usePreviewExecution({
     config: editor.config,
@@ -206,6 +215,31 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
   const { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit } = useTestLabLayout({
     traceEnabled,
+  });
+
+  // Auto-tab-switch and diff computation: fires on executing → success transition
+  const prevStatusRef = useRef<string>('idle');
+  useEffect(() => {
+    const prevStatus = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+
+    if (prevStatus === 'executing' && state.status === 'success') {
+      // Compute diff if expected output is available
+      if (loadedExpectedOutput !== undefined && loadedExpectedOutput.trim() !== '') {
+        try {
+          const parsedExpected = JSON.parse(loadedExpectedOutput);
+          const result = computeDiff(state.result.output, parsedExpected);
+          setDiffResult(result);
+          // Auto-switch to diff tab
+          setActiveTab('diff');
+        } catch {
+          // Unparseable expected output — treat as no diff
+          setDiffResult(null);
+        }
+      } else {
+        setDiffResult(null);
+      }
+    }
   });
 
   // Test case CRUD
@@ -269,6 +303,11 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     setLoadKey((k) => k + 1);
   }
 
+  function handleSelectSuiteTest(testCaseId: string) {
+    const tc = testCases.find((t) => t.id === testCaseId);
+    if (tc) handleSelectTestCase(tc);
+  }
+
   // ---------------------------------------------------------------------------
   // Add New / Save As handlers
   // ---------------------------------------------------------------------------
@@ -309,11 +348,21 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
   async function handleRunAll() {
     setBatchSummary(null);
+    setSuiteSummaryRows([]);
     await runAll(testCases);
     // Compute summary from updated results
     const passed = testCases.filter((tc) => runResults[tc.id]?.status === 'pass').length;
     const failed = testCases.filter((tc) => runResults[tc.id]?.status === 'fail').length;
     setBatchSummary({ passed, failed });
+    // Build suite summary rows
+    const rows: SuiteSummaryRow[] = testCases
+      .filter((tc) => runResults[tc.id] !== undefined)
+      .map((tc) => ({
+        testCaseId: tc.id,
+        testCaseName: tc.name,
+        result: runResults[tc.id],
+      }));
+    setSuiteSummaryRows(rows);
   }
 
   async function handleRerunFailed() {
@@ -422,6 +471,14 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
         data-testid="right-panel"
         data-layout="narrow"
       >
+        {/* Suite summary — shown after batch execution */}
+        {suiteSummaryRows.length > 0 && (
+          <SuiteSummary
+            rows={suiteSummaryRows}
+            onSelectTest={handleSelectSuiteTest}
+          />
+        )}
+
         {/* Tab bar */}
         <div
           role="tablist"
@@ -456,6 +513,24 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
                 >
                   {diagnosticCount}
                 </span>
+              )}
+              {tab.id === 'diff' && diffResult !== null && (
+                diffResult.isEqual ? (
+                  <CheckCircle2
+                    size={10}
+                    className="text-green-400"
+                    aria-label="Output matches expected"
+                    data-testid="diff-tab-match-icon"
+                  />
+                ) : (
+                  <span
+                    className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white"
+                    aria-label={`${diffResult.summary.total} diff mismatch${diffResult.summary.total === 1 ? '' : 'es'}`}
+                    data-testid="diff-tab-badge"
+                  >
+                    {diffResult.summary.total}
+                  </span>
+                )
               )}
             </button>
           ))}
@@ -770,7 +845,12 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
       </div>
 
       {/* Execution summary bar — sticky, all breakpoints */}
-      <ExecutionSummaryBar state={state} />
+      <ExecutionSummaryBar
+        state={state}
+        diffResult={diffResult}
+        diffSummaryLabel={diffResult !== null && !diffResult.isEqual ? formatDiffSummary(diffResult.summary) : undefined}
+        mappingVersion={editor.version}
+      />
 
       {/* Two-panel body */}
       <div

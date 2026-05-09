@@ -1,6 +1,15 @@
 import { useState, useMemo } from 'react';
+import {
+  MinusCircle,
+  PlusCircle,
+  ArrowRightLeft,
+  Braces,
+  CircleSlash,
+  Layers,
+  CheckCircle2,
+} from 'lucide-react';
 
-import type { DiffEntry } from '@/lib/types/diff';
+import type { DiffEntry, DiffSummary } from '@/lib/types/diff';
 import type { PreviewExecutionState } from '@/lib/types/domain';
 import { computeDiff } from '@/lib/utils/json-diff';
 
@@ -23,6 +32,56 @@ export interface DiffDisplayProps {
 }
 
 // ---------------------------------------------------------------------------
+// Category metadata
+// ---------------------------------------------------------------------------
+
+type CategoryMeta = {
+  label: string;
+  rowClass: string;
+  textClass: string;
+  Icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean }>;
+};
+
+const CATEGORY_META: Record<DiffEntry['type'], CategoryMeta> = {
+  missing_field: {
+    label: 'Missing Field',
+    rowClass: 'bg-red-900/30 border-l-2 border-red-500',
+    textClass: 'text-red-400',
+    Icon: MinusCircle,
+  },
+  extra_field: {
+    label: 'Extra Field',
+    rowClass: 'bg-amber-900/30 border-l-2 border-amber-500',
+    textClass: 'text-amber-400',
+    Icon: PlusCircle,
+  },
+  value_mismatch: {
+    label: 'Value Mismatch',
+    rowClass: 'bg-amber-900/30 border-l-2 border-amber-500',
+    textClass: 'text-amber-400',
+    Icon: ArrowRightLeft,
+  },
+  type_mismatch: {
+    label: 'Type Mismatch',
+    rowClass: 'bg-red-900/30 border-l-2 border-red-500',
+    textClass: 'text-red-400',
+    Icon: Braces,
+  },
+  null_mismatch: {
+    label: 'Null Mismatch',
+    rowClass: 'bg-amber-900/30 border-l-2 border-amber-500',
+    textClass: 'text-amber-400',
+    Icon: CircleSlash,
+  },
+  structural_mismatch: {
+    label: 'Structural Mismatch',
+    rowClass: 'bg-red-900/30 border-l-2 border-red-500',
+    textClass: 'text-red-400',
+    Icon: Layers,
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -30,54 +89,124 @@ const MAX_VALUE_DISPLAY_LEN = 60;
 
 function formatValue(value: unknown): string {
   const raw = JSON.stringify(value);
+  if (raw === undefined) return 'undefined';
   if (raw.length > MAX_VALUE_DISPLAY_LEN) {
     return raw.slice(0, MAX_VALUE_DISPLAY_LEN) + '…';
   }
   return raw;
 }
 
-function entryDescription(entry: DiffEntry): string {
-  switch (entry.type) {
-    case 'added':
-      return `"${entry.path}" is present in output but not in expected`;
-    case 'removed':
-      return `"${entry.path}" is expected but missing from output`;
-    case 'changed':
-      return `"${entry.path}": expected ${formatValue(entry.expected)} → got ${formatValue(entry.actual)}`;
-  }
+// ---------------------------------------------------------------------------
+// DiffSummaryHeader
+// ---------------------------------------------------------------------------
+
+const CATEGORY_SHORT_LABELS: Record<DiffEntry['type'], string> = {
+  missing_field: 'missing',
+  extra_field: 'extra',
+  value_mismatch: 'value',
+  type_mismatch: 'type',
+  null_mismatch: 'null',
+  structural_mismatch: 'structural',
+};
+
+interface DiffSummaryHeaderProps {
+  summary: DiffSummary;
 }
 
-function entryRowClass(type: DiffEntry['type']): string {
-  switch (type) {
-    case 'added':
-      return 'bg-green-900/30 border-l-2 border-green-500';
-    case 'removed':
-      return 'bg-red-900/30 border-l-2 border-red-500';
-    case 'changed':
-      return 'bg-amber-900/30 border-l-2 border-amber-500';
-  }
+function DiffSummaryHeader({ summary }: DiffSummaryHeaderProps) {
+  const parts = (Object.entries(summary.byCategory) as [DiffEntry['type'], number][])
+    .filter(([, count]) => count > 0)
+    .map(([cat, count]) => `${count} ${CATEGORY_SHORT_LABELS[cat]}`);
+
+  return (
+    <div
+      className="shrink-0 border-b border-zinc-700 bg-zinc-900 px-3 py-2"
+      data-testid="diff-summary-header"
+      aria-live="polite"
+    >
+      <p className="text-xs text-zinc-400">
+        <span className="font-semibold text-zinc-200">
+          {summary.total} {summary.total === 1 ? 'mismatch' : 'mismatches'}
+        </span>
+        {parts.length > 0 && (
+          <span className="ml-1 text-zinc-500">— {parts.join(', ')}</span>
+        )}
+      </p>
+    </div>
+  );
 }
 
-function entryTextClass(type: DiffEntry['type']): string {
-  switch (type) {
-    case 'added':
-      return 'text-green-400';
-    case 'removed':
-      return 'text-red-400';
-    case 'changed':
-      return 'text-amber-300';
-  }
+// ---------------------------------------------------------------------------
+// DiffEntryRow
+// ---------------------------------------------------------------------------
+
+interface DiffEntryRowProps {
+  entry: DiffEntry;
+  index: number;
 }
 
-function entryTypeLabel(type: DiffEntry['type']): string {
-  switch (type) {
-    case 'added':
-      return 'Added';
-    case 'removed':
-      return 'Removed';
-    case 'changed':
-      return 'Changed';
-  }
+function DiffEntryRow({ entry, index }: DiffEntryRowProps) {
+  const meta = CATEGORY_META[entry.type];
+  const { Icon } = meta;
+
+  return (
+    <li
+      className={`px-3 py-2.5 text-xs ${meta.rowClass}`}
+      data-testid={`diff-entry-${index}`}
+      data-entry-type={entry.type}
+    >
+      {/* Category badge */}
+      <div className={`mb-1 flex items-center gap-1 font-semibold ${meta.textClass}`}>
+        <Icon size={12} aria-hidden={true} />
+        <span aria-label={meta.label}>{meta.label}</span>
+      </div>
+
+      {/* Path */}
+      <p className="mb-1 truncate font-mono text-zinc-300" title={entry.path}>
+        {entry.path}
+      </p>
+
+      {/* Type annotation for type/null/structural mismatches */}
+      {(entry.type === 'type_mismatch' ||
+        entry.type === 'null_mismatch' ||
+        entry.type === 'structural_mismatch') &&
+        entry.actualType !== undefined &&
+        entry.expectedType !== undefined && (
+          <p className="mb-1 text-zinc-500">
+            <span className="text-zinc-400">{entry.actualType}</span>
+            {' → '}
+            <span className="text-zinc-400">{entry.expectedType}</span>
+            <span className="ml-1 text-zinc-600">(actual → expected)</span>
+          </p>
+        )}
+
+      {/* Value display */}
+      <div className="flex flex-col gap-0.5">
+        {entry.type === 'missing_field' ? (
+          <p className="text-zinc-400">
+            <span className="text-zinc-600">expected </span>
+            <span className="font-mono text-zinc-300">{formatValue(entry.expected)}</span>
+          </p>
+        ) : entry.type === 'extra_field' ? (
+          <p className="text-zinc-400">
+            <span className="text-zinc-600">actual </span>
+            <span className="font-mono text-zinc-300">{formatValue(entry.actual)}</span>
+          </p>
+        ) : (
+          <>
+            <p className="text-zinc-400">
+              <span className="text-zinc-600">actual </span>
+              <span className="font-mono text-zinc-300">{formatValue(entry.actual)}</span>
+            </p>
+            <p className="text-zinc-400">
+              <span className="text-zinc-600">expected </span>
+              <span className="font-mono text-zinc-300">{formatValue(entry.expected)}</span>
+            </p>
+          </>
+        )}
+      </div>
+    </li>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +265,7 @@ function ExpectedInput({ value, onChange, error }: ExpectedInputProps) {
  *
  * Lets the user enter expected JSON output and compares it against the actual
  * execution result using `computeDiff`. Renders color-coded structural diff
- * entries (added / removed / changed).
+ * entries with categorized mismatch types and a summary header (FS-035 T-02).
  */
 export function DiffDisplay({ state, initialExpectedOutput, onExpectedRawChange }: DiffDisplayProps) {
   const [expectedRaw, setExpectedRaw] = useState(initialExpectedOutput ?? '');
@@ -252,35 +381,27 @@ export function DiffDisplay({ state, initialExpectedOutput, onExpectedRawChange 
                 data-testid="diff-equal"
               >
                 <div className="flex flex-col items-center gap-1">
-                  <span className="text-base text-green-400" aria-hidden="true">
-                    ✓
-                  </span>
+                  <CheckCircle2
+                    size={20}
+                    className="text-green-400"
+                    aria-hidden={true}
+                  />
                   <p className="text-xs text-zinc-400">Output matches expected</p>
                 </div>
               </div>
             ) : (
-              <ul
-                role="list"
-                aria-label={`${diffResult.entries.length} difference${diffResult.entries.length === 1 ? '' : 's'}`}
-                data-testid="diff-entries-list"
-              >
-                {diffResult.entries.map((entry, i) => (
-                  <li
-                    key={i}
-                    className={`px-3 py-2 text-xs ${entryRowClass(entry.type)}`}
-                    data-testid={`diff-entry-${i}`}
-                    data-entry-type={entry.type}
-                  >
-                    <span
-                      className={`mr-1.5 font-semibold ${entryTextClass(entry.type)}`}
-                      aria-label={entryTypeLabel(entry.type)}
-                    >
-                      {entryTypeLabel(entry.type)}
-                    </span>
-                    <span className="text-zinc-300">{entryDescription(entry)}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <DiffSummaryHeader summary={diffResult.summary} />
+                <ul
+                  role="list"
+                  aria-label={`${diffResult.entries.length} difference${diffResult.entries.length === 1 ? '' : 's'}`}
+                  data-testid="diff-entries-list"
+                >
+                  {diffResult.entries.map((entry, i) => (
+                    <DiffEntryRow key={i} entry={entry} index={i} />
+                  ))}
+                </ul>
+              </>
             )}
           </>
         )}

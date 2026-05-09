@@ -1,4 +1,8 @@
+import { CheckCircle2, XCircle, AlertTriangle, Clock, Layers } from 'lucide-react';
+
 import type { PreviewExecutionState } from '@/lib/types/domain';
+import type { DiffResult } from '@/lib/types/diff';
+import { deriveExecutionVerdict } from '../../lib/execution-result-utils';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -6,21 +10,23 @@ import type { PreviewExecutionState } from '@/lib/types/domain';
 
 export interface ExecutionSummaryBarProps {
   state: PreviewExecutionState;
+  /** Optional diff result — when provided and not equal, verdict becomes 'fail'. */
+  diffResult?: DiffResult | null;
+  /**
+   * Human-readable diff summary label (e.g. "2 mismatches: 1 type, 1 value").
+   * Wired by T-04. Rendered as an additional badge when provided.
+   */
+  diffSummaryLabel?: string;
+  /** Mapping version number — rendered as "v{n}" badge. */
+  mappingVersion?: number;
+  /** Environment label — defaults to "Local". */
+  environmentLabel?: string;
   className?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
-function StatusDot({ color }: { color: string }) {
-  return (
-    <span
-      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${color}`}
-      aria-hidden="true"
-    />
-  );
-}
 
 function InlineSpinner() {
   return (
@@ -55,6 +61,17 @@ function SeverityBadge({
   );
 }
 
+function ContextBadge({ children, testId }: { children: React.ReactNode; testId?: string }) {
+  return (
+    <span
+      className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400"
+      data-testid={testId}
+    >
+      {children}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -62,31 +79,89 @@ function SeverityBadge({
 /**
  * ExecutionSummaryBar — compact sticky bar showing at-a-glance execution status.
  *
- * Renders between the top bar and the result panel area. Displays status,
- * duration, rule stats, and diagnostic severity counts derived from
- * `PreviewExecutionState`. Pure component — no side effects.
+ * Renders between the top bar and the result panel area. Hidden when idle.
+ * Displays verdict (pass/fail/error), duration, diagnostics, rules summary,
+ * and version/environment context (FS-035 T-03).
  */
-export function ExecutionSummaryBar({ state, className = '' }: ExecutionSummaryBarProps) {
+export function ExecutionSummaryBar({
+  state,
+  diffResult,
+  diffSummaryLabel,
+  mappingVersion,
+  environmentLabel = 'Local',
+  className = '',
+}: ExecutionSummaryBarProps) {
+  const verdict = deriveExecutionVerdict(state, diffResult);
+
+  // Hidden before first execution
+  if (verdict === 'idle') return null;
+
+  // Background tint by verdict
+  const bgClass =
+    verdict === 'executing'
+      ? 'bg-slate-900/80'
+      : verdict === 'pass'
+        ? 'bg-green-950/60'
+        : verdict === 'fail'
+          ? 'bg-red-950/60'
+          : 'bg-amber-950/60'; // error
+
   return (
     <div
-      className={`flex shrink-0 items-center gap-3 border-b border-slate-800 bg-slate-900/80 px-3 py-1 text-xs text-slate-400 backdrop-blur-sm ${className}`}
+      className={`flex shrink-0 items-center gap-3 border-b border-slate-800 px-3 py-1 text-xs text-slate-400 backdrop-blur-sm ${bgClass} ${className}`}
       data-testid="execution-summary-bar"
       aria-live="polite"
       aria-atomic="true"
     >
-      {state.status === 'idle' && (
-        <span className="text-slate-500" data-testid="summary-idle">
-          No results yet
-        </span>
-      )}
-
-      {state.status === 'executing' && (
+      {/* Executing */}
+      {verdict === 'executing' && (
         <>
           <InlineSpinner />
           <span data-testid="summary-executing">Executing…</span>
         </>
       )}
 
+      {/* Pass */}
+      {verdict === 'pass' && (
+        <>
+          <CheckCircle2 size={13} className="shrink-0 text-green-400" aria-hidden="true" />
+          <span className="font-medium text-green-400" data-testid="summary-verdict-pass">
+            Passed
+          </span>
+        </>
+      )}
+
+      {/* Fail */}
+      {verdict === 'fail' && (
+        <>
+          <XCircle size={13} className="shrink-0 text-red-400" aria-hidden="true" />
+          <span className="font-medium text-red-400" data-testid="summary-verdict-fail">
+            Failed
+          </span>
+        </>
+      )}
+
+      {/* Error */}
+      {verdict === 'error' && (
+        <>
+          <AlertTriangle size={13} className="shrink-0 text-amber-400" aria-hidden="true" />
+          <span className="font-medium text-amber-400" data-testid="summary-verdict-error">
+            Error
+          </span>
+          {state.status === 'error' && (
+            <span className="truncate text-slate-500" data-testid="summary-error-message">
+              {state.error}
+            </span>
+          )}
+          {state.status === 'timeout' && (
+            <span className="text-slate-500" data-testid="summary-timeout-message">
+              Execution timed out
+            </span>
+          )}
+        </>
+      )}
+
+      {/* Stats — only when success */}
       {state.status === 'success' && (() => {
         const { result } = state;
         const stats = result.stats;
@@ -98,33 +173,18 @@ export function ExecutionSummaryBar({ state, className = '' }: ExecutionSummaryB
 
         return (
           <>
-            <StatusDot color="bg-green-500" />
-            <span className="font-medium text-green-400" data-testid="summary-success">
-              Success
-            </span>
-
+            {/* Duration */}
             {stats !== undefined && (
-              <>
-                <span
-                  className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400"
-                  data-testid="summary-duration"
-                >
-                  {stats.durationMs}ms
-                </span>
-
-                <span className="text-slate-500" data-testid="summary-rule-stats">
-                  {stats.rulesEvaluated} rule{stats.rulesEvaluated === 1 ? '' : 's'}:{' '}
-                  <span className="text-green-400">{stats.rulesSucceeded} passed</span>
-                  {stats.rulesFailed > 0 && (
-                    <>
-                      {', '}
-                      <span className="text-red-400">{stats.rulesFailed} failed</span>
-                    </>
-                  )}
-                </span>
-              </>
+              <span
+                className="flex items-center gap-1 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400"
+                data-testid="summary-duration"
+              >
+                <Clock size={10} aria-hidden="true" />
+                {stats.durationMs}ms
+              </span>
             )}
 
+            {/* Diagnostics severity badges */}
             {(errorCount > 0 || warnCount > 0 || infoCount > 0) && (
               <span className="flex items-center gap-1" data-testid="summary-diagnostics">
                 <SeverityBadge
@@ -147,30 +207,39 @@ export function ExecutionSummaryBar({ state, className = '' }: ExecutionSummaryB
                 />
               </span>
             )}
+
+            {/* Rules summary */}
+            {stats !== undefined && (
+              <span className="flex items-center gap-1 text-slate-500" data-testid="summary-rule-stats">
+                <Layers size={10} aria-hidden="true" />
+                <span className={stats.rulesFailed === 0 ? 'text-green-400' : 'text-amber-400'}>
+                  {stats.rulesSucceeded}/{stats.rulesEvaluated}
+                </span>
+                {' '}rule{stats.rulesEvaluated === 1 ? '' : 's'}
+              </span>
+            )}
+
+            {/* Diff summary label (wired by T-04) */}
+            {diffSummaryLabel !== undefined && (
+              <span
+                className="rounded bg-red-900/40 px-1.5 py-0.5 text-[10px] text-red-300"
+                data-testid="summary-diff-label"
+              >
+                {diffSummaryLabel}
+              </span>
+            )}
           </>
         );
       })()}
 
-      {state.status === 'error' && (
-        <>
-          <StatusDot color="bg-red-500" />
-          <span className="font-medium text-red-400" data-testid="summary-error">
-            Error
-          </span>
-          <span className="truncate text-slate-500" data-testid="summary-error-message">
-            {state.error}
-          </span>
-        </>
-      )}
+      {/* Spacer */}
+      <span className="flex-1" aria-hidden="true" />
 
-      {state.status === 'timeout' && (
-        <>
-          <StatusDot color="bg-amber-500" />
-          <span className="font-medium text-amber-400" data-testid="summary-timeout">
-            Timeout
-          </span>
-        </>
+      {/* Context: version + environment */}
+      {mappingVersion !== undefined && (
+        <ContextBadge testId="summary-version">v{mappingVersion}</ContextBadge>
       )}
+      <ContextBadge testId="summary-environment">{environmentLabel}</ContextBadge>
     </div>
   );
 }

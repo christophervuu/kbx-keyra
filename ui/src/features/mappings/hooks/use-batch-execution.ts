@@ -36,7 +36,7 @@ export interface UseBatchExecutionResult {
 
 function buildResult(
   testCaseId: string,
-  status: 'pass' | 'fail',
+  status: 'pass' | 'fail' | 'error',
   errorCount: number,
   warningCount: number,
   durationMs: number,
@@ -124,7 +124,7 @@ export function useBatchExecution({
 
         if (parseError || config === null) {
           const durationMs = Date.now() - start;
-          result = buildResult(tc.id, 'fail', 1, 0, durationMs);
+          result = buildResult(tc.id, 'error', 1, 0, durationMs);
         } else {
           try {
             const execResult = executeMapping(
@@ -153,7 +153,7 @@ export function useBatchExecution({
             );
           } catch {
             const durationMs = Date.now() - start;
-            result = buildResult(tc.id, 'fail', 1, 0, durationMs);
+            result = buildResult(tc.id, 'error', 1, 0, durationMs);
           }
         }
 

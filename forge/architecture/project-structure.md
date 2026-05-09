@@ -325,12 +325,14 @@ ui/
             DiagnosticsDisplay.test.tsx Component tests (all state variants, severity colors, aria, scrollability)
             TraceDisplay.tsx      Trace tab content: collapsible execution trace entries (sequence, targetPath, duration, expression, value); disabled/empty states (FS-012 T-10)
             TraceDisplay.test.tsx Component tests (expand/collapse, aria-expanded, aria-label, disabled/empty states)
-            DiffDisplay.tsx       Diff tab content: expected output textarea + structural diff rendering (added/removed/changed color-coded rows); accepts initialExpectedOutput + onExpectedRawChange for test case integration (FS-012 T-11)
-            DiffDisplay.test.tsx  Component tests (all states, AE-05 scenario, invalid JSON error, aria)
+            DiffDisplay.tsx       Diff tab content: expected output textarea + categorized diff rendering (6 mismatch types with icons, diff summary header, type annotations, value display per category); accepts initialExpectedOutput + onExpectedRawChange for test case integration (FS-012 T-11, FS-035 T-01, T-02)
+            DiffDisplay.test.tsx  Component tests (all states, AE-05 scenario, invalid JSON error, aria, diff summary header, type annotations, value display per category)
             TestCaseManager.tsx   Test case save/load/delete UI: native select dropdown, inline save form with name input, delete-per-row button, quota error display (FS-012 T-12)
             TestCaseManager.test.tsx Component tests (save/load/delete flows, quota error, accessibility)
-            TestCaseListPanel.tsx  Vertical test case list with selection, pass/fail status badges, inline rename, duplicate/delete actions, Scratchpad pseudo-entry, Add New/Save As toolbar, Run All/Rerun Failed batch toolbar with progress and summary (FS-034 T-03, T-04, T-06)
+            TestCaseListPanel.tsx  Vertical test case list with selection, pass/fail/error icon indicators (CheckCircle2/XCircle/AlertCircle), inline rename, duplicate/delete actions, Scratchpad pseudo-entry, Add New/Save As toolbar, Run All/Rerun Failed batch toolbar with progress and summary (FS-034 T-03, T-04, T-06, FS-035 T-05)
             TestCaseListPanel.test.tsx Component tests (scratchpad, empty state, selection, badges, rename, duplicate, delete with confirmation, Add New, Save As flow, Run All/Rerun Failed enable/disable, progress, summary, cancel, toolbar slot, accessibility)
+            SuiteSummary.tsx      Inline batch suite summary: header with total/passed/failed/errored counts; scrollable per-test rows with verdict icon, name, duration, error count; clickable rows load test results into standard tabs (FS-035 T-06)
+            SuiteSummary.test.tsx Component tests (header counts, per-test rows, verdict icons, click handler, accessibility)
         hooks/            Feature-specific React hooks
           index.ts        Hooks barrel
           use-engine-validation.ts       Debounced validation hook (300ms, wraps engine validate())
@@ -349,9 +351,9 @@ ui/
           use-resizable-layout.test.ts   Hook unit tests (defaults, localStorage read/write, clamp, collapse/expand, drag min-width enforcement)
           use-test-cases.ts              Test case CRUD hook: save/load/delete/rename/duplicate/update, localStorage persistence keyed by mappingId (keyra:testcases:{id}), quota error handling (FS-012 T-05, FS-034 T-01)
           use-test-cases.test.ts         Hook unit tests (save, persist, load, delete, rename, duplicate, update, mappingId reload, corrupted storage, quota error)
-          use-test-run-results.ts        Test run result persistence hook: recordResult/clearResult/clearAll, localStorage keyed by mappingId (keyra:testresults:{id}), corruption handling (FS-034 T-02)
+          use-test-run-results.ts        Test run result persistence hook: recordResult/clearResult/clearAll, sessionStorage keyed by mappingId (keyra:test-results:{id}), corruption handling; cleared on tab/window close (FS-034 T-02, FS-035 T-05)
           use-test-run-results.test.ts   Hook unit tests (initial state, record, upsert, multi-result, clear, clearAll, mappingId reload, corruption, write failure)
-          use-batch-execution.ts         Sequential batch execution hook: runAll/rerunFailed/cancel, pass/fail from error diagnostics, onCaseComplete callback, cancellation ref, unmount cleanup (FS-034 T-05)
+          use-batch-execution.ts         Sequential batch execution hook: runAll/rerunFailed/cancel, pass/fail/error from error diagnostics or engine throw, onCaseComplete callback, cancellation ref, unmount cleanup (FS-034 T-05, FS-035 T-06)
           use-batch-execution.test.ts    Hook unit tests (sequential execution, pass/fail, invalid JSON, engine throw, config null, onCaseComplete, rerunFailed filter, cancellation)
           use-test-lab-layout.ts         Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence under keyra:testlab-layout (FS-033)
           use-test-lab-layout.test.ts    Hook unit tests (defaults, breakpoint detection, togglePanel, output no-op at medium, trace auto-behavior, split ratio clamping, localStorage read/write/fallback, storage write failure)
@@ -376,10 +378,12 @@ ui/
           __tests__/
             pipeline-expression-generator.test.ts  FS-023 unit tests for state→DSL generation across AE-01/02/03/04/05/06/14/15
             pipeline-decomposer.test.ts  FS-023 unit tests for DSL→state decomposition (28 tests: pipeline, conditional, valueMap, failures, roundtrips)
+            execution-result-utils.test.ts  FS-035 unit tests for deriveExecutionVerdict (all verdict cases, AE-06) and formatDiffSummary (total=0, singular/plural, category labels)
           autocomplete-utils.ts      detectAutocompleteContext(), flattenSchemaPaths(), filterSuggestions(); AutocompleteContext, SchemaPathEntry types (T-03)
           autocomplete-utils.test.ts Utility unit tests (25 tests: context detection for all kinds, schema flattening, prefix filtering)
           infer-rule-type.ts         Maps outermost expression function name to display label
           infer-rule-type.test.ts    Unit tests (14 tests: all rule type patterns)
+          execution-result-utils.ts  deriveExecutionVerdict (idle/executing/pass/fail/error from PreviewExecutionState + optional DiffResult) + formatDiffSummary (human-readable diff summary label) (FS-035 T-03, T-04)
       deployments/        Deployment Page (mapping-level and project-level)
       templates/          Template Library
       settings/           Global Settings
@@ -409,7 +413,7 @@ ui/
       state/              Global state (Context + useReducer)
       types/              UI-specific TypeScript types
         domain.ts         Shared domain model types (includes SchemaTreeNode, ParsedSchema, SchemaNodeType, MappingNodeStatus)
-        diff.ts           Preview/testing diff types (DiffChangeType, DiffEntry, DiffResult)
+        diff.ts           Preview/testing diff types: DiffChangeType (6 categories: missing_field, extra_field, value_mismatch, type_mismatch, null_mismatch, structural_mismatch), DiffEntry (+ actualType/expectedType), DiffSummary (total + byCategory), DiffResult (+ summary) (FS-035 T-01)
         index.ts          Types barrel
       utils/              Shared pure utility functions used across UI features
         json-diff.ts      Structural JSON diff utility for preview expected-vs-actual comparisons (FS-012)

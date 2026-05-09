@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
 import type { TestCase, TestRunResult } from '@/lib/types/domain';
 
@@ -99,18 +100,30 @@ function StatusBadge({ result }: { result: TestRunResult | undefined }) {
   }
   if (result.status === 'pass') {
     return (
-      <span
+      <CheckCircle2
+        size={12}
+        className="shrink-0 text-green-400"
         aria-label="Pass"
         title="Pass"
-        className="inline-block h-2 w-2 rounded-full bg-green-500"
+      />
+    );
+  }
+  if (result.status === 'error') {
+    return (
+      <AlertCircle
+        size={12}
+        className="shrink-0 text-amber-400"
+        aria-label="Error"
+        title="Error"
       />
     );
   }
   return (
-    <span
+    <XCircle
+      size={12}
+      className="shrink-0 text-red-400"
       aria-label="Fail"
       title="Fail"
-      className="inline-block h-2 w-2 rounded-full bg-red-500"
     />
   );
 }

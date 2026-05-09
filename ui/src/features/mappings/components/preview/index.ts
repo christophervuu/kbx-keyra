@@ -8,6 +8,8 @@ export { PreviewPanel } from './PreviewPanel';
 export type { PreviewPanelProps } from './PreviewPanel';
 export { SourceDataInput } from './SourceDataInput';
 export type { SourceDataInputProps } from './SourceDataInput';
+export { SuiteSummary } from './SuiteSummary';
+export type { SuiteSummaryProps, SuiteSummaryRow } from './SuiteSummary';
 export { TestCaseManager } from './TestCaseManager';
 export type { TestCaseManagerProps } from './TestCaseManager';
 export { TraceDisplay } from './TraceDisplay';

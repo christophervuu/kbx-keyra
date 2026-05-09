@@ -390,7 +390,7 @@ export interface TestCase {
 
 export interface TestRunResult {
   readonly testCaseId: string;
-  readonly status: 'pass' | 'fail';
+  readonly status: 'pass' | 'fail' | 'error';
   readonly errorCount: number;
   readonly warningCount: number;
   readonly executedAt: ISODateString;

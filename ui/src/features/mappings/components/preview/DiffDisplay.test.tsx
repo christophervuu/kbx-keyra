@@ -116,7 +116,7 @@ describe('DiffDisplay', () => {
 
   // ---- AE-05: actual {"name":"Alice","age":30,"active":true} vs expected {"name":"Alice","age":31} ----
 
-  it('AE-05: age changed (amber), active added (green)', () => {
+  it('AE-05: age value_mismatch (amber), active extra_field (amber)', () => {
     renderDiff(makeSuccessState({ name: 'Alice', age: 30, active: true }));
     fireEvent.change(getExpectedInput(), {
       target: { value: JSON.stringify({ name: 'Alice', age: 31 }) },
@@ -125,30 +125,30 @@ describe('DiffDisplay', () => {
     const list = screen.getByTestId('diff-entries-list');
     expect(list).toBeInTheDocument();
 
-    // Two entries: age changed, active added
+    // Two entries: age value_mismatch, active extra_field
     const entries = screen.getAllByTestId(/^diff-entry-/);
     expect(entries).toHaveLength(2);
 
-    // Find the changed entry (age)
-    const changedEntry = entries.find((el) => el.getAttribute('data-entry-type') === 'changed');
-    expect(changedEntry).toBeDefined();
-    expect(changedEntry!.className).toMatch(/amber/);
+    // Find the value_mismatch entry (age)
+    const valueMismatchEntry = entries.find((el) => el.getAttribute('data-entry-type') === 'value_mismatch');
+    expect(valueMismatchEntry).toBeDefined();
+    expect(valueMismatchEntry!.className).toMatch(/amber/);
 
-    // Find the added entry (active)
-    const addedEntry = entries.find((el) => el.getAttribute('data-entry-type') === 'added');
-    expect(addedEntry).toBeDefined();
-    expect(addedEntry!.className).toMatch(/green/);
+    // Find the extra_field entry (active — in actual but not in expected)
+    const extraFieldEntry = entries.find((el) => el.getAttribute('data-entry-type') === 'extra_field');
+    expect(extraFieldEntry).toBeDefined();
+    expect(extraFieldEntry!.className).toMatch(/amber/);
   });
 
-  it('removed entry has red styling', () => {
+  it('missing_field entry has red styling', () => {
     renderDiff(makeSuccessState({ name: 'Alice' }));
     fireEvent.change(getExpectedInput(), {
       target: { value: JSON.stringify({ name: 'Alice', extra: 'field' }) },
     });
 
-    const removedEntry = screen.getByTestId('diff-entry-0');
-    expect(removedEntry.getAttribute('data-entry-type')).toBe('removed');
-    expect(removedEntry.className).toMatch(/red/);
+    const missingEntry = screen.getByTestId('diff-entry-0');
+    expect(missingEntry.getAttribute('data-entry-type')).toBe('missing_field');
+    expect(missingEntry.className).toMatch(/red/);
   });
 
   it('diff list has accessible aria-label with count', () => {
@@ -166,7 +166,7 @@ describe('DiffDisplay', () => {
     fireEvent.change(getExpectedInput(), {
       target: { value: JSON.stringify({ a: 99, c: 3 }) },
     });
-    // a changed, b added, c removed
+    // a: value_mismatch, b: extra_field, c: missing_field
     const list = screen.getByTestId('diff-entries-list');
     expect(list.getAttribute('aria-label')).toMatch(/differences/);
   });
@@ -181,5 +181,100 @@ describe('DiffDisplay', () => {
     // The inner result area has overflow-auto
     const overflowArea = container.querySelector('.overflow-auto');
     expect(overflowArea).not.toBeNull();
+  });
+
+  // ---- T-02: Diff summary header ------------------------------------------
+
+  it('renders diff summary header when there are mismatches', () => {
+    renderDiff(makeSuccessState({ a: 1 }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ a: 2 }) },
+    });
+
+    expect(screen.getByTestId('diff-summary-header')).toBeInTheDocument();
+  });
+
+  it('summary header shows total mismatch count', () => {
+    renderDiff(makeSuccessState({ a: 1, b: 2 }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ a: 99, c: 3 }) },
+    });
+
+    // a: value_mismatch, b: extra_field, c: missing_field → 3 mismatches
+    const header = screen.getByTestId('diff-summary-header');
+    expect(header).toHaveTextContent('3 mismatches');
+  });
+
+  it('summary header shows singular "mismatch" for one entry', () => {
+    renderDiff(makeSuccessState({ a: 1 }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ a: 2 }) },
+    });
+
+    const header = screen.getByTestId('diff-summary-header');
+    expect(header).toHaveTextContent('1 mismatch');
+    expect(header).not.toHaveTextContent('mismatches');
+  });
+
+  it('summary header does not render when outputs match', () => {
+    renderDiff(makeSuccessState({ a: 1 }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ a: 1 }) },
+    });
+
+    expect(screen.queryByTestId('diff-summary-header')).not.toBeInTheDocument();
+  });
+
+  // ---- T-02: Type annotation for type_mismatch ----------------------------
+
+  it('type_mismatch entry shows actualType → expectedType annotation', () => {
+    renderDiff(makeSuccessState({ age: '30' }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ age: 30 }) },
+    });
+
+    const entry = screen.getByTestId('diff-entry-0');
+    expect(entry.getAttribute('data-entry-type')).toBe('type_mismatch');
+    // Should show "string → number"
+    expect(entry).toHaveTextContent('string');
+    expect(entry).toHaveTextContent('number');
+  });
+
+  // ---- T-02: Value display per category -----------------------------------
+
+  it('missing_field entry shows expected value only', () => {
+    renderDiff(makeSuccessState({ name: 'Alice' }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Alice', role: 'admin' }) },
+    });
+
+    const entry = screen.getByTestId('diff-entry-0');
+    expect(entry.getAttribute('data-entry-type')).toBe('missing_field');
+    expect(entry).toHaveTextContent('"admin"');
+    expect(entry).toHaveTextContent('expected');
+  });
+
+  it('extra_field entry shows actual value only', () => {
+    renderDiff(makeSuccessState({ name: 'Alice', extra: true }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Alice' }) },
+    });
+
+    const entry = screen.getByTestId('diff-entry-0');
+    expect(entry.getAttribute('data-entry-type')).toBe('extra_field');
+    expect(entry).toHaveTextContent('true');
+    expect(entry).toHaveTextContent('actual');
+  });
+
+  it('value_mismatch entry shows both actual and expected values', () => {
+    renderDiff(makeSuccessState({ score: 80 }));
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ score: 100 }) },
+    });
+
+    const entry = screen.getByTestId('diff-entry-0');
+    expect(entry.getAttribute('data-entry-type')).toBe('value_mismatch');
+    expect(entry).toHaveTextContent('80');
+    expect(entry).toHaveTextContent('100');
   });
 });
