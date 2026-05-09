@@ -99,7 +99,7 @@ describe('usePreviewExecution', () => {
   // Guard: missing inputs
   // -------------------------------------------------------------------------
 
-  it('does not execute when config is null', () => {
+  it('manual run sets error when config is null', () => {
     const { result } = renderHook(
       () => usePreviewExecution({ ...defaultParams(), config: null }),
       { wrapper },
@@ -108,10 +108,10 @@ describe('usePreviewExecution', () => {
     act(() => { result.current.run(); });
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.state.status).toBe('error');
   });
 
-  it('does not execute when sourceSchemaDetail is null', () => {
+  it('manual run sets error when sourceSchemaDetail is null', () => {
     const { result } = renderHook(
       () => usePreviewExecution({ ...defaultParams(), sourceSchemaDetail: null }),
       { wrapper },
@@ -120,10 +120,10 @@ describe('usePreviewExecution', () => {
     act(() => { result.current.run(); });
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.state.status).toBe('error');
   });
 
-  it('does not execute when targetSchemaDetail is null', () => {
+  it('manual run sets error when targetSchemaDetail is null', () => {
     const { result } = renderHook(
       () => usePreviewExecution({ ...defaultParams(), targetSchemaDetail: null }),
       { wrapper },
@@ -132,10 +132,10 @@ describe('usePreviewExecution', () => {
     act(() => { result.current.run(); });
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.state.status).toBe('error');
   });
 
-  it('does not execute when sourceDataRaw is null', () => {
+  it('manual run sets error when sourceDataRaw is null', () => {
     const { result } = renderHook(
       () => usePreviewExecution({ ...defaultParams(), sourceDataRaw: null }),
       { wrapper },
@@ -144,10 +144,10 @@ describe('usePreviewExecution', () => {
     act(() => { result.current.run(); });
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.state.status).toBe('error');
   });
 
-  it('does not execute when sourceDataRaw is invalid JSON', () => {
+  it('manual run sets parse error when sourceDataRaw is invalid JSON', () => {
     const { result } = renderHook(
       () => usePreviewExecution({ ...defaultParams(), sourceDataRaw: '{bad json' }),
       { wrapper },
@@ -156,7 +156,7 @@ describe('usePreviewExecution', () => {
     act(() => { result.current.run(); });
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.state.status).toBe('error');
   });
 
   // -------------------------------------------------------------------------

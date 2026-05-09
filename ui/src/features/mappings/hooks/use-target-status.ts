@@ -31,15 +31,46 @@ export interface UseTargetStatusResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Collects all leaf paths from a flat SchemaTreeNode list.
- * Returns a Set of all paths present in the schema.
+ * Collects every schema path by recursively walking a potentially hierarchical
+ * node list (root-only arrays with nested children, or flattened arrays).
  */
 function collectAllPaths(nodes: readonly SchemaTreeNode[]): Set<string> {
   const paths = new Set<string>();
-  for (const node of nodes) {
-    paths.add(node.path);
+
+  function walk(current: readonly SchemaTreeNode[]) {
+    for (const node of current) {
+      if (paths.has(node.path)) continue;
+      paths.add(node.path);
+      if (node.children.length > 0) {
+        walk(node.children);
+      }
+    }
   }
+
+  walk(nodes);
   return paths;
+}
+
+/**
+ * Returns every node in depth-first order from a possibly hierarchical root list.
+ */
+function collectAllNodes(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
+  const ordered: SchemaTreeNode[] = [];
+  const seen = new Set<string>();
+
+  function walk(current: readonly SchemaTreeNode[]) {
+    for (const node of current) {
+      if (seen.has(node.path)) continue;
+      seen.add(node.path);
+      ordered.push(node);
+      if (node.children.length > 0) {
+        walk(node.children);
+      }
+    }
+  }
+
+  walk(nodes);
+  return ordered;
 }
 
 /**
@@ -150,8 +181,46 @@ export function useTargetStatus(
       }
     }
 
+    // Step 3b: roll up container-node status from leaf descendants.
+    // Parent severity precedence: error > warning > mapped > unmapped.
+    const allNodes = collectAllNodes(nodes);
+    for (const node of allNodes) {
+      if (node.childCount === 0 || node.children.length === 0) continue;
+
+      const leafPaths = getLeafDescendants(node);
+      if (leafPaths.length === 0) continue;
+
+      let hasError = false;
+      let hasWarning = false;
+      let mappedCount = 0;
+
+      for (const leafPath of leafPaths) {
+        const leafStatus = statusMap.get(leafPath) ?? 'unmapped';
+        if (leafStatus === 'error') {
+          hasError = true;
+          break;
+        }
+        if (leafStatus === 'warning') {
+          hasWarning = true;
+        }
+        if (leafStatus === 'mapped' || leafStatus === 'warning') {
+          mappedCount++;
+        }
+      }
+
+      if (hasError) {
+        statusMap.set(node.path, 'error');
+      } else if (hasWarning) {
+        statusMap.set(node.path, 'warning');
+      } else if (mappedCount === leafPaths.length) {
+        statusMap.set(node.path, 'mapped');
+      } else {
+        statusMap.set(node.path, 'unmapped');
+      }
+    }
+
     // Step 4: compute coverage for object/array nodes using leaf descendants
-    for (const node of nodes) {
+    for (const node of allNodes) {
       if (node.childCount > 0 && node.children.length > 0) {
         const leafPaths = getLeafDescendants(node);
         if (leafPaths.length === 0) continue;

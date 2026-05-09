@@ -61,6 +61,10 @@ export interface UsePreviewExecutionResult {
   setTraceEnabled: (enabled: boolean) => void;
 }
 
+interface ExecuteOptions {
+  readonly fromAutoRun?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -138,7 +142,8 @@ export function usePreviewExecution({
     setLastResult,
   };
 
-  const executeNow = useCallback(() => {
+  const executeNow = useCallback((options?: ExecuteOptions) => {
+    const fromAutoRun = options?.fromAutoRun === true;
     const {
       config: cfg,
       sourceSchemaDetail: srcSchema,
@@ -150,13 +155,38 @@ export function usePreviewExecution({
     } = latestParams.current;
 
     // Guard: all inputs must be present
-    if (cfg === null || srcSchema === null || tgtSchema === null || rawData === null) {
+    if (cfg === null || srcSchema === null || tgtSchema === null) {
+      if (!fromAutoRun) {
+        setState({
+          status: 'error',
+          error: 'Preview is not ready yet. Wait for mapping and schemas to finish loading, then run again.',
+        });
+        setResult(null);
+      }
+      return;
+    }
+
+    if (rawData === null) {
+      if (!fromAutoRun) {
+        setState({
+          status: 'error',
+          error: 'Source JSON is empty or invalid. Paste valid JSON, then run again.',
+        });
+        setResult(null);
+      }
       return;
     }
 
     // Guard: source data must be valid JSON
     const parsed = tryParseJson(rawData);
     if (!parsed.ok) {
+      if (!fromAutoRun) {
+        setState({
+          status: 'error',
+          error: `Invalid JSON: ${parsed.error}`,
+        });
+        setResult(null);
+      }
       return;
     }
 
@@ -211,7 +241,7 @@ export function usePreviewExecution({
 
     autoRunTimerRef.current = setTimeout(() => {
       autoRunTimerRef.current = null;
-      executeNow();
+      executeNow({ fromAutoRun: true });
     }, AUTO_RUN_DEBOUNCE_MS);
 
     return () => {

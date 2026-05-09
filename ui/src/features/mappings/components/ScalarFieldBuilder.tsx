@@ -25,6 +25,7 @@ import type { SuggestedField } from '../lib/suggest-source-fields';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
+import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 import type { ExpressionBuilderState } from '../lib/expression-builder-state';
 import { PreviewContext } from '../context/preview-context';
 
@@ -112,6 +113,13 @@ const AI_COMING_SOON = 'Coming soon \u2014 AI features available in a future rel
 function normalizeExpression(value: string): string {
   return value.trim();
 }
+
+const SOURCE_CARD_HYDRATION_STATE: ExpressionBuilderState = {
+  mode: 'value',
+  inputType: 'source',
+  sources: [],
+  transforms: [],
+};
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -246,10 +254,17 @@ export function ScalarFieldBuilder({
       setDecompositionWarning(null);
       setMode('builder');
     } else {
-      // Decomposition failed → Editor mode with warning
-      setInitialUnifiedBuilderState(null);
-      setDecompositionWarning(result.reason ?? 'Expression cannot be loaded into the guided builder.');
-      setMode('editor');
+      const sourceCardResult = decomposeToSourceCardState(expr);
+      if (sourceCardResult !== null) {
+        setInitialUnifiedBuilderState(SOURCE_CARD_HYDRATION_STATE);
+        setDecompositionWarning(null);
+        setMode('builder');
+      } else {
+        // Decomposition failed → Editor mode with warning
+        setInitialUnifiedBuilderState(null);
+        setDecompositionWarning(result.reason ?? 'Expression cannot be loaded into the guided builder.');
+        setMode('editor');
+      }
     }
   }, [selectedTargetPath, currentExpression]);
 

@@ -36,6 +36,32 @@ export type {
   FallbackValue,
   ValueMapModeState,
   ExpressionBuilderState,
+  // FS-029 Source Card builder types
+  ArgumentSlot,
+  InlineTransform,
+  ArgumentFormNode,
+  DirectCopyState,
+  SourceWithTransformState,
+  FunctionCallState,
+  PendingConnectorState,
+  SourceCardValueModeState,
+} from './expression-builder-state';
+export {
+  // FS-029 type guards
+  isDirectCopy,
+  isSourceWithTransform,
+  isFunctionCall,
+  isPendingConnector,
+  // FS-029 factory functions
+  createDirectCopyState,
+  createSourceWithTransformState,
+  createFunctionCallState,
+  createPendingConnectorState,
+  // FS-029 slot helpers
+  makeSourceSlot,
+  makeSourceSlotWithTransform,
+  makeLiteralSlot,
+  makeExpressionSlot,
 } from './expression-builder-state';
 export { generateExpressionFromState } from './pipeline-expression-generator';
 export { decomposeExpression as decomposeExpressionFromState } from './pipeline-decomposer';

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import React, { useEffect } from 'react';
 
@@ -239,27 +239,36 @@ describe('ScalarFieldBuilder', () => {
 
   it('falls back to editor mode with warning when expression cannot be decomposed', () => {
     renderBuilder({
-      // concat() at root is not a recognized builder expression
-      currentExpression: 'concat(source("first"), source("last"))',
+      // object root is unsupported across decomposers
+      currentExpression: '{"id": "x"}',
       currentStatus: 'mapped',
     });
     expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
     expect(screen.getByTestId('decomposition-warning-container')).toBeInTheDocument();
   });
 
-  it('editor mode shows the loaded expression text when decomposition fails', () => {
+  it('keeps builder mode for concat expression created via Source Card function call', () => {
     renderBuilder({
       currentExpression: 'concat(source("first"), source("last"))',
       currentStatus: 'mapped',
     });
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
+  });
+
+  it('editor mode shows the loaded expression text when decomposition fails', () => {
+    renderBuilder({
+      currentExpression: '{"id": "x"}',
+      currentStatus: 'mapped',
+    });
     // RawDslEditor should contain the expression text
     const textarea = screen.getByRole('textbox');
-    expect(textarea).toHaveValue('concat(source("first"), source("last"))');
+    expect(textarea).toHaveValue('{"id": "x"}');
   });
 
   it('switches to builder mode when target changes to a mapped decomposable field', () => {
     const { rerender } = renderBuilder({
-      currentExpression: 'concat(source("a"), source("b"))',
+      currentExpression: '{"id": "x"}',
       currentStatus: 'mapped',
     });
     // Initially in editor (decomposition failed)
@@ -338,7 +347,7 @@ describe('ScalarFieldBuilder', () => {
 
     it('warning banner from previous field does not persist after navigation', () => {
       const { rerender } = renderBuilder({
-        currentExpression: 'concat(source("a"), source("b"))',
+        currentExpression: '{"id": "x"}',
         currentStatus: 'mapped',
       });
       // Previous field had decomposition failure → warning shown
@@ -359,7 +368,7 @@ describe('ScalarFieldBuilder', () => {
 
     it('editor mode from previous field resets to builder mode for decomposable new field', () => {
       const { rerender } = renderBuilder({
-        currentExpression: 'concat(source("a"), source("b"))',
+        currentExpression: '{"id": "x"}',
         currentStatus: 'mapped',
       });
       // Previous field → editor mode (decomposition failed)
@@ -384,7 +393,7 @@ describe('ScalarFieldBuilder', () => {
     it('calls onExpressionChange when user types in editor mode', () => {
       const onExpressionChange = vi.fn();
       renderBuilder({
-        currentExpression: 'concat(source("a"), source("b"))', // forces editor mode
+        currentExpression: '{"id": "x"}', // forces editor mode
         onExpressionChange,
       });
       // In editor mode, typing fires onExpressionChange
@@ -421,6 +430,7 @@ describe('ScalarFieldBuilder', () => {
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
 
       const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
       fireEvent.click(applyBtn);
       // After apply, button should show "Applied" text
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
@@ -434,7 +444,9 @@ describe('ScalarFieldBuilder', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
 
-      fireEvent.click(screen.getByTestId('apply-btn'));
+      const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
+      fireEvent.click(applyBtn);
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
 
       // Simulate expression change by typing a different expression
@@ -444,7 +456,7 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('apply-btn')).not.toHaveTextContent('Applied');
     });
 
-    it('onApply is called with correct args when Apply is clicked', () => {
+    it('onApply is called with correct args when Apply is clicked', async () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
 
@@ -452,7 +464,9 @@ describe('ScalarFieldBuilder', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("age")' } });
 
-      fireEvent.click(screen.getByTestId('apply-btn'));
+      const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
+      fireEvent.click(applyBtn);
       expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("age")');
     });
   });
@@ -607,7 +621,7 @@ describe('ScalarFieldBuilder', () => {
       expect(btn).toBeDisabled();
     });
 
-    it('Apply button shows "Applied" text immediately after single click', () => {
+    it('Apply button shows "Applied" text immediately after single click', async () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
 
@@ -615,11 +629,13 @@ describe('ScalarFieldBuilder', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
 
-      fireEvent.click(screen.getByTestId('apply-btn'));
+      const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
+      fireEvent.click(applyBtn);
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
     });
 
-    it('onApply is called exactly once per click', () => {
+    it('onApply is called exactly once per click', async () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
 
@@ -627,11 +643,13 @@ describe('ScalarFieldBuilder', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
 
-      fireEvent.click(screen.getByTestId('apply-btn'));
+      const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
+      fireEvent.click(applyBtn);
       expect(onApply).toHaveBeenCalledTimes(1);
     });
 
-    it('keeps "Applied" state after parent re-render with same expression', () => {
+    it('keeps "Applied" state after parent re-render with same expression', async () => {
       const onApply = vi.fn();
       const { rerender } = renderBuilder({
         currentExpression: 'source("firstName")',
@@ -642,7 +660,9 @@ describe('ScalarFieldBuilder', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
 
-      fireEvent.click(screen.getByTestId('apply-btn'));
+      const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
+      fireEvent.click(applyBtn);
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
 
       rerender(
@@ -656,7 +676,7 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
     });
 
-    it('keeps "Applied" state on same-value editor change event', () => {
+    it('keeps "Applied" state on same-value editor change event', async () => {
       const onApply = vi.fn();
       renderBuilder({ currentExpression: 'source("firstName")', onApply });
 
@@ -664,7 +684,9 @@ describe('ScalarFieldBuilder', () => {
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
 
-      fireEvent.click(screen.getByTestId('apply-btn'));
+      const applyBtn = screen.getByTestId('apply-btn');
+      await waitFor(() => expect(applyBtn).not.toBeDisabled());
+      fireEvent.click(applyBtn);
       expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
 
       fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
@@ -719,10 +741,12 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('live-result-display')).toBeInTheDocument();
     });
 
-    it('does not show no-data message when sourceData is provided (AE-05)', () => {
+    it('does not show no-data message when sourceData is provided (AE-05)', async () => {
       renderBuilderWithContext({}, { firstName: 'Alice' });
       // The no-data placeholder should not be visible when sourceData is set
-      expect(screen.queryByTestId('live-result-no-data')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByTestId('live-result-no-data')).not.toBeInTheDocument();
+      });
     });
   });
 });

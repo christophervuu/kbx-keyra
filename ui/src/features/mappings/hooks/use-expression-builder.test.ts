@@ -105,7 +105,7 @@ describe('useExpressionBuilder', () => {
     expect(updateRule).not.toHaveBeenCalled();
 
     act(() => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(600);
     });
 
     expect(updateRule).toHaveBeenCalledTimes(1);
@@ -225,8 +225,7 @@ describe('useExpressionBuilder', () => {
     expect(result.current.decompositionWarning).toBeNull();
   });
 
-  it('switchToBuilder with complex expression sets decompositionWarning and stays in editor', () => {
-    // concat() at root is not a recognized builder expression
+  it('switchToBuilder with concat expression succeeds via Source Card decomposition', () => {
     const complexRules: readonly MappingRule[] = [
       makeRule('concat(source("first"), source("last"))'),
     ];
@@ -239,18 +238,18 @@ describe('useExpressionBuilder', () => {
       }),
     );
 
-    // Auto-hydration on mount already sets editor mode + warning
-    expect(result.current.mode).toBe('editor');
+    // Auto-hydration on mount sets builder mode via Source Card fallback
+    expect(result.current.mode).toBe('builder');
 
-    // Calling switchToBuilder again should also fail and set warning
+    // Calling switchToBuilder again should keep builder mode and no warning
     act(() => { result.current.switchToBuilder(); });
-    expect(result.current.mode).toBe('editor'); // stayed in editor
-    expect(result.current.decompositionWarning).not.toBeNull();
+    expect(result.current.mode).toBe('builder');
+    expect(result.current.decompositionWarning).toBeNull();
   });
 
   it('dismissDecompositionWarning clears the warning', () => {
     const complexRules: readonly MappingRule[] = [
-      makeRule('concat(source("first"), source("last"))'),
+      makeRule('{"id": "x"}'),
     ];
     const { result } = renderHook(() =>
       useExpressionBuilder({
@@ -271,7 +270,7 @@ describe('useExpressionBuilder', () => {
 
   it('forceBuilder clears warning and switches to builder mode', () => {
     const complexRules: readonly MappingRule[] = [
-      makeRule('concat(source("first"), source("last"))'),
+      makeRule('{"id": "x"}'),
     ];
     const { result } = renderHook(() =>
       useExpressionBuilder({
@@ -407,7 +406,7 @@ describe('useExpressionBuilder', () => {
       expect(result.current.decompositionWarning).toBeNull();
     });
 
-    it('AE-05: undecomposable expression falls back to Editor mode with warning', () => {
+    it('AE-05: unsupported expression falls back to Editor mode with warning', () => {
       const { result } = renderHook(() =>
         useExpressionBuilder({
           selectedRuleIndex: null,
@@ -417,13 +416,32 @@ describe('useExpressionBuilder', () => {
         }),
       );
 
-      // concat() is not a recognized root-level builder expression
+      // object root is unsupported across all decomposers
       act(() => {
-        result.current.loadExpression('concat(source("first"), source("last"))');
+        result.current.loadExpression('{"id": "x"}');
       });
 
       expect(result.current.mode).toBe('editor');
       expect(result.current.decompositionWarning).not.toBeNull();
+      expect(result.current.expression).toBe('{"id": "x"}');
+    });
+
+    it('loads concat expression into builder mode (no false complexity fallback)', () => {
+      const { result } = renderHook(() =>
+        useExpressionBuilder({
+          selectedRuleIndex: null,
+          rules,
+          updateRule: vi.fn(),
+          parsedSourceSchema: null,
+        }),
+      );
+
+      act(() => {
+        result.current.loadExpression('concat(source("first"), source("last"))');
+      });
+
+      expect(result.current.mode).toBe('builder');
+      expect(result.current.decompositionWarning).toBeNull();
       expect(result.current.expression).toBe('concat(source("first"), source("last"))');
     });
 
@@ -439,12 +457,12 @@ describe('useExpressionBuilder', () => {
 
       // Load an undecomposable expression → falls back to editor
       act(() => {
-        result.current.loadExpression('concat(source("a"), source("b"))');
+        result.current.loadExpression('{"id": "x"}');
       });
 
       expect(result.current.mode).toBe('editor');
       // expression string must be populated so RawDslEditor shows it
-      expect(result.current.expression).toBe('concat(source("a"), source("b"))');
+      expect(result.current.expression).toBe('{"id": "x"}');
     });
 
     it('auto-hydrates when selectedRuleIndex changes to a mapped rule', () => {

@@ -17,6 +17,28 @@ interface DateParts {
 
 const TOKENS: readonly DateToken[] = ['YYYY', 'MM', 'DD', 'HH', 'mm', 'ss'];
 
+/**
+ * All date format tokens supported by the engine's formatDate function,
+ * including the special ISO8601 keyword.
+ *
+ * Exported for UI consumption (e.g. parameter-hints.ts) so that the UI
+ * derives its dropdown options from the engine source of truth rather than
+ * duplicating the list.
+ */
+export const SUPPORTED_FORMAT_TOKENS: readonly string[] = [...TOKENS, 'ISO8601'];
+
+/**
+ * Common date format presets derived from the base tokens.
+ * These are offered as quick-pick suggestions in the Argument Form.
+ */
+export const FORMAT_PRESETS: readonly string[] = [
+  'ISO8601',
+  `${'YYYY'}-${'MM'}-${'DD'}`,
+  `${'MM'}/${'DD'}/${'YYYY'}`,
+  `${'DD'}/${'MM'}/${'YYYY'}`,
+  `${'YYYY'}-${'MM'}-${'DD'}T${'HH'}:${'mm'}:${'ss'}Z`,
+];
+
 const TOKEN_WIDTHS: Readonly<Record<DateToken, number>> = {
   YYYY: 4,
   MM: 2,

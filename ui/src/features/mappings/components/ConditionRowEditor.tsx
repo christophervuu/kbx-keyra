@@ -8,12 +8,13 @@
  *  - Optional remove button
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { InlinePipelineBuilder } from './InlinePipelineBuilder';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { ComparisonOperator, ConditionRow, Operand, ValueModeState } from '../lib/expression-builder-state';
+
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,8 @@ import type { ParsedSchema } from '@/lib/types/domain';
 // ---------------------------------------------------------------------------
 
 export const COMPARISON_OPTIONS: { value: ComparisonOperator; label: string }[] = [
+  { value: 'isTruthy', label: 'is true' },
+  { value: 'isFalsy', label: 'is false' },
   { value: 'eq', label: 'equals' },
   { value: 'neq', label: 'not equal' },
   { value: 'gt', label: 'greater than' },
@@ -32,7 +35,7 @@ export const COMPARISON_OPTIONS: { value: ComparisonOperator; label: string }[] 
   { value: 'isNotNull', label: 'is not null' },
 ];
 
-const UNARY_OPERATORS = new Set<ComparisonOperator>(['isNull', 'isNotNull']);
+const UNARY_OPERATORS = new Set<ComparisonOperator>(['isTruthy', 'isFalsy', 'isNull', 'isNotNull']);
 
 const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', inputType: 'source', sources: [], transforms: [] };
 
@@ -45,6 +48,8 @@ export interface ConditionRowEditorProps {
   readonly onChange: (updated: ConditionRow) => void;
   readonly onRemove?: () => void;
   readonly parsedSourceSchema: ParsedSchema | null;
+  readonly sourceFieldOptions?: readonly { path: string; type?: string }[];
+  readonly allowPipelineOperands?: boolean;
   readonly rowIndex: number;
 }
 
@@ -56,21 +61,31 @@ interface OperandInputProps {
   operand: Operand;
   onChange: (updated: Operand) => void;
   parsedSourceSchema: ParsedSchema | null;
+  sourceFieldOptions?: readonly { path: string; type?: string }[];
   label: string;
   testIdPrefix: string;
   /** When true, shows the "Transform..." option for pipeline operands (T-03) */
   allowPipeline?: boolean;
 }
 
-function OperandInput({ operand, onChange, parsedSourceSchema, label, testIdPrefix, allowPipeline = false }: OperandInputProps) {
+function OperandInput({
+  operand,
+  onChange,
+  parsedSourceSchema,
+  sourceFieldOptions,
+  label,
+  testIdPrefix,
+  allowPipeline = false,
+}: OperandInputProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const allPaths = useMemo(() => {
+    if (sourceFieldOptions && sourceFieldOptions.length > 0) return sourceFieldOptions;
     if (!parsedSourceSchema) return [];
     return flattenSchemaPaths(parsedSourceSchema);
-  }, [parsedSourceSchema]);
+  }, [parsedSourceSchema, sourceFieldOptions]);
 
   const suggestions = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -221,6 +236,8 @@ export function ConditionRowEditor({
   onChange,
   onRemove,
   parsedSourceSchema,
+  sourceFieldOptions,
+  allowPipelineOperands = true,
   rowIndex,
 }: ConditionRowEditorProps) {
   const isUnary = UNARY_OPERATORS.has(condition.comparison);
@@ -256,9 +273,10 @@ export function ConditionRowEditor({
         operand={condition.leftOperand}
         onChange={handleLeftChange}
         parsedSourceSchema={parsedSourceSchema}
+        sourceFieldOptions={sourceFieldOptions}
         label="Left"
         testIdPrefix={`condition-left-${rowIndex}`}
-        allowPipeline
+        allowPipeline={allowPipelineOperands}
       />
 
       {/* Operator */}
@@ -284,6 +302,7 @@ export function ConditionRowEditor({
           operand={condition.rightOperand}
           onChange={handleRightChange}
           parsedSourceSchema={parsedSourceSchema}
+          sourceFieldOptions={sourceFieldOptions}
           label="Right"
           testIdPrefix={`condition-right-${rowIndex}`}
         />

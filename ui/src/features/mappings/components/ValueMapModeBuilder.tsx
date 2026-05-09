@@ -11,8 +11,15 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { X, Plus, AlertTriangle } from 'lucide-react';
 
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
-import type { FallbackValue, ValueMapEntry, ValueMapModeState } from '../lib/expression-builder-state';
+import type { FallbackValue, StaticValue, ValueMapEntry, ValueMapModeState } from '../lib/expression-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
+
+const OUTPUT_TYPE_OPTIONS: Array<{ value: StaticValue['type']; label: string }> = [
+  { value: 'string', label: 'String' },
+  { value: 'number', label: 'Number' },
+  { value: 'boolean', label: 'Boolean' },
+  { value: 'null', label: 'Null' },
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,11 +144,13 @@ interface MappingRowProps {
   readonly entry: ValueMapEntry;
   readonly index: number;
   readonly onChange: (index: number, field: 'whenValue' | 'mapTo', value: string) => void;
+  readonly onTypeChange: (index: number, valueType: StaticValue['type']) => void;
   readonly onRemove: (index: number) => void;
 }
 
-function MappingRow({ entry, index, onChange, onRemove }: MappingRowProps) {
+function MappingRow({ entry, index, onChange, onTypeChange, onRemove }: MappingRowProps) {
   const isEmpty = entry.whenValue.trim() === '';
+  const mapToType = entry.mapToType ?? 'string';
   return (
     <tr
       data-testid={`value-map-row-${index}`}
@@ -166,14 +175,61 @@ function MappingRow({ entry, index, onChange, onRemove }: MappingRowProps) {
         </div>
       </td>
       <td className="py-1 pr-2">
-        <input
-          type="text"
-          value={entry.mapTo}
-          onChange={(e) => { onChange(index, 'mapTo', e.target.value); }}
-          placeholder="Map to…"
-          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          data-testid={`value-map-to-${index}`}
-        />
+        <div className="space-y-1">
+          <select
+            value={mapToType}
+            onChange={(e) => { onTypeChange(index, e.target.value as StaticValue['type']); }}
+            aria-label={`Map output type for row ${index + 1}`}
+            className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            data-testid={`value-map-to-type-${index}`}
+          >
+            {OUTPUT_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
+          {mapToType === 'string' && (
+            <input
+              type="text"
+              value={entry.mapTo}
+              onChange={(e) => { onChange(index, 'mapTo', e.target.value); }}
+              placeholder="Map to…"
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              data-testid={`value-map-to-${index}`}
+            />
+          )}
+
+          {mapToType === 'number' && (
+            <input
+              type="number"
+              value={entry.mapTo}
+              onChange={(e) => { onChange(index, 'mapTo', e.target.value); }}
+              placeholder="0"
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              data-testid={`value-map-to-${index}`}
+            />
+          )}
+
+          {mapToType === 'boolean' && (
+            <select
+              value={entry.mapTo === 'false' ? 'false' : 'true'}
+              onChange={(e) => { onChange(index, 'mapTo', e.target.value); }}
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              data-testid={`value-map-to-${index}`}
+            >
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          )}
+
+          {mapToType === 'null' && (
+            <p className="px-1 text-xs italic text-zinc-500" data-testid={`value-map-to-null-${index}`}>
+              Row maps to null.
+            </p>
+          )}
+        </div>
       </td>
       <td className="py-1 text-right">
         <button
@@ -228,9 +284,26 @@ export function ValueMapModeBuilder({
   const handleAddRow = useCallback(() => {
     onStateChange({
       ...state,
-      mappings: [...state.mappings, { whenValue: '', mapTo: '' }],
+      mappings: [...state.mappings, { whenValue: '', mapTo: '', mapToType: 'string' }],
     });
   }, [state, onStateChange]);
+
+  const handleRowTypeChange = useCallback(
+    (index: number, mapToType: StaticValue['type']) => {
+      const nextValue =
+        mapToType === 'boolean'
+          ? 'true'
+          : mapToType === 'number'
+            ? '0'
+            : '';
+
+      const updated = state.mappings.map((row, i) =>
+        i === index ? { ...row, mapToType, mapTo: mapToType === 'null' ? '' : nextValue } : row,
+      );
+      onStateChange({ ...state, mappings: updated });
+    },
+    [state, onStateChange],
+  );
 
   const handleRemoveRow = useCallback(
     (index: number) => {
@@ -249,7 +322,7 @@ export function ValueMapModeBuilder({
   const handleFallbackKindChange = useCallback(
     (kind: FallbackValue['kind']) => {
       const fallback: FallbackValue =
-        kind === 'null' ? { kind: 'null' } : { kind: 'value', value: '' };
+        kind === 'null' ? { kind: 'null' } : { kind: 'value', value: '', valueType: 'string' };
       onStateChange({ ...state, fallback });
     },
     [state, onStateChange],
@@ -257,7 +330,27 @@ export function ValueMapModeBuilder({
 
   const handleFallbackValueChange = useCallback(
     (value: string) => {
-      onStateChange({ ...state, fallback: { kind: 'value', value } });
+      const valueType = state.fallback.kind === 'value' ? (state.fallback.valueType ?? 'string') : 'string';
+      onStateChange({ ...state, fallback: { kind: 'value', value, valueType } });
+    },
+    [state, onStateChange],
+  );
+
+  const handleFallbackTypeChange = useCallback(
+    (valueType: StaticValue['type']) => {
+      if (valueType === 'null') {
+        onStateChange({ ...state, fallback: { kind: 'null' } });
+        return;
+      }
+
+      const value =
+        valueType === 'boolean'
+          ? 'true'
+          : valueType === 'number'
+            ? '0'
+            : '';
+
+      onStateChange({ ...state, fallback: { kind: 'value', valueType, value } });
     },
     [state, onStateChange],
   );
@@ -317,6 +410,7 @@ export function ValueMapModeBuilder({
                     entry={entry}
                     index={i}
                     onChange={handleRowChange}
+                    onTypeChange={handleRowTypeChange}
                     onRemove={handleRemoveRow}
                   />
                 ))}
@@ -368,14 +462,54 @@ export function ValueMapModeBuilder({
           </label>
         </div>
         {state.fallback.kind === 'value' && (
-          <input
-            type="text"
-            value={state.fallback.value ?? ''}
-            onChange={(e) => { handleFallbackValueChange(e.target.value); }}
-            placeholder="Fallback value…"
-            className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-            data-testid="value-map-fallback-input"
-          />
+          <div className="space-y-2">
+            <select
+              value={state.fallback.valueType ?? 'string'}
+              onChange={(e) => { handleFallbackTypeChange(e.target.value as StaticValue['type']); }}
+              aria-label="Fallback value type"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              data-testid="value-map-fallback-type"
+            >
+              <option value="string">String</option>
+              <option value="number">Number</option>
+              <option value="boolean">Boolean</option>
+              <option value="null">Null</option>
+            </select>
+
+            {(state.fallback.valueType ?? 'string') === 'string' && (
+              <input
+                type="text"
+                value={state.fallback.value ?? ''}
+                onChange={(e) => { handleFallbackValueChange(e.target.value); }}
+                placeholder="Fallback value…"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                data-testid="value-map-fallback-input"
+              />
+            )}
+
+            {state.fallback.valueType === 'number' && (
+              <input
+                type="number"
+                value={state.fallback.value ?? '0'}
+                onChange={(e) => { handleFallbackValueChange(e.target.value); }}
+                placeholder="0"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                data-testid="value-map-fallback-input"
+              />
+            )}
+
+            {state.fallback.valueType === 'boolean' && (
+              <select
+                value={state.fallback.value === 'false' ? 'false' : 'true'}
+                onChange={(e) => { handleFallbackValueChange(e.target.value); }}
+                className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                data-testid="value-map-fallback-input"
+              >
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+            )}
+          </div>
         )}
       </section>
     </div>

@@ -35,6 +35,17 @@ function staticLiteral(value: StaticValue): string {
   }
 }
 
+function typedValueLiteral(value: string | undefined, type: StaticValue['type'] | undefined): string {
+  const effectiveType = type ?? 'string';
+  if (effectiveType === 'null') return 'null';
+  if (effectiveType === 'boolean') return value === 'true' ? 'true' : 'false';
+  if (effectiveType === 'number') {
+    const parsed = Number(value ?? '');
+    return Number.isFinite(parsed) ? String(parsed) : '0';
+  }
+  return quoteString(value ?? '');
+}
+
 function generateOperand(operand: Operand): string {
   switch (operand.kind) {
     case 'source':
@@ -55,6 +66,14 @@ function generateOperand(operand: Operand): string {
 
 function generateConditionRow(row: ConditionRow): string {
   const left = generateOperand(row.leftOperand);
+
+  if (row.comparison === 'isTruthy') {
+    return left;
+  }
+
+  if (row.comparison === 'isFalsy') {
+    return `not(${left})`;
+  }
 
   if (row.comparison === 'isNull') {
     return `isNull(${left})`;
@@ -91,7 +110,7 @@ function generateConditionGroup(group: ConditionGroup): string {
 function generateBranch(branch: BranchValue): string {
   switch (branch.kind) {
     case 'static':
-      return quoteString(branch.value);
+      return typedValueLiteral(branch.value, branch.valueType);
     case 'source':
       return `source(${quoteString(branch.value)})`;
     case 'expression':
@@ -108,7 +127,7 @@ function generateFallback(fallback: FallbackValue): string {
   if (fallback.kind === 'null') {
     return 'null';
   }
-  return quoteString(fallback.value ?? '');
+  return typedValueLiteral(fallback.value, fallback.valueType);
 }
 
 function generateValueMapEntries(entries: readonly ValueMapEntry[]): string {
@@ -118,11 +137,11 @@ function generateValueMapEntries(entries: readonly ValueMapEntry[]): string {
   }
 
   return `{${validEntries
-    .map((entry) => `${quoteString(entry.whenValue)}: ${quoteString(entry.mapTo)}`)
+    .map((entry) => `${quoteString(entry.whenValue)}: ${typedValueLiteral(entry.mapTo, entry.mapToType)}`)
     .join(', ')}}`;
 }
 
-function comparisonToFunction(operator: Exclude<ComparisonOperator, 'isNotNull'>): string {
+function comparisonToFunction(operator: Exclude<ComparisonOperator, 'isNotNull' | 'isTruthy' | 'isFalsy'>): string {
   return operator;
 }
 

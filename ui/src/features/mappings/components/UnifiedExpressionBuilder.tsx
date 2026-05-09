@@ -3,7 +3,7 @@
  *
  * Replaces the old 4-step GuidedBuilder wizard with a unified form that has
  * three modes selectable via a segmented control:
- *   - Value: source field(s) + optional transform pipeline
+ *   - Value: source field(s) + Source Card builder (FS-029)
  *   - Conditional: if/else branching
  *   - Value Map: key-value lookup table
  *
@@ -12,26 +12,45 @@
  * T-05: Conditional mode (placeholder)
  * T-06: Value Map mode (placeholder)
  * T-07: Live Expression/Result displays wired in
+ * T-09 (FS-029): Source Card builder replaces TransformPipeline in Value mode
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ConfirmDialog } from './ConfirmDialog';
 import { ConditionalModeBuilder } from './ConditionalModeBuilder';
 import { LiveExpressionDisplay } from './LiveExpressionDisplay';
 import { LiveResultDisplay } from './LiveResultDisplay';
 import { SourceChipPicker } from './SourceChipPicker';
-import { TransformPipeline } from './TransformPipeline';
 import { ValueMapModeBuilder } from './ValueMapModeBuilder';
+// FS-029 Source Card builder components (T-09)
+import { SourceCard } from './SourceCard';
+import { ConnectorPrompt } from './ConnectorPrompt';
+import { ArgumentForm } from './ArgumentForm';
+import { BuilderEntryActions } from './BuilderEntryActions';
 import { generateExpressionFromState } from '../lib/pipeline-expression-generator';
+import { generateExpressionFromSourceCardState } from '../lib/source-card-expression-generator';
+import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type {
   ConditionalModeState,
   ExpressionBuilderState,
   SourceSelection,
   StaticValue,
-  TransformStep,
   ValueMapModeState,
   ValueModeState,
+} from '../lib/expression-builder-state';
+import type {
+  ArgumentSlot,
+  InlineTransform,
+  SourceCardValueModeState,
+} from '../lib/expression-builder-state';
+import {
+  createDirectCopyState,
+  createFunctionCallState,
+  createPendingConnectorState,
+  createSourceWithTransformState,
+  makeSourceSlot,
 } from '../lib/expression-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 
@@ -84,7 +103,7 @@ function isStateNonEmpty(state: ExpressionBuilderState): boolean {
     return state.sources.length > 0 || state.staticValue !== undefined;
   }
   if (state.mode === 'conditional') {
-    return true; // conditional always has some structure
+    return true;
   }
   if (state.mode === 'valueMap') {
     return state.inputSource.length > 0 || state.mappings.length > 0;
@@ -111,9 +130,10 @@ function makeEmptyStateForMode(mode: ActiveMode): ExpressionBuilderState {
 
 /**
  * Unified expression builder with mode tabs (Value | Conditional | Value Map).
+ * Value mode now uses the FS-029 Source Card builder (T-09).
  */
 export function UnifiedExpressionBuilder({
-  expression: _expression,
+  expression,
   onExpressionChange,
   onApply: _onApply,
   selectedTargetPath: _selectedTargetPath,
@@ -129,25 +149,46 @@ export function UnifiedExpressionBuilder({
   const [pendingMode, setPendingMode] = useState<ActiveMode | null>(null);
   const [currentExpression, setCurrentExpression] = useState('');
 
+  // FS-029: Source Card builder state (null = not in SC mode / use legacy pipeline)
+  // When non-null, this drives expression generation instead of the legacy generator.
+  const [sourceCardState, setSourceCardState] = useState<SourceCardValueModeState | null>(null);
+
   // Hydrate from initialState when it changes (T-01)
   useEffect(() => {
     if (initialState != null) {
       setBuilderState(initialState);
       setActiveMode(initialState.mode);
+
+      if (initialState.mode === 'value') {
+        const sourceCardDecomposition = decomposeToSourceCardState(expression);
+        setSourceCardState(sourceCardDecomposition);
+      } else {
+        setSourceCardState(null);
+      }
     } else {
       setBuilderState(makeEmptyValueState());
       setActiveMode('value');
+      setSourceCardState(null);
     }
   }, [initialState]);
 
-  // Sync expression out whenever builderState changes
+  // Sync expression out whenever builderState or sourceCardState changes
   useEffect(() => {
-    const expr = generateExpressionFromState(builderState);
+    let expr: string;
+
+    if (activeMode === 'value' && sourceCardState !== null) {
+      // FS-029 path: generate from Source Card state
+      expr = generateExpressionFromSourceCardState(sourceCardState) ?? '';
+    } else {
+      // Legacy path: generate from pipeline state
+      expr = generateExpressionFromState(builderState);
+    }
+
     setCurrentExpression(expr);
     if (expr) {
       onExpressionChange(expr);
     }
-  }, [builderState, onExpressionChange]);
+  }, [builderState, sourceCardState, activeMode, onExpressionChange]);
 
   // -------------------------------------------------------------------------
   // Mode switching
@@ -156,21 +197,24 @@ export function UnifiedExpressionBuilder({
   const handleModeClick = useCallback(
     (mode: ActiveMode) => {
       if (mode === activeMode) return;
-      if (isStateNonEmpty(builderState)) {
+      const nonEmpty = isStateNonEmpty(builderState) || sourceCardState !== null;
+      if (nonEmpty) {
         setPendingMode(mode);
         setShowModeConfirmation(true);
       } else {
         setActiveMode(mode);
         setBuilderState(makeEmptyStateForMode(mode));
+        setSourceCardState(null);
       }
     },
-    [activeMode, builderState],
+    [activeMode, builderState, sourceCardState],
   );
 
   const handleModeConfirm = useCallback(() => {
     if (pendingMode) {
       setActiveMode(pendingMode);
       setBuilderState(makeEmptyStateForMode(pendingMode));
+      setSourceCardState(null);
     }
     setShowModeConfirmation(false);
     setPendingMode(null);
@@ -182,7 +226,7 @@ export function UnifiedExpressionBuilder({
   }, []);
 
   // -------------------------------------------------------------------------
-  // Value mode: source changes
+  // Value mode: legacy source changes (SourceChipPicker)
   // -------------------------------------------------------------------------
 
   const handleSourcesChange = useCallback(
@@ -190,6 +234,13 @@ export function UnifiedExpressionBuilder({
       setBuilderState((prev) => {
         if (prev.mode !== 'value') return prev;
         return { ...prev, sources };
+      });
+      // Sync into Source Card state when not in a standalone FunctionCall
+      setSourceCardState((prev) => {
+        if (prev?.variant === 'functionCall') return prev; // preserve function call
+        if (sources.length === 0) return null;
+        if (sources.length === 1) return createDirectCopyState(sources[0].path);
+        return createPendingConnectorState(sources.map((s) => s.path));
       });
     },
     [],
@@ -205,6 +256,8 @@ export function UnifiedExpressionBuilder({
         const { staticValue: _sv, ...rest } = prev;
         return { ...rest, inputType: 'source', sources: [] };
       });
+      // Static mode uses legacy generator — clear SC state
+      if (enabled) setSourceCardState(null);
     },
     [],
   );
@@ -220,18 +273,92 @@ export function UnifiedExpressionBuilder({
   );
 
   // -------------------------------------------------------------------------
-  // Value mode: transform changes
+  // FS-029: Source Card state transitions
   // -------------------------------------------------------------------------
 
-  const handleTransformsChange = useCallback(
-    (transforms: TransformStep[]) => {
-      setBuilderState((prev) => {
-        if (prev.mode !== 'value') return prev;
-        return { ...prev, transforms };
+  /**
+   * Called by BuilderEntryActions when the user selects a source field
+   * from the empty-state picker. Transitions to DirectCopy.
+   */
+  const handleEntrySourceSelected = useCallback((path: string) => {
+    const newState = createDirectCopyState(path);
+    setSourceCardState(newState);
+    // Also sync into legacy sources for SourceChipPicker display
+    setBuilderState((prev) => {
+      if (prev.mode !== 'value') return prev;
+      return { ...prev, sources: [{ path, type: 'string' }] };
+    });
+  }, []);
+
+  /**
+   * Called by BuilderEntryActions when the user selects a function
+   * from the empty-state picker. Transitions to FunctionCall.
+   */
+  const handleEntryFunctionSelected = useCallback((functionName: string) => {
+    const newState = createFunctionCallState(functionName, []);
+    setSourceCardState(newState);
+  }, []);
+
+  /**
+   * Called by SourceCard when the user adds/removes a transformation.
+   * Receives the new DirectCopyState or SourceWithTransformState.
+   */
+  const handleSourceCardStateChange = useCallback(
+    (newState: import('../lib/expression-builder-state').DirectCopyState | import('../lib/expression-builder-state').SourceWithTransformState) => {
+      setSourceCardState(newState);
+    },
+    [],
+  );
+
+  /**
+   * Called by SourceCard remove button. Clears the source card state.
+   */
+  const handleSourceCardRemove = useCallback((path: string) => {
+    setSourceCardState((prev) => {
+      if (prev === null) return null;
+      if (prev.variant === 'directCopy' || prev.variant === 'sourceWithTransform') {
+        return null;
+      }
+      if (prev.variant === 'pendingConnector') {
+        const remaining = prev.sourcePaths.filter((p) => p !== path);
+        if (remaining.length === 0) return null;
+        if (remaining.length === 1) return createDirectCopyState(remaining[0]);
+        return createPendingConnectorState(remaining);
+      }
+      return prev;
+    });
+    // Sync legacy sources
+    setBuilderState((prev) => {
+      if (prev.mode !== 'value') return prev;
+      const remaining = prev.sources.filter((s) => s.path !== path);
+      return { ...prev, sources: remaining };
+    });
+  }, []);
+
+  /**
+   * Called by ConnectorPrompt when the user selects a combining function.
+   * Transitions PendingConnector → FunctionCall with sources pre-filled as slots.
+   */
+  const handleConnectorFunctionSelected = useCallback(
+    (functionName: string) => {
+      setSourceCardState((prev) => {
+        if (prev?.variant !== 'pendingConnector') return prev;
+        const slots: ArgumentSlot[] = prev.sourcePaths.map((p) => makeSourceSlot(p));
+        return createFunctionCallState(functionName, slots);
       });
     },
     [],
   );
+
+  /**
+   * Called by ArgumentForm when slots change in a FunctionCall state.
+   */
+  const handleFunctionCallSlotsChange = useCallback((slots: ArgumentSlot[]) => {
+    setSourceCardState((prev) => {
+      if (prev?.variant !== 'functionCall') return prev;
+      return createFunctionCallState(prev.node.functionName, slots);
+    });
+  }, []);
 
   // -------------------------------------------------------------------------
   // Conditional mode: state changes
@@ -256,13 +383,17 @@ export function UnifiedExpressionBuilder({
   );
 
   // -------------------------------------------------------------------------
-  // Render
+  // Derived values
   // -------------------------------------------------------------------------
 
   const valueModeState = builderState.mode === 'value' ? builderState : null;
   const isStaticMode = valueModeState?.inputType === 'static';
+  const sourceOptions = useMemo(
+    () => (parsedSourceSchema === null ? [] : flattenSchemaPaths(parsedSourceSchema)),
+    [parsedSourceSchema],
+  );
 
-  // Compute source description for the pipeline's auto-wired label
+  // Compute source description for legacy pipeline label
   const sourceDescription: string = (() => {
     if (!valueModeState) return '';
     if (valueModeState.staticValue) {
@@ -280,6 +411,17 @@ export function UnifiedExpressionBuilder({
     }
     return 'source';
   })();
+
+  // Determine what to render in the Source Card builder area
+  const scVariant = sourceCardState?.variant ?? null;
+  const showBuilderEntryActions = !isStaticMode && scVariant === null && (valueModeState?.sources.length ?? 0) === 0;
+  const showSourceCard = !isStaticMode && (scVariant === 'directCopy' || scVariant === 'sourceWithTransform');
+  const showPendingConnector = !isStaticMode && scVariant === 'pendingConnector';
+  const showFunctionCall = !isStaticMode && scVariant === 'functionCall';
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
 
   return (
     <div
@@ -313,10 +455,10 @@ export function UnifiedExpressionBuilder({
         ))}
       </div>
 
-      {/* Mode content */}
+      {/* ── Value mode ── */}
       {activeMode === 'value' && (
         <div className="space-y-4" data-testid="value-mode-section">
-          {/* Source section */}
+          {/* Source section — SourceChipPicker (legacy, preserved for DnD + existing tests) */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">Source</h3>
             <SourceChipPicker
@@ -330,17 +472,91 @@ export function UnifiedExpressionBuilder({
             />
           </div>
 
-          {/* Transform pipeline (T-04) */}
+          {/* ── FS-029 Source Card builder area ── */}
           {!isStaticMode && (
-            <TransformPipeline
-              transforms={valueModeState?.transforms ?? []}
-              onTransformsChange={handleTransformsChange}
-              sourceDescription={sourceDescription}
-            />
+            <div className="space-y-3" data-testid="source-card-builder">
+
+              {/* Empty state: dual entry actions */}
+              {showBuilderEntryActions && (
+                <BuilderEntryActions
+                  parsedSourceSchema={parsedSourceSchema}
+                  onSourceSelected={handleEntrySourceSelected}
+                  onFunctionSelected={handleEntryFunctionSelected}
+                />
+              )}
+
+              {/* Single source card (DirectCopy or SourceWithTransform) */}
+              {showSourceCard && (sourceCardState?.variant === 'directCopy' || sourceCardState?.variant === 'sourceWithTransform') && (
+                <SourceCard
+                  source={sourceCardState.sourcePath}
+                  transform={
+                    sourceCardState.variant === 'sourceWithTransform'
+                      ? sourceCardState.transform
+                      : undefined
+                  }
+                  onStateChange={handleSourceCardStateChange}
+                  onRemove={() => { handleSourceCardRemove(sourceCardState.sourcePath); }}
+                  renderArgumentForm={({ functionName, transform: t, onTransformChange }) => (
+                    <ArgumentForm
+                      functionName={functionName}
+                      slots={t.args as ArgumentSlot[]}
+                      parameterOffset={1}
+                      sourceOptions={sourceOptions}
+                      onSlotsChange={(slots) => {
+                        onTransformChange({ ...t, args: slots });
+                      }}
+                    />
+                  )}
+                />
+              )}
+
+              {/* Pending connector: 2+ sources awaiting combining function */}
+              {showPendingConnector && sourceCardState?.variant === 'pendingConnector' && (
+                <div className="space-y-2" data-testid="pending-connector-area">
+                  {sourceCardState.sourcePaths.map((path) => (
+                    <SourceCard
+                      key={path}
+                      source={path}
+                      transform={undefined}
+                      onStateChange={handleSourceCardStateChange}
+                      onRemove={() => { handleSourceCardRemove(path); }}
+                      renderArgumentForm={({ functionName, transform: t, onTransformChange }) => (
+                        <ArgumentForm
+                          functionName={functionName}
+                          slots={t.args as ArgumentSlot[]}
+                          parameterOffset={1}
+                          sourceOptions={sourceOptions}
+                          onSlotsChange={(slots) => {
+                            onTransformChange({ ...t, args: slots });
+                          }}
+                        />
+                      )}
+                    />
+                  ))}
+                  <ConnectorPrompt
+                    sources={sourceCardState.sourcePaths as string[]}
+                    onFunctionSelected={handleConnectorFunctionSelected}
+                  />
+                </div>
+              )}
+
+              {/* Function call: standalone ArgumentForm */}
+              {showFunctionCall && sourceCardState?.variant === 'functionCall' && (
+                <div data-testid="function-call-area">
+                  <ArgumentForm
+                    functionName={sourceCardState.node.functionName}
+                    slots={sourceCardState.node.slots as ArgumentSlot[]}
+                    sourceOptions={sourceOptions}
+                    onSlotsChange={handleFunctionCallSlotsChange}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
 
+      {/* ── Conditional mode ── */}
       {activeMode === 'conditional' && (
         <div data-testid="conditional-mode-section">
           <ConditionalModeBuilder
@@ -360,6 +576,7 @@ export function UnifiedExpressionBuilder({
         </div>
       )}
 
+      {/* ── Value Map mode ── */}
       {activeMode === 'valueMap' && (
         <div data-testid="value-map-mode-section">
           <ValueMapModeBuilder

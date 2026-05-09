@@ -134,7 +134,14 @@ export function ConnectedInlinePreviewStrip({
     sourceDataRaw: sourceData.trim() ? sourceData : null,
   });
 
-  const output = state.status === 'success' ? state.result.output : null;
+  const output =
+    state.status === 'success'
+      ? state.result.output
+      : state.status === 'error'
+        ? { error: state.error }
+        : state.status === 'timeout'
+          ? { error: 'Execution timed out. Try reducing input size or simplifying expressions.' }
+          : null;
 
   const status =
     state.status === 'success'
@@ -142,6 +149,8 @@ export function ConnectedInlinePreviewStrip({
           errors: state.result.diagnostics.filter((d) => d.severity === 'error').length,
           warnings: state.result.diagnostics.filter((d) => d.severity === 'warning').length,
         }
+      : state.status === 'error' || state.status === 'timeout'
+        ? { errors: 1, warnings: 0 }
       : null;
 
   // Derive ruleCount: prefer stats.rulesEvaluated from execution result, fall back to config

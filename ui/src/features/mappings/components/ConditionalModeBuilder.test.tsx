@@ -137,6 +137,13 @@ describe('ConditionalModeBuilder — structure', () => {
 // ---------------------------------------------------------------------------
 
 describe('ConditionalModeBuilder — operators', () => {
+  it('isTruthy operator hides right operand', async () => {
+    const user = userEvent.setup();
+    renderConditional();
+    await user.selectOptions(screen.getByTestId('condition-operator-0'), 'isTruthy');
+    expect(screen.queryByTestId('condition-right-0')).not.toBeInTheDocument();
+  });
+
   it('isNull operator hides right operand', async () => {
     const user = userEvent.setup();
     renderConditional();
@@ -148,6 +155,13 @@ describe('ConditionalModeBuilder — operators', () => {
     const user = userEvent.setup();
     renderConditional();
     await user.selectOptions(screen.getByTestId('condition-operator-0'), 'isNotNull');
+    expect(screen.queryByTestId('condition-right-0')).not.toBeInTheDocument();
+  });
+
+  it('isFalsy operator hides right operand', async () => {
+    const user = userEvent.setup();
+    renderConditional();
+    await user.selectOptions(screen.getByTestId('condition-operator-0'), 'isFalsy');
     expect(screen.queryByTestId('condition-right-0')).not.toBeInTheDocument();
   });
 
@@ -230,6 +244,15 @@ describe('ConditionalModeBuilder — branch value selector', () => {
     const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0] as ConditionalModeState;
     expect((lastCall.thenBranch as { kind: 'static'; value: string }).value).toBe('Yes');
   });
+
+  it('then static branch supports changing output type to boolean', async () => {
+    const user = userEvent.setup();
+    const { onStateChange } = renderConditional();
+    await user.selectOptions(screen.getByTestId('branch-then-static-type'), 'boolean');
+
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0] as ConditionalModeState;
+    expect(lastCall.thenBranch).toMatchObject({ kind: 'static', valueType: 'boolean', value: 'true' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -255,6 +278,73 @@ describe('ConditionalModeBuilder — else-if depth cap', () => {
 // ---------------------------------------------------------------------------
 
 describe('ConditionalModeBuilder — expression generation', () => {
+  it('boolean-direct source condition generates if(source(...), then, else)', () => {
+    const state: ConditionalModeState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'settings.notificationsEnabled' },
+            comparison: 'isTruthy',
+            rightOperand: { kind: 'static', value: '' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'ENABLED' },
+      elseBranch: { kind: 'static', value: 'DISABLED' },
+    };
+
+    const expr = generateExpressionFromState(state);
+    expect(expr).toBe(
+      'if(source("settings.notificationsEnabled"), "ENABLED", "DISABLED")',
+    );
+  });
+
+  it('boolean output branches generate unquoted booleans', () => {
+    const state: ConditionalModeState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'notes' },
+            comparison: 'isNull',
+            rightOperand: { kind: 'static', value: '' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'false', valueType: 'boolean' },
+      elseBranch: { kind: 'static', value: 'true', valueType: 'boolean' },
+    };
+
+    const expr = generateExpressionFromState(state);
+    expect(expr).toBe('if(isNull(source("notes")), false, true)');
+  });
+
+  it('boolean-direct false condition generates if(not(source(...)), then, else)', () => {
+    const state: ConditionalModeState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'settings.notificationsEnabled' },
+            comparison: 'isFalsy',
+            rightOperand: { kind: 'static', value: '' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'DISABLED' },
+      elseBranch: { kind: 'static', value: 'ENABLED' },
+    };
+
+    const expr = generateExpressionFromState(state);
+    expect(expr).toBe(
+      'if(not(source("settings.notificationsEnabled")), "DISABLED", "ENABLED")',
+    );
+  });
+
   it('AE-04: eq(source("status"), "active") with then="Yes" else="No"', () => {
     const state: ConditionalModeState = {
       mode: 'conditional',

@@ -191,6 +191,16 @@ describe('ValueMapModeBuilder — mapping table', () => {
     expect(lastCall.mappings[0].mapTo).toBe('United States');
   });
 
+  it('row output type can be switched to boolean', async () => {
+    const user = userEvent.setup();
+    const { onStateChange } = renderBuilder();
+    await user.click(screen.getByTestId('value-map-add-row-btn'));
+    await user.selectOptions(screen.getByTestId('value-map-to-type-0'), 'boolean');
+
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0] as ValueMapModeState;
+    expect(lastCall.mappings[0]).toMatchObject({ mapToType: 'boolean', mapTo: 'true' });
+  });
+
   it('removing a row removes it from state', async () => {
     const user = userEvent.setup();
     const { onStateChange } = renderBuilder({
@@ -259,6 +269,16 @@ describe('ValueMapModeBuilder — fallback', () => {
     expect((lastCall.fallback as { kind: 'value'; value?: string }).value).toBe('Unknown');
   });
 
+  it('fallback value type can be switched to boolean', async () => {
+    const user = userEvent.setup();
+    const { onStateChange } = renderBuilder();
+    await user.click(screen.getByTestId('value-map-fallback-value-radio'));
+    await user.selectOptions(screen.getByTestId('value-map-fallback-type'), 'boolean');
+
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0] as ValueMapModeState;
+    expect(lastCall.fallback).toMatchObject({ kind: 'value', valueType: 'boolean', value: 'true' });
+  });
+
   it('switching back to null hides text input', async () => {
     const user = userEvent.setup();
     renderBuilder({ initialState: { ...makeEmptyState(), fallback: { kind: 'value', value: 'x' } } });
@@ -322,6 +342,21 @@ describe('ValueMapModeBuilder — expression generation', () => {
     };
     const expr = generateExpressionFromState(state);
     expect(expr).toBe('');
+  });
+
+  it('boolean row outputs and fallback generate unquoted booleans', () => {
+    const state: ValueMapModeState = {
+      mode: 'valueMap',
+      inputSource: 'notes',
+      mappings: [
+        { whenValue: '', mapTo: 'false', mapToType: 'boolean' },
+        { whenValue: 'present', mapTo: 'true', mapToType: 'boolean' },
+      ],
+      fallback: { kind: 'value', value: 'false', valueType: 'boolean' },
+    };
+
+    const expr = generateExpressionFromState(state);
+    expect(expr).toBe('valueMap(source("notes"), {"present": true}, false)');
   });
 });
 

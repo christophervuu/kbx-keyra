@@ -115,6 +115,28 @@ describe('generateExpressionFromState (conditional mode)', () => {
     );
   });
 
+  it('emits boolean literals for typed static conditional branches', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'notes' },
+            comparison: 'isNotNull',
+            rightOperand: { kind: 'static', value: '' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'true', valueType: 'boolean' },
+      elseBranch: { kind: 'static', value: 'false', valueType: 'boolean' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(not(isNull(source("notes"))), true, false)',
+    );
+  });
+
   it('AE-05: nested else-if chain', () => {
     const nested: ExpressionBuilderState = {
       mode: 'conditional',
@@ -191,6 +213,8 @@ describe('generateExpressionFromState (conditional mode)', () => {
   });
 
   it.each([
+    ['isTruthy', 'source("x")'],
+    ['isFalsy', 'not(source("x"))'],
     ['eq', 'eq(source("x"), "y")'],
     ['neq', 'neq(source("x"), "y")'],
     ['gt', 'gt(source("x"), "y")'],
@@ -370,6 +394,22 @@ describe('generateExpressionFromState (valueMap mode)', () => {
 
     expect(generateExpressionFromState(state)).toBe(
       'valueMap(source("country"), {"US": "United States"}, null)',
+    );
+  });
+
+  it('emits boolean map values and boolean fallback when typed', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'valueMap',
+      inputSource: 'notes',
+      mappings: [
+        { whenValue: '', mapTo: 'false', mapToType: 'boolean' },
+        { whenValue: 'present', mapTo: 'true', mapToType: 'boolean' },
+      ],
+      fallback: { kind: 'value', value: 'false', valueType: 'boolean' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'valueMap(source("notes"), {"present": true}, false)',
     );
   });
 

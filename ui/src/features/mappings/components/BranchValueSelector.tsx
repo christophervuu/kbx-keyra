@@ -13,7 +13,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { InlinePipelineBuilder } from './InlinePipelineBuilder';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
-import type { BranchValue, ConditionalModeState, ValueModeState } from '../lib/expression-builder-state';
+import type { BranchValue, ConditionalModeState, StaticValue, ValueModeState } from '../lib/expression-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +43,12 @@ type BranchKind = 'static' | 'source' | 'pipeline' | 'conditional';
 const MAX_ELSE_IF_DEPTH = 5;
 
 const EMPTY_PIPELINE_STATE: ValueModeState = { mode: 'value', inputType: 'source', sources: [], transforms: [] };
+const STATIC_OUTPUT_TYPES: Array<{ value: StaticValue['type']; label: string }> = [
+  { value: 'string', label: 'String' },
+  { value: 'number', label: 'Number' },
+  { value: 'boolean', label: 'Boolean' },
+  { value: 'null', label: 'Null' },
+];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -79,7 +85,7 @@ export function BranchValueSelector({
   const handleKindChange = useCallback(
     (kind: BranchKind) => {
       if (kind === 'static') {
-        onBranchChange({ kind: 'static', value: '' });
+        onBranchChange({ kind: 'static', value: '', valueType: 'string' });
       } else if (kind === 'source') {
         onBranchChange({ kind: 'source', value: '' });
       } else if (kind === 'pipeline') {
@@ -90,8 +96,8 @@ export function BranchValueSelector({
           value: {
             mode: 'conditional',
             condition: { operator: 'and', conditions: [] },
-            thenBranch: { kind: 'static', value: '' },
-            elseBranch: { kind: 'static', value: '' },
+            thenBranch: { kind: 'static', value: '', valueType: 'string' },
+            elseBranch: { kind: 'static', value: '', valueType: 'string' },
           },
         });
       }
@@ -101,7 +107,30 @@ export function BranchValueSelector({
 
   const handleStaticValueChange = useCallback(
     (value: string) => {
-      onBranchChange({ kind: 'static', value });
+      const currentType = branch.kind === 'static' ? (branch.valueType ?? 'string') : 'string';
+      onBranchChange({ kind: 'static', value, valueType: currentType });
+    },
+    [onBranchChange, branch],
+  );
+
+  const handleStaticTypeChange = useCallback(
+    (valueType: StaticValue['type']) => {
+      if (valueType === 'null') {
+        onBranchChange({ kind: 'static', value: '', valueType: 'null' });
+        return;
+      }
+
+      if (valueType === 'boolean') {
+        onBranchChange({ kind: 'static', value: 'true', valueType: 'boolean' });
+        return;
+      }
+
+      if (valueType === 'number') {
+        onBranchChange({ kind: 'static', value: '0', valueType: 'number' });
+        return;
+      }
+
+      onBranchChange({ kind: 'static', value: '', valueType: 'string' });
     },
     [onBranchChange],
   );
@@ -199,15 +228,70 @@ export function BranchValueSelector({
 
       {/* Static value input */}
       {currentKind === 'static' && (
-        <input
-          type="text"
-          value={branch.kind === 'static' ? branch.value : ''}
-          onChange={(e) => { handleStaticValueChange(e.target.value); }}
-          placeholder="Enter value…"
-          aria-label="Branch static value"
-          className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
-          data-testid={`${testIdPrefix}-static-input`}
-        />
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-zinc-400 shrink-0">Type:</label>
+            <select
+              value={branch.kind === 'static' ? (branch.valueType ?? 'string') : 'string'}
+              onChange={(e) => { handleStaticTypeChange(e.target.value as StaticValue['type']); }}
+              aria-label="Branch static value type"
+              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:border-blue-500"
+              data-testid={`${testIdPrefix}-static-type`}
+            >
+              {STATIC_OUTPUT_TYPES.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {(branch.kind !== 'static' || (branch.valueType ?? 'string') === 'string') && (
+            <input
+              type="text"
+              value={branch.kind === 'static' ? branch.value : ''}
+              onChange={(e) => { handleStaticValueChange(e.target.value); }}
+              placeholder="Enter value…"
+              aria-label="Branch static value"
+              className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+              data-testid={`${testIdPrefix}-static-input`}
+            />
+          )}
+
+          {branch.kind === 'static' && branch.valueType === 'number' && (
+            <input
+              type="number"
+              value={branch.value}
+              onChange={(e) => { handleStaticValueChange(e.target.value); }}
+              placeholder="0"
+              aria-label="Branch static value"
+              className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+              data-testid={`${testIdPrefix}-static-input`}
+            />
+          )}
+
+          {branch.kind === 'static' && branch.valueType === 'boolean' && (
+            <select
+              value={branch.value === 'false' ? 'false' : 'true'}
+              onChange={(e) => { handleStaticValueChange(e.target.value); }}
+              aria-label="Branch static value"
+              className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-blue-500"
+              data-testid={`${testIdPrefix}-static-input`}
+            >
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          )}
+
+          {branch.kind === 'static' && branch.valueType === 'null' && (
+            <p
+              className="text-xs text-zinc-500 italic px-1"
+              data-testid={`${testIdPrefix}-static-null-hint`}
+            >
+              Value will be null.
+            </p>
+          )}
+        </div>
       )}
 
       {/* Source field picker */}

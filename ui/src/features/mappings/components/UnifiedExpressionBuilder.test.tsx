@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -151,7 +151,7 @@ describe('UnifiedExpressionBuilder — mode switch confirmation', () => {
     expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
     expect(screen.getByTestId('mode-tab-value')).toHaveAttribute('aria-selected', 'true');
     // The chip should still be there
-    expect(screen.getByText('email')).toBeInTheDocument();
+    expect(within(screen.getByTestId('selected-sources')).getByText('email')).toBeInTheDocument();
   });
 });
 
@@ -178,7 +178,7 @@ describe('UnifiedExpressionBuilder — source chip picker', () => {
     await user.click(screen.getByTestId('source-search-input'));
     await user.click(screen.getByTestId('suggestion-email'));
     expect(screen.getByTestId('selected-sources')).toBeInTheDocument();
-    expect(screen.getByText('email')).toBeInTheDocument();
+    expect(within(screen.getByTestId('selected-sources')).getByText('email')).toBeInTheDocument();
   });
 
   it('clicking x on a chip removes it', async () => {
@@ -287,5 +287,26 @@ describe('UnifiedExpressionBuilder — Direct Copy removed (AE-15)', () => {
     await user.click(screen.getByTestId('source-search-input'));
     await user.click(screen.getByTestId('suggestion-email'));
     expect(onExpressionChange).toHaveBeenCalledWith('source("email")');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Saved expression hydration
+// ---------------------------------------------------------------------------
+
+describe('UnifiedExpressionBuilder — saved expression hydration', () => {
+  it('hydrates SourceCard transform UI from saved expression in value mode', () => {
+    renderBuilder({
+      expression: 'upper(source("email"))',
+      initialState: {
+        mode: 'value',
+        inputType: 'source',
+        sources: [{ path: 'email', type: 'string' }],
+        transforms: [],
+      },
+    });
+
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-transform-badge')).toHaveTextContent('upper');
   });
 });

@@ -44,6 +44,7 @@ const CATEGORY_LABEL: Record<FunctionCategory, string> = {
 export interface TransformFunctionPickerProps {
   readonly onSelect: (functionName: string) => void;
   readonly onClose: () => void;
+  readonly includeSourceAccess?: boolean;
   readonly className?: string;
 }
 
@@ -58,6 +59,7 @@ export interface TransformFunctionPickerProps {
 export function TransformFunctionPicker({
   onSelect,
   onClose,
+  includeSourceAccess = false,
   className,
 }: TransformFunctionPickerProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,24 +67,29 @@ export function TransformFunctionPicker({
     new Set(['String']),
   );
 
+  const pickerCategories = useMemo<FunctionCategory[]>(() => {
+    if (includeSourceAccess) return [...PICKER_CATEGORIES, 'SourceAccess'];
+    return PICKER_CATEGORIES;
+  }, [includeSourceAccess]);
+
   const filtered = useMemo<FunctionCatalogEntry[]>(() => {
     const q = searchQuery.toLowerCase();
     return DSL_FUNCTION_CATALOG.filter(
       (fn) =>
-        PICKER_CATEGORIES.includes(fn.category) &&
+        pickerCategories.includes(fn.category) &&
         (q === '' || fn.name.toLowerCase().includes(q) || fn.description.toLowerCase().includes(q)),
     );
-  }, [searchQuery]);
+  }, [searchQuery, pickerCategories]);
 
   const byCategory = useMemo(() => {
     const map = new Map<FunctionCategory, FunctionCatalogEntry[]>();
-    for (const cat of PICKER_CATEGORIES) map.set(cat, []);
+    for (const cat of pickerCategories) map.set(cat, []);
     for (const fn of filtered) map.get(fn.category)?.push(fn);
     return map;
-  }, [filtered]);
+  }, [filtered, pickerCategories]);
 
   const effectiveExpanded =
-    searchQuery !== '' ? new Set(PICKER_CATEGORIES) : expandedCategories;
+    searchQuery !== '' ? new Set(pickerCategories) : expandedCategories;
 
   const toggleCategory = (cat: FunctionCategory) => {
     setExpandedCategories((prev) => {
@@ -131,7 +138,7 @@ export function TransformFunctionPicker({
 
       {/* Category accordions */}
       <div className="p-1 space-y-1">
-        {PICKER_CATEGORIES.map((cat) => {
+        {pickerCategories.map((cat) => {
           const fns = byCategory.get(cat) ?? [];
           if (fns.length === 0) return null;
           const isExpanded = effectiveExpanded.has(cat);

@@ -133,6 +133,32 @@ describe('ConditionRowEditor', () => {
     expect(screen.queryByTestId('condition-right-0')).not.toBeInTheDocument();
   });
 
+  it('hides right operand for isTruthy operator', () => {
+    render(
+      <ConditionRowEditor
+        condition={makeRow({ comparison: 'isTruthy' })}
+        onChange={vi.fn()}
+        parsedSourceSchema={MOCK_SCHEMA}
+        rowIndex={0}
+      />,
+    );
+
+    expect(screen.queryByTestId('condition-right-0')).not.toBeInTheDocument();
+  });
+
+  it('hides right operand for isFalsy operator', () => {
+    render(
+      <ConditionRowEditor
+        condition={makeRow({ comparison: 'isFalsy' })}
+        onChange={vi.fn()}
+        parsedSourceSchema={MOCK_SCHEMA}
+        rowIndex={0}
+      />,
+    );
+
+    expect(screen.queryByTestId('condition-right-0')).not.toBeInTheDocument();
+  });
+
   it('hides right operand for isNotNull operator', () => {
     render(
       <ConditionRowEditor

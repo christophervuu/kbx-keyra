@@ -128,7 +128,16 @@ function nodeToExpressionString(node: AstNode): string {
 function nodeToBranchValue(node: AstNode): BranchValue {
   // Static string literal
   if (node.type === 'StringLiteral') {
-    return { kind: 'static', value: node.value };
+    return { kind: 'static', value: node.value, valueType: 'string' };
+  }
+  if (node.type === 'NumberLiteral') {
+    return { kind: 'static', value: String(node.value), valueType: 'number' };
+  }
+  if (node.type === 'BooleanLiteral') {
+    return { kind: 'static', value: node.value ? 'true' : 'false', valueType: 'boolean' };
+  }
+  if (node.type === 'NullLiteral') {
+    return { kind: 'static', value: '', valueType: 'null' };
   }
   // source("path")
   if (
@@ -146,9 +155,17 @@ function nodeToBranchValue(node: AstNode): BranchValue {
     node.arguments.length === 1
   ) {
     const inner = node.arguments[0];
-    const val = literalValue(inner);
-    if (val !== undefined) {
-      return { kind: 'static', value: val === null ? '' : String(val) };
+    if (inner.type === 'StringLiteral') {
+      return { kind: 'static', value: inner.value, valueType: 'string' };
+    }
+    if (inner.type === 'NumberLiteral') {
+      return { kind: 'static', value: String(inner.value), valueType: 'number' };
+    }
+    if (inner.type === 'BooleanLiteral') {
+      return { kind: 'static', value: inner.value ? 'true' : 'false', valueType: 'boolean' };
+    }
+    if (inner.type === 'NullLiteral') {
+      return { kind: 'static', value: '', valueType: 'null' };
     }
   }
   // Nested if() — conditional branch
@@ -210,6 +227,35 @@ function nodeToOperand(node: AstNode): Operand {
 function decomposeConditionNode(
   node: AstNode,
 ): { success: true; result: ConditionRow | ConditionGroup } | { success: false; reason: string } {
+  // Direct boolean condition: if(source("flag"), then, else)
+  if (
+    node.type === 'FunctionCall' &&
+    node.name === 'source' &&
+    node.arguments.length === 1 &&
+    node.arguments[0].type === 'StringLiteral'
+  ) {
+    const left = nodeToOperand(node);
+    const row: ConditionRow = {
+      leftOperand: left,
+      comparison: 'isTruthy',
+      rightOperand: { kind: 'static', value: '' },
+    };
+    return { success: true, result: row };
+  }
+
+  // Direct boolean condition from a supported inline pipeline expression.
+  if (node.type === 'FunctionCall' && TRANSFORM_FUNCTIONS.has(node.name)) {
+    const left = nodeToOperand(node);
+    if (left.kind === 'pipeline') {
+      const row: ConditionRow = {
+        leftOperand: left,
+        comparison: 'isTruthy',
+        rightOperand: { kind: 'static', value: '' },
+      };
+      return { success: true, result: row };
+    }
+  }
+
   if (node.type !== 'FunctionCall') {
     return { success: false, reason: `Expected a condition function, got ${node.type}` };
   }
@@ -252,6 +298,17 @@ function decomposeConditionNode(
       const row: ConditionRow = {
         leftOperand: left,
         comparison: 'isNotNull',
+        rightOperand: { kind: 'static', value: '' },
+      };
+      return { success: true, result: row };
+    }
+
+    // not(<boolean-operand>) → isFalsy
+    const left = nodeToOperand(inner);
+    if (left.kind === 'source' || left.kind === 'expression' || left.kind === 'pipeline') {
+      const row: ConditionRow = {
+        leftOperand: left,
+        comparison: 'isFalsy',
         rightOperand: { kind: 'static', value: '' },
       };
       return { success: true, result: row };
@@ -353,7 +410,26 @@ function decomposeValueMap(node: FunctionCallNode): PipelineDecompositionResult 
 
   const mappings: ValueMapEntry[] = mappingsNode.properties.map((prop) => ({
     whenValue: prop.key,
-    mapTo: prop.value.type === 'StringLiteral' ? prop.value.value : nodeToExpressionString(prop.value),
+    mapTo:
+      prop.value.type === 'StringLiteral'
+        ? prop.value.value
+        : prop.value.type === 'NumberLiteral'
+          ? String(prop.value.value)
+          : prop.value.type === 'BooleanLiteral'
+            ? (prop.value.value ? 'true' : 'false')
+            : prop.value.type === 'NullLiteral'
+              ? ''
+              : nodeToExpressionString(prop.value),
+    mapToType:
+      prop.value.type === 'StringLiteral'
+        ? 'string'
+        : prop.value.type === 'NumberLiteral'
+          ? 'number'
+          : prop.value.type === 'BooleanLiteral'
+            ? 'boolean'
+            : prop.value.type === 'NullLiteral'
+              ? 'null'
+              : 'string',
   }));
 
   // Third arg: fallback (optional)
@@ -363,16 +439,30 @@ function decomposeValueMap(node: FunctionCallNode): PipelineDecompositionResult 
   } else if (fallbackNode.type === 'NullLiteral') {
     fallback = { kind: 'null' };
   } else if (fallbackNode.type === 'StringLiteral') {
-    fallback = { kind: 'value', value: fallbackNode.value };
+    fallback = { kind: 'value', value: fallbackNode.value, valueType: 'string' };
+  } else if (fallbackNode.type === 'NumberLiteral') {
+    fallback = { kind: 'value', value: String(fallbackNode.value), valueType: 'number' };
+  } else if (fallbackNode.type === 'BooleanLiteral') {
+    fallback = { kind: 'value', value: fallbackNode.value ? 'true' : 'false', valueType: 'boolean' };
   } else if (
     fallbackNode.type === 'FunctionCall' &&
     fallbackNode.name === 'static' &&
-    fallbackNode.arguments.length === 1 &&
-    fallbackNode.arguments[0].type === 'StringLiteral'
+    fallbackNode.arguments.length === 1
   ) {
-    fallback = { kind: 'value', value: (fallbackNode.arguments[0] as Extract<AstNode, { type: 'StringLiteral' }>).value };
+    const inner = fallbackNode.arguments[0];
+    if (inner.type === 'StringLiteral') {
+      fallback = { kind: 'value', value: inner.value, valueType: 'string' };
+    } else if (inner.type === 'NumberLiteral') {
+      fallback = { kind: 'value', value: String(inner.value), valueType: 'number' };
+    } else if (inner.type === 'BooleanLiteral') {
+      fallback = { kind: 'value', value: inner.value ? 'true' : 'false', valueType: 'boolean' };
+    } else if (inner.type === 'NullLiteral') {
+      fallback = { kind: 'null' };
+    } else {
+      fallback = { kind: 'value', value: nodeToExpressionString(fallbackNode), valueType: 'string' };
+    }
   } else {
-    fallback = { kind: 'value', value: nodeToExpressionString(fallbackNode) };
+    fallback = { kind: 'value', value: nodeToExpressionString(fallbackNode), valueType: 'string' };
   }
 
   return ok({ mode: 'valueMap', inputSource, mappings, fallback });

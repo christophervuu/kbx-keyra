@@ -216,4 +216,140 @@ describe('useTargetStatus — leaf-field coverage (AE-13)', () => {
     const locationCoverage = result.current.coverageMap.get('address.location');
     expect(locationCoverage).toEqual({ mapped: 1, total: 2 });
   });
+
+  it('handles hierarchical root-only node arrays for section coverage and status', () => {
+    const idNode = makeNode('workspaceProject.id', 'id', 'string', 1);
+    const displayNameNode = makeNode('workspaceProject.displayName', 'displayName', 'string', 1);
+    const createdDateNode = makeNode('workspaceProject.createdDate', 'createdDate', 'string', 1);
+    const projectKeyNode = makeNode('workspaceProject.projectKey', 'projectKey', 'string', 1);
+    const workspaceProjectNode = makeNode('workspaceProject', 'workspaceProject', 'object', 0, [
+      idNode,
+      displayNameNode,
+      createdDateNode,
+      projectKeyNode,
+    ]);
+
+    // Simulates hierarchical schema payload where only roots are provided in nodes[].
+    const hierarchicalNodes: SchemaTreeNode[] = [workspaceProjectNode];
+    const rules = [
+      makeRule('workspaceProject.id'),
+      makeRule('workspaceProject.displayName'),
+      makeRule('workspaceProject.createdDate'),
+      makeRule('workspaceProject.projectKey'),
+    ];
+
+    const { result } = renderHook(() => useTargetStatus(rules, null, hierarchicalNodes));
+
+    expect(result.current.statusMap.get('workspaceProject.id')).toBe('mapped');
+    expect(result.current.statusMap.get('workspaceProject.displayName')).toBe('mapped');
+    expect(result.current.statusMap.get('workspaceProject.createdDate')).toBe('mapped');
+    expect(result.current.statusMap.get('workspaceProject.projectKey')).toBe('mapped');
+    expect(result.current.coverageMap.get('workspaceProject')).toEqual({ mapped: 4, total: 4 });
+  });
+
+  it('rolls up object status to mapped when all leaf descendants are mapped', () => {
+    const idNode = makeNode('workspaceProject.id', 'id', 'string', 1);
+    const displayNameNode = makeNode('workspaceProject.displayName', 'displayName', 'string', 1);
+    const createdDateNode = makeNode('workspaceProject.createdDate', 'createdDate', 'string', 1);
+    const projectKeyNode = makeNode('workspaceProject.projectKey', 'projectKey', 'string', 1);
+    const workspaceProjectNode = makeNode('workspaceProject', 'workspaceProject', 'object', 0, [
+      idNode,
+      displayNameNode,
+      createdDateNode,
+      projectKeyNode,
+    ]);
+
+    const hierarchicalNodes: SchemaTreeNode[] = [workspaceProjectNode];
+    const rules = [
+      makeRule('workspaceProject.id'),
+      makeRule('workspaceProject.displayName'),
+      makeRule('workspaceProject.createdDate'),
+      makeRule('workspaceProject.projectKey'),
+    ];
+
+    const { result } = renderHook(() => useTargetStatus(rules, null, hierarchicalNodes));
+    expect(result.current.statusMap.get('workspaceProject')).toBe('mapped');
+  });
+
+  it('rolls up object status to warning when any leaf descendant has warning', () => {
+    const idNode = makeNode('workspaceProject.id', 'id', 'string', 1);
+    const displayNameNode = makeNode('workspaceProject.displayName', 'displayName', 'string', 1);
+    const createdDateNode = makeNode('workspaceProject.createdDate', 'createdDate', 'string', 1);
+    const projectKeyNode = makeNode('workspaceProject.projectKey', 'projectKey', 'string', 1);
+    const workspaceProjectNode = makeNode('workspaceProject', 'workspaceProject', 'object', 0, [
+      idNode,
+      displayNameNode,
+      createdDateNode,
+      projectKeyNode,
+    ]);
+
+    const hierarchicalNodes: SchemaTreeNode[] = [workspaceProjectNode];
+    const rules = [
+      makeRule('workspaceProject.id'),
+      makeRule('workspaceProject.displayName'),
+      makeRule('workspaceProject.createdDate'),
+      makeRule('workspaceProject.projectKey'),
+    ];
+    const validation = makeValidationResult([
+      {
+        code: 'W001',
+        severity: 'warning',
+        message: 'Type mismatch',
+        targetPath: 'workspaceProject.projectKey',
+      },
+    ]);
+
+    const { result } = renderHook(() => useTargetStatus(rules, validation, hierarchicalNodes));
+    expect(result.current.statusMap.get('workspaceProject')).toBe('warning');
+  });
+
+  it('keeps object status unmapped when only some leaf descendants are mapped', () => {
+    const idNode = makeNode('workspaceProject.id', 'id', 'string', 1);
+    const displayNameNode = makeNode('workspaceProject.displayName', 'displayName', 'string', 1);
+    const createdDateNode = makeNode('workspaceProject.createdDate', 'createdDate', 'string', 1);
+    const projectKeyNode = makeNode('workspaceProject.projectKey', 'projectKey', 'string', 1);
+    const workspaceProjectNode = makeNode('workspaceProject', 'workspaceProject', 'object', 0, [
+      idNode,
+      displayNameNode,
+      createdDateNode,
+      projectKeyNode,
+    ]);
+
+    const hierarchicalNodes: SchemaTreeNode[] = [workspaceProjectNode];
+    const rules = [
+      makeRule('workspaceProject.id'),
+      makeRule('workspaceProject.displayName'),
+    ];
+
+    const { result } = renderHook(() => useTargetStatus(rules, null, hierarchicalNodes));
+    expect(result.current.statusMap.get('workspaceProject')).toBe('unmapped');
+  });
+
+  it('marks nested child object as mapped when all of its leaf descendants are mapped', () => {
+    const sourceId = makeNode('schemas.source.id', 'id', 'string', 2);
+    const sourceLabel = makeNode('schemas.source.label', 'label', 'string', 2);
+    const sourceRevision = makeNode('schemas.source.revision', 'revision', 'string', 2);
+    const sourceObject = makeNode('schemas.source', 'source', 'object', 1, [
+      sourceId,
+      sourceLabel,
+      sourceRevision,
+    ]);
+    const schemasObject = makeNode('schemas', 'schemas', 'object', 0, [sourceObject]);
+
+    // Root-only hierarchical shape (children nested under parent objects).
+    const hierarchicalNodes: SchemaTreeNode[] = [schemasObject];
+
+    const rules = [
+      makeRule('schemas.source.id'),
+      makeRule('schemas.source.label'),
+      makeRule('schemas.source.revision'),
+    ];
+
+    const { result } = renderHook(() => useTargetStatus(rules, null, hierarchicalNodes));
+
+    expect(result.current.statusMap.get('schemas.source')).toBe('mapped');
+    expect(result.current.statusMap.get('schemas')).toBe('mapped');
+    expect(result.current.coverageMap.get('schemas.source')).toEqual({ mapped: 3, total: 3 });
+    expect(result.current.coverageMap.get('schemas')).toEqual({ mapped: 3, total: 3 });
+  });
 });

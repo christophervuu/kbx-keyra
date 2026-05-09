@@ -102,6 +102,15 @@ describe('decomposeExpression — conditional mode', () => {
     expect(state.elseBranch).toMatchObject({ kind: 'static', value: 'No' });
   });
 
+  it('hydrates typed boolean static branches in conditional expressions', () => {
+    const result = decomposeExpression('if(source("notes"), true, false)');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'conditional' }>;
+    expect(state.thenBranch).toMatchObject({ kind: 'static', value: 'true', valueType: 'boolean' });
+    expect(state.elseBranch).toMatchObject({ kind: 'static', value: 'false', valueType: 'boolean' });
+  });
+
   it('AE-16: if(gt(source("amount"), 100), "high", "low") → Conditional mode (mode auto-detection)', () => {
     const result = decomposeExpression('if(gt(source("amount"), 100), "high", "low")');
     expect(result.success).toBe(true);
@@ -144,6 +153,26 @@ describe('decomposeExpression — conditional mode', () => {
     const row = state.condition.conditions[0] as import('../expression-builder-state').ConditionRow;
     expect(row.comparison).toBe('isNotNull');
   });
+
+  it('if(source("flag"), ...) → isTruthy comparison operator', () => {
+    const result = decomposeExpression('if(source("settings.notificationsEnabled"), "ENABLED", "DISABLED")');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'conditional' }>;
+    const row = state.condition.conditions[0] as import('../expression-builder-state').ConditionRow;
+    expect(row.comparison).toBe('isTruthy');
+    expect(row.leftOperand).toMatchObject({ kind: 'source', value: 'settings.notificationsEnabled' });
+  });
+
+  it('if(not(source("flag")), ...) → isFalsy comparison operator', () => {
+    const result = decomposeExpression('if(not(source("settings.notificationsEnabled")), "DISABLED", "ENABLED")');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'conditional' }>;
+    const row = state.condition.conditions[0] as import('../expression-builder-state').ConditionRow;
+    expect(row.comparison).toBe('isFalsy');
+    expect(row.leftOperand).toMatchObject({ kind: 'source', value: 'settings.notificationsEnabled' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -177,6 +206,16 @@ describe('decomposeExpression — valueMap mode', () => {
     if (!result.success) return;
     const state = result.state as Extract<ExpressionBuilderState, { mode: 'valueMap' }>;
     expect(state.mappings).toHaveLength(2);
+  });
+
+  it('hydrates typed boolean map entries and fallback', () => {
+    const result = decomposeExpression('valueMap(source("notes"), {"": false, "present": true}, false)');
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const state = result.state as Extract<ExpressionBuilderState, { mode: 'valueMap' }>;
+    expect(state.mappings[0]).toMatchObject({ whenValue: '', mapTo: 'false', mapToType: 'boolean' });
+    expect(state.mappings[1]).toMatchObject({ whenValue: 'present', mapTo: 'true', mapToType: 'boolean' });
+    expect(state.fallback).toMatchObject({ kind: 'value', value: 'false', valueType: 'boolean' });
   });
 });
 

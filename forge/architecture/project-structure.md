@@ -257,9 +257,19 @@ ui/
           ExpressionPreviewStep.test.tsx Component tests (8 tests: highlighting, valid/invalid status, button states, copy, placeholder)
           GuidedBuilder.tsx          Guided expression builder orchestrator: 4-step flow (source→transform→args→preview), forwardRef GuidedBuilderRef.insertSourceField(), direct copy + static value shortcuts (T-05); Step 3 ArgumentConfigurator + Step 4 ExpressionPreviewStep, generateExpression + parse validation (T-06); array context detection + map()/filter() routing to ObjectTemplateBuilder/ConditionBuilder (T-07) — replaced by UnifiedExpressionBuilder in FS-023 T-07
           GuidedBuilder.test.tsx     Component tests (18 tests: step flow, shortcuts, ref API, back navigation)
-          UnifiedExpressionBuilder.tsx  FS-023 single-form multi-mode builder shell: mode tabs, confirmation dialog, Value mode source section, Direct Copy (T-03); transform pipeline wired (T-04); ConditionalModeBuilder wired (T-05); ValueMapModeBuilder wired (T-06); LiveExpressionDisplay + LiveResultDisplay wired (T-07)
+          UnifiedExpressionBuilder.tsx  FS-023 single-form multi-mode builder shell: mode tabs, confirmation dialog, Value mode source section, Direct Copy (T-03); transform pipeline wired (T-04); ConditionalModeBuilder wired (T-05); ValueMapModeBuilder wired (T-06); LiveExpressionDisplay + LiveResultDisplay wired (T-07); FS-029 Source Card builder integrated (T-09): SourceCard/ConnectorPrompt/ArgumentForm/BuilderEntryActions wired; dual expression generation (SC state vs legacy pipeline)
           UnifiedExpressionBuilder.test.tsx  FS-023 component tests (23 tests: mode tabs, mode switch confirmation, source chip picker, static toggle, Direct Copy)
+          UnifiedExpressionBuilder.integration.test.tsx  FS-029 integration tests (T-09): Source Card builder area, AE-01 DirectCopy via SourceChipPicker, AE-02 SourceWithTransform, AE-03 Add Transformation from empty state, AE-04 ConnectorPrompt with 2 sources, mode switch confirmation with SC state, static mode hides SC builder
           SourceChipPicker.tsx         FS-023 chip-based multi-select source field picker with search, static value toggle (T-03)
+          SourceCard.tsx               FS-029 Source Card component: source path chip, [+ Add Transformation] button, inline transform badge, ArgumentForm render prop slot, remove actions (T-02)
+          SourceCard.test.tsx          FS-029 component tests (AE-01/02/06: base state, picker interaction, transform state, remove transform, accessibility, keyboard nav)
+          ArgumentSlotInput.tsx        FS-029 single argument slot sub-component: source/literal mode toggle, source path input, inline nested transform (AE-07), dropdown when hints provided, validation indicator (T-03)
+          ArgumentForm.tsx             FS-029 argument form: renders all parameter slots from DSL_FUNCTION_CATALOG, PARAMETER_HINTS_STUB for dropdowns (replaced by T-04), variadic [+ Add value] button (T-03)
+          ArgumentForm.test.tsx        FS-029 component tests (T-03): ArgumentForm rendering, formatDate/cast/concat/upper scenarios, slot change propagation, validation, ArgumentSlotInput mode toggle, source/literal/dropdown modes, AE-07 nested transforms, accessibility
+          ConnectorPrompt.tsx          FS-029 automatic connector prompt (AE-04): renders when 2+ sources pending combination; CONNECTOR_CANDIDATES derived from DSL_FUNCTION_CATALOG (multi-input, non-SourceAccess/Array); emits onFunctionSelected callback (T-05)
+          ConnectorPrompt.test.tsx     FS-029 component tests (T-05): visibility guard (0/1/2/3 sources), structure/aria, dropdown options (concat/coalesce/add/subtract present, SourceAccess/single-input excluded), function selection callback, CONNECTOR_CANDIDATES export
+          BuilderEntryActions.tsx      FS-029 empty-state entry point (AE-03): dual [+ Add Source] / [+ Add Transformation] buttons; source picker popover (schema search, single-select); reuses TransformFunctionPicker; mutual exclusion between pickers; emits onSourceSelected/onFunctionSelected (T-06)
+          BuilderEntryActions.test.tsx FS-029 component tests (T-06): rendering, accessibility (aria-labels, aria-expanded, keyboard focusable), source picker open/close/filter/null-schema, source selection callback, function picker open/close, function selection callback, mutual exclusion
           TransformFunctionPicker.tsx  FS-023 categorized function picker popover for pipeline (T-04): search, category accordions, SourceAccess excluded
           TransformPipeline.tsx        FS-023 ordered transform step list with add/remove/reorder controls and function picker integration (T-04)
           TransformPipeline.test.tsx   FS-023 component tests (24 tests: picker, pipeline CRUD, reorder AE-12, AE-02, AE-03 integration)
@@ -340,9 +350,14 @@ ui/
           dsl-tokenizer.test.ts      Tokenizer unit tests (17 tests: all token types, edge cases, bracket matching)
           expression-generator.ts    Pure DSL generation from BuilderState: generateExpression(), makeSourceArg/makeLiteralArg/makeNestedArg helpers, BuilderArgument, BuilderState types (T-06)
           expression-generator.test.ts Unit tests (14 tests: direct copy, static types, concat, nested functions, escaping)
-          expression-builder-state.ts  FS-023 expression-builder state model types (Value/Conditional/ValueMap modes)
+          expression-builder-state.ts  FS-023 expression-builder state model types (Value/Conditional/ValueMap modes); FS-029 Source Card builder types (SourceCardValueModeState, ArgumentSlot, InlineTransform, ArgumentFormNode, DirectCopyState, SourceWithTransformState, FunctionCallState, PendingConnectorState) with type guards and factory functions
+          expression-builder-state.test.ts  FS-029 unit tests for Source Card state model (factory functions, type guards, slot helpers, AE-01/02/03/04/06/07 coverage)
           pipeline-expression-generator.ts  FS-023 pure state→DSL generator for unified expression builder
           pipeline-decomposer.ts        FS-023 DSL→ExpressionBuilderState decomposer with mode auto-detection (AE-09/10/16)
+          source-card-expression-generator.ts  FS-029 pure SourceCardValueModeState→DSL generator (T-07): DirectCopy/SourceWithTransform/FunctionCall/PendingConnector variants; recursive slot resolution (source, literal, expression, inline transform); literal type detection (string/number/boolean); string escaping
+          source-card-expression-generator.test.ts  FS-029 generator tests (T-07): AE-01/02/03/04/07 canonical cases, nested transforms, expression slots, PendingConnector→null, literal type detection, string escaping, variadic functions
+          source-card-decomposer.ts       FS-029 DSL→SourceCardValueModeState decomposer (T-08): source→DirectCopy, single-input-transform(source,...)→SourceWithTransform, fn(args)→FunctionCall; recursive slot decomposition (source/literal/expression/inline-transform); SINGLE_INPUT_TRANSFORMS heuristic; null for unsupported patterns
+          source-card-decomposer.test.ts  FS-029 decomposer tests (T-08): AE-01/02/03/07 decomposition, round-trip generate(decompose(expr))===expr, literal types, null/unsupported inputs, SourceWithTransform vs FunctionCall heuristic, variadic, string escaping
           __tests__/
             pipeline-expression-generator.test.ts  FS-023 unit tests for state→DSL generation across AE-01/02/03/04/05/06/14/15
             pipeline-decomposer.test.ts  FS-023 unit tests for DSL→state decomposition (28 tests: pipeline, conditional, valueMap, failures, roundtrips)
@@ -372,6 +387,8 @@ ui/
       data/               Shared static data consumed cross-feature
         dsl-functions.ts  DSL_FUNCTION_CATALOG: all registered functions with categories, params, descriptions (T-01)
         dsl-functions.test.ts  Catalog tests (5 tests: coverage, required fields, valid categories, no duplicates)
+        parameter-hints.ts  PARAMETER_HINTS registry: (functionName, parameterName) → ParameterHint (EnumParameterHint | TokenParameterHint); getParameterHint/hintToSlotOptions helpers; format tokens derived from @keyra/engine SUPPORTED_FORMAT_TOKENS/FORMAT_PRESETS (T-04)
+        parameter-hints.test.ts  Registry tests: SUPPORTED_FORMAT_TOKENS/FORMAT_PRESETS engine exports, formatDate/cast hint entries, getParameterHint/hintToSlotOptions helpers (T-04)
       engine/             Browser integration layer for src/engine (imported via @keyra/engine alias)
         index.ts          Exports validateMapping(), executeMapping(), toEngineConfig adapter, parse, defaultRegistry, FunctionRegistry, and re-exports engine types
       state/              Global state (Context + useReducer)

@@ -9,6 +9,8 @@ import { registerSourceAccessFunctions } from './source-access.js';
 import { registerStringFunctions } from './string.js';
 import { registerTypeConversionFunctions } from './type-conversion.js';
 
+export { SUPPORTED_FORMAT_TOKENS, FORMAT_PRESETS } from './date.js';
+
 export function registerAllFunctions(registry: FunctionRegistry): void {
   registerSourceAccessFunctions(registry);
   registerArrayFunctions(registry);

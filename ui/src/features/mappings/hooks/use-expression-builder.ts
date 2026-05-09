@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ParseResult } from '@/lib/engine';
 import type { MappingRule, ParsedSchema } from '@/lib/types/domain';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
+import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 import type { ExpressionBuilderState } from '../lib/expression-builder-state';
 // Keep old decomposer import for canDecompose (backward compat with ExpressionBuilderPanel)
 import { decomposeExpression } from '../lib/ast-decomposer';
@@ -113,6 +114,13 @@ export interface ExpressionBuilderResult {
 
 const DEBOUNCE_MS = 300;
 
+const SOURCE_CARD_HYDRATION_STATE: ExpressionBuilderState = {
+  mode: 'value',
+  inputType: 'source',
+  sources: [],
+  transforms: [],
+};
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -189,6 +197,15 @@ export function useExpressionBuilder({
     const newResult = decomposeExpressionNew(normalized);
     if (newResult.success) {
       setInitialUnifiedBuilderState(newResult.state);
+      setInitialBuilderState(null);
+      setDecompositionWarning(null);
+      setMode('builder');
+      return;
+    }
+
+    const sourceCardResult = decomposeToSourceCardState(normalized);
+    if (sourceCardResult !== null) {
+      setInitialUnifiedBuilderState(SOURCE_CARD_HYDRATION_STATE);
       setInitialBuilderState(null);
       setDecompositionWarning(null);
       setMode('builder');
@@ -279,7 +296,10 @@ export function useExpressionBuilder({
   // Derived state
   // -------------------------------------------------------------------------
 
-  const canDecompose = decomposeExpression(expression).success;
+  const canDecompose =
+    decomposeExpressionNew(expression).success ||
+    decomposeToSourceCardState(expression) !== null ||
+    decomposeExpression(expression).success;
 
   const hasUnsavedChanges =
     selectedRule !== null &&
@@ -314,6 +334,16 @@ export function useExpressionBuilder({
       setMode('builder');
       return;
     }
+
+    const sourceCardResult = decomposeToSourceCardState(expression);
+    if (sourceCardResult !== null) {
+      setInitialUnifiedBuilderState(SOURCE_CARD_HYDRATION_STATE);
+      setInitialBuilderState(null);
+      setDecompositionWarning(null);
+      setMode('builder');
+      return;
+    }
+
     // Fall back to old decomposer for backward compat
     const result = decomposeExpression(expression);
     if (result.success && result.builderState) {
