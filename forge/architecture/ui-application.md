@@ -102,7 +102,7 @@ ui/src/
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
         InlinePreviewStrip.tsx Collapsed bar + expanded strip; unconditional auto-preview on Apply when sourceData is present; test case selector; output flash animation; Run disabled when sourceData empty (FS-022)
         ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
-        AdvancedTestingPage.tsx Full-page test case management: two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs; trace/auto-run toggles; own isolated PreviewProvider (FS-021 T-06)
+        TestLabPage.tsx      Full-page test case management (Test Lab): two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs; trace/auto-run toggles; own isolated PreviewProvider (FS-021 T-06, FS-032)
         TargetFieldRow.tsx    Atomic target field row (status icon, type badge, expression summary)
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
@@ -333,7 +333,7 @@ This pattern is the canonical single-expression engine usage for UI surfaces tha
 - `/projects/:projectId/mappings/new` → Create Mapping
 - `/projects/:projectId/mappings/:mappingId` → Mapping Editor
 - `/projects/:projectId/mappings/:mappingId/deploy` → Mapping Deployment
-- `/projects/:projectId/mappings/:mappingId/test` → Advanced Testing (FS-021 T-06)
+- `/projects/:projectId/mappings/:mappingId/test-lab` → Test Lab (FS-021 T-06, FS-032)
 - `/schemas` → Schema Library
 - `/schemas/:schemaId` → Schema Detail
 - `/templates` → Template Library
@@ -345,6 +345,7 @@ This pattern is the canonical single-expression engine usage for UI surfaces tha
 All pages render inside a single shell route:
 
 - `AppLayout` provides `NavBar` + `Breadcrumbs` + content container (`<Outlet />`)
+- Mapping Editor and Test Lab are treated as focused-workspace routes: breadcrumbs are suppressed and content renders full-bleed (`<main className="flex-1">`) rather than the constrained `max-w-7xl` container
 - Not Found route is also rendered inside shell
 
 ### Breadcrumb Strategy
@@ -650,18 +651,18 @@ This change was made in FS-021 T-03 to reduce prop drilling and allow each panel
 - **Run disabled:** the Run button is disabled when `sourceData` is empty (AE-14 compliance).
 - **`ConnectedInlinePreviewStrip`:** thin wrapper that owns `usePreviewExecution` and local state; must be rendered inside `<PreviewProvider>`. Used as `bottomContent` in `MappingEditor.tsx`.
 - **Rules View parity:** `BottomArea` also exposes the same test case selector behavior so saved test cases can be loaded without switching views.
-- **`PreviewProvider` isolation:** `MappingEditor.tsx` wraps its content in a `<PreviewProvider>`. The Advanced Testing page has its own separate `<PreviewProvider>` — they are never co-mounted.
+- **`PreviewProvider` isolation:** `MappingEditor.tsx` wraps its content in a `<PreviewProvider>`. The Test Lab page has its own separate `<PreviewProvider>` — they are never co-mounted.
 
-### Advanced Testing Page (FS-021 T-06)
+### Test Lab Page (FS-021 T-06, FS-032)
 
-Route: `/projects/:projectId/mappings/:mappingId/test`
+Route: `/projects/:projectId/mappings/:mappingId/test-lab`
 
 A dedicated full-page testing surface that provides the full test case management, trace mode, diff view, and diagnostics previously available only in the editor's bottom tabs.
 
 **Page composition:**
-- `MappingAdvancedTesting.tsx` (route page) — thin wrapper; extracts `projectId`/`mappingId` from route params; renders `AdvancedTestingPage`.
-- `AdvancedTestingPage.tsx` (feature component) — wraps content in its own isolated `<PreviewProvider>`; delegates to `AdvancedTestingInner`.
-- `AdvancedTestingInner` — owns all state and hooks; never co-mounted with the editor's `PreviewProvider`.
+- `MappingTestLab.tsx` (route page) — thin wrapper; extracts `projectId`/`mappingId` from route params; renders `TestLabPage`.
+- `TestLabPage.tsx` (feature component) — wraps content in its own isolated `<PreviewProvider>`; delegates to `TestLabInner`.
+- `TestLabInner` — owns all state and hooks; never co-mounted with the editor's `PreviewProvider`.
 
 **Layout (two-panel, full page height):**
 - **Left panel (~35%):** `SourceDataInput` (full textarea) + `TestCaseManager` (below source input).
@@ -681,7 +682,7 @@ A dedicated full-page testing surface that provides the full test case managemen
 
 **Empty state:** when no execution has run, the right panel shows "Enter source data and click Run to see results."
 
-**`PreviewProvider` isolation:** the Advanced Testing page wraps its content in its own `<PreviewProvider>`, independent from the editor's provider. Both pages independently access the same localStorage keys via their respective hook instances. This avoids stale-reference risk and is future-proof for `HttpAdapter` migration.
+**`PreviewProvider` isolation:** the Test Lab page wraps its content in its own `<PreviewProvider>`, independent from the editor's provider. Both pages independently access the same localStorage keys via their respective hook instances. This avoids stale-reference risk and is future-proof for `HttpAdapter` migration.
 
 ### Rules View Search (FS-022)
 

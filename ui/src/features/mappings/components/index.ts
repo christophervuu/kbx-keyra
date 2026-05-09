@@ -118,5 +118,5 @@ export { InlinePreviewStrip } from './InlinePreviewStrip';
 export type { InlinePreviewStripProps } from './InlinePreviewStrip';
 export { ConnectedInlinePreviewStrip } from './ConnectedInlinePreviewStrip';
 export type { ConnectedInlinePreviewStripProps } from './ConnectedInlinePreviewStrip';
-export { AdvancedTestingPage } from './AdvancedTestingPage';
-export type { AdvancedTestingPageProps } from './AdvancedTestingPage';
+export { TestLabPage } from './TestLabPage';
+export type { TestLabPageProps } from './TestLabPage';

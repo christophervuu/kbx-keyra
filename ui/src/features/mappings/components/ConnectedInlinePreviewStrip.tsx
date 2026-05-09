@@ -187,7 +187,7 @@ export function ConnectedInlinePreviewStrip({
       output={output}
       isRunning={state.status === 'executing'}
       status={status}
-      testingPageUrl={`/projects/${projectId}/mappings/${mappingId}/test`}
+      testingPageUrl={`/projects/${projectId}/mappings/${mappingId}/test-lab`}
       isCollapsed={isCollapsed}
       onToggleCollapse={() => setIsCollapsed((prev) => !prev)}
       lastApplyTimestamp={lastApplyTimestamp}

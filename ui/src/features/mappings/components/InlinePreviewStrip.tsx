@@ -28,7 +28,7 @@ export interface InlinePreviewStripProps {
    * Null when no run has completed yet.
    */
   status: { errors: number; warnings: number } | null;
-  /** href for the "Open Advanced Testing" link */
+  /** href for the "Open Test Lab" link */
   testingPageUrl: string;
   /** Whether the strip is collapsed to its summary bar */
   isCollapsed: boolean;
@@ -204,10 +204,10 @@ function StatusBar({
       <span aria-hidden="true">·</span>
       <Link
         to={testingPageUrl}
-        data-testid="strip-status-bar-advanced-testing-link"
+        data-testid="strip-status-bar-test-lab-link"
         className="text-red-400 underline hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
       >
-        Open Advanced Testing →
+        Open Test Lab →
       </Link>
     </div>
   );
@@ -511,7 +511,7 @@ function SaveTestCaseModal({
  * InlinePreviewStrip — compact bottom strip replacing the 4-tab BottomArea.
  *
  * Expanded layout:
- *   Toolbar row (PREVIEW label, test case selector, Clear, Auto-run toggle, Run, Advanced Testing link)
+ *   Toolbar row (PREVIEW label, test case selector, Clear, Auto-run toggle, Run, Test Lab link)
  *   Status bar (state-dependent single-line display)
  *   Three-pane content area:
  *     [Source JSON ~35%] [Output ~40%] [Diagnostics ~25%]
@@ -771,13 +771,13 @@ export function InlinePreviewStrip({
 
         <span className="flex-1" aria-hidden="true" />
 
-        {/* Open Advanced Testing link */}
+        {/* Open Test Lab link */}
         <Link
           to={testingPageUrl}
-          data-testid="strip-advanced-testing-link"
+          data-testid="strip-test-lab-link"
           className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
         >
-          Open Advanced Testing
+          Open Test Lab
           <ExternalLink size={10} aria-hidden="true" />
         </Link>
 

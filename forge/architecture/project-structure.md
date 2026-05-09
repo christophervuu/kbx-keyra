@@ -58,7 +58,7 @@ ui/
     App.tsx               Root component and router setup
     routes/               Route path constants and placeholder pages
       index.ts            Barrel export for route constants
-      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test' (FS-021 T-05)
+      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test-lab' (FS-021 T-05, FS-032 T-01)
       pages/              Placeholder page components (one per route)
         HomeDashboard.tsx   Renders HomeDashboardPage from features/home (FS-014 T-11)
         CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
@@ -68,7 +68,7 @@ ui/
         CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
         MappingDeployment.tsx
-        MappingAdvancedTesting.tsx  Thin wrapper: extracts projectId/mappingId from route params, renders AdvancedTestingPage (FS-021 T-06)
+        MappingTestLab.tsx          Thin wrapper: extracts projectId/mappingId from route params, renders TestLabPage (FS-021 T-06, FS-032 T-01)
         SchemaLibrary.tsx          Renders SchemaLibraryPage from features/schemas (FS-016 T-04)
         SchemaDetail.tsx
         TemplateLibrary.tsx
@@ -306,8 +306,8 @@ ui/
           InlinePreviewStrip.tsx     Collapsed bar + expanded strip; auto-preview via lastApplyTimestamp; output flash animation; Run disabled when sourceData empty; keyboard accessible (FS-021 T-05)
           InlinePreviewStrip.test.tsx Component tests (25 tests: collapsed/expanded states, auto-run, flash animation, run disabled, keyboard nav)
           ConnectedInlinePreviewStrip.tsx  Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
-          AdvancedTestingPage.tsx    Full-page test case management and execution: two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs (Output/Diagnostics/Trace/Diff); trace toggle; auto-run toggle; Run button; "Back to Editor" link; own isolated PreviewProvider (FS-021 T-06)
-          AdvancedTestingPage.test.tsx Component tests (layout, tabs, tab switching, Run button, trace toggle, auto-run toggle, back link, empty state, mapping context)
+          TestLabPage.tsx            Full-page test case management and execution: two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs (Output/Diagnostics/Trace/Diff); trace toggle; auto-run toggle; Run button; "Back to Editor" link; own isolated PreviewProvider (FS-021 T-06, FS-032 T-03)
+          TestLabPage.test.tsx       Component tests (layout, tabs, tab switching, Run button, trace toggle, auto-run toggle, back link, empty state, mapping context)
           preview/          Preview & Testing Panel components (FS-012)
             index.ts              Preview barrel (re-exports all preview components)
             PreviewPanel.tsx      Panel 5 shell: toolbar (Run/auto-run/trace), Test Case Manager, 4-tab bar (Output/Diagnostics/Trace/Diff), stats bar, empty/loading states, wired to usePreviewExecution (FS-012 T-06); accepts mappingId prop for test case scoping

@@ -71,11 +71,11 @@ describe('InlinePreviewStrip', () => {
     expect(screen.getByTestId('strip-autorun-toggle')).toBeInTheDocument();
   });
 
-  it('renders Advanced Testing link in toolbar', () => {
-    renderStrip({ testingPageUrl: '/projects/p1/mappings/m1/test' });
-    const link = screen.getByTestId('strip-advanced-testing-link');
+  it('renders Test Lab link in toolbar', () => {
+    renderStrip({ testingPageUrl: '/projects/p1/mappings/m1/test-lab' });
+    const link = screen.getByTestId('strip-test-lab-link');
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test');
+    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test-lab');
   });
 
   it('Clear button calls onClearSource when clicked', () => {
@@ -293,19 +293,19 @@ describe('InlinePreviewStrip', () => {
     expect(bar).toHaveTextContent('3 warnings');
   });
 
-  it('status bar shows Error state with Advanced Testing link', () => {
+  it('status bar shows Error state with Test Lab link', () => {
     renderStrip({
       sourceData: '{"a":1}',
       isRunning: false,
       status: { errors: 2, warnings: 1 },
-      testingPageUrl: '/projects/p1/mappings/m1/test',
+      testingPageUrl: '/projects/p1/mappings/m1/test-lab',
     });
     const bar = screen.getByTestId('strip-status-bar');
     expect(bar).toHaveTextContent('2 errors');
     expect(bar).toHaveTextContent('1 warning');
-    const link = screen.getByTestId('strip-status-bar-advanced-testing-link');
+    const link = screen.getByTestId('strip-status-bar-test-lab-link');
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test');
+    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test-lab');
   });
 
   // ---------------------------------------------------------------------------

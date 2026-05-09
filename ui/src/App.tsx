@@ -9,7 +9,7 @@ import { AppLayout } from '@/components/layout';
 import CreateMapping from '@/routes/pages/CreateMapping';
 import CreateProject from '@/routes/pages/CreateProject';
 import HomeDashboard from '@/routes/pages/HomeDashboard';
-import MappingAdvancedTesting from '@/routes/pages/MappingAdvancedTesting';
+import MappingTestLab from '@/routes/pages/MappingTestLab';
 import MappingDeployment from '@/routes/pages/MappingDeployment';
 import MappingEditor from '@/routes/pages/MappingEditor';
 import NotFound from '@/routes/pages/NotFound';
@@ -36,8 +36,8 @@ const router = createBrowserRouter(
         element={<MappingDeployment />}
       />
       <Route
-        path="/projects/:projectId/mappings/:mappingId/test"
-        element={<MappingAdvancedTesting />}
+        path="/projects/:projectId/mappings/:mappingId/test-lab"
+        element={<MappingTestLab />}
       />
       <Route path="/schemas" element={<SchemaLibrary />} />
       <Route path="/schemas/:schemaId" element={<SchemaDetail />} />
