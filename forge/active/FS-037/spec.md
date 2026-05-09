@@ -17,7 +17,7 @@ FS-037
 Owner: TBD
 Reviewers: TBD
 Created: 2026-05-09
-Last Updated: 2026-05-09
+Last Updated: 2026-05-10
 Type: cross-cutting
 
 ---
@@ -30,7 +30,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -71,8 +71,9 @@ After this change:
 - FS-032 (Rename to Test Lab + full-bleed layout) will be completed before or concurrently with this spec
 - The `ApiAdapter.previewOnServer()` method and `ServerPreviewResult` type are stable contracts that will not change materially
 - In Phase 0 (`LocalStorageAdapter`), `previewOnServer` throws "Not available in offline mode" — all server-side comparison modes are disabled in Phase 0
-- The existing `DiffDisplay` component and `computeDiff` utility can be adapted for comparison diff rendering
+- The existing `computeDiff` utility and diff rendering primitives (color conventions, entry formatting) can be reused in the comparison-specific diff component without reusing `DiffDisplay` itself
 - The existing `PreviewProvider` / `usePreviewExecution` pattern for client-side execution remains the correct foundation for the "Current" side of comparisons
+- The Compare tab shares source data state with the rest of Test Lab via the existing `PreviewProvider` — a single source-of-truth payload, not a separate compare-only copy
 - Deployment metadata for the "Current" side is derived from the in-memory `MappingConfig` (version, last saved timestamp), not from a server call
 
 ---
@@ -157,10 +158,10 @@ getDeploymentContext(mappingId: string): Promise<DeploymentContext>;
 - **Deployment context loading** via `getDeploymentContext` to determine which environments have active deployments and are therefore selectable
 - **Phase 0 disabled states**: environment comparison modes shown as unavailable with "(requires backend)" messaging; only "Current" execution is functional
 - **Guardrails**: no deploy, promote, rollback, or write actions anywhere in the Compare tab
-- **Comparison result snapshot**: optional ability to store a comparison result alongside a test case
+- **Comparison result snapshot**: optional ability to store a comparison result as a separate `ComparisonSnapshot` record linked to a test case by ID
 - New comparison-related types in the domain model
 - New hooks: `useServerPreview`, `useEnvironmentComparison`
-- New components: `CompareTab`, `ComparisonModeSelector`, `ComparisonSidePanel`, `EnvironmentMetadataBar`
+- New components: `CompareTab`, `ComparisonModeSelector`, `ComparisonSidePanel`, `EnvironmentMetadataBar`, `ComparisonDiffDisplay`
 
 ### Out of Scope
 
@@ -250,6 +251,20 @@ getDeploymentContext(mappingId: string): Promise<DeploymentContext>;
 
 ### System Behavior
 
+#### User-facing comparison labels
+
+All comparison UIs use these canonical labels consistently:
+
+| Label | Meaning |
+|-------|---------|
+| **Current** | The current working mapping config in the editor, including any unsaved changes |
+| **Saved** | The latest persisted mapping version (last successful save to adapter) |
+| **DEV** | The snapshot currently deployed and active in the DEV environment |
+| **QA** | The snapshot currently deployed and active in the QA environment |
+| **PROD** | The snapshot currently deployed and active in the PROD environment |
+
+"Current" always reflects the in-memory editor state. "Saved" always reflects the latest adapter-persisted state. DEV/QA/PROD always reflect the currently deployed snapshot in that environment — not a historical deployment or a pending deployment.
+
 #### Comparison mode model
 
 Each comparison mode defines a left side and a right side:
@@ -298,22 +313,31 @@ In Phase 0, `getDeploymentContext` returns stub data. All environment modes are 
 
 #### Client-side "Current" execution
 
-Uses the same `executeMapping()` path as `usePreviewExecution` but runs independently within the comparison hook. The working config comes from `useMappingEditor`'s in-memory state. The "Current (Saved)" variant loads the last-persisted config via `adapter.getMapping(mappingId)`.
+Uses the same `executeMapping()` path as `usePreviewExecution` but runs independently within the comparison hook. The working config comes from `useMappingEditor`'s in-memory state.
+
+The "Current (Saved)" variant loads the last-persisted config by calling `adapter.getMapping(mappingId)` on each comparison run — not from a page-load cache. This ensures the comparison always reflects the latest persisted version, even if the mapping was saved in another tab or context between comparison runs. The async loading step happens at the start of `runComparison()`, before engine execution begins.
 
 #### Server-side environment execution
 
 Calls `adapter.previewOnServer(mappingId, { environment, sourceData })`. The result includes `ServerPreviewResult.metadata` with environment, snapshot version, deployment timestamp, and engine version. In Phase 0, this call throws and the mode is disabled.
 
+For modes where both sides are server previews (DEV vs QA, QA vs PROD), both requests fire in parallel. The hook uses `Promise.allSettled` to ensure one side's failure does not prevent the other from completing. Partial failures are handled explicitly: the successful side displays its result while the failed side shows its error.
+
+When inputs change (source data edited, mode changed) while a comparison is in-flight, stale requests are cancelled. The hook tracks a run ID (incrementing counter) and discards results from superseded runs. This prevents race conditions where a slow prior request overwrites the results of a newer run.
+
 #### Diff computation
 
-After both sides complete, `computeDiff(leftOutput, rightOutput)` produces a diff entry list. The diff is rendered below the side-by-side panels using the same visual treatment as the existing `DiffDisplay` component but adapted for comparison context (labels reference "Left" / "Right" or the environment names).
+After both sides complete, `computeDiff(leftOutput, rightOutput)` produces a diff entry list. The diff is rendered below the side-by-side panels in a dedicated `ComparisonDiffDisplay` component. This component is separate from the existing `DiffDisplay` (which includes an editable expected-output textarea for the Diff tab); `ComparisonDiffDisplay` is read-only comparison output. Both components share the underlying `computeDiff` utility and diff entry color conventions (green for added, red for removed, amber for changed), but `ComparisonDiffDisplay` labels entries using the left/right comparison labels (e.g., "Current (Working)" / "DEV") instead of "expected"/"actual".
 
 #### Comparison result storage
 
-When the user clicks **Save to Test Case**, the comparison metadata is stored alongside the test case in localStorage:
+When the user clicks **Save Comparison**, the comparison result is stored as a separate `ComparisonSnapshot` record linked to a test case by ID. This record is stored independently from the `TestCase` data — the `TestCase` type is not extended with comparison fields.
 
 ```ts
-interface TestCaseComparisonSnapshot {
+interface ComparisonSnapshot {
+  id: string;                       // unique snapshot ID
+  testCaseId: string;               // linked test case
+  mappingId: string;                // mapping context
   mode: ComparisonMode;
   leftResult: ComparisonSideResult;
   rightResult: ComparisonSideResult;
@@ -322,7 +346,9 @@ interface TestCaseComparisonSnapshot {
 }
 ```
 
-This is an optional extension of the existing `TestCase` type. Stored comparison snapshots are read-only historical records — they are not re-executable.
+Storage key: `keyra:comparison-snapshots:{mappingId}` in localStorage (Phase 0). Each mapping stores an array of `ComparisonSnapshot` records. Snapshots are linked to test cases via `testCaseId` — the `TestCaseManager` can query for snapshots belonging to a given test case.
+
+Stored comparison snapshots are read-only historical records — they are not re-executable. Deleting a test case does not automatically delete its linked snapshots (orphaned snapshots are harmless and can be cleaned up lazily).
 
 ### Failure / Edge Behavior
 
@@ -334,6 +360,7 @@ This is an optional extension of the existing `TestCase` type. Stored comparison
 - **No active deployments:** Environment comparison modes are disabled. Tooltip shows the specific reason per mode.
 - **Working config has no rules:** "Current" side executes and returns an empty output. This is valid and may be useful for comparing against a deployed version.
 - **Unsaved changes indicator:** The "Current (Working)" side metadata bar shows an "unsaved" badge when the working config differs from the last save.
+- **Stale request cancellation:** If the user changes the comparison mode or edits source data while a comparison is in-flight, the in-flight results are discarded. The UI resets to idle or immediately starts a new comparison if auto-triggered.
 
 ---
 
@@ -485,8 +512,9 @@ This is an optional extension of the existing `TestCase` type. Stored comparison
 - User clicks "Save Comparison"
 
 **Then**
-- The comparison snapshot (mode, both results, diff) is stored alongside the test case
-- The TestCaseManager shows an indicator that the test case has a stored comparison
+- A `ComparisonSnapshot` record is created and linked to the test case by ID
+- The snapshot is stored in `keyra:comparison-snapshots:{mappingId}` in localStorage
+- The TestCaseManager shows an indicator that the test case has linked comparison snapshots
 - Viewing the stored comparison shows the historical results (read-only, not re-executable)
 
 ### AE-12 — Comparison mode selector shows deployment status
@@ -507,11 +535,7 @@ This is an optional extension of the existing `TestCase` type. Stored comparison
 
 ## Open Questions
 
-- `Q1.` Should the "Current vs Saved" comparison load the last-persisted config via `adapter.getMapping()` on each comparison run, or should it cache the saved config at page load time? Loading on each run ensures freshness if another tab saves, but adds an async step.
-- `Q2.` Should the comparison result snapshot be stored as a property on the existing `TestCase` type (extending it), or as a separate `ComparisonSnapshot` record linked by test case ID? Extending `TestCase` is simpler but couples the types.
-- `Q3.` Should the diff in the Compare tab use the same `DiffDisplay` component (adapted) or a new `ComparisonDiffDisplay` component? Reuse reduces code but `DiffDisplay` currently expects a user-editable "expected output" textarea which is not appropriate for comparison diff.
-- `Q4.` For "DEV vs QA" and "QA vs PROD" modes where both sides are server previews, should both requests fire in parallel or sequentially? Parallel is faster but generates two simultaneous server calls.
-- `Q5.` Should the Compare tab share the same source data state as the other tabs (via `PreviewProvider`), or should it maintain its own source data reference? Sharing ensures consistency but may cause re-render coupling.
+- none
 
 ---
 
@@ -533,23 +557,23 @@ This is an optional extension of the existing `TestCase` type. Stored comparison
 
 This is a cross-cutting spec with primarily UI work and one architecture task. Tasks should be decomposed as follows:
 
-1. **Comparison domain types** (ui-task): Add `ComparisonMode`, `ComparisonSideResult`, `ComparisonSideMetadata`, `ComparisonState`, and `TestCaseComparisonSnapshot` types to domain model and feature types. Foundation for all other tasks.
+1. **Comparison domain types** (ui-task): Add `ComparisonMode`, `ComparisonSideResult`, `ComparisonSideMetadata`, `ComparisonState`, and `ComparisonSnapshot` types to domain model and feature types. Foundation for all other tasks.
 
 2. **useServerPreview hook** (ui-task): Wrap `adapter.previewOnServer()` with Phase 0 gating, error handling, and typed result. Used by the comparison hook for server-side execution.
 
 3. **useDeploymentContext hook** (ui-task): Load deployment context for the mapping to determine which environments have active deployments. Used by the comparison mode selector.
 
-4. **useEnvironmentComparison hook** (ui-task): Orchestrate two-sided comparison execution — client-side for "Current", server-side for environments. Manages comparison state, mode selection, and diff computation. Depends on T-01, T-02, T-03.
+4. **useEnvironmentComparison hook** (ui-task): Orchestrate two-sided comparison execution — client-side for "Current", server-side for environments. Loads saved config via `adapter.getMapping()` on each run for freshness. Fires both sides in parallel via `Promise.allSettled`. Cancels stale in-flight results via run ID tracking. Depends on T-01, T-02, T-03.
 
 5. **ComparisonModeSelector component** (ui-task): Dropdown or segmented control for selecting comparison mode. Shows deployment status per environment, disables unavailable modes. Depends on T-01, T-03.
 
 6. **ComparisonSidePanel + EnvironmentMetadataBar components** (ui-task): Side panel displaying a single comparison result with metadata bar above output. Depends on T-01.
 
-7. **ComparisonDiffSummary component** (ui-task): Diff display between two comparison outputs. Adapts existing `computeDiff` utility for comparison context. Depends on T-01.
+7. **ComparisonDiffDisplay component** (ui-task): Dedicated comparison diff display between two outputs. Reuses `computeDiff` utility and shared diff rendering primitives (color conventions, entry formatting) but is a separate read-only component from `DiffDisplay`. Depends on T-01.
 
-8. **CompareTab composition and Test Lab integration** (ui-task): Compose all comparison components into a Compare tab, wire into the Test Lab tab bar, connect to shared source data. Depends on T-04, T-05, T-06, T-07.
+8. **CompareTab composition and Test Lab integration** (ui-task): Compose all comparison components into a Compare tab, wire into the Test Lab tab bar, connect to shared source data via existing `PreviewProvider`. Depends on T-04, T-05, T-06, T-07.
 
-9. **Comparison snapshot storage** (ui-task): Extend test case model to support optional comparison snapshots. Add save/view functionality in TestCaseManager. Depends on T-08.
+9. **Comparison snapshot storage** (ui-task): Implement separate `ComparisonSnapshot` storage linked to test cases by ID. New localStorage key `keyra:comparison-snapshots:{mappingId}`. Add save/view functionality in CompareTab and TestCaseManager. Depends on T-08.
 
 10. **Architecture update** (task): Update `ui-application.md` with comparison workflow architecture section. Update `INDEX.md` date.
 
@@ -559,5 +583,18 @@ Tasks 2, 3, 5, 6, 7 can proceed in parallel after T-01. T-04 depends on T-01, T-
 
 ## Change Log
 
+- Rev 2 — 2026-05-10
+  - All 5 open questions resolved:
+    - Q1: "Current vs Saved" loads saved config via `adapter.getMapping()` on each comparison run for freshness
+    - Q2: Comparison snapshots stored as separate `ComparisonSnapshot` records linked by test case ID, not as TestCase type extension
+    - Q3: New `ComparisonDiffDisplay` component (read-only), reusing shared `computeDiff` utility and diff primitives; `DiffDisplay` not reused directly
+    - Q4: Both server preview requests fire in parallel via `Promise.allSettled`; stale in-flight results cancelled via run ID tracking
+    - Q5: Compare tab shares source data state via existing `PreviewProvider` — single source-of-truth
+  - Added user-facing comparison label definitions (Current, Saved, DEV, QA, PROD)
+  - Added stale request cancellation to failure/edge behavior
+  - Updated AE-11 for separate ComparisonSnapshot storage model
+  - Renamed ComparisonDiffSummary → ComparisonDiffDisplay throughout
+  - Renamed TestCaseComparisonSnapshot → ComparisonSnapshot throughout
+  - No scope change; all changes are design clarifications
 - Rev 1 — 2026-05-09
   - Initial draft

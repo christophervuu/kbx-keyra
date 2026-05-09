@@ -5,12 +5,45 @@ import {
   createMemoryRouter,
   createRoutesFromElements,
 } from 'react-router-dom';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import { TestLabPage } from '@/features/mappings/components/TestLabPage';
 import MappingTestLab from '@/routes/pages/MappingTestLab';
+
+// ---------------------------------------------------------------------------
+// matchMedia mock
+// ---------------------------------------------------------------------------
+
+function mockMatchMedia(isWide: boolean, isMedium: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches:
+        query === '(min-width: 1280px)'
+          ? isWide
+          : query === '(min-width: 1024px)'
+            ? isMedium
+            : false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+// Default: wide viewport
+beforeEach(() => {
+  mockMatchMedia(true, true);
+  // Clear localStorage
+  localStorage.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ---------------------------------------------------------------------------
 // Mock adapter — never resolves (keeps component in loading state for most tests)
@@ -124,7 +157,7 @@ describe('TestLabPage', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Layout
+  // Layout — shared across breakpoints
   // ---------------------------------------------------------------------------
 
   it('renders the page container', () => {
@@ -153,40 +186,248 @@ describe('TestLabPage', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Tabs
+  // Execution summary bar
   // ---------------------------------------------------------------------------
 
-  it('renders all four result tabs', () => {
+  it('renders the execution summary bar', () => {
     renderComponent();
-    expect(screen.getByTestId('tab-output')).toBeInTheDocument();
-    expect(screen.getByTestId('tab-diagnostics')).toBeInTheDocument();
-    expect(screen.getByTestId('tab-trace')).toBeInTheDocument();
-    expect(screen.getByTestId('tab-diff')).toBeInTheDocument();
+    expect(screen.getByTestId('execution-summary-bar')).toBeInTheDocument();
   });
 
-  it('Output tab is selected by default', () => {
+  it('summary bar shows idle state before any execution', () => {
     renderComponent();
-    expect(screen.getByTestId('tab-output')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('tab-diagnostics')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByTestId('summary-idle')).toBeInTheDocument();
   });
 
-  it('clicking Diagnostics tab selects it', () => {
-    renderComponent();
-    fireEvent.click(screen.getByTestId('tab-diagnostics'));
-    expect(screen.getByTestId('tab-diagnostics')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('tab-output')).toHaveAttribute('aria-selected', 'false');
+  // ---------------------------------------------------------------------------
+  // Wide viewport — 2x2 multi-panel layout
+  // ---------------------------------------------------------------------------
+
+  describe('wide viewport (>= 1280px)', () => {
+    beforeEach(() => {
+      mockMatchMedia(true, true);
+    });
+
+    it('renders all four ResultPanels', () => {
+      renderComponent();
+      expect(screen.getByTestId('panel-output')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-diff')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-diagnostics')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-trace')).toBeInTheDocument();
+    });
+
+    it('renders panel titles', () => {
+      renderComponent();
+      expect(screen.getByText('Output')).toBeInTheDocument();
+      expect(screen.getByText('Diff')).toBeInTheDocument();
+      expect(screen.getByText('Diagnostics')).toBeInTheDocument();
+      expect(screen.getByText('Trace')).toBeInTheDocument();
+    });
+
+    it('does not render the tab bar at wide breakpoint', () => {
+      renderComponent();
+      expect(screen.queryByTestId('results-tabs')).not.toBeInTheDocument();
+    });
+
+    it('right panel has data-layout="wide"', () => {
+      renderComponent();
+      expect(screen.getByTestId('right-panel')).toHaveAttribute('data-layout', 'wide');
+    });
+
+    it('renders vertical and horizontal grid dividers', () => {
+      renderComponent();
+      expect(screen.getByTestId('divider-col')).toBeInTheDocument();
+      expect(screen.getByTestId('divider-row')).toBeInTheDocument();
+    });
+
+    it('renders the main split divider', () => {
+      renderComponent();
+      expect(screen.getByTestId('divider-main')).toBeInTheDocument();
+    });
+
+    it('left panel width is driven by mainSplit ratio (default ~35%)', () => {
+      renderComponent();
+      const leftPanel = screen.getByTestId('left-panel');
+      // Default mainSplit is 0.35 → 35%
+      expect(leftPanel).toHaveStyle({ width: '35%' });
+    });
+
+    it('shows empty state in Output panel before execution', () => {
+      renderComponent();
+      expect(
+        screen.getByText(/Enter source data and click Run to see the mapping output/i),
+      ).toBeInTheDocument();
+    });
+
+    it('shows empty state in Diff panel before execution', () => {
+      renderComponent();
+      expect(
+        screen.getByText(/Run a test and set expected output to see the diff/i),
+      ).toBeInTheDocument();
+    });
+
+    it('shows empty state in Diagnostics panel before execution', () => {
+      renderComponent();
+      expect(
+        screen.getByText(/No diagnostics from the last execution/i),
+      ).toBeInTheDocument();
+    });
+
+    it('shows trace disabled message when trace is off', () => {
+      renderComponent();
+      // trace toggle starts unchecked → trace disabled
+      expect(
+        screen.getByText(/Enable Trace in the top bar to see execution trace/i),
+      ).toBeInTheDocument();
+    });
+
+    it('Output panel collapse toggle is present at wide breakpoint', () => {
+      renderComponent();
+      expect(screen.getByTestId('panel-output-toggle')).toBeInTheDocument();
+    });
+
+    it('clicking Output panel collapse toggle collapses it', () => {
+      renderComponent();
+      const toggle = screen.getByTestId('panel-output-toggle');
+      fireEvent.click(toggle);
+      const content = screen.getByTestId('panel-output-content');
+      expect(content.className).toContain('hidden');
+    });
+
+    it('clicking Diagnostics panel collapse toggle collapses it', () => {
+      renderComponent();
+      const toggle = screen.getByTestId('panel-diagnostics-toggle');
+      fireEvent.click(toggle);
+      const content = screen.getByTestId('panel-diagnostics-content');
+      expect(content.className).toContain('hidden');
+    });
+
+    it('clicking a collapsed panel toggle expands it again', () => {
+      renderComponent();
+      const toggle = screen.getByTestId('panel-diff-toggle');
+      fireEvent.click(toggle); // collapse
+      fireEvent.click(toggle); // expand
+      const content = screen.getByTestId('panel-diff-content');
+      expect(content.className).not.toContain('hidden');
+    });
   });
 
-  it('clicking Trace tab selects it', () => {
-    renderComponent();
-    fireEvent.click(screen.getByTestId('tab-trace'));
-    expect(screen.getByTestId('tab-trace')).toHaveAttribute('aria-selected', 'true');
+  // ---------------------------------------------------------------------------
+  // Medium viewport — vertical stack
+  // ---------------------------------------------------------------------------
+
+  describe('medium viewport (1024–1279px)', () => {
+    beforeEach(() => {
+      mockMatchMedia(false, true);
+    });
+
+    it('renders all four ResultPanels in vertical stack', () => {
+      renderComponent();
+      expect(screen.getByTestId('panel-output')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-diff')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-diagnostics')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-trace')).toBeInTheDocument();
+    });
+
+    it('right panel has data-layout="medium"', () => {
+      renderComponent();
+      expect(screen.getByTestId('right-panel')).toHaveAttribute('data-layout', 'medium');
+    });
+
+    it('does not render the tab bar at medium breakpoint', () => {
+      renderComponent();
+      expect(screen.queryByTestId('results-tabs')).not.toBeInTheDocument();
+    });
+
+    it('Output panel has no collapse toggle at medium breakpoint', () => {
+      renderComponent();
+      expect(screen.queryByTestId('panel-output-toggle')).not.toBeInTheDocument();
+    });
+
+    it('Diff panel has a collapse toggle at medium breakpoint', () => {
+      renderComponent();
+      expect(screen.getByTestId('panel-diff-toggle')).toBeInTheDocument();
+    });
+
+    it('Diagnostics panel has a collapse toggle at medium breakpoint', () => {
+      renderComponent();
+      expect(screen.getByTestId('panel-diagnostics-toggle')).toBeInTheDocument();
+    });
+
+    it('renders the main split divider at medium breakpoint', () => {
+      renderComponent();
+      expect(screen.getByTestId('divider-main')).toBeInTheDocument();
+    });
+
+    it('does not render grid dividers at medium breakpoint', () => {
+      renderComponent();
+      expect(screen.queryByTestId('divider-col')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('divider-row')).not.toBeInTheDocument();
+    });
   });
 
-  it('clicking Diff tab selects it', () => {
-    renderComponent();
-    fireEvent.click(screen.getByTestId('tab-diff'));
-    expect(screen.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
+  // ---------------------------------------------------------------------------
+  // Narrow viewport — tab fallback
+  // ---------------------------------------------------------------------------
+
+  describe('narrow viewport (< 1024px)', () => {
+    beforeEach(() => {
+      mockMatchMedia(false, false);
+    });
+
+    it('renders the tab bar at narrow breakpoint', () => {
+      renderComponent();
+      expect(screen.getByTestId('results-tabs')).toBeInTheDocument();
+    });
+
+    it('renders all four result tabs', () => {
+      renderComponent();
+      expect(screen.getByTestId('tab-output')).toBeInTheDocument();
+      expect(screen.getByTestId('tab-diagnostics')).toBeInTheDocument();
+      expect(screen.getByTestId('tab-trace')).toBeInTheDocument();
+      expect(screen.getByTestId('tab-diff')).toBeInTheDocument();
+    });
+
+    it('Output tab is selected by default', () => {
+      renderComponent();
+      expect(screen.getByTestId('tab-output')).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('tab-diagnostics')).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('clicking Diagnostics tab selects it', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-diagnostics'));
+      expect(screen.getByTestId('tab-diagnostics')).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('tab-output')).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('clicking Trace tab selects it', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-trace'));
+      expect(screen.getByTestId('tab-trace')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('clicking Diff tab selects it', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-diff'));
+      expect(screen.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('right panel has data-layout="narrow"', () => {
+      renderComponent();
+      expect(screen.getByTestId('right-panel')).toHaveAttribute('data-layout', 'narrow');
+    });
+
+    it('does not render the main split divider at narrow breakpoint', () => {
+      renderComponent();
+      expect(screen.queryByTestId('divider-main')).not.toBeInTheDocument();
+    });
+
+    it('does not render grid dividers at narrow breakpoint', () => {
+      renderComponent();
+      expect(screen.queryByTestId('divider-col')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('divider-row')).not.toBeInTheDocument();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -238,15 +479,6 @@ describe('TestLabPage', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Empty / idle state
-  // ---------------------------------------------------------------------------
-
-  it('shows empty results state when no execution has run', () => {
-    renderComponent();
-    expect(screen.getByTestId('results-empty-state')).toBeInTheDocument();
-  });
-
-  // ---------------------------------------------------------------------------
   // Mapping context
   // ---------------------------------------------------------------------------
 
@@ -258,5 +490,25 @@ describe('TestLabPage', () => {
   it('renders mapping version in top bar', () => {
     renderComponent();
     expect(screen.getByTestId('mapping-version')).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // localStorage — corrupt data graceful fallback
+  // ---------------------------------------------------------------------------
+
+  it('renders with default layout when localStorage contains invalid JSON', () => {
+    localStorage.setItem('keyra:testlab-layout', 'not-valid-json{{{');
+    // Should render without throwing
+    renderComponent();
+    expect(screen.getByTestId('test-lab-page')).toBeInTheDocument();
+    // Default mainSplit is 0.35 → left panel should be 35%
+    expect(screen.getByTestId('left-panel')).toHaveStyle({ width: '35%' });
+  });
+
+  it('renders with default layout when localStorage key is missing', () => {
+    // localStorage is already cleared in beforeEach
+    renderComponent();
+    expect(screen.getByTestId('test-lab-page')).toBeInTheDocument();
+    expect(screen.getByTestId('left-panel')).toHaveStyle({ width: '35%' });
   });
 });

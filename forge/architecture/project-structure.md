@@ -306,9 +306,14 @@ ui/
           InlinePreviewStrip.tsx     Collapsed bar + expanded strip; auto-preview via lastApplyTimestamp; output flash animation; Run disabled when sourceData empty; keyboard accessible (FS-021 T-05)
           InlinePreviewStrip.test.tsx Component tests (25 tests: collapsed/expanded states, auto-run, flash animation, run disabled, keyboard nav)
           ConnectedInlinePreviewStrip.tsx  Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
-          TestLabPage.tsx            Full-page test case management and execution: two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs (Output/Diagnostics/Trace/Diff); trace toggle; auto-run toggle; Run button; "Back to Editor" link; own isolated PreviewProvider (FS-021 T-06, FS-032 T-03)
-          TestLabPage.test.tsx       Component tests (layout, tabs, tab switching, Run button, trace toggle, auto-run toggle, back link, empty state, mapping context)
-          preview/          Preview & Testing Panel components (FS-012)
+          TestLabPage.tsx            Full-page test lab: multi-panel simultaneous layout (2×2 wide, vertical stack medium, tab fallback narrow); resizable main split; ExecutionSummaryBar; ResultPanel wrappers; useTestLabLayout hook; own isolated PreviewProvider (FS-021 T-06, FS-032 T-03, FS-033)
+          TestLabPage.test.tsx       Component tests (layout, breakpoint rendering, panel collapse, dividers, Run button, trace toggle, auto-run toggle, back link, empty states, localStorage fallback)
+          preview/          Preview & Testing Panel components (FS-012, FS-033)
+            index.ts              Preview barrel (re-exports all preview components)
+            ResultPanel.tsx       Reusable panel chrome: header (title + optional badge + collapse toggle) + content area; children always mounted; CSS hidden for collapse; ARIA aria-expanded on toggle (FS-033)
+            ResultPanel.test.tsx  Component tests (header rendering, badge variants, collapse toggle, content visibility, empty state, testId/className)
+            ExecutionSummaryBar.tsx  Sticky compact execution status bar: idle | executing | success (duration + rule stats + diagnostic severity badges) | error | timeout; pure component from PreviewExecutionState (FS-033)
+            ExecutionSummaryBar.test.tsx  Component tests (all state variants, diagnostic badge counts, zero-count suppression, rule stats formatting, aria-live)
             index.ts              Preview barrel (re-exports all preview components)
             PreviewPanel.tsx      Panel 5 shell: toolbar (Run/auto-run/trace), Test Case Manager, 4-tab bar (Output/Diagnostics/Trace/Diff), stats bar, empty/loading states, wired to usePreviewExecution (FS-012 T-06); accepts mappingId prop for test case scoping
             PreviewPanel.test.tsx Component tests (render, tabs, toolbar disabled states, ARIA)
@@ -342,6 +347,8 @@ ui/
           use-resizable-layout.test.ts   Hook unit tests (defaults, localStorage read/write, clamp, collapse/expand, drag min-width enforcement)
           use-test-cases.ts              Test case CRUD hook: save/load/delete, localStorage persistence keyed by mappingId (keyra:testcases:{id}), quota error handling (FS-012 T-05)
           use-test-cases.test.ts         Hook unit tests (save, persist, load, delete, mappingId reload, corrupted storage, quota error)
+          use-test-lab-layout.ts         Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence under keyra:testlab-layout (FS-033)
+          use-test-lab-layout.test.ts    Hook unit tests (defaults, breakpoint detection, togglePanel, output no-op at medium, trace auto-behavior, split ratio clamping, localStorage read/write/fallback, storage write failure)
         context/          Feature-scoped React contexts
           preview-context.tsx  PreviewContext (read) + PreviewSettersContext (write) + PreviewProvider + usePreviewContext() + usePreviewSetters() (FS-012 T-03)
         lib/              Pure utility functions

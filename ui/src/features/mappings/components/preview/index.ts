@@ -12,3 +12,7 @@ export { TestCaseManager } from './TestCaseManager';
 export type { TestCaseManagerProps } from './TestCaseManager';
 export { TraceDisplay } from './TraceDisplay';
 export type { TraceDisplayProps } from './TraceDisplay';
+export { ResultPanel } from './ResultPanel';
+export type { ResultPanelProps, ResultPanelBadge } from './ResultPanel';
+export { ExecutionSummaryBar } from './ExecutionSummaryBar';
+export type { ExecutionSummaryBarProps } from './ExecutionSummaryBar';

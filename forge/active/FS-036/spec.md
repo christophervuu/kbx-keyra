@@ -17,7 +17,7 @@ FS-036
 Owner: TBD
 Reviewers: TBD
 Created: 2026-05-09
-Last Updated: 2026-05-09
+Last Updated: 2026-05-10
 Type: ui
 
 ---
@@ -30,7 +30,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -227,18 +227,20 @@ The natural linking key between panels is a combination of `targetPath` and `rul
 
 #### Filtering
 
-1. Diagnostics tab shows filter chips: **Error** | **Warning** | **Info** (toggle ON/OFF, AND semantics for multi-select)
-2. Diagnostics tab shows a search input filtering by `targetPath` or `message` substring (case-insensitive, debounced 200ms)
-3. Trace tab shows filter chips: **Failed** (has diagnostics) | **Success** (no diagnostics)
-4. Trace tab shows a search input filtering by `targetPath` (case-insensitive, debounced 200ms)
-5. Filtering does not clear linked selection; if the selected item is filtered out, the selection persists but the item is not visible. When filters clear, it reappears highlighted.
-6. Filter state includes a count display: `{N} of {M} diagnostics` or `{N} of {M} trace steps`
+1. Diagnostics tab shows filter chips: **Error** | **Warning** | **Info** (toggle ON/OFF, AND semantics for multi-select). All severities are shown by default with no active filter on initial load.
+2. Error and warning rows are visually emphasized (bolder styling or stronger color) relative to info rows, regardless of filter state. Info entries remain visible unless the user explicitly filters them out.
+3. Diagnostics tab shows a search input filtering by `targetPath` or `message` substring (case-insensitive, debounced 200ms)
+4. Trace tab shows filter chips: **Failed** (has diagnostics) | **Success** (no diagnostics)
+5. Trace tab shows a search input filtering by `targetPath` (case-insensitive, debounced 200ms)
+6. Filtering does not clear linked selection; if the selected item is filtered out, the selection persists but the item is not visible. When filters clear, it reappears highlighted.
+7. Filter state includes a count display: `{N} of {M} diagnostics` or `{N} of {M} trace steps`
 
 #### Jump to Rule
 
 1. When a diagnostic or trace entry is selected, a "Jump to rule" button/link appears in the selection context
-2. Clicking it navigates to `/projects/:projectId/mappings/:mappingId` with route state `{ selectedTargetPath: targetPath }`
-3. The Mapping Editor reads this route state on mount and sets `selectedTargetPath`, scrolling the target worklist to the relevant field and opening its builder
+2. Clicking it navigates in the same browser tab to `/projects/:projectId/mappings/:mappingId` with route state `{ selectedTargetPath: targetPath }`
+3. Navigation preserves normal browser back-button behavior so users can return to Test Lab easily
+4. The Mapping Editor reads this route state on mount and sets `selectedTargetPath`, scrolling the target worklist to the relevant field and opening its builder
 
 #### Plain-Language Failure Helpers
 
@@ -284,7 +286,8 @@ OutputDisplay must be enhanced to:
 1. Parse the rendered JSON and track the path to each key-value pair during rendering
 2. Accept an `highlightPath: string | null` prop
 3. When `highlightPath` is set, apply a highlight style (background color) to the key-value node(s) at that path
-4. Handle nested paths with dot notation (e.g., `Order.Header.DocumentType` highlights the `DocumentType` key and value within the rendered JSON)
+4. Handle the canonical dot-separated object path format used by existing result models (e.g., `Order.Header.DocumentType` highlights the `DocumentType` key and value within the rendered JSON)
+5. Array index path support (e.g., `Order.Items[0].Name`) is deferred unless the current path format already provides it consistently and the renderer can support it without adding a separate path-resolution model
 
 #### Failure Explainer Module
 
@@ -302,6 +305,8 @@ function explainDiagnostic(diagnostic: Diagnostic, traceEntry?: TraceEntry): Fai
 ```
 
 Returns `null` for diagnostics that don't match any known pattern. The function is pure and deterministic — no I/O.
+
+Pattern matching strategy: match by diagnostic `code` first (authoritative). Where no stable code-based pattern exists, allow limited best-effort fallback matching on diagnostic `message` text. Code-based matching remains authoritative and takes precedence over any message-based match.
 
 ### Failure / Edge Behavior
 
@@ -488,11 +493,17 @@ Returns `null` for diagnostics that don't match any known pattern. The function 
 
 ## Open Questions
 
-- `Q1.` Should the "Jump to rule" behavior open the editor in the same tab (replacing the Test Lab) or in a new tab? Recommendation: same tab with browser back-button support; new-tab can be added later as a modifier (Ctrl+click).
-- `Q2.` Should Output path highlighting support array indices (e.g., `Order.Items[0].Name`) or only dot-separated object paths? The current `DiffEntry.path` format needs confirmation. Recommendation: support dot-separated paths first; array index paths in a follow-up if the diff utility produces them.
-- `Q3.` Should the diagnostic severity filter default to showing all severities or only errors+warnings? Recommendation: all severities shown by default (no filters active on load).
-- `Q4.` For the InlinePreviewStrip, should the output pane highlighting be added in this spec or deferred? The strip's output area is smaller and space-constrained. Recommendation: add it — highlighting a single path in the compact output view is still useful for quick correlation.
-- `Q5.` Should the failure explainer patterns be driven by diagnostic `code` strings only, or also inspect the `message` text? The engine's diagnostic codes need to be cataloged to build the pattern set. Recommendation: match on `code` first; fall back to `message` substring matching for patterns not covered by codes.
+- none
+
+---
+
+## Resolved Questions
+
+- `Q1.` (Rev 2) **Jump-to-rule navigation target:** "Jump to rule" opens the Mapping Editor in the same browser tab. Navigation preserves normal browser back-button behavior so users can return to Test Lab easily.
+- `Q2.` (Rev 2) **Output path highlighting format:** v1 supports the canonical dot-separated object path format used by existing result models. Array index path support (e.g., `Order.Items[0].Name`) is deferred unless the current path format already provides it consistently and the renderer can support it without adding a separate path-resolution model.
+- `Q3.` (Rev 2) **Default diagnostic severity filter:** All severities shown by default with no active filter on initial load. Errors and warnings are visually emphasized (bolder styling or stronger color) but info entries remain visible unless the user explicitly filters them out.
+- `Q4.` (Rev 2) **InlinePreviewStrip output highlighting:** Included in v1. Lightweight single-path output highlighting in the InlinePreviewStrip provides quick correlation with diagnostics and diff selections.
+- `Q5.` (Rev 2) **Failure explainer matching strategy:** Match by diagnostic `code` first (authoritative). Where no stable code-based pattern exists, allow limited best-effort fallback matching on diagnostic `message` text. Code-based matching remains authoritative.
 
 ---
 
@@ -543,5 +554,13 @@ Parallelization: T-02, T-03, T-04, T-05 are independent of each other (all depen
 
 ## Change Log
 
+- Rev 2 — 2026-05-10
+  - Resolved all 5 open questions (Q1–Q5) based on owner input
+  - Q1: Jump-to-rule navigates in the same tab with browser back-button support
+  - Q2: Output highlighting uses dot-separated object paths; array index paths deferred
+  - Q3: All diagnostic severities shown by default; error/warning rows visually emphasized
+  - Q4: InlinePreviewStrip output highlighting included in v1
+  - Q5: Failure explainer matches on diagnostic code first (authoritative), message text as fallback
+  - Updated Filtering, Jump to Rule, Output Path Highlighting, and Failure Explainer sections to reflect resolved decisions
 - Rev 1 — 2026-05-09
   - Initial draft

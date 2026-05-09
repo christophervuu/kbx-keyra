@@ -102,7 +102,10 @@ ui/src/
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
         InlinePreviewStrip.tsx Collapsed bar + expanded strip; unconditional auto-preview on Apply when sourceData is present; test case selector; output flash animation; Run disabled when sourceData empty (FS-022)
         ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
-        TestLabPage.tsx      Full-page test case management (Test Lab): two-panel layout (35% source+TestCaseManager / 65% tabbed results); 4 tabs; trace/auto-run toggles; own isolated PreviewProvider (FS-021 T-06, FS-032)
+        TestLabPage.tsx      Full-page test lab: multi-panel simultaneous layout (2×2 wide, vertical stack medium, tab fallback narrow); resizable main split; ExecutionSummaryBar; ResultPanel wrappers; useTestLabLayout hook; own isolated PreviewProvider (FS-021 T-06, FS-032, FS-033)
+        preview/
+          ResultPanel.tsx      Reusable panel chrome: header (title + badge + collapse toggle) + content area; children always mounted; CSS hidden for collapse; ARIA aria-expanded on toggle (FS-033)
+          ExecutionSummaryBar.tsx  Sticky compact bar: idle | executing | success (duration + rule stats + diagnostic severity badges) | error | timeout; pure component from PreviewExecutionState (FS-033)
         TargetFieldRow.tsx    Atomic target field row (status icon, type badge, expression summary)
         EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01)
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
@@ -144,6 +147,7 @@ ui/src/
         use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04)
         use-resizable-layout.ts    Resizable layout state hook (source/target widths, bottom height, collapse state, drag handle props, localStorage persistence)
         use-test-cases.ts          Test case CRUD hook keyed by mappingId (FS-012 T-05)
+        use-test-lab-layout.ts     Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence (keyra:testlab-layout) (FS-033)
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
       lib/
@@ -653,20 +657,47 @@ This change was made in FS-021 T-03 to reduce prop drilling and allow each panel
 - **Rules View parity:** `BottomArea` also exposes the same test case selector behavior so saved test cases can be loaded without switching views.
 - **`PreviewProvider` isolation:** `MappingEditor.tsx` wraps its content in a `<PreviewProvider>`. The Test Lab page has its own separate `<PreviewProvider>` — they are never co-mounted.
 
-### Test Lab Page (FS-021 T-06, FS-032)
+### Test Lab Page (FS-021 T-06, FS-032, FS-033)
 
 Route: `/projects/:projectId/mappings/:mappingId/test-lab`
 
-A dedicated full-page testing surface that provides the full test case management, trace mode, diff view, and diagnostics previously available only in the editor's bottom tabs.
+A dedicated full-page testing surface that provides simultaneous visibility of all four result panels (Output, Diff, Diagnostics, Trace) with a resizable main split, responsive breakpoint layout, and per-panel collapse controls.
 
 **Page composition:**
 - `MappingTestLab.tsx` (route page) — thin wrapper; extracts `projectId`/`mappingId` from route params; renders `TestLabPage`.
 - `TestLabPage.tsx` (feature component) — wraps content in its own isolated `<PreviewProvider>`; delegates to `TestLabInner`.
 - `TestLabInner` — owns all state and hooks; never co-mounted with the editor's `PreviewProvider`.
 
+**Responsive breakpoints:**
+- **Wide (>= 1280px):** 2×2 CSS Grid layout — Output (top-left), Diff (top-right), Diagnostics (bottom-left), Trace (bottom-right). Three resizable dividers: main split (left/right), column divider (between result columns), row divider (between result rows).
+- **Medium (1024–1279px):** Vertical flex stack. Output always expanded (not collapsible). Diff, Diagnostics, Trace have collapse toggles. Main split divider active. No column/row dividers.
+- **Narrow (< 1024px):** Tab fallback — tab bar (Output | Diagnostics | Trace | Diff) with corresponding display components. No dividers.
+
 **Layout (two-panel, full page height):**
-- **Left panel (~35%):** `SourceDataInput` (full textarea) + `TestCaseManager` (below source input).
-- **Right panel (~65%, tabbed):** tab bar (Output | Diagnostics | Trace | Diff) + corresponding display components.
+```
+┌─────────────────────────────────────────────────────────┐
+│  Top bar (Back to Editor | name | Trace | Auto-run | Run)│
+├─────────────────────────────────────────────────────────┤
+│  Execution Summary Bar (status | duration | rule stats)  │
+├──────────────────┬──┬──────────────────────────────────┤
+│  Left panel      │  │  Right panel (breakpoint-driven)  │
+│  (mainSplit %)   │▐▌│  Wide: 2×2 grid                  │
+│                  │  │  Medium: vertical stack            │
+│  SourceDataInput │  │  Narrow: tab layout               │
+│  TestCaseManager │  │                                   │
+└──────────────────┴──┴──────────────────────────────────┘
+```
+
+**Resizable main split:**
+- Default ratio: `0.35` (35% left / 65% right)
+- Clamped: `[0.2, 0.5]`
+- Persisted to `keyra:testlab-layout` as `mainSplit`
+- Drag handle: 4px vertical divider between left and right panels
+
+**Wide layout grid dividers:**
+- Column divider: between Output/Diagnostics column and Diff/Trace column; `columnSplit` ratio, clamped `[0.2, 0.8]`
+- Row divider: between top row (Output/Diff) and bottom row (Diagnostics/Trace); `rowSplit` ratio, clamped `[0.2, 0.8]`
+- Both dividers use mouse-event drag (mousedown/mousemove/mouseup), consistent with `useResizableLayout` pattern
 
 **Top bar:**
 - Mapping name + version (read-only context via `useMappingEditor`)
@@ -675,12 +706,40 @@ A dedicated full-page testing surface that provides the full test case managemen
 - Auto-run toggle (checkbox)
 - Run button (disabled when `sourceData` is null or mapping config/schemas not loaded)
 
+**Execution Summary Bar (`ExecutionSummaryBar`):**
+- Sticky bar between top bar and result area; renders at all breakpoints
+- Displays: idle message | executing spinner | success (green dot + duration + rule stats + diagnostic severity badges) | error (red dot + message) | timeout (amber dot)
+- Props: `state: PreviewExecutionState`
+- Diagnostic badges only shown for severities with count > 0
+
+**`ResultPanel` component:**
+- Reusable wrapper for each result panel
+- Props: `title`, `badge?` (count + variant), `collapsed`, `onToggleCollapse`, `collapsible?` (default true), `emptyState?`, `isEmpty?`, `children`, `className?`, `testId?`
+- Children always remain mounted (CSS `hidden` class used for collapse, not unmounting)
+- Badge variants: `info` (blue), `warning` (amber), `error` (red)
+- Collapse toggle button has ARIA `aria-expanded` and `aria-label`
+
+**`useTestLabLayout` hook:**
+- Input: `{ traceEnabled: boolean }`
+- Output: `{ layout: TestLabLayoutState, togglePanel, setMainSplit, setColumnSplit, setRowSplit }`
+- `TestLabLayoutState`: `{ breakpoint: 'wide' | 'medium' | 'narrow', collapsed: { output, diff, diagnostics, trace }, mainSplit, columnSplit, rowSplit }`
+- Breakpoint detection via `window.matchMedia` with change listeners
+- Trace panel auto-collapses when `traceEnabled` changes to `false`; auto-expands when changed to `true`
+- `togglePanel('output')` is a no-op at medium breakpoint (Output always expanded)
+- Persistence key: `keyra:testlab-layout`; shape: `{ collapsed, mainSplit, columnSplit, rowSplit }`
+- Trace collapsed state is always derived from `traceEnabled` on mount (not read from localStorage)
+- Storage write failures are caught and ignored silently
+
+**Panel visibility rules:**
+- Output: always expanded at medium; collapsible at wide and narrow
+- Diff, Diagnostics, Trace: collapsible at all breakpoints
+- Trace: auto-collapsed when `traceEnabled === false`
+
 **Hook wiring:**
 - `useMappingEditor(mappingId)` — loads mapping config and schemas independently on mount; no shared React Context with the editor page.
 - `usePreviewExecution({ config, sourceSchemaDetail, targetSchemaDetail, sourceDataRaw })` — execution lifecycle.
+- `useTestLabLayout({ traceEnabled })` — panel layout state, breakpoint detection, persistence.
 - `useTestCases(mappingId)` — test case CRUD; reads from `keyra:testcases:{mappingId}` (same localStorage key as the editor strip, ensuring test cases created on either page are visible on the other after navigation).
-
-**Empty state:** when no execution has run, the right panel shows "Enter source data and click Run to see results."
 
 **`PreviewProvider` isolation:** the Test Lab page wraps its content in its own `<PreviewProvider>`, independent from the editor's provider. Both pages independently access the same localStorage keys via their respective hook instances. This avoids stale-reference risk and is future-proof for `HttpAdapter` migration.
 

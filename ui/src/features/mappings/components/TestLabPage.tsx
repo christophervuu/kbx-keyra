@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ArrowLeft } from 'lucide-react';
@@ -6,7 +6,9 @@ import { ArrowLeft } from 'lucide-react';
 import {
   DiagnosticsDisplay,
   DiffDisplay,
+  ExecutionSummaryBar,
   OutputDisplay,
+  ResultPanel,
   SourceDataInput,
   TestCaseManager,
   TraceDisplay,
@@ -14,6 +16,7 @@ import {
 import { PreviewProvider } from '../context/preview-context';
 import { usePreviewExecution } from '../hooks/use-preview-execution';
 import { useMappingEditor } from '../hooks/use-mapping-editor';
+import { useTestLabLayout } from '../hooks/use-test-lab-layout';
 
 import type { TestCase } from '@/lib/types/domain';
 
@@ -26,6 +29,7 @@ export interface TestLabPageProps {
   mappingId: string;
 }
 
+// Narrow fallback tab layout
 type TabId = 'output' | 'diagnostics' | 'trace' | 'diff';
 
 const TABS: readonly { id: TabId; label: string }[] = [
@@ -34,6 +38,101 @@ const TABS: readonly { id: TabId; label: string }[] = [
   { id: 'trace', label: 'Trace' },
   { id: 'diff', label: 'Diff' },
 ];
+
+// ---------------------------------------------------------------------------
+// Divider drag hook
+// ---------------------------------------------------------------------------
+
+type DragAxis = 'col' | 'row';
+
+interface UseDividerDragOptions {
+  axis: DragAxis;
+  containerRef: React.RefObject<HTMLElement | null>;
+  clampMin: number;
+  clampMax: number;
+  onRatioChange: (ratio: number) => void;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function useDividerDrag({
+  axis,
+  containerRef,
+  clampMin,
+  clampMax,
+  onRatioChange,
+}: UseDividerDragOptions) {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const cursor = axis === 'col' ? 'col-resize' : 'row-resize';
+      document.body.style.cursor = cursor;
+      document.body.style.userSelect = 'none';
+
+      function handleMouseMove(ev: MouseEvent) {
+        const r = container!.getBoundingClientRect();
+        let ratio: number;
+        if (axis === 'col') {
+          ratio = (ev.clientX - r.left) / r.width;
+        } else {
+          ratio = (ev.clientY - r.top) / r.height;
+        }
+        onRatioChange(clamp(ratio, clampMin, clampMax));
+      }
+
+      function handleMouseUp() {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        setIsDragging(false);
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      }
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    },
+    [axis, containerRef, clampMin, clampMax, onRatioChange],
+  );
+
+  return { isDragging, handleMouseDown };
+}
+
+// ---------------------------------------------------------------------------
+// Divider element
+// ---------------------------------------------------------------------------
+
+interface DividerProps {
+  axis: DragAxis;
+  isDragging: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+  testId?: string;
+}
+
+function Divider({ axis, isDragging, onMouseDown, testId }: DividerProps) {
+  const isCol = axis === 'col';
+  return (
+    <div
+      role="separator"
+      aria-orientation={isCol ? 'vertical' : 'horizontal'}
+      onMouseDown={onMouseDown}
+      data-testid={testId}
+      className={[
+        'shrink-0 transition-colors',
+        isCol ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
+        isDragging ? 'bg-blue-500' : 'bg-slate-700 hover:bg-slate-500',
+      ].join(' ')}
+    />
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Spinner
@@ -50,6 +149,29 @@ function Spinner() {
 }
 
 // ---------------------------------------------------------------------------
+// Empty / loading states
+// ---------------------------------------------------------------------------
+
+function PanelEmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-4">
+      <p className="max-w-xs text-center text-xs text-slate-500">{message}</p>
+    </div>
+  );
+}
+
+function PanelLoadingState() {
+  return (
+    <div className="flex h-full items-center justify-center p-4">
+      <div className="flex flex-col items-center gap-2">
+        <Spinner />
+        <p className="text-xs text-slate-500">Executing mapping…</p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Inner component — must be inside PreviewProvider
 // ---------------------------------------------------------------------------
 
@@ -61,6 +183,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   const [loadedSourceData, setLoadedSourceData] = useState('');
   const [loadedExpectedOutput, setLoadedExpectedOutput] = useState<string | undefined>(undefined);
   const [currentExpectedOutput, setCurrentExpectedOutput] = useState<string | null>(null);
+
+  // Narrow fallback tab state — only used at narrow breakpoint
   const [activeTab, setActiveTab] = useState<TabId>('output');
 
   const { state, run, autoRun, setAutoRun, traceEnabled, setTraceEnabled } = usePreviewExecution({
@@ -70,8 +194,14 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     sourceDataRaw,
   });
 
+  const { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit } = useTestLabLayout({
+    traceEnabled,
+  });
+
   const isExecuting = state.status === 'executing';
   const hasResult = state.status === 'success';
+  const hasAnyResult = hasResult || state.status === 'error' || state.status === 'timeout';
+
   const canRun =
     !isExecuting &&
     editor.config !== null &&
@@ -89,6 +219,375 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   }
 
   const editorUrl = `/projects/${projectId}/mappings/${mappingId}`;
+
+  // ---------------------------------------------------------------------------
+  // Drag divider refs
+  // ---------------------------------------------------------------------------
+
+  // The body container holds both left panel + divider + right panel
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // The wide grid container
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const mainDrag = useDividerDrag({
+    axis: 'col',
+    containerRef: bodyRef,
+    clampMin: 0.2,
+    clampMax: 0.5,
+    onRatioChange: setMainSplit,
+  });
+
+  const colDrag = useDividerDrag({
+    axis: 'col',
+    containerRef: gridRef,
+    clampMin: 0.2,
+    clampMax: 0.8,
+    onRatioChange: setColumnSplit,
+  });
+
+  const rowDrag = useDividerDrag({
+    axis: 'row',
+    containerRef: gridRef,
+    clampMin: 0.2,
+    clampMax: 0.8,
+    onRatioChange: setRowSplit,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-panel content helpers
+  // ---------------------------------------------------------------------------
+
+  function outputContent() {
+    if (isExecuting) return <PanelLoadingState />;
+    if (!hasAnyResult)
+      return (
+        <PanelEmptyState message="Enter source data and click Run to see the mapping output." />
+      );
+    return <OutputDisplay state={state} />;
+  }
+
+  function diffContent() {
+    if (isExecuting) return <PanelLoadingState />;
+    if (!hasAnyResult)
+      return <PanelEmptyState message="Run a test and set expected output to see the diff." />;
+    return (
+      <DiffDisplay
+        key={loadKey}
+        state={state}
+        initialExpectedOutput={loadedExpectedOutput}
+        onExpectedRawChange={setCurrentExpectedOutput}
+      />
+    );
+  }
+
+  function diagnosticsContent() {
+    if (isExecuting) return <PanelLoadingState />;
+    if (!hasAnyResult)
+      return <PanelEmptyState message="No diagnostics from the last execution." />;
+    return <DiagnosticsDisplay state={state} />;
+  }
+
+  function traceContent() {
+    if (!traceEnabled)
+      return (
+        <PanelEmptyState message="Enable Trace in the top bar to see execution trace." />
+      );
+    if (isExecuting) return <PanelLoadingState />;
+    if (!hasAnyResult)
+      return (
+        <PanelEmptyState message="Run a test with Trace enabled to see trace entries." />
+      );
+    return (
+      <TraceDisplay
+        trace={state.status === 'success' ? (state.result.trace ?? []) : undefined}
+        traceEnabled={traceEnabled}
+      />
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Right panel — breakpoint-conditional rendering
+  // ---------------------------------------------------------------------------
+
+  function renderNarrowRightPanel() {
+    return (
+      <div
+        className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-950"
+        data-testid="right-panel"
+        data-layout="narrow"
+      >
+        {/* Tab bar */}
+        <div
+          role="tablist"
+          aria-label="Test results"
+          className="flex shrink-0 border-b border-slate-800"
+          data-testid="results-tabs"
+        >
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`atp-tab-${tab.id}`}
+              aria-selected={activeTab === tab.id}
+              aria-controls={`atp-tabpanel-${tab.id}`}
+              onClick={() => setActiveTab(tab.id)}
+              data-testid={`tab-${tab.id}`}
+              className={[
+                'relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
+                activeTab === tab.id
+                  ? 'border-b-2 border-blue-500 text-blue-400'
+                  : 'text-slate-400 hover:text-slate-300',
+              ].join(' ')}
+            >
+              {tab.label}
+              {tab.id === 'diagnostics' && diagnosticCount > 0 && (
+                <span
+                  className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-900"
+                  aria-label={`${diagnosticCount} diagnostic${diagnosticCount === 1 ? '' : 's'}`}
+                  data-testid="diagnostics-badge"
+                >
+                  {diagnosticCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div
+            role="tabpanel"
+            id="atp-tabpanel-output"
+            aria-labelledby="atp-tab-output"
+            hidden={activeTab !== 'output'}
+            data-testid="tabpanel-output"
+          >
+            {outputContent()}
+          </div>
+          <div
+            role="tabpanel"
+            id="atp-tabpanel-diagnostics"
+            aria-labelledby="atp-tab-diagnostics"
+            hidden={activeTab !== 'diagnostics'}
+            data-testid="tabpanel-diagnostics"
+          >
+            {diagnosticsContent()}
+          </div>
+          <div
+            role="tabpanel"
+            id="atp-tabpanel-trace"
+            aria-labelledby="atp-tab-trace"
+            hidden={activeTab !== 'trace'}
+            data-testid="tabpanel-trace"
+          >
+            {traceContent()}
+          </div>
+          <div
+            role="tabpanel"
+            id="atp-tabpanel-diff"
+            aria-labelledby="atp-tab-diff"
+            hidden={activeTab !== 'diff'}
+            data-testid="tabpanel-diff"
+          >
+            {diffContent()}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderMediumRightPanel() {
+    return (
+      <div
+        className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-950"
+        data-testid="right-panel"
+        data-layout="medium"
+      >
+        {/* Output — always expanded at medium, not collapsible */}
+        <ResultPanel
+          title="Output"
+          collapsed={layout.collapsed.output}
+          onToggleCollapse={() => togglePanel('output')}
+          collapsible={false}
+          isEmpty={!hasAnyResult && !isExecuting}
+          emptyState={
+            <PanelEmptyState message="Enter source data and click Run to see the mapping output." />
+          }
+          className="min-h-0 flex-1"
+          testId="panel-output"
+        >
+          {outputContent()}
+        </ResultPanel>
+
+        <ResultPanel
+          title="Diff"
+          collapsed={layout.collapsed.diff}
+          onToggleCollapse={() => togglePanel('diff')}
+          isEmpty={!hasAnyResult && !isExecuting}
+          emptyState={
+            <PanelEmptyState message="Run a test and set expected output to see the diff." />
+          }
+          className="min-h-0 flex-1"
+          testId="panel-diff"
+        >
+          {diffContent()}
+        </ResultPanel>
+
+        <ResultPanel
+          title="Diagnostics"
+          badge={
+            diagnosticCount > 0 ? { count: diagnosticCount, variant: 'warning' } : undefined
+          }
+          collapsed={layout.collapsed.diagnostics}
+          onToggleCollapse={() => togglePanel('diagnostics')}
+          isEmpty={!hasAnyResult && !isExecuting}
+          emptyState={<PanelEmptyState message="No diagnostics from the last execution." />}
+          className="min-h-0 flex-1"
+          testId="panel-diagnostics"
+        >
+          {diagnosticsContent()}
+        </ResultPanel>
+
+        <ResultPanel
+          title="Trace"
+          collapsed={layout.collapsed.trace}
+          onToggleCollapse={() => togglePanel('trace')}
+          isEmpty={!traceEnabled || (!hasAnyResult && !isExecuting)}
+          emptyState={
+            !traceEnabled ? (
+              <PanelEmptyState message="Enable Trace in the top bar to see execution trace." />
+            ) : (
+              <PanelEmptyState message="Run a test with Trace enabled to see trace entries." />
+            )
+          }
+          className="min-h-0 flex-1"
+          testId="panel-trace"
+        >
+          {traceContent()}
+        </ResultPanel>
+      </div>
+    );
+  }
+
+  function renderWideRightPanel() {
+    const colFr = layout.columnSplit;
+    const rowFr = layout.rowSplit;
+
+    return (
+      <div
+        ref={gridRef}
+        className="min-w-0 flex-1 overflow-hidden"
+        style={{
+          display: 'grid',
+          // 3 columns: left panels | divider | right panels
+          gridTemplateColumns: `${colFr}fr 4px ${1 - colFr}fr`,
+          // 3 rows: top panels | divider | bottom panels
+          gridTemplateRows: `${rowFr}fr 4px ${1 - rowFr}fr`,
+        }}
+        data-testid="right-panel"
+        data-layout="wide"
+      >
+        {/* Row 1, Col 1: Output (top-left) */}
+        <ResultPanel
+          title="Output"
+          collapsed={layout.collapsed.output}
+          onToggleCollapse={() => togglePanel('output')}
+          isEmpty={!hasAnyResult && !isExecuting}
+          emptyState={
+            <PanelEmptyState message="Enter source data and click Run to see the mapping output." />
+          }
+          className="overflow-hidden"
+          testId="panel-output"
+        >
+          {outputContent()}
+        </ResultPanel>
+
+        {/* Row 1, Col 2: Vertical divider (spans both rows via grid-row) */}
+        <div
+          style={{ gridRow: '1 / 4' }}
+          className="flex items-stretch"
+          data-testid="divider-col"
+        >
+          <Divider
+            axis="col"
+            isDragging={colDrag.isDragging}
+            onMouseDown={colDrag.handleMouseDown}
+            testId="divider-col-handle"
+          />
+        </div>
+
+        {/* Row 1, Col 3: Diff (top-right) */}
+        <ResultPanel
+          title="Diff"
+          collapsed={layout.collapsed.diff}
+          onToggleCollapse={() => togglePanel('diff')}
+          isEmpty={!hasAnyResult && !isExecuting}
+          emptyState={
+            <PanelEmptyState message="Run a test and set expected output to see the diff." />
+          }
+          className="overflow-hidden"
+          testId="panel-diff"
+        >
+          {diffContent()}
+        </ResultPanel>
+
+        {/* Row 2, Col 1: Horizontal divider (spans both columns) */}
+        <div
+          style={{ gridColumn: '1 / 4' }}
+          className="flex flex-col"
+          data-testid="divider-row"
+        >
+          <Divider
+            axis="row"
+            isDragging={rowDrag.isDragging}
+            onMouseDown={rowDrag.handleMouseDown}
+            testId="divider-row-handle"
+          />
+        </div>
+
+        {/* Row 3, Col 1: Diagnostics (bottom-left) */}
+        <ResultPanel
+          title="Diagnostics"
+          badge={
+            diagnosticCount > 0 ? { count: diagnosticCount, variant: 'warning' } : undefined
+          }
+          collapsed={layout.collapsed.diagnostics}
+          onToggleCollapse={() => togglePanel('diagnostics')}
+          isEmpty={!hasAnyResult && !isExecuting}
+          emptyState={<PanelEmptyState message="No diagnostics from the last execution." />}
+          className="overflow-hidden"
+          testId="panel-diagnostics"
+        >
+          {diagnosticsContent()}
+        </ResultPanel>
+
+        {/* Row 3, Col 3: Trace (bottom-right) */}
+        <ResultPanel
+          title="Trace"
+          collapsed={layout.collapsed.trace}
+          onToggleCollapse={() => togglePanel('trace')}
+          isEmpty={!traceEnabled || (!hasAnyResult && !isExecuting)}
+          emptyState={
+            !traceEnabled ? (
+              <PanelEmptyState message="Enable Trace in the top bar to see execution trace." />
+            ) : (
+              <PanelEmptyState message="Run a test with Trace enabled to see trace entries." />
+            )
+          }
+          className="overflow-hidden"
+          testId="panel-trace"
+        >
+          {traceContent()}
+        </ResultPanel>
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <div
@@ -164,11 +663,19 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
         </button>
       </div>
 
+      {/* Execution summary bar — sticky, all breakpoints */}
+      <ExecutionSummaryBar state={state} />
+
       {/* Two-panel body */}
-      <div className="flex min-h-0 flex-1 gap-px bg-slate-800">
-        {/* Left panel — ~35% */}
+      <div
+        ref={bodyRef}
+        className="flex min-h-0 flex-1"
+        data-testid="body-container"
+      >
+        {/* Left panel — width driven by mainSplit ratio */}
         <div
-          className="flex w-[35%] shrink-0 flex-col overflow-hidden bg-slate-950"
+          className="flex shrink-0 flex-col overflow-hidden bg-slate-950"
+          style={{ width: `${layout.mainSplit * 100}%` }}
           data-testid="left-panel"
         >
           <div
@@ -192,129 +699,20 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
           </div>
         </div>
 
-        {/* Right panel — ~65% */}
-        <div
-          className="flex min-w-0 flex-1 flex-col overflow-hidden bg-slate-950"
-          data-testid="right-panel"
-        >
-          {/* Tab bar */}
-          <div
-            role="tablist"
-            aria-label="Test results"
-            className="flex shrink-0 border-b border-slate-800"
-            data-testid="results-tabs"
-          >
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                id={`atp-tab-${tab.id}`}
-                aria-selected={activeTab === tab.id}
-                aria-controls={`atp-tabpanel-${tab.id}`}
-                onClick={() => setActiveTab(tab.id)}
-                data-testid={`tab-${tab.id}`}
-                className={[
-                  'relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
-                  activeTab === tab.id
-                    ? 'border-b-2 border-blue-500 text-blue-400'
-                    : 'text-slate-400 hover:text-slate-300',
-                ].join(' ')}
-              >
-                {tab.label}
-                {tab.id === 'diagnostics' && diagnosticCount > 0 && (
-                  <span
-                    className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-slate-900"
-                    aria-label={`${diagnosticCount} diagnostic${diagnosticCount === 1 ? '' : 's'}`}
-                    data-testid="diagnostics-badge"
-                  >
-                    {diagnosticCount}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+        {/* Main split divider — visible at wide and medium */}
+        {layout.breakpoint !== 'narrow' && (
+          <Divider
+            axis="col"
+            isDragging={mainDrag.isDragging}
+            onMouseDown={mainDrag.handleMouseDown}
+            testId="divider-main"
+          />
+        )}
 
-          {/* Tab content */}
-          <div className="min-h-0 flex-1 overflow-auto">
-            {state.status === 'idle' && (
-              <div
-                className="flex h-full items-center justify-center p-4"
-                data-testid="results-empty-state"
-              >
-                <p className="max-w-xs text-center text-xs text-slate-500">
-                  Enter source data and click{' '}
-                  <strong className="text-slate-400">Run</strong> to see results.
-                </p>
-              </div>
-            )}
-
-            {isExecuting && (
-              <div
-                className="flex h-full items-center justify-center p-4"
-                data-testid="results-loading-state"
-              >
-                <div className="flex flex-col items-center gap-2">
-                  <Spinner />
-                  <p className="text-xs text-slate-500">Executing mapping…</p>
-                </div>
-              </div>
-            )}
-
-            {(hasResult || state.status === 'error' || state.status === 'timeout') && (
-              <>
-                <div
-                  role="tabpanel"
-                  id="atp-tabpanel-output"
-                  aria-labelledby="atp-tab-output"
-                  hidden={activeTab !== 'output'}
-                  data-testid="tabpanel-output"
-                >
-                  <OutputDisplay state={state} />
-                </div>
-
-                <div
-                  role="tabpanel"
-                  id="atp-tabpanel-diagnostics"
-                  aria-labelledby="atp-tab-diagnostics"
-                  hidden={activeTab !== 'diagnostics'}
-                  data-testid="tabpanel-diagnostics"
-                >
-                  <DiagnosticsDisplay state={state} />
-                </div>
-
-                <div
-                  role="tabpanel"
-                  id="atp-tabpanel-trace"
-                  aria-labelledby="atp-tab-trace"
-                  hidden={activeTab !== 'trace'}
-                  data-testid="tabpanel-trace"
-                >
-                  <TraceDisplay
-                    trace={state.status === 'success' ? (state.result.trace ?? []) : undefined}
-                    traceEnabled={traceEnabled}
-                  />
-                </div>
-
-                <div
-                  role="tabpanel"
-                  id="atp-tabpanel-diff"
-                  aria-labelledby="atp-tab-diff"
-                  hidden={activeTab !== 'diff'}
-                  data-testid="tabpanel-diff"
-                >
-                  <DiffDisplay
-                    key={loadKey}
-                    state={state}
-                    initialExpectedOutput={loadedExpectedOutput}
-                    onExpectedRawChange={setCurrentExpectedOutput}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        {/* Right panel — breakpoint-conditional */}
+        {layout.breakpoint === 'narrow' && renderNarrowRightPanel()}
+        {layout.breakpoint === 'medium' && renderMediumRightPanel()}
+        {layout.breakpoint === 'wide' && renderWideRightPanel()}
       </div>
     </div>
   );
