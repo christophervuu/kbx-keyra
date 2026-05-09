@@ -329,6 +329,8 @@ ui/
             DiffDisplay.test.tsx  Component tests (all states, AE-05 scenario, invalid JSON error, aria)
             TestCaseManager.tsx   Test case save/load/delete UI: native select dropdown, inline save form with name input, delete-per-row button, quota error display (FS-012 T-12)
             TestCaseManager.test.tsx Component tests (save/load/delete flows, quota error, accessibility)
+            TestCaseListPanel.tsx  Vertical test case list with selection, pass/fail status badges, inline rename, duplicate/delete actions, Scratchpad pseudo-entry, Add New/Save As toolbar, Run All/Rerun Failed batch toolbar with progress and summary (FS-034 T-03, T-04, T-06)
+            TestCaseListPanel.test.tsx Component tests (scratchpad, empty state, selection, badges, rename, duplicate, delete with confirmation, Add New, Save As flow, Run All/Rerun Failed enable/disable, progress, summary, cancel, toolbar slot, accessibility)
         hooks/            Feature-specific React hooks
           index.ts        Hooks barrel
           use-engine-validation.ts       Debounced validation hook (300ms, wraps engine validate())
@@ -345,8 +347,12 @@ ui/
           use-preview-execution.test.ts  Hook unit tests (idle state, guards, success, error, trace flag, auto-run debounce, timeout)
           use-resizable-layout.ts        Resizable panel layout hook: pixel-based column widths, bottom height, collapse states, drag logic, localStorage persistence under keyra:editor-layout (FS-022 T-02)
           use-resizable-layout.test.ts   Hook unit tests (defaults, localStorage read/write, clamp, collapse/expand, drag min-width enforcement)
-          use-test-cases.ts              Test case CRUD hook: save/load/delete, localStorage persistence keyed by mappingId (keyra:testcases:{id}), quota error handling (FS-012 T-05)
-          use-test-cases.test.ts         Hook unit tests (save, persist, load, delete, mappingId reload, corrupted storage, quota error)
+          use-test-cases.ts              Test case CRUD hook: save/load/delete/rename/duplicate/update, localStorage persistence keyed by mappingId (keyra:testcases:{id}), quota error handling (FS-012 T-05, FS-034 T-01)
+          use-test-cases.test.ts         Hook unit tests (save, persist, load, delete, rename, duplicate, update, mappingId reload, corrupted storage, quota error)
+          use-test-run-results.ts        Test run result persistence hook: recordResult/clearResult/clearAll, localStorage keyed by mappingId (keyra:testresults:{id}), corruption handling (FS-034 T-02)
+          use-test-run-results.test.ts   Hook unit tests (initial state, record, upsert, multi-result, clear, clearAll, mappingId reload, corruption, write failure)
+          use-batch-execution.ts         Sequential batch execution hook: runAll/rerunFailed/cancel, pass/fail from error diagnostics, onCaseComplete callback, cancellation ref, unmount cleanup (FS-034 T-05)
+          use-batch-execution.test.ts    Hook unit tests (sequential execution, pass/fail, invalid JSON, engine throw, config null, onCaseComplete, rerunFailed filter, cancellation)
           use-test-lab-layout.ts         Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence under keyra:testlab-layout (FS-033)
           use-test-lab-layout.test.ts    Hook unit tests (defaults, breakpoint detection, togglePanel, output no-op at medium, trace auto-behavior, split ratio clamping, localStorage read/write/fallback, storage write failure)
         context/          Feature-scoped React contexts

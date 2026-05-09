@@ -303,4 +303,338 @@ describe('useTestCases', () => {
     expect(result.current.testCases).toEqual([]);
     expect(consoleSpy).toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // renameTestCase
+  // -------------------------------------------------------------------------
+
+  it('renameTestCase updates the name of the targeted test case', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{}' });
+    });
+
+    const id = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.renameTestCase(id, 'renamed');
+    });
+
+    expect(result.current.testCases[0].name).toBe('renamed');
+  });
+
+  it('renameTestCase persists the new name to localStorage', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{}' });
+    });
+
+    const id = result.current.testCases[0].id;
+    vi.clearAllMocks();
+
+    act(() => {
+      result.current.renameTestCase(id, 'renamed');
+    });
+
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'keyra:testcases:mapping-1',
+      expect.stringContaining('"renamed"'),
+    );
+  });
+
+  it('renameTestCase is a no-op for a non-existent ID', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'keep', sourceData: '{}' });
+    });
+
+    vi.clearAllMocks();
+
+    act(() => {
+      result.current.renameTestCase('ghost-id', 'should not appear');
+    });
+
+    expect(result.current.testCases[0].name).toBe('keep');
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it('renameTestCase only renames the targeted test case', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'first', sourceData: '{}' });
+      result.current.saveTestCase({ name: 'second', sourceData: '{}' });
+    });
+
+    const firstId = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.renameTestCase(firstId, 'first-renamed');
+    });
+
+    expect(result.current.testCases[0].name).toBe('first-renamed');
+    expect(result.current.testCases[1].name).toBe('second');
+  });
+
+  // -------------------------------------------------------------------------
+  // duplicateTestCase
+  // -------------------------------------------------------------------------
+
+  it('duplicateTestCase creates a copy with " (copy)" appended to the name', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{"x":1}' });
+    });
+
+    const id = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.duplicateTestCase(id);
+    });
+
+    expect(result.current.testCases).toHaveLength(2);
+    expect(result.current.testCases[1].name).toBe('original (copy)');
+  });
+
+  it('duplicateTestCase assigns a new unique ID to the copy', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{}' });
+    });
+
+    const originalId = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.duplicateTestCase(originalId);
+    });
+
+    expect(result.current.testCases[1].id).not.toBe(originalId);
+    expect(result.current.testCases[1].id).toBeTruthy();
+  });
+
+  it('duplicateTestCase copies sourceData and expectedOutput from the source', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{"x":1}', expectedOutput: '{"y":2}' });
+    });
+
+    const id = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.duplicateTestCase(id);
+    });
+
+    const copy = result.current.testCases[1];
+    expect(copy.sourceData).toBe('{"x":1}');
+    expect(copy.expectedOutput).toBe('{"y":2}');
+  });
+
+  it('duplicateTestCase returns the new TestCase object', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{}' });
+    });
+
+    const id = result.current.testCases[0].id;
+    let returned: ReturnType<typeof result.current.duplicateTestCase> = null;
+
+    act(() => {
+      returned = result.current.duplicateTestCase(id);
+    });
+
+    expect(returned).not.toBeNull();
+    expect(returned!.name).toBe('original (copy)');
+    expect(returned!.id).toBe(result.current.testCases[1].id);
+  });
+
+  it('duplicateTestCase appends the copy to the end of the list', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'a', sourceData: '{}' });
+      result.current.saveTestCase({ name: 'b', sourceData: '{}' });
+    });
+
+    const firstId = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.duplicateTestCase(firstId);
+    });
+
+    expect(result.current.testCases).toHaveLength(3);
+    expect(result.current.testCases[2].name).toBe('a (copy)');
+  });
+
+  it('duplicateTestCase persists the copy to localStorage', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{}' });
+    });
+
+    const id = result.current.testCases[0].id;
+    vi.clearAllMocks();
+
+    act(() => {
+      result.current.duplicateTestCase(id);
+    });
+
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'keyra:testcases:mapping-1',
+      expect.stringContaining('"original (copy)"'),
+    );
+  });
+
+  it('duplicateTestCase returns null for a non-existent ID', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+    let returned: ReturnType<typeof result.current.duplicateTestCase> = null;
+
+    act(() => {
+      returned = result.current.duplicateTestCase('ghost-id');
+    });
+
+    expect(returned).toBeNull();
+    expect(result.current.testCases).toHaveLength(0);
+  });
+
+  it('duplicateTestCase assigns a new createdAt timestamp', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'original', sourceData: '{}' });
+    });
+
+    const originalCreatedAt = result.current.testCases[0].createdAt;
+    const id = result.current.testCases[0].id;
+
+    // Advance time slightly so timestamps differ
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(1000);
+
+    act(() => {
+      result.current.duplicateTestCase(id);
+    });
+
+    vi.useRealTimers();
+
+    expect(result.current.testCases[1].createdAt).not.toBe(originalCreatedAt);
+    expect(result.current.testCases[1].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  // -------------------------------------------------------------------------
+  // updateTestCase
+  // -------------------------------------------------------------------------
+
+  it('updateTestCase updates sourceData only', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'test', sourceData: '{"old":true}', expectedOutput: '{"y":1}' });
+    });
+
+    const id = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.updateTestCase(id, { sourceData: '{"new":true}' });
+    });
+
+    expect(result.current.testCases[0].sourceData).toBe('{"new":true}');
+    expect(result.current.testCases[0].expectedOutput).toBe('{"y":1}');
+  });
+
+  it('updateTestCase updates expectedOutput only', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'test', sourceData: '{"x":1}', expectedOutput: '{"old":true}' });
+    });
+
+    const id = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.updateTestCase(id, { expectedOutput: '{"new":true}' });
+    });
+
+    expect(result.current.testCases[0].sourceData).toBe('{"x":1}');
+    expect(result.current.testCases[0].expectedOutput).toBe('{"new":true}');
+  });
+
+  it('updateTestCase updates both sourceData and expectedOutput', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'test', sourceData: '{"old":true}', expectedOutput: '{"old":true}' });
+    });
+
+    const id = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.updateTestCase(id, { sourceData: '{"new":true}', expectedOutput: '{"new":true}' });
+    });
+
+    expect(result.current.testCases[0].sourceData).toBe('{"new":true}');
+    expect(result.current.testCases[0].expectedOutput).toBe('{"new":true}');
+  });
+
+  it('updateTestCase is a no-op for a non-existent ID', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'keep', sourceData: '{"x":1}' });
+    });
+
+    vi.clearAllMocks();
+
+    act(() => {
+      result.current.updateTestCase('ghost-id', { sourceData: '{"changed":true}' });
+    });
+
+    expect(result.current.testCases[0].sourceData).toBe('{"x":1}');
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+  });
+
+  it('updateTestCase persists changes to localStorage', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'test', sourceData: '{"old":true}' });
+    });
+
+    const id = result.current.testCases[0].id;
+    vi.clearAllMocks();
+
+    act(() => {
+      result.current.updateTestCase(id, { sourceData: '{"new":true}' });
+    });
+
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'keyra:testcases:mapping-1',
+      expect.stringContaining('"{\\"new\\":true}"'),
+    );
+  });
+
+  it('updateTestCase only modifies the targeted test case', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({ name: 'first', sourceData: '{"first":true}' });
+      result.current.saveTestCase({ name: 'second', sourceData: '{"second":true}' });
+    });
+
+    const firstId = result.current.testCases[0].id;
+
+    act(() => {
+      result.current.updateTestCase(firstId, { sourceData: '{"updated":true}' });
+    });
+
+    expect(result.current.testCases[0].sourceData).toBe('{"updated":true}');
+    expect(result.current.testCases[1].sourceData).toBe('{"second":true}');
+  });
 });

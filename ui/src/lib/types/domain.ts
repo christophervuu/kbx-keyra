@@ -388,6 +388,16 @@ export interface TestCase {
   readonly createdAt: ISODateString;
 }
 
+export interface TestRunResult {
+  readonly testCaseId: string;
+  readonly status: 'pass' | 'fail';
+  readonly errorCount: number;
+  readonly warningCount: number;
+  readonly executedAt: ISODateString;
+  readonly durationMs: number;
+  readonly outputSnapshot?: unknown;
+}
+
 export interface PreviewContextValue {
   readonly sourceData: unknown | null;
   readonly isExecuting: boolean;

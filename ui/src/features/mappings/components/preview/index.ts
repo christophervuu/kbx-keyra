@@ -16,3 +16,5 @@ export { ResultPanel } from './ResultPanel';
 export type { ResultPanelProps, ResultPanelBadge } from './ResultPanel';
 export { ExecutionSummaryBar } from './ExecutionSummaryBar';
 export type { ExecutionSummaryBarProps } from './ExecutionSummaryBar';
+export { TestCaseListPanel } from './TestCaseListPanel';
+export type { TestCaseListPanelProps, BatchState, BatchSummary } from './TestCaseListPanel';

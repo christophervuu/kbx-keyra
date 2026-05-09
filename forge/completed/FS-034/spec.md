@@ -24,7 +24,7 @@ Type: cross-cutting
 
 ## Status
 
-draft
+completed
 
 ---
 

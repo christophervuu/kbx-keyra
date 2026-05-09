@@ -146,7 +146,9 @@ ui/src/
         use-drop-zone.ts           HTML5 drop zone state (isDragOver + handlers)
         use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04)
         use-resizable-layout.ts    Resizable layout state hook (source/target widths, bottom height, collapse state, drag handle props, localStorage persistence)
-        use-test-cases.ts          Test case CRUD hook keyed by mappingId (FS-012 T-05)
+        use-test-cases.ts          Test case CRUD hook keyed by mappingId (FS-012 T-05, FS-034 T-01): save/load/delete/rename/duplicate/update; localStorage key keyra:testcases:{id}
+        use-test-run-results.ts    Test run result persistence hook keyed by mappingId (FS-034 T-02): recordResult/clearResult/clearAll; localStorage key keyra:testresults:{id}; results stored as Record<string, TestRunResult> for O(1) lookup
+        use-batch-execution.ts     Sequential batch execution hook (FS-034 T-05): runAll/rerunFailed/cancel; pass/fail from zero-error-diagnostic rule; onCaseComplete callback; cancellation ref; unmount cleanup
         use-test-lab-layout.ts     Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence (keyra:testlab-layout) (FS-033)
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
@@ -657,11 +659,11 @@ This change was made in FS-021 T-03 to reduce prop drilling and allow each panel
 - **Rules View parity:** `BottomArea` also exposes the same test case selector behavior so saved test cases can be loaded without switching views.
 - **`PreviewProvider` isolation:** `MappingEditor.tsx` wraps its content in a `<PreviewProvider>`. The Test Lab page has its own separate `<PreviewProvider>` — they are never co-mounted.
 
-### Test Lab Page (FS-021 T-06, FS-032, FS-033)
+### Test Lab Page (FS-021 T-06, FS-032, FS-033, FS-034)
 
 Route: `/projects/:projectId/mappings/:mappingId/test-lab`
 
-A dedicated full-page testing surface that provides simultaneous visibility of all four result panels (Output, Diff, Diagnostics, Trace) with a resizable main split, responsive breakpoint layout, and per-panel collapse controls.
+A dedicated full-page testing surface that provides simultaneous visibility of all four result panels (Output, Diff, Diagnostics, Trace) with a resizable main split, responsive breakpoint layout, per-panel collapse controls, and a full test case management sidebar with batch execution.
 
 **Page composition:**
 - `MappingTestLab.tsx` (route page) — thin wrapper; extracts `projectId`/`mappingId` from route params; renders `TestLabPage`.
@@ -683,8 +685,10 @@ A dedicated full-page testing surface that provides simultaneous visibility of a
 │  Left panel      │  │  Right panel (breakpoint-driven)  │
 │  (mainSplit %)   │▐▌│  Wide: 2×2 grid                  │
 │                  │  │  Medium: vertical stack            │
-│  SourceDataInput │  │  Narrow: tab layout               │
-│  TestCaseManager │  │                                   │
+│  TestCaseList-   │  │  Narrow: tab layout               │
+│  Panel (upper)   │  │                                   │
+│  SourceDataInput │  │                                   │
+│  (lower)         │  │                                   │
 └──────────────────┴──┴──────────────────────────────────┘
 ```
 
@@ -704,7 +708,7 @@ A dedicated full-page testing surface that provides simultaneous visibility of a
 - "← Back to Editor" link (navigates to `/projects/:projectId/mappings/:mappingId`)
 - Trace mode toggle (checkbox)
 - Auto-run toggle (checkbox)
-- Run button (disabled when `sourceData` is null or mapping config/schemas not loaded)
+- Run button (disabled when `sourceData` is null or mapping config/schemas not loaded, or batch is running)
 
 **Execution Summary Bar (`ExecutionSummaryBar`):**
 - Sticky bar between top bar and result area; renders at all breakpoints
@@ -739,11 +743,64 @@ A dedicated full-page testing surface that provides simultaneous visibility of a
 - `useMappingEditor(mappingId)` — loads mapping config and schemas independently on mount; no shared React Context with the editor page.
 - `usePreviewExecution({ config, sourceSchemaDetail, targetSchemaDetail, sourceDataRaw })` — execution lifecycle.
 - `useTestLabLayout({ traceEnabled })` — panel layout state, breakpoint detection, persistence.
-- `useTestCases(mappingId)` — test case CRUD; reads from `keyra:testcases:{mappingId}` (same localStorage key as the editor strip, ensuring test cases created on either page are visible on the other after navigation).
+- `useTestCases(mappingId)` — test case CRUD (save/load/delete/rename/duplicate/update); reads from `keyra:testcases:{mappingId}`.
+- `useTestRunResults(mappingId)` — run result persistence; reads from `keyra:testresults:{mappingId}`.
+- `useBatchExecution({ config, sourceSchema, targetSchema, onCaseComplete })` — sequential batch execution; fires `onCaseComplete` after each case; parent calls `recordResult`.
 
 **`PreviewProvider` isolation:** the Test Lab page wraps its content in its own `<PreviewProvider>`, independent from the editor's provider. Both pages independently access the same localStorage keys via their respective hook instances. This avoids stale-reference risk and is future-proof for `HttpAdapter` migration.
 
-### Rules View Search (FS-022)
+### Test Case Management (FS-034)
+
+The Test Lab page provides a full test case management sidebar (`TestCaseListPanel`) that replaces the legacy `TestCaseManager` dropdown.
+
+**Selection model:**
+- `selectedTestCaseId: string | null` — `null` means Scratchpad is active.
+- Scratchpad is ephemeral: always starts empty, not persisted across navigations.
+- Selecting a saved test case loads its `sourceData` into the source textarea and its `expectedOutput` into the Diff tab.
+- Selecting Scratchpad clears the source textarea.
+
+**`TestCaseListPanel` component:**
+- Props: `testCases`, `selectedId`, `runResults`, `onSelect`, `onSelectScratchpad`, `onRename`, `onDuplicate`, `onDelete`, `onAddNew`, `onSaveCurrentInput`, `sourceDataRaw`, `onRunAll`, `onRerunFailed`, `onCancel`, `batchState`, `toolbarSlot?`
+- Permanent Scratchpad pseudo-entry at top of list (non-deletable, non-renamable)
+- Status badges: green = pass, red = fail, gray = not run
+- Inline rename: double-click name → input → Enter confirms, Escape/blur cancels
+- Delete confirmation when run results exist for the case
+- Add New / Save As toolbar row (primary)
+- Run All / Rerun Failed / progress / summary toolbar row (batch)
+
+**`TestRunResult` type:**
+```ts
+interface TestRunResult {
+  testCaseId: string;
+  status: 'pass' | 'fail';
+  errorCount: number;
+  warningCount: number;
+  executedAt: ISODateString;
+  durationMs: number;
+  outputSnapshot?: unknown;
+}
+```
+Storage key: `keyra:testresults:{mappingId}` — stored as `Record<string, TestRunResult>` for O(1) lookup by `testCaseId`. Separate from `keyra:testcases:{mappingId}` to preserve backward compatibility with existing `TestCase` data.
+
+**`useTestRunResults` hook:**
+- Input: `mappingId: string`
+- Output: `{ results, recordResult, clearResult, clearAll }`
+- `results: Readonly<Record<string, TestRunResult>>` — keyed by `testCaseId`
+- Reloads on `mappingId` change; corrupted data resets to `{}` with console warning
+
+**`useBatchExecution` hook:**
+- Input: `{ config, sourceSchema, targetSchema, onCaseComplete? }`
+- Output: `{ isRunning, progress: { current, total }, runAll, rerunFailed, cancel }`
+- Sequential execution: one test case at a time, yields to event loop between cases
+- Pass/fail: zero error-severity diagnostics = pass; any errors, invalid JSON, or engine throw = fail
+- `rerunFailed` filters to cases with `status === 'fail'` in the provided results map
+- Cancellation: `cancel()` sets a ref flag checked before each case; current case always completes
+- Cleanup: cancels on unmount via `useEffect` cleanup
+- Does not own result persistence — fires `onCaseComplete(testCaseId, result)` and caller persists via `recordResult`
+
+**Batch summary:**
+- After `runAll` or `rerunFailed` completes, `TestLabInner` computes `{ passed, failed }` from the updated `runResults` and passes it to `TestCaseListPanel` as `batchState.summary`
+- Summary is shown inline in the batch toolbar row; cleared when a new batch starts
 
 `RuleList` includes a local search bar for filtering visible rules by case-insensitive substring match against:
 

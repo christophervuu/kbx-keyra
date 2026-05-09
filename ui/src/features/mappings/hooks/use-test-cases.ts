@@ -88,6 +88,23 @@ export interface UseTestCasesResult {
   loadTestCase: (id: string) => TestCase | null;
   /** Remove a test case by ID and persist the updated list. */
   deleteTestCase: (id: string) => void;
+  /**
+   * Rename a test case by ID.
+   * No-op if the ID does not exist.
+   */
+  renameTestCase: (id: string, newName: string) => void;
+  /**
+   * Duplicate a test case by ID.
+   * Creates a copy with " (copy)" appended to the name, a new ID, and a new
+   * `createdAt` timestamp. Appends the copy to the end of the list and persists.
+   * Returns the new `TestCase` on success, or `null` if the source ID is not found.
+   */
+  duplicateTestCase: (id: string) => TestCase | null;
+  /**
+   * Partially update a test case's `sourceData` and/or `expectedOutput` fields.
+   * No-op if the ID does not exist.
+   */
+  updateTestCase: (id: string, updates: Partial<Pick<TestCase, 'sourceData' | 'expectedOutput'>>) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,5 +168,53 @@ export function useTestCases(mappingId: string): UseTestCasesResult {
     [mappingId, testCases],
   );
 
-  return { testCases, saveTestCase, loadTestCase, deleteTestCase };
+  const renameTestCase = useCallback(
+    (id: string, newName: string): void => {
+      const idx = testCases.findIndex((tc) => tc.id === id);
+      if (idx === -1) return;
+      const updated = testCases.map((tc) => (tc.id === id ? { ...tc, name: newName } : tc));
+      writeToStorage(mappingId, updated);
+      setTestCases(updated);
+    },
+    [mappingId, testCases],
+  );
+
+  const duplicateTestCase = useCallback(
+    (id: string): TestCase | null => {
+      const source = testCases.find((tc) => tc.id === id);
+      if (!source) return null;
+      const copy: TestCase = {
+        ...source,
+        id: generateId(),
+        name: `${source.name} (copy)`,
+        createdAt: new Date().toISOString(),
+      };
+      const updated = [...testCases, copy];
+      writeToStorage(mappingId, updated);
+      setTestCases(updated);
+      return copy;
+    },
+    [mappingId, testCases],
+  );
+
+  const updateTestCase = useCallback(
+    (id: string, updates: Partial<Pick<TestCase, 'sourceData' | 'expectedOutput'>>): void => {
+      const idx = testCases.findIndex((tc) => tc.id === id);
+      if (idx === -1) return;
+      const updated = testCases.map((tc) => (tc.id === id ? { ...tc, ...updates } : tc));
+      writeToStorage(mappingId, updated);
+      setTestCases(updated);
+    },
+    [mappingId, testCases],
+  );
+
+  return {
+    testCases,
+    saveTestCase,
+    loadTestCase,
+    deleteTestCase,
+    renameTestCase,
+    duplicateTestCase,
+    updateTestCase,
+  };
 }

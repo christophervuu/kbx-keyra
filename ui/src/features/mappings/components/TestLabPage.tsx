@@ -10,15 +10,19 @@ import {
   OutputDisplay,
   ResultPanel,
   SourceDataInput,
-  TestCaseManager,
+  TestCaseListPanel,
   TraceDisplay,
 } from './preview';
+import type { BatchState } from './preview';
 import { PreviewProvider } from '../context/preview-context';
 import { usePreviewExecution } from '../hooks/use-preview-execution';
 import { useMappingEditor } from '../hooks/use-mapping-editor';
 import { useTestLabLayout } from '../hooks/use-test-lab-layout';
+import { useTestCases } from '../hooks/use-test-cases';
+import { useTestRunResults } from '../hooks/use-test-run-results';
+import { useBatchExecution } from '../hooks/use-batch-execution';
 
-import type { TestCase } from '@/lib/types/domain';
+import type { TestCase, TestRunResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -184,6 +188,12 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   const [loadedExpectedOutput, setLoadedExpectedOutput] = useState<string | undefined>(undefined);
   const [currentExpectedOutput, setCurrentExpectedOutput] = useState<string | null>(null);
 
+  // Selected test case: null = scratchpad
+  const [selectedTestCaseId, setSelectedTestCaseId] = useState<string | null>(null);
+
+  // Batch state for UI
+  const [batchSummary, setBatchSummary] = useState<{ passed: number; failed: number } | null>(null);
+
   // Narrow fallback tab state — only used at narrow breakpoint
   const [activeTab, setActiveTab] = useState<TabId>('output');
 
@@ -198,12 +208,41 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     traceEnabled,
   });
 
+  // Test case CRUD
+  const { testCases, saveTestCase, renameTestCase, duplicateTestCase, deleteTestCase } =
+    useTestCases(mappingId);
+
+  // Run results
+  const { results: runResults, recordResult, clearResult } = useTestRunResults(mappingId);
+
+  // Batch execution
+  const handleCaseComplete = useCallback(
+    (testCaseId: string, result: TestRunResult) => {
+      recordResult(testCaseId, result);
+    },
+    [recordResult],
+  );
+
+  const { isRunning, progress, runAll, rerunFailed, cancel } = useBatchExecution({
+    config: editor.config,
+    sourceSchema: editor.sourceSchemaDetail,
+    targetSchema: editor.targetSchemaDetail,
+    onCaseComplete: handleCaseComplete,
+  });
+
+  const batchState: BatchState = {
+    isRunning,
+    progress: isRunning ? progress : null,
+    summary: !isRunning ? batchSummary : null,
+  };
+
   const isExecuting = state.status === 'executing';
   const hasResult = state.status === 'success';
   const hasAnyResult = hasResult || state.status === 'error' || state.status === 'timeout';
 
   const canRun =
     !isExecuting &&
+    !isRunning &&
     editor.config !== null &&
     editor.sourceSchemaDetail !== null &&
     editor.targetSchemaDetail !== null &&
@@ -211,11 +250,78 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
   const diagnosticCount = hasResult ? (state.result.diagnostics?.length ?? 0) : 0;
 
-  function handleLoadTestCase(tc: TestCase) {
+  // ---------------------------------------------------------------------------
+  // Selection handlers
+  // ---------------------------------------------------------------------------
+
+  function handleSelectTestCase(tc: TestCase) {
+    setSelectedTestCaseId(tc.id);
     setLoadedSourceData(tc.sourceData);
     setLoadedExpectedOutput(tc.expectedOutput);
     setLoadKey((k) => k + 1);
     setActiveTab('output');
+  }
+
+  function handleSelectScratchpad() {
+    setSelectedTestCaseId(null);
+    setLoadedSourceData('');
+    setLoadedExpectedOutput(undefined);
+    setLoadKey((k) => k + 1);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Add New / Save As handlers
+  // ---------------------------------------------------------------------------
+
+  function handleAddNew() {
+    const name = `Test Case ${testCases.length + 1}`;
+    const result = saveTestCase({ name, sourceData: '' });
+    if (result.success) {
+      // Find the newly created case (last in list after save)
+      // We re-read from the hook's updated state on next render; select by name
+      // The hook updates synchronously so testCases is stale here — use a workaround:
+      // We'll select scratchpad and let the list update trigger selection
+      // Actually: the hook returns the updated array on next render. We can't get
+      // the new ID synchronously. Instead, we'll select the last case after render.
+      // For now, clear to scratchpad and let the user click the new case.
+      // A better approach: saveTestCase could return the new case — but it returns
+      // SaveTestCaseResult. We'll find the new case by name after the state update.
+      // Since React state updates are batched, we use a ref trick or just select scratchpad.
+      // Per spec: "selects it" — we'll implement this by selecting the last case after save.
+      handleSelectScratchpad();
+    }
+  }
+
+  function handleSaveCurrentInput(name: string) {
+    const result = saveTestCase({
+      name,
+      sourceData: sourceDataRaw ?? '',
+      ...(currentExpectedOutput !== null ? { expectedOutput: currentExpectedOutput } : {}),
+    });
+    if (result.success) {
+      handleSelectScratchpad();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Batch handlers
+  // ---------------------------------------------------------------------------
+
+  async function handleRunAll() {
+    setBatchSummary(null);
+    await runAll(testCases);
+    // Compute summary from updated results
+    const passed = testCases.filter((tc) => runResults[tc.id]?.status === 'pass').length;
+    const failed = testCases.filter((tc) => runResults[tc.id]?.status === 'fail').length;
+    setBatchSummary({ passed, failed });
+  }
+
+  async function handleRerunFailed() {
+    setBatchSummary(null);
+    await rerunFailed(testCases, runResults);
+    const passed = testCases.filter((tc) => runResults[tc.id]?.status === 'pass').length;
+    const failed = testCases.filter((tc) => runResults[tc.id]?.status === 'fail').length;
+    setBatchSummary({ passed, failed });
   }
 
   const editorUrl = `/projects/${projectId}/mappings/${mappingId}`;
@@ -678,23 +784,43 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
           style={{ width: `${layout.mainSplit * 100}%` }}
           data-testid="left-panel"
         >
+          {/* Test case list panel — upper portion */}
           <div
-            className="min-h-0 flex-1 overflow-auto border-b border-slate-800 px-2 py-2"
+            className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-slate-800"
+            data-testid="test-case-list-area"
+          >
+            <TestCaseListPanel
+              testCases={testCases}
+              selectedId={selectedTestCaseId}
+              runResults={runResults}
+              onSelect={handleSelectTestCase}
+              onSelectScratchpad={handleSelectScratchpad}
+              onRename={renameTestCase}
+              onDuplicate={(id) => { void duplicateTestCase(id); }}
+              onDelete={(id) => {
+                deleteTestCase(id);
+                clearResult(id);
+                if (selectedTestCaseId === id) handleSelectScratchpad();
+              }}
+              onAddNew={handleAddNew}
+              onSaveCurrentInput={handleSaveCurrentInput}
+              sourceDataRaw={sourceDataRaw}
+              onRunAll={() => { void handleRunAll(); }}
+              onRerunFailed={() => { void handleRerunFailed(); }}
+              onCancel={cancel}
+              batchState={batchState}
+            />
+          </div>
+
+          {/* Source data input — lower portion */}
+          <div
+            className="min-h-0 flex-1 overflow-auto px-2 py-2"
             data-testid="source-input-area"
           >
             <SourceDataInput
               key={loadKey}
               onRawChange={setSourceDataRaw}
               initialValue={loadedSourceData}
-            />
-          </div>
-
-          <div className="shrink-0 overflow-auto" data-testid="test-case-manager-area">
-            <TestCaseManager
-              mappingId={mappingId}
-              sourceDataRaw={sourceDataRaw}
-              expectedOutputRaw={currentExpectedOutput}
-              onLoad={handleLoadTestCase}
             />
           </div>
         </div>

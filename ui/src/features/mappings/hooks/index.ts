@@ -35,4 +35,10 @@ export { usePreviewExecution } from './use-preview-execution';
 export type { UsePreviewExecutionParams, UsePreviewExecutionResult } from './use-preview-execution';
 export { useResizableLayout } from './use-resizable-layout';
 export type { LayoutState, ResizeHandleProps, UseResizableLayoutResult } from './use-resizable-layout';
+export { useTestCases } from './use-test-cases';
+export type { SaveTestCaseParams, SaveTestCaseResult, UseTestCasesResult } from './use-test-cases';
+export { useTestRunResults } from './use-test-run-results';
+export type { UseTestRunResultsResult } from './use-test-run-results';
+export { useBatchExecution } from './use-batch-execution';
+export type { UseBatchExecutionOptions, UseBatchExecutionResult, BatchProgress } from './use-batch-execution';
 
