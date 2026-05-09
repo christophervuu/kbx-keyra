@@ -40,9 +40,9 @@ import type {
   ValueMapModeState,
   ValueModeState,
 } from '../lib/expression-builder-state';
+// Remove unused InlineTransform import — slots are now accessed via step.args
 import type {
   ArgumentSlot,
-  InlineTransform,
   SourceCardValueModeState,
 } from '../lib/expression-builder-state';
 import {
@@ -496,17 +496,20 @@ export function UnifiedExpressionBuilder({
                   }
                   onStateChange={handleSourceCardStateChange}
                   onRemove={() => { handleSourceCardRemove(sourceCardState.sourcePath); }}
-                  renderArgumentForm={({ functionName, transform: t, onTransformChange }) => (
-                    <ArgumentForm
-                      functionName={functionName}
-                      slots={t.args as ArgumentSlot[]}
-                      parameterOffset={1}
-                      sourceOptions={sourceOptions}
-                      onSlotsChange={(slots) => {
-                        onTransformChange({ ...t, args: slots });
-                      }}
-                    />
-                  )}
+                  renderArgumentForm={({ stepIndex = 0, step, onStepArgsChange }) => {
+                    if (!step || !onStepArgsChange) return null;
+                    return (
+                      <ArgumentForm
+                        functionName={step.functionName}
+                        slots={step.args as ArgumentSlot[]}
+                        parameterOffset={1}
+                        sourceOptions={sourceOptions}
+                        onSlotsChange={(slots) => {
+                          onStepArgsChange(stepIndex, slots);
+                        }}
+                      />
+                    );
+                  }}
                 />
               )}
 
@@ -520,17 +523,20 @@ export function UnifiedExpressionBuilder({
                       transform={undefined}
                       onStateChange={handleSourceCardStateChange}
                       onRemove={() => { handleSourceCardRemove(path); }}
-                      renderArgumentForm={({ functionName, transform: t, onTransformChange }) => (
-                        <ArgumentForm
-                          functionName={functionName}
-                          slots={t.args as ArgumentSlot[]}
-                          parameterOffset={1}
-                          sourceOptions={sourceOptions}
-                          onSlotsChange={(slots) => {
-                            onTransformChange({ ...t, args: slots });
-                          }}
-                        />
-                      )}
+                      renderArgumentForm={({ stepIndex = 0, step, onStepArgsChange }) => {
+                        if (!step || !onStepArgsChange) return null;
+                        return (
+                          <ArgumentForm
+                            functionName={step.functionName}
+                            slots={step.args as ArgumentSlot[]}
+                            parameterOffset={1}
+                            sourceOptions={sourceOptions}
+                            onSlotsChange={(slots) => {
+                              onStepArgsChange(stepIndex, slots);
+                            }}
+                          />
+                        );
+                      }}
                     />
                   ))}
                   <ConnectorPrompt

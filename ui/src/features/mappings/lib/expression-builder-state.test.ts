@@ -10,6 +10,9 @@ import {
   makeSourceSlotWithTransform,
   makeLiteralSlot,
   makeExpressionSlot,
+  // Chain factory helpers (FS-030)
+  makeChainStep,
+  makeSingleStepTransform,
   // Type guards
   isDirectCopy,
   isSourceWithTransform,
@@ -19,6 +22,7 @@ import {
   type ArgumentSlot,
   type ArgumentFormNode,
   type InlineTransform,
+  type TransformChainStep,
   type SourceCardValueModeState,
 } from './expression-builder-state';
 
@@ -50,7 +54,7 @@ describe('createDirectCopyState', () => {
 
 describe('createSourceWithTransformState', () => {
   it('produces a SourceWithTransformState with the correct variant', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     const state = createSourceWithTransformState('order.email', transform);
     expect(state.variant).toBe('sourceWithTransform');
     expect(state.sourcePath).toBe('order.email');
@@ -59,22 +63,22 @@ describe('createSourceWithTransformState', () => {
 
   it('AE-02: represents formatDate(source("order.createdAt"), "ISO8601", "YYYY-MM-DD")', () => {
     const transform: InlineTransform = {
-      functionName: 'formatDate',
-      args: [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')],
+      steps: [{ functionName: 'formatDate', args: [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')] }],
     };
     const state = createSourceWithTransformState('order.createdAt', transform);
     expect(state.variant).toBe('sourceWithTransform');
     expect(state.sourcePath).toBe('order.createdAt');
-    expect(state.transform.functionName).toBe('formatDate');
-    expect(state.transform.args).toHaveLength(2);
-    expect(state.transform.args[0]).toEqual({ mode: 'literal', value: 'ISO8601' });
-    expect(state.transform.args[1]).toEqual({ mode: 'literal', value: 'YYYY-MM-DD' });
+    expect(state.transform.steps).toHaveLength(1);
+    expect(state.transform.steps[0]!.functionName).toBe('formatDate');
+    expect(state.transform.steps[0]!.args).toHaveLength(2);
+    expect(state.transform.steps[0]!.args[0]).toEqual({ mode: 'literal', value: 'ISO8601' });
+    expect(state.transform.steps[0]!.args[1]).toEqual({ mode: 'literal', value: 'YYYY-MM-DD' });
   });
 
   it('AE-06: unary transform (upper) has empty args', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     const state = createSourceWithTransformState('order.email', transform);
-    expect(state.transform.args).toHaveLength(0);
+    expect(state.transform.steps[0]!.args).toHaveLength(0);
   });
 });
 
@@ -157,7 +161,7 @@ describe('makeSourceSlot', () => {
 
 describe('makeSourceSlotWithTransform', () => {
   it('creates a source-mode slot with an inline transform', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     const slot = makeSourceSlotWithTransform('order.name', transform);
     expect(slot.mode).toBe('source');
     if (slot.mode === 'source') {
@@ -167,9 +171,9 @@ describe('makeSourceSlotWithTransform', () => {
   });
 
   it('AE-07: represents upper(source("firstName")) as a slot', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     const slot = makeSourceSlotWithTransform('firstName', transform);
-    expect(slot).toEqual({ mode: 'source', path: 'firstName', transform: { functionName: 'upper', args: [] } });
+    expect(slot).toEqual({ mode: 'source', path: 'firstName', transform: { steps: [{ functionName: 'upper', args: [] }] } });
   });
 });
 
@@ -204,7 +208,7 @@ describe('makeExpressionSlot', () => {
 
 describe('type guards', () => {
   const directCopy = createDirectCopyState('a');
-  const sourceWithTransform = createSourceWithTransformState('a', { functionName: 'upper', args: [] });
+  const sourceWithTransform = createSourceWithTransformState('a', { steps: [{ functionName: 'upper', args: [] }] });
   const functionCall = createFunctionCallState('concat');
   const pendingConnector = createPendingConnectorState(['a', 'b']);
 
@@ -275,7 +279,7 @@ describe('type guards', () => {
 describe('AE-07: nested transform within argument slot', () => {
   it('represents concat(upper(source("firstName")), source("lastName"))', () => {
     // Slot 1: upper(source("firstName"))
-    const upperTransform: InlineTransform = { functionName: 'upper', args: [] };
+    const upperTransform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     const slot1 = makeSourceSlotWithTransform('firstName', upperTransform);
 
     // Slot 2: source("lastName")
@@ -291,8 +295,8 @@ describe('AE-07: nested transform within argument slot', () => {
     expect(s1.mode).toBe('source');
     if (s1.mode === 'source') {
       expect(s1.path).toBe('firstName');
-      expect(s1.transform?.functionName).toBe('upper');
-      expect(s1.transform?.args).toHaveLength(0);
+      expect(s1.transform?.steps[0]?.functionName).toBe('upper');
+      expect(s1.transform?.steps[0]?.args).toHaveLength(0);
     }
 
     const s2 = state.node.slots[1];
@@ -320,5 +324,103 @@ describe('immutability', () => {
     const state = createPendingConnectorState(['x', 'y']);
     expect(state.sourcePaths[0]).toBe('x');
     expect(state.sourcePaths[1]).toBe('y');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030: makeChainStep factory helper
+// ---------------------------------------------------------------------------
+
+describe('makeChainStep', () => {
+  it('creates a TransformChainStep with the given function name and empty args by default', () => {
+    const step: TransformChainStep = makeChainStep('upper');
+    expect(step).toEqual({ functionName: 'upper', args: [] });
+  });
+
+  it('creates a TransformChainStep with provided args', () => {
+    const args: ArgumentSlot[] = [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')];
+    const step = makeChainStep('formatDate', args);
+    expect(step.functionName).toBe('formatDate');
+    expect(step.args).toHaveLength(2);
+    expect(step.args[0]).toEqual({ mode: 'literal', value: 'ISO8601' });
+    expect(step.args[1]).toEqual({ mode: 'literal', value: 'YYYY-MM-DD' });
+  });
+
+  it('creates a step with a source slot arg', () => {
+    const step = makeChainStep('divide', [makeSourceSlot('stats.totalFields')]);
+    expect(step.functionName).toBe('divide');
+    expect(step.args[0]).toEqual({ mode: 'source', path: 'stats.totalFields' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030: makeSingleStepTransform factory helper
+// ---------------------------------------------------------------------------
+
+describe('makeSingleStepTransform', () => {
+  it('creates an InlineTransform with a single step and empty args by default', () => {
+    const transform = makeSingleStepTransform('upper');
+    expect(transform).toEqual({ steps: [{ functionName: 'upper', args: [] }] });
+  });
+
+  it('creates an InlineTransform with a single step and provided args', () => {
+    const args: ArgumentSlot[] = [makeLiteralSlot('2')];
+    const transform = makeSingleStepTransform('round', args);
+    expect(transform.steps).toHaveLength(1);
+    expect(transform.steps[0]!.functionName).toBe('round');
+    expect(transform.steps[0]!.args).toHaveLength(1);
+    expect(transform.steps[0]!.args[0]).toEqual({ mode: 'literal', value: '2' });
+  });
+
+  it('is equivalent to constructing { steps: [makeChainStep(fn, args)] }', () => {
+    const transform = makeSingleStepTransform('lower');
+    expect(transform).toEqual({ steps: [makeChainStep('lower')] });
+  });
+
+  it('can be used with createSourceWithTransformState', () => {
+    const transform = makeSingleStepTransform('upper');
+    const state = createSourceWithTransformState('order.name', transform);
+    expect(state.variant).toBe('sourceWithTransform');
+    expect(state.transform.steps).toHaveLength(1);
+    expect(state.transform.steps[0]!.functionName).toBe('upper');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030: Multi-step InlineTransform (chain model)
+// ---------------------------------------------------------------------------
+
+describe('InlineTransform chain model', () => {
+  it('supports a 3-step math pipeline state shape', () => {
+    // round(multiply(divide(source("stats.mappedFields"), source("stats.totalFields")), 100), 2)
+    const transform: InlineTransform = {
+      steps: [
+        makeChainStep('divide', [makeSourceSlot('stats.totalFields')]),
+        makeChainStep('multiply', [makeLiteralSlot('100')]),
+        makeChainStep('round', [makeLiteralSlot('2')]),
+      ],
+    };
+    expect(transform.steps).toHaveLength(3);
+    expect(transform.steps[0]!.functionName).toBe('divide');
+    expect(transform.steps[1]!.functionName).toBe('multiply');
+    expect(transform.steps[2]!.functionName).toBe('round');
+  });
+
+  it('supports a 2-step string cleanup pipeline state shape', () => {
+    // lower(trim(source("input.rawName")))
+    const transform: InlineTransform = {
+      steps: [makeChainStep('trim'), makeChainStep('lower')],
+    };
+    expect(transform.steps).toHaveLength(2);
+    expect(transform.steps[0]!.functionName).toBe('trim');
+    expect(transform.steps[1]!.functionName).toBe('lower');
+  });
+
+  it('single-step chain is equivalent to old single-transform shape', () => {
+    const transform = makeSingleStepTransform('upper');
+    const state = createSourceWithTransformState('order.email', transform);
+    expect(state.transform.steps).toHaveLength(1);
+    expect(state.transform.steps[0]!.functionName).toBe('upper');
+    expect(state.transform.steps[0]!.args).toHaveLength(0);
   });
 });

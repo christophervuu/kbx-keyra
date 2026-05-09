@@ -206,8 +206,8 @@ describe('T-09 — AE-02: SourceWithTransform', () => {
     await selectSourceViaChipPicker(user, 'order.firstName');
     await user.click(screen.getByTestId('source-card-add-transform'));
     await user.click(screen.getByTestId('transform-fn-upper'));
-    expect(screen.getByTestId('source-card-transform-badge')).toBeInTheDocument();
-    expect(screen.getByTestId('source-card-transform-badge')).toHaveTextContent('upper');
+    expect(screen.getByTestId('source-card-step-badge-0')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('upper');
   });
 
   it('selecting a transform once keeps argument form visible without requiring a second click', async () => {
@@ -218,7 +218,7 @@ describe('T-09 — AE-02: SourceWithTransform', () => {
     await user.click(screen.getByTestId('source-card-add-transform'));
     await user.click(screen.getByTestId('transform-fn-upper'));
 
-    expect(screen.getByTestId('source-card-transform-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-step-badge-0')).toBeInTheDocument();
     expect(screen.getByTestId('source-card-argument-form')).toBeInTheDocument();
   });
 
@@ -230,7 +230,7 @@ describe('T-09 — AE-02: SourceWithTransform', () => {
     await user.click(screen.getByTestId('source-card-add-transform'));
     await user.click(screen.getByTestId('transform-fn-upper'));
     onExpressionChange.mockClear();
-    await user.click(screen.getByTestId('source-card-remove-transform'));
+    await user.click(screen.getByTestId('source-card-remove-step-0'));
     expect(onExpressionChange).toHaveBeenCalledWith('source("order.firstName")');
   });
 
@@ -425,5 +425,148 @@ describe('T-09 — static mode hides Source Card builder', () => {
     await user.click(screen.getByTestId('input-type-static'));
     await user.click(screen.getByTestId('input-type-source'));
     expect(screen.getByTestId('source-card-builder')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030 AE-01: Multi-step chain authoring
+// ---------------------------------------------------------------------------
+
+describe('FS-030 — AE-01: Multi-step chain authoring', () => {
+  it('shows [+ Add Step] button after first transform is added', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await selectSourceViaChipPicker(user, 'order.firstName');
+    await user.click(screen.getByTestId('source-card-add-transform'));
+    await user.click(screen.getByTestId('transform-fn-upper'));
+    expect(screen.getByTestId('source-card-add-step')).toBeInTheDocument();
+  });
+
+  it('clicking [+ Add Step] opens a second function picker', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await selectSourceViaChipPicker(user, 'order.firstName');
+    await user.click(screen.getByTestId('source-card-add-transform'));
+    await user.click(screen.getByTestId('transform-fn-upper'));
+    await user.click(screen.getByTestId('source-card-add-step'));
+    expect(screen.getByTestId('source-card-add-step-picker-popover')).toBeInTheDocument();
+  });
+
+  it('adding a second step renders two step badges', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+    await selectSourceViaChipPicker(user, 'order.firstName');
+    await user.click(screen.getByTestId('source-card-add-transform'));
+    await user.click(screen.getByTestId('transform-fn-upper'));
+    await user.click(screen.getByTestId('source-card-add-step'));
+    await user.click(screen.getByTestId('transform-fn-lower'));
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('upper');
+    expect(screen.getByTestId('source-card-step-badge-1')).toHaveTextContent('lower');
+  });
+
+  it('two-step chain fires onExpressionChange with nested expression (AE-01)', async () => {
+    const user = userEvent.setup();
+    const onExpressionChange = vi.fn();
+    renderBuilder({ onExpressionChange });
+    await selectSourceViaChipPicker(user, 'order.firstName');
+    await user.click(screen.getByTestId('source-card-add-transform'));
+    await user.click(screen.getByTestId('transform-fn-upper'));
+    onExpressionChange.mockClear();
+    await user.click(screen.getByTestId('source-card-add-step'));
+    await user.click(screen.getByTestId('transform-fn-lower'));
+    const calls = onExpressionChange.mock.calls;
+    const lastExpr = calls[calls.length - 1][0] as string;
+    expect(lastExpr).toBe('lower(upper(source("order.firstName")))');
+  });
+
+  it('removing the first step of a two-step chain leaves only the second step', async () => {
+    const user = userEvent.setup();
+    const onExpressionChange = vi.fn();
+    renderBuilder({ onExpressionChange });
+    await selectSourceViaChipPicker(user, 'order.firstName');
+    await user.click(screen.getByTestId('source-card-add-transform'));
+    await user.click(screen.getByTestId('transform-fn-upper'));
+    await user.click(screen.getByTestId('source-card-add-step'));
+    await user.click(screen.getByTestId('transform-fn-lower'));
+    onExpressionChange.mockClear();
+    await user.click(screen.getByTestId('source-card-remove-step-0'));
+    const calls = onExpressionChange.mock.calls;
+    const lastExpr = calls[calls.length - 1][0] as string;
+    expect(lastExpr).toBe('lower(source("order.firstName"))');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030 AE-04: Chain hydration from existing expression
+// ---------------------------------------------------------------------------
+
+describe('FS-030 — AE-04: Chain hydration from existing expression', () => {
+  it('hydrates a single-step chain from a saved expression (backward compat AE-03)', () => {
+    renderBuilder({
+      expression: 'upper(source("order.firstName"))',
+      initialState: {
+        mode: 'value',
+        inputType: 'source',
+        sources: [{ path: 'order.firstName', type: 'string' }],
+        transforms: [],
+      },
+    });
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('upper');
+  });
+
+  it('hydrates a two-step chain from a saved expression (AE-04)', () => {
+    renderBuilder({
+      expression: 'lower(upper(source("order.firstName")))',
+      initialState: {
+        mode: 'value',
+        inputType: 'source',
+        sources: [{ path: 'order.firstName', type: 'string' }],
+        transforms: [],
+      },
+    });
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('upper');
+    expect(screen.getByTestId('source-card-step-badge-1')).toHaveTextContent('lower');
+  });
+
+  it('hydrates a three-step math chain from a saved expression (AE-01 round-trip)', () => {
+    renderBuilder({
+      expression: 'round(multiply(divide(source("order.amount"), source("order.amount")), 100), 2)',
+      initialState: {
+        mode: 'value',
+        inputType: 'source',
+        sources: [{ path: 'order.amount', type: 'number' }],
+        transforms: [],
+      },
+    });
+    // divide → multiply → round
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('divide');
+    expect(screen.getByTestId('source-card-step-badge-1')).toHaveTextContent('multiply');
+    expect(screen.getByTestId('source-card-step-badge-2')).toHaveTextContent('round');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030 AE-05: Non-linear expression falls back to FunctionCall
+// ---------------------------------------------------------------------------
+
+describe('FS-030 — AE-05: Non-linear expression fallback', () => {
+  it('a non-linear expression (concat) falls back to FunctionCall area, not SourceCard', () => {
+    renderBuilder({
+      expression: 'concat(source("order.firstName"), source("order.lastName"))',
+      initialState: {
+        mode: 'value',
+        inputType: 'source',
+        sources: [
+          { path: 'order.firstName', type: 'string' },
+          { path: 'order.lastName', type: 'string' },
+        ],
+        transforms: [],
+      },
+    });
+    // concat with 2 sources decomposes to FunctionCall (not a chain)
+    // The source-card-builder area should show function-call-area or connector-prompt
+    // (not a single SourceCard with a chain)
+    expect(screen.queryByTestId('source-card-step-badge-0')).not.toBeInTheDocument();
   });
 });

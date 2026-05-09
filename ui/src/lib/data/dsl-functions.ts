@@ -171,6 +171,19 @@ export const DSL_FUNCTION_CATALOG: readonly FunctionCatalogEntry[] = [
     returnType: 'string',
     example: 'formatDate(source("orderDate"), "ISO8601", "YYYY-MM-DD")',
   },
+  {
+    name: 'dateDiffSeconds',
+    category: 'Date',
+    description: 'Returns the difference in seconds between two date-time values (end - start) parsed with the same input format.',
+    parameterCount: 3,
+    parameters: [
+      { name: 'start', type: 'string', required: true },
+      { name: 'end', type: 'string', required: true },
+      { name: 'inputFormat', type: 'string', required: true },
+    ],
+    returnType: 'number',
+    example: 'dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")',
+  },
 
   // ----- Math -----
   {

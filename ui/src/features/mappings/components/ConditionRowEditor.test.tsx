@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ConditionRowEditor } from './ConditionRowEditor';
 import type { ConditionRow } from '../lib/expression-builder-state';
+
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -201,6 +202,28 @@ describe('ConditionRowEditor', () => {
     expect(onChange).toHaveBeenCalledOnce();
     const updated = onChange.mock.calls[0][0] as ConditionRow;
     expect(updated.comparison).toBe('gt');
+  });
+
+  it('selecting a source suggestion stores sourceType metadata', async () => {
+    const onChange = vi.fn();
+    render(
+      <ConditionRowEditor
+        condition={makeRow({ leftOperand: { kind: 'source', value: '' } })}
+        onChange={onChange}
+        parsedSourceSchema={MOCK_SCHEMA}
+        rowIndex={0}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('condition-left-0-field-input'));
+    await userEvent.click(screen.getByTestId('condition-left-0-suggestion-amount'));
+
+    const updated = onChange.mock.calls[0][0] as ConditionRow;
+    expect(updated.leftOperand).toMatchObject({
+      kind: 'source',
+      value: 'amount',
+      sourceType: 'number',
+    });
   });
 
   it('remove button fires onRemove with correct aria-label', async () => {

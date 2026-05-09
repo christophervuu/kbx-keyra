@@ -109,7 +109,8 @@ function OperandInput({
   };
 
   const handleSelectPath = (path: string) => {
-    onChange({ kind: 'source', value: path });
+    const matched = allPaths.find((entry) => entry.path === path);
+    onChange({ kind: 'source', value: path, sourceType: matched?.type });
     setSearchQuery('');
     setShowSuggestions(false);
   };

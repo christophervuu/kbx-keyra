@@ -109,11 +109,16 @@ ui/src/
         RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics + debounced search/filter by target/expression/type; DnD disabled during active search)
         ExpressionBuilderPanel.tsx  Rules View expression shell (mode toggle + composition); embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode (FS-023)
         RawDslEditor.tsx      Raw DSL textarea editor (overlay highlighting + autocomplete)
-        UnifiedExpressionBuilder.tsx Single-form multi-mode builder (Value / Conditional / Value Map) with live expression/result sections (FS-023)
+        UnifiedExpressionBuilder.tsx Single-form multi-mode builder (Value / Conditional / Value Map) with live expression/result sections (FS-023); FS-029 Source Card integration + FS-030 transform-chain argument wiring and decomposition hydration
         SourceChipPicker.tsx  Value-mode source chip picker with search and static-value toggle (FS-023)
+        SourceCard.tsx        FS-029/FS-030 Source Card builder surface: DirectCopy + SourceWithTransform chain pipeline, per-step argument rendering, add/remove step actions, and type-compatible add-step picker wiring
+        ArgumentForm.tsx      Parameter-driven argument editor used by FunctionCall and per-step SourceCard chain forms; supports implicit-first-arg offset and variadic slots
+        ArgumentSlotInput.tsx Single-slot editor (source/literal/expression) with optional nested source inline transform (single-step chain shape in slot transform)
+        ConnectorPrompt.tsx   Pending-connector surface for 2+ selected sources awaiting a combining function (FunctionCall transition)
+        BuilderEntryActions.tsx Empty-state entry actions ([+ Add Source] / [+ Add Transformation]) for Source Card flow
         TransformPipeline.tsx  Value-mode ordered transform chain (add/remove/reorder) (FS-023)
         TransformPipelineStep.tsx Value-mode single transform step card (auto-wired first param + dynamic additional params) (FS-023)
-        TransformFunctionPicker.tsx Value-mode categorized transform picker with search (FS-023)
+        TransformFunctionPicker.tsx Value-mode categorized transform picker with search (FS-023); optional allowedFunctions filtering for FS-030 type compatibility
         ConditionalModeBuilder.tsx Conditional-mode IF/THEN/ELSE builder with grouped AND/OR conditions and nested else-if (FS-023)
         ConditionRowEditor.tsx Conditional-mode single comparison row editor (FS-023)
         BranchValueSelector.tsx Conditional/value-branch selector (static/source/pipeline/else-if) with depth cap messaging; "Build expression" option renders InlinePipelineBuilder (FS-023, FS-025 T-03)
@@ -144,9 +149,12 @@ ui/src/
       lib/
         infer-rule-type.ts    Expression outer-function -> display label mapping
         dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
-        expression-builder-state.ts Discriminated union state model for UnifiedExpressionBuilder modes (Value/Conditional/ValueMap); ValueModeState includes `inputType: 'source' | 'static'` and `staticValue?: StaticValue` (FS-023, FS-027 T-06)
+        expression-builder-state.ts Discriminated union state model for UnifiedExpressionBuilder modes (Value/Conditional/ValueMap); ValueModeState includes `inputType: 'source' | 'static'` and `staticValue?: StaticValue`; FS-029/FS-030 Source Card types (SourceCardValueModeState, ArgumentSlot, TransformChainStep, InlineTransform chain model)
         pipeline-expression-generator.ts Pure state -> DSL generator for UnifiedExpressionBuilder (FS-023)
         pipeline-decomposer.ts DSL -> ExpressionBuilderState decomposer with mode auto-detection and failure reason (FS-023)
+        source-card-expression-generator.ts FS-029/FS-030 SourceCardValueModeState -> DSL generator (DirectCopy/SourceWithTransform chain/FunctionCall/PendingConnector)
+        source-card-decomposer.ts FS-029/FS-030 DSL -> SourceCardValueModeState decomposer with chain-walking (`CHAINABLE_TRANSFORMS`), backward-compat single-step heuristic (`SINGLE_INPUT_TRANSFORMS`), and FunctionCall fallback
+        transform-chain-utils.ts FS-030 chain utilities: getChainOutputType() + getCompatibleChainableTransforms() for add-step picker type compatibility filtering
         expression-generator.ts  Legacy guided-builder state -> DSL expression generator
         ast-decomposer.ts     Legacy editor expression -> guided-builder decomposition utility
         autocomplete-utils.ts Context detection + suggestion filtering utilities
@@ -786,6 +794,77 @@ Both surfaces now use the same builder implementation in builder mode: `UnifiedE
 - `mode: 'valueMap'` — input source + mapping rows + fallback
 
 The expression string is derived from state on each change and propagated upward through `onExpressionChange`.
+
+#### Transform Chain Model (FS-030)
+
+FS-030 evolves Source Card inline transforms from a single wrapper to a chain pipeline model.
+
+Type definitions and ordering:
+
+- `TransformChainStep = { functionName: string; args: readonly ArgumentSlot[] }`
+- `InlineTransform = { steps: readonly TransformChainStep[] }`
+- Chain ordering is **innermost-first**:
+  - `steps[0]` is applied to `source("path")`
+  - each later step consumes the previous step's output as implicit arg1
+  - last step produces final output
+
+Chain state locations:
+
+- top-level source-card transform: `SourceWithTransformState.transform`
+- nested source slot transform: `ArgumentSlot.transform` when `slot.mode === 'source'`
+
+`CHAINABLE_TRANSFORMS` vs `SINGLE_INPUT_TRANSFORMS`:
+
+- `CHAINABLE_TRANSFORMS` (used for chain-walking and add-step candidates) includes:
+  - String: `upper`, `lower`, `trim`, `replace`, `replaceAll`, `length`, `substring`
+  - Date: `formatDate`
+  - Math: `add`, `subtract`, `multiply`, `divide`, `round`, `abs`
+  - TypeConversion: `cast`
+  - NullHandling: `default`
+  - Array: `flatten`, `first`, `count`
+- `SINGLE_INPUT_TRANSFORMS` remains narrower and is used only for backward-compatible **single-step** top-level decomposition decisions.
+
+Generation algorithm (chain -> DSL):
+
+1. Start with base expression `source("{sourcePath}")`
+2. Iterate `transform.steps` in order
+3. For each step, build `step.functionName(previousExpression, ...step.args)`
+4. Final wrapped expression is emitted
+
+Example:
+
+`steps = [divide(y), multiply(100), round(2)]`
+-> `round(multiply(divide(source("x"), source("y")), 100), 2)`
+
+Decomposition algorithm (DSL -> chain):
+
+1. Walk outermost -> innermost through function-call first arguments
+2. Record each function only if it is in `CHAINABLE_TRANSFORMS`
+3. Collect non-first arguments as `step.args`
+4. Stop successfully when base reaches `source("path")`
+5. Fail chain-walk when encountering a non-chainable function or non-source base
+
+Top-level backward-compat heuristic:
+
+- 2+ recovered steps => `SourceWithTransform` chain
+- exactly 1 recovered step => preserve FS-029 behavior by applying `SINGLE_INPUT_TRANSFORMS` heuristic (otherwise `FunctionCall`)
+
+Non-linear fallback:
+
+- if chain-walk fails, decomposition falls back to `FunctionCall` (or `null` if unsupported), never forcing an invalid chain model.
+
+Type compatibility enforcement for `[+ Add Step]`:
+
+- `getChainOutputType(steps, sourceType?)` computes current pipeline output type from last step return type (or source type / `any`)
+- `getCompatibleChainableTransforms(outputType)` filters `DSL_FUNCTION_CATALOG` to chainable transforms whose first parameter accepts the output type
+- `TransformFunctionPicker` receives `allowedFunctions` so incompatible transforms are excluded from add-step UI
+
+SourceCard rendering pattern:
+
+- SourceCard shows a **vertical pipeline** (`<ol>`) of steps
+- each row renders a step badge, remove button, and per-step `ArgumentForm` for additional args only (implicit arg1 hidden)
+- connector visuals indicate flow between rows
+- `[+ Add Step]` appends a new chain step and opens type-filtered picker
 
 #### State hydration on target selection (FS-025 T-01)
 

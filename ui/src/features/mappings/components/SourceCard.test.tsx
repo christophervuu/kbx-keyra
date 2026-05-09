@@ -3,6 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SourceCard } from './SourceCard';
+import {
+  makeSingleStepTransform,
+  makeChainStep,
+  makeLiteralSlot,
+  makeSourceSlot,
+} from '../lib/expression-builder-state';
 import type { InlineTransform } from '../lib/expression-builder-state';
 
 // ---------------------------------------------------------------------------
@@ -20,7 +26,7 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof SourceCard>> 
 }
 
 // ---------------------------------------------------------------------------
-// Base state (AE-01: direct copy)
+// Base state (direct copy — no transform)
 // ---------------------------------------------------------------------------
 
 describe('SourceCard — base state', () => {
@@ -35,9 +41,9 @@ describe('SourceCard — base state', () => {
     expect(screen.getByTestId('source-card-add-transform')).toHaveTextContent('Add Transformation');
   });
 
-  it('does not render the transform badge in base state', () => {
+  it('does not render the pipeline in base state', () => {
     renderCard();
-    expect(screen.queryByTestId('source-card-transform-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-card-pipeline')).not.toBeInTheDocument();
   });
 
   it('does not render the argument form in base state', () => {
@@ -45,9 +51,9 @@ describe('SourceCard — base state', () => {
     expect(screen.queryByTestId('source-card-argument-form')).not.toBeInTheDocument();
   });
 
-  it('does not render remove-transform button in base state', () => {
+  it('does not render any step badges in base state', () => {
     renderCard();
-    expect(screen.queryByTestId('source-card-remove-transform')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-card-step-badge-0')).not.toBeInTheDocument();
   });
 
   it('renders the remove card button when onRemove is provided', () => {
@@ -70,7 +76,7 @@ describe('SourceCard — base state', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Function picker interaction
+// Function picker interaction (initial transform selection)
 // ---------------------------------------------------------------------------
 
 describe('SourceCard — function picker', () => {
@@ -91,18 +97,19 @@ describe('SourceCard — function picker', () => {
     expect(screen.queryByTestId('transform-function-picker')).not.toBeInTheDocument();
   });
 
-  it('AE-02: selecting a function calls onStateChange with SourceWithTransformState', async () => {
+  it('selecting a function calls onStateChange with SourceWithTransformState', async () => {
     const user = userEvent.setup();
     const { onStateChange } = renderCard({ source: 'order.createdAt' });
     await user.click(screen.getByTestId('source-card-add-transform'));
-    // formatDate is in the Date category — expand it first
     await user.click(screen.getByTestId('transform-category-date'));
     await user.click(screen.getByTestId('transform-fn-formatDate'));
     expect(onStateChange).toHaveBeenCalledOnce();
     const emitted = onStateChange.mock.calls[0][0];
     expect(emitted.variant).toBe('sourceWithTransform');
     expect(emitted.sourcePath).toBe('order.createdAt');
-    expect(emitted.transform.functionName).toBe('formatDate');
+    // FS-030: transform is now a chain with one step
+    expect(emitted.transform.steps).toHaveLength(1);
+    expect(emitted.transform.steps[0].functionName).toBe('formatDate');
   });
 
   it('selecting a function closes the picker', async () => {
@@ -118,7 +125,6 @@ describe('SourceCard — function picker', () => {
     const { onStateChange } = renderCard({ source: 'order.email' });
     await user.click(screen.getByTestId('source-card-add-transform'));
     await user.click(screen.getByTestId('transform-fn-upper'));
-    // After selection, onStateChange was called — re-render with the new state
     const emitted = onStateChange.mock.calls[0][0];
     render(
       <SourceCard
@@ -132,26 +138,45 @@ describe('SourceCard — function picker', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Transform state (AE-02: source + transform)
+// Single-step transform state (AE-03 backward compat)
 // ---------------------------------------------------------------------------
 
-describe('SourceCard — transform state', () => {
-  const transform: InlineTransform = { functionName: 'upper', args: [] };
+describe('SourceCard — single-step transform state (AE-03)', () => {
+  const transform = makeSingleStepTransform('upper');
 
-  it('renders the transform badge when transform is provided', () => {
+  it('renders the pipeline when a single-step transform is provided', () => {
     renderCard({ transform });
-    expect(screen.getByTestId('source-card-transform-badge')).toBeInTheDocument();
-    expect(screen.getByTestId('source-card-transform-badge')).toHaveTextContent('upper');
+    expect(screen.getByTestId('source-card-pipeline')).toBeInTheDocument();
   });
 
-  it('renders the argument form area when transform is provided', () => {
+  it('renders exactly one step badge', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-badge-0')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-card-step-badge-1')).not.toBeInTheDocument();
+  });
+
+  it('step badge shows the function name', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('upper');
+  });
+
+  it('step badge has aria-label with step number and function name', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveAttribute(
+      'aria-label',
+      'Step 1: upper',
+    );
+  });
+
+  it('renders the argument form area', () => {
     renderCard({ transform });
     expect(screen.getByTestId('source-card-argument-form')).toBeInTheDocument();
   });
 
-  it('renders the remove-transform button when transform is provided', () => {
+  it('renders the [+ Add Step] button', () => {
     renderCard({ transform });
-    expect(screen.getByTestId('source-card-remove-transform')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-add-step')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-add-step')).toHaveTextContent('Add Step');
   });
 
   it('does not render [+ Add Transformation] when transform is active', () => {
@@ -164,18 +189,22 @@ describe('SourceCard — transform state', () => {
     expect(screen.getByTestId('source-card-path')).toHaveTextContent('order.email');
   });
 
-  it('AE-02: renders the argument form placeholder with function name', () => {
-    const formatDateTransform: InlineTransform = { functionName: 'formatDate', args: [] };
-    renderCard({ source: 'order.createdAt', transform: formatDateTransform });
-    expect(screen.getByTestId('argument-form-placeholder')).toBeInTheDocument();
-    expect(screen.getByTestId('argument-form-placeholder')).toHaveTextContent('formatDate');
+  it('renders the remove step button', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-remove-step-0')).toBeInTheDocument();
   });
 
-  it('AE-02: argument form placeholder shows first arg pre-filled with source path', () => {
-    const formatDateTransform: InlineTransform = { functionName: 'formatDate', args: [] };
-    renderCard({ source: 'order.createdAt', transform: formatDateTransform });
-    const firstArg = screen.getByTestId('argument-form-placeholder-first-arg');
-    expect(firstArg).toHaveTextContent('source("order.createdAt")');
+  it('remove step button has aria-label with function name', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-remove-step-0')).toHaveAttribute(
+      'aria-label',
+      'Remove upper step',
+    );
+  });
+
+  it('does not render a connector after the only step', () => {
+    renderCard({ transform });
+    expect(screen.queryByTestId('source-card-step-connector-0')).not.toBeInTheDocument();
   });
 
   it('uses renderArgumentForm render prop when provided', () => {
@@ -184,80 +213,200 @@ describe('SourceCard — transform state', () => {
     );
     renderCard({ transform, renderArgumentForm });
     expect(screen.getByTestId('custom-argument-form')).toBeInTheDocument();
-    expect(screen.queryByTestId('argument-form-placeholder')).not.toBeInTheDocument();
     expect(renderArgumentForm).toHaveBeenCalledWith(
       expect.objectContaining({
         functionName: 'upper',
         transform,
         sourcePath: 'order.customerName',
         onTransformChange: expect.any(Function),
-      }),
-    );
-  });
-
-  it('renderArgumentForm receives onTransformChange that emits SourceWithTransformState', () => {
-    const { onStateChange } = renderCard({ source: 'order.email', transform });
-    // Simulate the render prop calling onTransformChange
-    let capturedOnTransformChange: ((t: InlineTransform) => void) | undefined;
-    const renderArgumentForm = vi.fn().mockImplementation(
-      ({ onTransformChange }: { onTransformChange: (t: InlineTransform) => void }) => {
-        capturedOnTransformChange = onTransformChange;
-        return <div />;
-      },
-    );
-    render(
-      <SourceCard
-        source="order.email"
-        transform={transform}
-        onStateChange={onStateChange}
-        renderArgumentForm={renderArgumentForm}
-      />,
-    );
-    const updatedTransform: InlineTransform = {
-      functionName: 'upper',
-      args: [{ mode: 'literal', value: 'test' }],
-    };
-    capturedOnTransformChange!(updatedTransform);
-    expect(onStateChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        variant: 'sourceWithTransform',
-        sourcePath: 'order.email',
-        transform: updatedTransform,
+        stepIndex: 0,
+        step: transform.steps[0],
+        onStepArgsChange: expect.any(Function),
       }),
     );
   });
 });
 
 // ---------------------------------------------------------------------------
-// AE-06: Removing transformation returns to source card base state
+// AE-01: Multi-step pipeline rendering (3-step chain)
 // ---------------------------------------------------------------------------
 
-describe('SourceCard — AE-06: remove transformation', () => {
-  const transform: InlineTransform = { functionName: 'upper', args: [] };
+describe('SourceCard — AE-01: multi-step pipeline rendering', () => {
+  const transform: InlineTransform = {
+    steps: [
+      makeChainStep('divide', [makeSourceSlot('stats.totalFields')]),
+      makeChainStep('multiply', [makeLiteralSlot('100')]),
+      makeChainStep('round', [makeLiteralSlot('2')]),
+    ],
+  };
 
-  it('clicking remove-transform calls onStateChange with DirectCopyState', async () => {
+  it('renders 3 step sections', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-0')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-step-1')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-step-2')).toBeInTheDocument();
+  });
+
+  it('renders 3 step badges with correct function names', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('divide');
+    expect(screen.getByTestId('source-card-step-badge-1')).toHaveTextContent('multiply');
+    expect(screen.getByTestId('source-card-step-badge-2')).toHaveTextContent('round');
+  });
+
+  it('step badges have correct aria-labels', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveAttribute('aria-label', 'Step 1: divide');
+    expect(screen.getByTestId('source-card-step-badge-1')).toHaveAttribute('aria-label', 'Step 2: multiply');
+    expect(screen.getByTestId('source-card-step-badge-2')).toHaveAttribute('aria-label', 'Step 3: round');
+  });
+
+  it('renders connectors between steps (not after last)', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-connector-0')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-step-connector-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-card-step-connector-2')).not.toBeInTheDocument();
+  });
+
+  it('renders 3 remove step buttons', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-remove-step-0')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-remove-step-1')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card-remove-step-2')).toBeInTheDocument();
+  });
+
+  it('pipeline has role="list"', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-pipeline')).toHaveAttribute('role', 'list');
+  });
+
+  it('steps have role="listitem"', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-step-0')).toHaveAttribute('role', 'listitem');
+    expect(screen.getByTestId('source-card-step-1')).toHaveAttribute('role', 'listitem');
+    expect(screen.getByTestId('source-card-step-2')).toHaveAttribute('role', 'listitem');
+  });
+
+  it('renders [+ Add Step] button', () => {
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-add-step')).toBeInTheDocument();
+  });
+
+  it('calls renderArgumentForm once per step with correct stepIndex', () => {
+    const renderArgumentForm = vi.fn().mockReturnValue(<div />);
+    renderCard({ transform, renderArgumentForm });
+    expect(renderArgumentForm).toHaveBeenCalledTimes(3);
+    expect(renderArgumentForm).toHaveBeenNthCalledWith(1, expect.objectContaining({ stepIndex: 0, step: transform.steps[0] }));
+    expect(renderArgumentForm).toHaveBeenNthCalledWith(2, expect.objectContaining({ stepIndex: 1, step: transform.steps[1] }));
+    expect(renderArgumentForm).toHaveBeenNthCalledWith(3, expect.objectContaining({ stepIndex: 2, step: transform.steps[2] }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AE-02: Add Step appends to chain
+// ---------------------------------------------------------------------------
+
+describe('SourceCard — add step', () => {
+  it('opens the add-step picker when [+ Add Step] is clicked', async () => {
     const user = userEvent.setup();
+    const transform = makeSingleStepTransform('upper');
+    renderCard({ transform });
+    await user.click(screen.getByTestId('source-card-add-step'));
+    expect(screen.getByTestId('transform-function-picker')).toBeInTheDocument();
+  });
+
+  it('selecting a function from add-step picker appends a new step', async () => {
+    const user = userEvent.setup();
+    const transform = makeSingleStepTransform('trim');
+    const { onStateChange } = renderCard({ source: 'order.name', transform });
+    await user.click(screen.getByTestId('source-card-add-step'));
+    await user.click(screen.getByTestId('transform-fn-upper'));
+    expect(onStateChange).toHaveBeenCalledOnce();
+    const emitted = onStateChange.mock.calls[0][0];
+    expect(emitted.variant).toBe('sourceWithTransform');
+    expect(emitted.transform.steps).toHaveLength(2);
+    expect(emitted.transform.steps[0].functionName).toBe('trim');
+    expect(emitted.transform.steps[1].functionName).toBe('upper');
+  });
+
+  it('closes the add-step picker after selecting a function', async () => {
+    const user = userEvent.setup();
+    const transform = makeSingleStepTransform('upper');
+    renderCard({ transform });
+    await user.click(screen.getByTestId('source-card-add-step'));
+    await user.click(screen.getByTestId('transform-fn-lower'));
+    expect(screen.queryByTestId('transform-function-picker')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AE-09: Remove step mid-chain
+// ---------------------------------------------------------------------------
+
+describe('SourceCard — AE-09: remove step mid-chain', () => {
+  it('removing the middle step of a 3-step chain leaves 2 steps', async () => {
+    const user = userEvent.setup();
+    const transform: InlineTransform = {
+      steps: [
+        makeChainStep('divide', [makeSourceSlot('stats.totalFields')]),
+        makeChainStep('multiply', [makeLiteralSlot('100')]),
+        makeChainStep('round', [makeLiteralSlot('2')]),
+      ],
+    };
+    const { onStateChange } = renderCard({ source: 'stats.mappedFields', transform });
+    await user.click(screen.getByTestId('source-card-remove-step-1'));
+    expect(onStateChange).toHaveBeenCalledOnce();
+    const emitted = onStateChange.mock.calls[0][0];
+    expect(emitted.variant).toBe('sourceWithTransform');
+    expect(emitted.transform.steps).toHaveLength(2);
+    expect(emitted.transform.steps[0].functionName).toBe('divide');
+    expect(emitted.transform.steps[1].functionName).toBe('round');
+  });
+
+  it('removing the first step of a 2-step chain leaves 1 step', async () => {
+    const user = userEvent.setup();
+    const transform: InlineTransform = {
+      steps: [makeChainStep('trim'), makeChainStep('upper')],
+    };
+    const { onStateChange } = renderCard({ source: 'order.name', transform });
+    await user.click(screen.getByTestId('source-card-remove-step-0'));
+    expect(onStateChange).toHaveBeenCalledOnce();
+    const emitted = onStateChange.mock.calls[0][0];
+    expect(emitted.variant).toBe('sourceWithTransform');
+    expect(emitted.transform.steps).toHaveLength(1);
+    expect(emitted.transform.steps[0].functionName).toBe('upper');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AE-10: Remove all steps reverts to DirectCopy
+// ---------------------------------------------------------------------------
+
+describe('SourceCard — AE-10: remove all steps reverts to DirectCopy', () => {
+  it('removing the only step calls onStateChange with DirectCopyState', async () => {
+    const user = userEvent.setup();
+    const transform = makeSingleStepTransform('upper');
     const { onStateChange } = renderCard({ source: 'order.email', transform });
-    await user.click(screen.getByTestId('source-card-remove-transform'));
+    await user.click(screen.getByTestId('source-card-remove-step-0'));
     expect(onStateChange).toHaveBeenCalledOnce();
     const emitted = onStateChange.mock.calls[0][0];
     expect(emitted.variant).toBe('directCopy');
     expect(emitted.sourcePath).toBe('order.email');
   });
 
-  it('after removing transform, base state is shown (re-render)', async () => {
+  it('after removing last step, base state is shown (re-render)', async () => {
     const user = userEvent.setup();
+    const transform = makeSingleStepTransform('upper');
     const { onStateChange } = renderCard({ source: 'order.email', transform });
-    await user.click(screen.getByTestId('source-card-remove-transform'));
+    await user.click(screen.getByTestId('source-card-remove-step-0'));
     const emitted = onStateChange.mock.calls[0][0];
-    // Re-render with the emitted state (no transform)
     render(
       <SourceCard
         source={emitted.sourcePath}
         onStateChange={vi.fn()}
       />,
     );
-    expect(screen.queryByTestId('source-card-transform-badge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-card-pipeline')).not.toBeInTheDocument();
     expect(screen.queryByTestId('source-card-argument-form')).not.toBeInTheDocument();
     expect(screen.getByTestId('source-card-add-transform')).toBeInTheDocument();
   });
@@ -268,11 +417,13 @@ describe('SourceCard — AE-06: remove transformation', () => {
 // ---------------------------------------------------------------------------
 
 describe('SourceCard — accessibility', () => {
-  it('remove-transform button has aria-label', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+  it('remove step button has aria-label with function name', () => {
+    const transform = makeSingleStepTransform('upper');
     renderCard({ transform });
-    const btn = screen.getByTestId('source-card-remove-transform');
-    expect(btn).toHaveAttribute('aria-label', 'Remove upper transformation');
+    expect(screen.getByTestId('source-card-remove-step-0')).toHaveAttribute(
+      'aria-label',
+      'Remove upper step',
+    );
   });
 
   it('remove card button has aria-label', () => {
@@ -294,22 +445,27 @@ describe('SourceCard — accessibility', () => {
     expect(screen.getByTestId('source-card-add-transform')).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('transform badge has aria-label', () => {
-    const transform: InlineTransform = { functionName: 'formatDate', args: [] };
+  it('[+ Add Step] button has aria-expanded=false when picker is closed', () => {
+    const transform = makeSingleStepTransform('upper');
     renderCard({ transform });
-    expect(screen.getByTestId('source-card-transform-badge')).toHaveAttribute(
-      'aria-label',
-      'Transform: formatDate',
-    );
+    expect(screen.getByTestId('source-card-add-step')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('pipeline has aria-label="Transform pipeline"', () => {
+    const transform = makeSingleStepTransform('upper');
+    renderCard({ transform });
+    expect(screen.getByTestId('source-card-pipeline')).toHaveAttribute('aria-label', 'Transform pipeline');
   });
 
   it('all interactive elements are keyboard focusable (have no tabIndex=-1)', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform = makeSingleStepTransform('upper');
     renderCard({ source: 'order.email', transform, onRemove: vi.fn() });
-    const removeTransformBtn = screen.getByTestId('source-card-remove-transform');
+    const removeStepBtn = screen.getByTestId('source-card-remove-step-0');
     const removeCardBtn = screen.getByTestId('source-card-remove');
-    expect(removeTransformBtn).not.toHaveAttribute('tabindex', '-1');
+    const addStepBtn = screen.getByTestId('source-card-add-step');
+    expect(removeStepBtn).not.toHaveAttribute('tabindex', '-1');
     expect(removeCardBtn).not.toHaveAttribute('tabindex', '-1');
+    expect(addStepBtn).not.toHaveAttribute('tabindex', '-1');
   });
 });
 
@@ -336,15 +492,55 @@ describe('SourceCard — keyboard navigation', () => {
     expect(screen.getByTestId('transform-function-picker')).toBeInTheDocument();
   });
 
-  it('can activate remove-transform button with Enter key', async () => {
+  it('can activate remove-step button with Enter key', async () => {
     const user = userEvent.setup();
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform = makeSingleStepTransform('upper');
     const { onStateChange } = renderCard({ transform });
-    const btn = screen.getByTestId('source-card-remove-transform');
+    const btn = screen.getByTestId('source-card-remove-step-0');
     btn.focus();
     await user.keyboard('{Enter}');
     expect(onStateChange).toHaveBeenCalledWith(
       expect.objectContaining({ variant: 'directCopy' }),
+    );
+  });
+
+  it('can activate [+ Add Step] with Enter key', async () => {
+    const user = userEvent.setup();
+    const transform = makeSingleStepTransform('upper');
+    renderCard({ transform });
+    const btn = screen.getByTestId('source-card-add-step');
+    btn.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByTestId('transform-function-picker')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Placeholder fallback (no renderArgumentForm provided)
+// ---------------------------------------------------------------------------
+
+describe('SourceCard — argument form placeholder', () => {
+  it('renders the step placeholder when no renderArgumentForm is provided', () => {
+    const transform = makeSingleStepTransform('upper');
+    renderCard({ transform });
+    expect(screen.getByTestId('argument-form-placeholder-0')).toBeInTheDocument();
+  });
+
+  it('placeholder shows implicit first arg with source path for step 0', () => {
+    const transform = makeSingleStepTransform('formatDate');
+    renderCard({ source: 'order.createdAt', transform });
+    expect(screen.getByTestId('argument-form-placeholder-first-arg-0')).toHaveTextContent(
+      'source("order.createdAt")',
+    );
+  });
+
+  it('placeholder shows [output of step N] for subsequent steps', () => {
+    const transform: InlineTransform = {
+      steps: [makeChainStep('trim'), makeChainStep('upper')],
+    };
+    renderCard({ source: 'order.name', transform });
+    expect(screen.getByTestId('argument-form-placeholder-first-arg-1')).toHaveTextContent(
+      '[output of step 1]',
     );
   });
 });

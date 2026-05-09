@@ -24,7 +24,7 @@ Type: ui
 
 ## Status
 
-approved
+completed
 
 ---
 

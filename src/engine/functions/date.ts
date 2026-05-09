@@ -57,6 +57,15 @@ const formatDateSignature: FunctionSignature = {
   returnType: 'string',
 };
 
+const dateDiffSecondsSignature: FunctionSignature = {
+  parameters: [
+    { name: 'start', type: 'string', required: true },
+    { name: 'end', type: 'string', required: true },
+    { name: 'inputFormat', type: 'string', required: true },
+  ],
+  returnType: 'number',
+};
+
 function tokenAt(format: string, index: number): DateToken | null {
   for (const token of TOKENS) {
     if (format.startsWith(token, index)) {
@@ -184,7 +193,13 @@ function formatByTokens(parts: DateParts, outputFormat: string): string {
   return result;
 }
 
-function emitE040(context: EvaluationContext, value: string, inputFormat: string): null {
+function emitE040(
+  context: EvaluationContext,
+  value: string,
+  inputFormat: string,
+  fnName: 'formatDate' | 'dateDiffSeconds',
+  argumentIndex: number,
+): null {
   context.addDiagnostic({
     code: DIAGNOSTIC_CODES['KEYRA-E040'].code,
     severity: DIAGNOSTIC_CODES['KEYRA-E040'].severity,
@@ -192,10 +207,32 @@ function emitE040(context: EvaluationContext, value: string, inputFormat: string
       value,
       format: inputFormat,
     }),
-    location: { function: 'formatDate', argumentIndex: 0 },
+    location: { function: fnName, argumentIndex },
   });
 
   return null;
+}
+
+function parseInputDate(value: string, inputFormat: string): DateParts | null {
+  const inputHasIsoToken = inputFormat.includes('ISO8601');
+  if (inputHasIsoToken && inputFormat !== 'ISO8601') {
+    return null;
+  }
+
+  return inputFormat === 'ISO8601' ? parseIso8601(value) : parseByFormat(value, inputFormat);
+}
+
+function datePartsToEpochSeconds(parts: DateParts): number {
+  const resolved = withDefaults(parts);
+  const millis = Date.UTC(
+    resolved.year,
+    resolved.month - 1,
+    resolved.day,
+    resolved.hour,
+    resolved.minute,
+    resolved.second,
+  );
+  return Math.floor(millis / 1000);
 }
 
 const formatDateImplementation: FunctionImplementation = (
@@ -207,20 +244,20 @@ const formatDateImplementation: FunctionImplementation = (
   const outputFormat = args[2] as string;
 
   if (value.length === 0) {
-    return emitE040(context, value, inputFormat);
+    return emitE040(context, value, inputFormat, 'formatDate', 0);
   }
 
   const inputHasIsoToken = inputFormat.includes('ISO8601');
   const outputHasIsoToken = outputFormat.includes('ISO8601');
 
   if ((inputHasIsoToken && inputFormat !== 'ISO8601') || (outputHasIsoToken && outputFormat !== 'ISO8601')) {
-    return emitE040(context, value, inputFormat);
+    return emitE040(context, value, inputFormat, 'formatDate', 0);
   }
 
-  const parsed = inputFormat === 'ISO8601' ? parseIso8601(value) : parseByFormat(value, inputFormat);
+  const parsed = parseInputDate(value, inputFormat);
 
   if (parsed === null) {
-    return emitE040(context, value, inputFormat);
+    return emitE040(context, value, inputFormat, 'formatDate', 0);
   }
 
   if (outputFormat === 'ISO8601') {
@@ -231,6 +268,36 @@ const formatDateImplementation: FunctionImplementation = (
   return formatByTokens(parsed, outputFormat);
 };
 
+const dateDiffSecondsImplementation: FunctionImplementation = (
+  args: readonly unknown[],
+  context: EvaluationContext,
+): unknown => {
+  const start = args[0] as string;
+  const end = args[1] as string;
+  const inputFormat = args[2] as string;
+
+  if (start.length === 0) {
+    return emitE040(context, start, inputFormat, 'dateDiffSeconds', 0);
+  }
+
+  if (end.length === 0) {
+    return emitE040(context, end, inputFormat, 'dateDiffSeconds', 1);
+  }
+
+  const parsedStart = parseInputDate(start, inputFormat);
+  if (parsedStart === null) {
+    return emitE040(context, start, inputFormat, 'dateDiffSeconds', 0);
+  }
+
+  const parsedEnd = parseInputDate(end, inputFormat);
+  if (parsedEnd === null) {
+    return emitE040(context, end, inputFormat, 'dateDiffSeconds', 1);
+  }
+
+  return datePartsToEpochSeconds(parsedEnd) - datePartsToEpochSeconds(parsedStart);
+};
+
 export function registerDateFunctions(registry: FunctionRegistry): void {
   registry.registerFunction('formatDate', formatDateSignature, formatDateImplementation);
+  registry.registerFunction('dateDiffSeconds', dateDiffSecondsSignature, dateDiffSecondsImplementation);
 }

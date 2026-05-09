@@ -39,6 +39,7 @@ export type {
   // FS-029 Source Card builder types
   ArgumentSlot,
   InlineTransform,
+  TransformChainStep,
   ArgumentFormNode,
   DirectCopyState,
   SourceWithTransformState,
@@ -62,6 +63,9 @@ export {
   makeSourceSlotWithTransform,
   makeLiteralSlot,
   makeExpressionSlot,
+  // FS-030 chain factory helpers
+  makeChainStep,
+  makeSingleStepTransform,
 } from './expression-builder-state';
 export { generateExpressionFromState } from './pipeline-expression-generator';
 export { decomposeExpression as decomposeExpressionFromState } from './pipeline-decomposer';
@@ -71,3 +75,9 @@ export { suggestSourceFields } from './suggest-source-fields';
 export type { SuggestedField, MatchKind } from './suggest-source-fields';
 export { generateArrayExpression } from './array-expression-generator';
 export type { ArrayBuilderState, ArrayPattern, FieldMapping } from './array-expression-generator';
+// FS-030 transform chain utilities
+export {
+  getChainOutputType,
+  getCompatibleChainableTransforms,
+  CHAINABLE_TRANSFORMS,
+} from './transform-chain-utils';

@@ -43,6 +43,20 @@ function callFormatDate(value: string, inputFormat: string, outputFormat: string
   };
 }
 
+function callDateDiffSeconds(start: string, end: string, inputFormat: string): AstNode {
+  return {
+    type: 'FunctionCall',
+    name: 'dateDiffSeconds',
+    arguments: [
+      { type: 'StringLiteral', value: start, start: 0, end: 0 },
+      { type: 'StringLiteral', value: end, start: 0, end: 0 },
+      { type: 'StringLiteral', value: inputFormat, start: 0, end: 0 },
+    ],
+    start: 0,
+    end: 1,
+  };
+}
+
 describe('formatDate()', () => {
   it('AE-17: reformats ISO8601 input to token format', () => {
     const context = createContext();
@@ -156,5 +170,43 @@ describe('formatDate()', () => {
     expect(invalidIsoInOutput.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E040')).toBe(
       true,
     );
+  });
+});
+
+describe('dateDiffSeconds()', () => {
+  it('returns difference in seconds for ISO8601 timestamps', () => {
+    const context = createContext();
+
+    const result = evaluate(
+      callDateDiffSeconds('2026-05-09T10:00:00Z', '2026-05-09T10:01:30Z', 'ISO8601'),
+      context,
+    );
+
+    expect(result.value).toBe(90);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('returns difference in seconds for custom token formats', () => {
+    const context = createContext();
+
+    const result = evaluate(
+      callDateDiffSeconds('2026/05/09 10:00:00', '2026/05/09 10:00:45', 'YYYY/MM/DD HH:mm:ss'),
+      context,
+    );
+
+    expect(result.value).toBe(45);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('emits E040 when either input cannot be parsed', () => {
+    const context = createContext();
+
+    const result = evaluate(
+      callDateDiffSeconds('bad-date', '2026-05-09T10:01:30Z', 'ISO8601'),
+      context,
+    );
+
+    expect(result.value).toBeNull();
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E040')).toBe(true);
   });
 });

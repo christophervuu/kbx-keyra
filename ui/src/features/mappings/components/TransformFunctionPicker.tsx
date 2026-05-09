@@ -45,6 +45,12 @@ export interface TransformFunctionPickerProps {
   readonly onSelect: (functionName: string) => void;
   readonly onClose: () => void;
   readonly includeSourceAccess?: boolean;
+  /**
+   * When provided, only functions whose names are in this set are shown.
+   * Functions not in the set are excluded entirely (not shown as disabled).
+   * Used by the [+ Add Step] picker to enforce type compatibility (FS-030 AE-02).
+   */
+  readonly allowedFunctions?: ReadonlySet<string>;
   readonly className?: string;
 }
 
@@ -60,6 +66,7 @@ export function TransformFunctionPicker({
   onSelect,
   onClose,
   includeSourceAccess = false,
+  allowedFunctions,
   className,
 }: TransformFunctionPickerProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,9 +84,10 @@ export function TransformFunctionPicker({
     return DSL_FUNCTION_CATALOG.filter(
       (fn) =>
         pickerCategories.includes(fn.category) &&
+        (allowedFunctions === undefined || allowedFunctions.has(fn.name)) &&
         (q === '' || fn.name.toLowerCase().includes(q) || fn.description.toLowerCase().includes(q)),
     );
-  }, [searchQuery, pickerCategories]);
+  }, [searchQuery, pickerCategories, allowedFunctions]);
 
   const byCategory = useMemo(() => {
     const map = new Map<FunctionCategory, FunctionCatalogEntry[]>();

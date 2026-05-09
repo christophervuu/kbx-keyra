@@ -9,6 +9,8 @@ import {
   makeLiteralSlot,
   makeSourceSlot,
   makeSourceSlotWithTransform,
+  makeChainStep,
+  makeSingleStepTransform,
 } from './expression-builder-state';
 import type { ArgumentFormNode, InlineTransform } from './expression-builder-state';
 import { generateExpressionFromSourceCardState } from './source-card-expression-generator';
@@ -50,22 +52,22 @@ describe('DirectCopy (AE-01)', () => {
 
 describe('SourceWithTransform (AE-02)', () => {
   it('generates unary transform: upper(source("name"))', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform = makeSingleStepTransform('upper');
     const state = createSourceWithTransformState('order.name', transform);
     expect(generateExpressionFromSourceCardState(state)).toBe('upper(source("order.name"))');
   });
 
   it('generates unary transform: lower(source("email"))', () => {
-    const transform: InlineTransform = { functionName: 'lower', args: [] };
+    const transform = makeSingleStepTransform('lower');
     const state = createSourceWithTransformState('order.email', transform);
     expect(generateExpressionFromSourceCardState(state)).toBe('lower(source("order.email"))');
   });
 
   it('generates formatDate with literal args (AE-02 canonical)', () => {
-    const transform: InlineTransform = {
-      functionName: 'formatDate',
-      args: [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')],
-    };
+    const transform = makeSingleStepTransform('formatDate', [
+      makeLiteralSlot('ISO8601'),
+      makeLiteralSlot('YYYY-MM-DD'),
+    ]);
     const state = createSourceWithTransformState('order.createdAt', transform);
     expect(generateExpressionFromSourceCardState(state)).toBe(
       'formatDate(source("order.createdAt"), "ISO8601", "YYYY-MM-DD")',
@@ -73,26 +75,40 @@ describe('SourceWithTransform (AE-02)', () => {
   });
 
   it('returns null for an empty source path', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform = makeSingleStepTransform('upper');
     const state = createSourceWithTransformState('', transform);
     expect(generateExpressionFromSourceCardState(state)).toBeNull();
   });
 
   it('generates trim(source("notes")) with no extra args', () => {
-    const transform: InlineTransform = { functionName: 'trim', args: [] };
+    const transform = makeSingleStepTransform('trim');
     const state = createSourceWithTransformState('order.notes', transform);
     expect(generateExpressionFromSourceCardState(state)).toBe('trim(source("order.notes"))');
   });
 
   it('generates transform with numeric literal arg', () => {
-    const transform: InlineTransform = {
-      functionName: 'round',
-      args: [makeLiteralSlot('2')],
-    };
+    const transform = makeSingleStepTransform('round', [makeLiteralSlot('2')]);
     const state = createSourceWithTransformState('order.amount', transform);
     expect(generateExpressionFromSourceCardState(state)).toBe(
       'round(source("order.amount"), 2)',
     );
+  });
+
+  it('generates dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")', () => {
+    const transform = makeSingleStepTransform('dateDiffSeconds', [
+      makeSourceSlot('lastRun.endedAt'),
+      makeLiteralSlot('ISO8601'),
+    ]);
+    const state = createSourceWithTransformState('lastRun.startedAt', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBe(
+      'dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")',
+    );
+  });
+
+  it('returns null for empty steps array', () => {
+    const transform: InlineTransform = { steps: [] };
+    const state = createSourceWithTransformState('order.name', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBeNull();
   });
 });
 
@@ -201,7 +217,7 @@ describe('FunctionCall — from connector (AE-04)', () => {
 
 describe('FunctionCall — nested inline transforms (AE-07)', () => {
   it('generates concat(upper(source("firstName")), source("lastName"))', () => {
-    const upperTransform: InlineTransform = { functionName: 'upper', args: [] };
+    const upperTransform = makeSingleStepTransform('upper');
     const state = createFunctionCallState('concat', [
       makeSourceSlotWithTransform('firstName', upperTransform),
       makeSourceSlot('lastName'),
@@ -212,8 +228,8 @@ describe('FunctionCall — nested inline transforms (AE-07)', () => {
   });
 
   it('generates concat(upper(source("a")), lower(source("b")))', () => {
-    const upperTransform: InlineTransform = { functionName: 'upper', args: [] };
-    const lowerTransform: InlineTransform = { functionName: 'lower', args: [] };
+    const upperTransform = makeSingleStepTransform('upper');
+    const lowerTransform = makeSingleStepTransform('lower');
     const state = createFunctionCallState('concat', [
       makeSourceSlotWithTransform('a', upperTransform),
       makeSourceSlotWithTransform('b', lowerTransform),
@@ -224,10 +240,10 @@ describe('FunctionCall — nested inline transforms (AE-07)', () => {
   });
 
   it('generates nested transform with extra args: formatDate(source("date"), "ISO8601", "YYYY-MM-DD") as a slot', () => {
-    const formatTransform: InlineTransform = {
-      functionName: 'formatDate',
-      args: [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')],
-    };
+    const formatTransform = makeSingleStepTransform('formatDate', [
+      makeLiteralSlot('ISO8601'),
+      makeLiteralSlot('YYYY-MM-DD'),
+    ]);
     const state = createFunctionCallState('concat', [
       makeSourceSlotWithTransform('order.createdAt', formatTransform),
       makeLiteralSlot(' UTC'),
@@ -238,10 +254,7 @@ describe('FunctionCall — nested inline transforms (AE-07)', () => {
   });
 
   it('generates concat("v", cast(source("sourceSchema.version"), "string")) for nested cast transform', () => {
-    const castTransform: InlineTransform = {
-      functionName: 'cast',
-      args: [makeLiteralSlot('string')],
-    };
+    const castTransform = makeSingleStepTransform('cast', [makeLiteralSlot('string')]);
 
     const state = createFunctionCallState('concat', [
       makeLiteralSlot('v'),
@@ -537,6 +550,99 @@ describe('Variadic functions', () => {
     ]);
     expect(generateExpressionFromSourceCardState(state)).toBe(
       'coalesce(source("order.preferredName"), source("order.firstName"), "Unknown")',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030: Transform chain generation
+// ---------------------------------------------------------------------------
+
+describe('FS-030: Transform chain — SourceWithTransform multi-step', () => {
+  it('AE-01: generates 3-step math pipeline: round(multiply(divide(source("x"), source("y")), 100), 2)', () => {
+    // round(multiply(divide(source("stats.mappedFields"), source("stats.totalFields")), 100), 2)
+    const transform: InlineTransform = {
+      steps: [
+        makeChainStep('divide', [makeSourceSlot('stats.totalFields')]),
+        makeChainStep('multiply', [makeLiteralSlot('100')]),
+        makeChainStep('round', [makeLiteralSlot('2')]),
+      ],
+    };
+    const state = createSourceWithTransformState('stats.mappedFields', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBe(
+      'round(multiply(divide(source("stats.mappedFields"), source("stats.totalFields")), 100), 2)',
+    );
+  });
+
+  it('AE-06: generates 2-step string cleanup pipeline: lower(trim(source("input.rawName")))', () => {
+    const transform: InlineTransform = {
+      steps: [makeChainStep('trim'), makeChainStep('lower')],
+    };
+    const state = createSourceWithTransformState('input.rawName', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBe(
+      'lower(trim(source("input.rawName")))',
+    );
+  });
+
+  it('AE-03: single-step chain generates same as pre-FS-030 single transform', () => {
+    const transform = makeSingleStepTransform('upper');
+    const state = createSourceWithTransformState('order.name', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBe('upper(source("order.name"))');
+  });
+
+  it('AE-09: 2-step chain after mid-step removal: round(divide(source("x"), source("y")), 2)', () => {
+    // Simulates removing the multiply step from a 3-step chain
+    const transform: InlineTransform = {
+      steps: [
+        makeChainStep('divide', [makeSourceSlot('stats.totalFields')]),
+        makeChainStep('round', [makeLiteralSlot('2')]),
+      ],
+    };
+    const state = createSourceWithTransformState('stats.mappedFields', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBe(
+      'round(divide(source("stats.mappedFields"), source("stats.totalFields")), 2)',
+    );
+  });
+
+  it('AE-10: DirectCopy state (after removing all steps) generates source("path")', () => {
+    const state = createDirectCopyState('order.name');
+    expect(generateExpressionFromSourceCardState(state)).toBe('source("order.name")');
+  });
+
+  it('returns null for empty steps array', () => {
+    const transform: InlineTransform = { steps: [] };
+    const state = createSourceWithTransformState('order.name', transform);
+    expect(generateExpressionFromSourceCardState(state)).toBeNull();
+  });
+});
+
+describe('FS-030: Transform chain — nested slot with chain (AE-07 chain variant)', () => {
+  it('generates concat(round(multiply(source("x"), 100), 2), "suffix")', () => {
+    // Slot 0: source("x") with a 2-step chain: multiply(100) -> round(2)
+    const slotTransform: InlineTransform = {
+      steps: [
+        makeChainStep('multiply', [makeLiteralSlot('100')]),
+        makeChainStep('round', [makeLiteralSlot('2')]),
+      ],
+    };
+    const state = createFunctionCallState('concat', [
+      makeSourceSlotWithTransform('x', slotTransform),
+      makeLiteralSlot('suffix'),
+    ]);
+    expect(generateExpressionFromSourceCardState(state)).toBe(
+      'concat(round(multiply(source("x"), 100), 2), "suffix")',
+    );
+  });
+
+  it('generates concat(upper(source("firstName")), " ", source("lastName")) — single-step chain in slot', () => {
+    const slotTransform = makeSingleStepTransform('upper');
+    const state = createFunctionCallState('concat', [
+      makeSourceSlotWithTransform('firstName', slotTransform),
+      makeLiteralSlot(' '),
+      makeSourceSlot('lastName'),
+    ]);
+    expect(generateExpressionFromSourceCardState(state)).toBe(
+      'concat(upper(source("firstName")), " ", source("lastName"))',
     );
   });
 });

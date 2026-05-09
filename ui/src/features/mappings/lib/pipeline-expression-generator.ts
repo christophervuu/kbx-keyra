@@ -15,6 +15,27 @@ function quoteString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+function normalizeSourceType(sourceType?: string): 'string' | 'number' | 'boolean' | 'any' {
+  if (!sourceType) return 'any';
+  const normalized = sourceType.toLowerCase();
+  if (normalized.includes('number') || normalized === 'int' || normalized === 'float') return 'number';
+  if (normalized.includes('bool')) return 'boolean';
+  if (normalized.includes('string') || normalized === 'str') return 'string';
+  return 'any';
+}
+
+function typedOperandLiteral(value: string, sourceType?: string): string {
+  const normalized = normalizeSourceType(sourceType);
+  if (normalized === 'number') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? String(parsed) : '0';
+  }
+  if (normalized === 'boolean') {
+    return value === 'true' ? 'true' : 'false';
+  }
+  return quoteString(value);
+}
+
 function literal(value: PrimitiveValue): string {
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -65,7 +86,10 @@ function generateOperand(operand: Operand): string {
 }
 
 function generateConditionRow(row: ConditionRow): string {
-  const left = generateOperand(row.leftOperand);
+  const left =
+    row.leftOperand.kind === 'static' && row.rightOperand.kind === 'source'
+      ? typedOperandLiteral(row.leftOperand.value, row.rightOperand.sourceType)
+      : generateOperand(row.leftOperand);
 
   if (row.comparison === 'isTruthy') {
     return left;
@@ -83,7 +107,10 @@ function generateConditionRow(row: ConditionRow): string {
     return `not(isNull(${left}))`;
   }
 
-  const right = generateOperand(row.rightOperand);
+  const right =
+    row.rightOperand.kind === 'static' && row.leftOperand.kind === 'source'
+      ? typedOperandLiteral(row.rightOperand.value, row.leftOperand.sourceType)
+      : generateOperand(row.rightOperand);
   return `${comparisonToFunction(row.comparison)}(${left}, ${right})`;
 }
 
@@ -104,7 +131,12 @@ function generateConditionGroup(group: ConditionGroup): string {
     return parts[0];
   }
 
-  return `${group.operator}(${parts.join(', ')})`;
+  // Engine conditional functions are binary (and(a,b), or(a,b)).
+  // Fold N parts into nested binary calls to support unlimited condition rows.
+  return parts.slice(1).reduce(
+    (acc, part) => `${group.operator}(${acc}, ${part})`,
+    parts[0],
+  );
 }
 
 function generateBranch(branch: BranchValue): string {

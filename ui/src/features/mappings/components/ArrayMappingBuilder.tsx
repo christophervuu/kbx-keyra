@@ -63,16 +63,57 @@ const PATTERN_OPTIONS: { value: ArrayPattern; label: string; description: string
 
 function getArrayNodes(schema: ParsedSchema | null): SchemaTreeNode[] {
   if (!schema) return [];
-  return schema.nodes.filter((n) => n.type === 'array');
+  return flattenSchemaNodes(schema.nodes).filter((n) => n.type === 'array');
 }
 
 function getScalarChildren(schema: ParsedSchema | null, arrayPath: string): SchemaTreeNode[] {
   if (!schema) return [];
-  return schema.nodes.filter(
+  const allNodes = flattenSchemaNodes(schema.nodes);
+  return allNodes.filter(
     (n) =>
       n.parentPath === arrayPath &&
       n.type !== 'object' &&
       n.type !== 'array',
+  );
+}
+
+function flattenSchemaNodes(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
+  const flattened: SchemaTreeNode[] = [];
+  const seenPaths = new Set<string>();
+
+  const walk = (current: readonly SchemaTreeNode[]) => {
+    for (const node of current) {
+      if (!seenPaths.has(node.path)) {
+        seenPaths.add(node.path);
+        flattened.push(node);
+      }
+      if (node.children.length > 0) {
+        walk(node.children);
+      }
+    }
+  };
+
+  walk(nodes);
+  return flattened;
+}
+
+function getItemScalarFields(schema: ParsedSchema | null, arrayPath: string): SchemaTreeNode[] {
+  if (!schema) return [];
+  const allNodes = flattenSchemaNodes(schema.nodes);
+
+  const directScalars = getScalarChildren(schema, arrayPath);
+  if (directScalars.length > 0) return directScalars;
+
+  // Array-of-object shape: array -> object item container -> scalar fields
+  const directItemObjects = allNodes.filter(
+    (n) => n.parentPath === arrayPath && n.type === 'object',
+  );
+
+  return allNodes.filter((n) =>
+    n.type !== 'object' &&
+    n.type !== 'array' &&
+    n.parentPath !== null &&
+    directItemObjects.some((itemObj) => n.parentPath === itemObj.path),
   );
 }
 
@@ -172,6 +213,7 @@ function Step2PatternSelection({
 
 function Step3FieldMapping({
   targetArrayPath,
+  sourceArrayPath,
   parsedSourceSchema,
   parsedTargetSchema,
   fieldMappings,
@@ -179,6 +221,7 @@ function Step3FieldMapping({
   onRemoveMapping,
 }: {
   targetArrayPath: string;
+  sourceArrayPath: string;
   parsedSourceSchema: ParsedSchema | null;
   parsedTargetSchema: ParsedSchema | null;
   fieldMappings: FieldMapping[];
@@ -187,13 +230,8 @@ function Step3FieldMapping({
 }) {
   const [draggedSource, setDraggedSource] = useState<string | null>(null);
 
-  // Get scalar children of the source array and target array
-  const sourceItems = getScalarChildren(parsedSourceSchema, fieldMappings.length > 0 ? '' : '');
-  // Use all non-object/array nodes from source as potential item fields
-  const sourceFields = parsedSourceSchema
-    ? parsedSourceSchema.nodes.filter((n) => n.type !== 'object' && n.type !== 'array')
-    : [];
-  const targetFields = getScalarChildren(parsedTargetSchema, targetArrayPath);
+  const sourceFields = getItemScalarFields(parsedSourceSchema, sourceArrayPath);
+  const targetFields = getItemScalarFields(parsedTargetSchema, targetArrayPath);
 
   const mappedTargetFields = new Set(fieldMappings.map((m) => m.targetField));
 
@@ -374,8 +412,6 @@ export function ArrayMappingBuilder({
   } = builder;
 
   const isAdvanced = state.pattern === 'advanced';
-  // Advanced pattern: step 2 → step 4 (skip step 3)
-  const visibleSteps = isAdvanced ? [1, 2, 4] : [1, 2, 3, 4];
   const totalSteps = 4;
 
   return (
@@ -436,6 +472,7 @@ export function ArrayMappingBuilder({
         {currentStep === 3 && !isAdvanced && (
           <Step3FieldMapping
             targetArrayPath={targetArrayPath}
+            sourceArrayPath={state.sourceArrayPath}
             parsedSourceSchema={parsedSourceSchema}
             parsedTargetSchema={parsedTargetSchema}
             fieldMappings={state.fieldMappings}

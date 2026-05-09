@@ -69,6 +69,14 @@ export const PARAMETER_HINTS: ParameterHintsRegistry = {
       allowFreeform: true,
     },
   },
+  dateDiffSeconds: {
+    inputFormat: {
+      type: 'tokens',
+      tokens: SUPPORTED_FORMAT_TOKENS,
+      presets: FORMAT_PRESETS,
+      allowFreeform: true,
+    },
+  },
   cast: {
     targetType: {
       type: 'enum',

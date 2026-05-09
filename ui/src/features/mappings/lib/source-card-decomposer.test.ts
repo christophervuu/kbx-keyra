@@ -7,8 +7,8 @@ import {
   makeLiteralSlot,
   makeSourceSlot,
   makeSourceSlotWithTransform,
+  makeSingleStepTransform,
 } from './expression-builder-state';
-import type { InlineTransform } from './expression-builder-state';
 import { decomposeToSourceCardState } from './source-card-decomposer';
 import { generateExpressionFromSourceCardState } from './source-card-expression-generator';
 
@@ -53,17 +53,14 @@ describe('DirectCopy (AE-01)', () => {
 describe('SourceWithTransform (AE-02)', () => {
   it('decomposes upper(source("order.name")) → SourceWithTransform', () => {
     const state = decomposeToSourceCardState('upper(source("order.name"))');
-    const expected = createSourceWithTransformState('order.name', {
-      functionName: 'upper',
-      args: [],
-    });
+    const expected = createSourceWithTransformState('order.name', makeSingleStepTransform('upper'));
     expect(state).toEqual(expected);
   });
 
   it('decomposes lower(source("order.email")) → SourceWithTransform', () => {
     const state = decomposeToSourceCardState('lower(source("order.email"))');
     expect(state).toEqual(
-      createSourceWithTransformState('order.email', { functionName: 'lower', args: [] }),
+      createSourceWithTransformState('order.email', makeSingleStepTransform('lower')),
     );
   });
 
@@ -71,27 +68,42 @@ describe('SourceWithTransform (AE-02)', () => {
     const state = decomposeToSourceCardState(
       'formatDate(source("order.createdAt"), "ISO8601", "YYYY-MM-DD")',
     );
-    const expected = createSourceWithTransformState('order.createdAt', {
-      functionName: 'formatDate',
-      args: [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')],
-    });
+    const expected = createSourceWithTransformState(
+      'order.createdAt',
+      makeSingleStepTransform('formatDate', [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')]),
+    );
     expect(state).toEqual(expected);
   });
 
   it('decomposes trim(source("order.notes")) → SourceWithTransform', () => {
     const state = decomposeToSourceCardState('trim(source("order.notes"))');
     expect(state).toEqual(
-      createSourceWithTransformState('order.notes', { functionName: 'trim', args: [] }),
+      createSourceWithTransformState('order.notes', makeSingleStepTransform('trim')),
     );
   });
 
   it('decomposes cast(source("order.amount"), "string") → SourceWithTransform', () => {
     const state = decomposeToSourceCardState('cast(source("order.amount"), "string")');
     expect(state).toEqual(
-      createSourceWithTransformState('order.amount', {
-        functionName: 'cast',
-        args: [makeLiteralSlot('string')],
-      }),
+      createSourceWithTransformState(
+        'order.amount',
+        makeSingleStepTransform('cast', [makeLiteralSlot('string')]),
+      ),
+    );
+  });
+
+  it('decomposes dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601") → SourceWithTransform', () => {
+    const state = decomposeToSourceCardState(
+      'dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")',
+    );
+    expect(state).toEqual(
+      createSourceWithTransformState(
+        'lastRun.startedAt',
+        makeSingleStepTransform('dateDiffSeconds', [
+          makeSourceSlot('lastRun.endedAt'),
+          makeLiteralSlot('ISO8601'),
+        ]),
+      ),
     );
   });
 
@@ -109,6 +121,12 @@ describe('SourceWithTransform (AE-02)', () => {
     expect(roundTrip('cast(source("order.amount"), "string")')).toBe(
       'cast(source("order.amount"), "string")',
     );
+  });
+
+  it('round-trip: dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")', () => {
+    expect(
+      roundTrip('dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")'),
+    ).toBe('dateDiffSeconds(source("lastRun.startedAt"), source("lastRun.endedAt"), "ISO8601")');
   });
 });
 
@@ -179,9 +197,8 @@ describe('FunctionCall — nested inline transforms (AE-07)', () => {
     const state = decomposeToSourceCardState(
       'concat(upper(source("firstName")), source("lastName"))',
     );
-    const upperTransform: InlineTransform = { functionName: 'upper', args: [] };
     const expected = createFunctionCallState('concat', [
-      makeSourceSlotWithTransform('firstName', upperTransform),
+      makeSourceSlotWithTransform('firstName', makeSingleStepTransform('upper')),
       makeSourceSlot('lastName'),
     ]);
     expect(state).toEqual(expected);
@@ -192,8 +209,8 @@ describe('FunctionCall — nested inline transforms (AE-07)', () => {
       'concat(upper(source("a")), lower(source("b")))',
     );
     const expected = createFunctionCallState('concat', [
-      makeSourceSlotWithTransform('a', { functionName: 'upper', args: [] }),
-      makeSourceSlotWithTransform('b', { functionName: 'lower', args: [] }),
+      makeSourceSlotWithTransform('a', makeSingleStepTransform('upper')),
+      makeSourceSlotWithTransform('b', makeSingleStepTransform('lower')),
     ]);
     expect(state).toEqual(expected);
   });
@@ -203,10 +220,10 @@ describe('FunctionCall — nested inline transforms (AE-07)', () => {
       'concat(formatDate(source("order.createdAt"), "ISO8601", "YYYY-MM-DD"), " UTC")',
     );
     const expected = createFunctionCallState('concat', [
-      makeSourceSlotWithTransform('order.createdAt', {
-        functionName: 'formatDate',
-        args: [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')],
-      }),
+      makeSourceSlotWithTransform(
+        'order.createdAt',
+        makeSingleStepTransform('formatDate', [makeLiteralSlot('ISO8601'), makeLiteralSlot('YYYY-MM-DD')]),
+      ),
       makeLiteralSlot(' UTC'),
     ]);
     expect(state).toEqual(expected);
@@ -245,7 +262,7 @@ describe('Expression slots — general nested function calls', () => {
     expect(slot0.mode).toBe('source');
     if (slot0.mode === 'source') {
       expect(slot0.path).toBe('order.name');
-      expect(slot0.transform?.functionName).toBe('upper');
+      expect(slot0.transform?.steps[0]?.functionName).toBe('upper');
     }
   });
 
@@ -452,5 +469,155 @@ describe('String escaping round-trips', () => {
   it('round-trip: literal with escaped double quote', () => {
     const expr = 'concat(source("a"), "say \\"hi\\"")';
     expect(roundTrip(expr)).toBe(expr);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-030: Transform chain decomposition
+// ---------------------------------------------------------------------------
+
+describe('FS-030: Chain decomposition — SourceWithTransform multi-step (AE-04)', () => {
+  it('AE-04: decomposes 3-step math pipeline → SourceWithTransform with 3-step chain', () => {
+    const expr = 'round(multiply(divide(source("stats.mappedFields"), source("stats.totalFields")), 100), 2)';
+    const state = decomposeToSourceCardState(expr);
+    expect(state?.variant).toBe('sourceWithTransform');
+    if (state?.variant !== 'sourceWithTransform') throw new Error('Expected sourceWithTransform');
+    expect(state.sourcePath).toBe('stats.mappedFields');
+    expect(state.transform.steps).toHaveLength(3);
+    expect(state.transform.steps[0]!.functionName).toBe('divide');
+    expect(state.transform.steps[0]!.args).toHaveLength(1);
+    expect(state.transform.steps[0]!.args[0]).toEqual(makeSourceSlot('stats.totalFields'));
+    expect(state.transform.steps[1]!.functionName).toBe('multiply');
+    expect(state.transform.steps[1]!.args).toHaveLength(1);
+    expect(state.transform.steps[1]!.args[0]).toEqual(makeLiteralSlot('100'));
+    expect(state.transform.steps[2]!.functionName).toBe('round');
+    expect(state.transform.steps[2]!.args).toHaveLength(1);
+    expect(state.transform.steps[2]!.args[0]).toEqual(makeLiteralSlot('2'));
+  });
+
+  it('AE-04: round-trip: round(multiply(divide(source("stats.mappedFields"), source("stats.totalFields")), 100), 2)', () => {
+    const expr = 'round(multiply(divide(source("stats.mappedFields"), source("stats.totalFields")), 100), 2)';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+
+  it('AE-06: decomposes 2-step string pipeline → SourceWithTransform with 2-step chain', () => {
+    const state = decomposeToSourceCardState('lower(trim(source("input.rawName")))');
+    expect(state?.variant).toBe('sourceWithTransform');
+    if (state?.variant !== 'sourceWithTransform') throw new Error('Expected sourceWithTransform');
+    expect(state.sourcePath).toBe('input.rawName');
+    expect(state.transform.steps).toHaveLength(2);
+    expect(state.transform.steps[0]!.functionName).toBe('trim');
+    expect(state.transform.steps[0]!.args).toHaveLength(0);
+    expect(state.transform.steps[1]!.functionName).toBe('lower');
+    expect(state.transform.steps[1]!.args).toHaveLength(0);
+  });
+
+  it('AE-06: round-trip: lower(trim(source("input.rawName")))', () => {
+    expect(roundTrip('lower(trim(source("input.rawName")))')).toBe(
+      'lower(trim(source("input.rawName")))',
+    );
+  });
+
+  it('AE-03: single-step chain (upper) → SourceWithTransform with 1-step chain', () => {
+    const state = decomposeToSourceCardState('upper(source("order.name"))');
+    expect(state?.variant).toBe('sourceWithTransform');
+    if (state?.variant !== 'sourceWithTransform') throw new Error('Expected sourceWithTransform');
+    expect(state.transform.steps).toHaveLength(1);
+    expect(state.transform.steps[0]!.functionName).toBe('upper');
+    expect(state.transform.steps[0]!.args).toHaveLength(0);
+  });
+
+  it('AE-03: decomposes to expected state shape using factory helpers', () => {
+    const state = decomposeToSourceCardState('upper(source("order.name"))');
+    const expected = createSourceWithTransformState('order.name', makeSingleStepTransform('upper'));
+    expect(state).toEqual(expected);
+  });
+});
+
+describe('FS-030: Chain decomposition — backward compatibility (AE-08)', () => {
+  it('AE-08: divide(source("a"), source("b")) → FunctionCall (not SourceWithTransform)', () => {
+    // divide is chainable but NOT in SINGLE_INPUT_TRANSFORMS, so 1-step chain → FunctionCall
+    const state = decomposeToSourceCardState('divide(source("a"), source("b"))');
+    expect(state?.variant).toBe('functionCall');
+  });
+
+  it('AE-08: round-trip: divide(source("a"), source("b"))', () => {
+    expect(roundTrip('divide(source("a"), source("b"))')).toBe('divide(source("a"), source("b"))');
+  });
+
+  it('multiply(source("a"), source("b")) → FunctionCall (1-step, not in SINGLE_INPUT_TRANSFORMS)', () => {
+    const state = decomposeToSourceCardState('multiply(source("a"), source("b"))');
+    expect(state?.variant).toBe('functionCall');
+  });
+
+  it('add(source("a"), source("b")) → FunctionCall (1-step, not in SINGLE_INPUT_TRANSFORMS)', () => {
+    const state = decomposeToSourceCardState('add(source("a"), source("b"))');
+    expect(state?.variant).toBe('functionCall');
+  });
+});
+
+describe('FS-030: Chain decomposition — non-linear fallback (AE-05)', () => {
+  it('AE-05: round(concat(source("a"), source("b")), 2) → FunctionCall (concat not chainable)', () => {
+    // concat is not in CHAINABLE_TRANSFORMS, so chain-walking fails → FunctionCall
+    const state = decomposeToSourceCardState('round(concat(source("a"), source("b")), 2)');
+    expect(state?.variant).toBe('functionCall');
+  });
+
+  it('AE-05: round-trip: round(concat(source("a"), source("b")), 2)', () => {
+    expect(roundTrip('round(concat(source("a"), source("b")), 2)')).toBe(
+      'round(concat(source("a"), source("b")), 2)',
+    );
+  });
+
+  it('non-linear: coalesce(source("a"), source("b")) → FunctionCall', () => {
+    const state = decomposeToSourceCardState('coalesce(source("a"), source("b"))');
+    expect(state?.variant).toBe('functionCall');
+  });
+});
+
+describe('FS-030: Chain decomposition — nested slot with chain (AE-07 chain variant)', () => {
+  it('AE-07: decomposes concat(round(multiply(source("x"), 100), 2), "suffix") → FunctionCall with chain slot', () => {
+    const state = decomposeToSourceCardState(
+      'concat(round(multiply(source("x"), 100), 2), "suffix")',
+    );
+    expect(state?.variant).toBe('functionCall');
+    if (state?.variant !== 'functionCall') throw new Error('Expected functionCall');
+    expect(state.node.functionName).toBe('concat');
+    expect(state.node.slots).toHaveLength(2);
+
+    const slot0 = state.node.slots[0];
+    expect(slot0.mode).toBe('source');
+    if (slot0.mode === 'source') {
+      expect(slot0.path).toBe('x');
+      expect(slot0.transform?.steps).toHaveLength(2);
+      expect(slot0.transform?.steps[0]?.functionName).toBe('multiply');
+      expect(slot0.transform?.steps[0]?.args[0]).toEqual(makeLiteralSlot('100'));
+      expect(slot0.transform?.steps[1]?.functionName).toBe('round');
+      expect(slot0.transform?.steps[1]?.args[0]).toEqual(makeLiteralSlot('2'));
+    }
+
+    const slot1 = state.node.slots[1];
+    expect(slot1).toEqual(makeLiteralSlot('suffix'));
+  });
+
+  it('AE-07: round-trip: concat(round(multiply(source("x"), 100), 2), "suffix")', () => {
+    expect(roundTrip('concat(round(multiply(source("x"), 100), 2), "suffix")')).toBe(
+      'concat(round(multiply(source("x"), 100), 2), "suffix")',
+    );
+  });
+
+  it('decomposes concat(upper(source("firstName")), " ", source("lastName")) — single-step chain in slot', () => {
+    const state = decomposeToSourceCardState(
+      'concat(upper(source("firstName")), " ", source("lastName"))',
+    );
+    expect(state?.variant).toBe('functionCall');
+    if (state?.variant !== 'functionCall') throw new Error('Expected functionCall');
+    const slot0 = state.node.slots[0];
+    expect(slot0.mode).toBe('source');
+    if (slot0.mode === 'source') {
+      expect(slot0.path).toBe('firstName');
+      expect(slot0.transform?.steps).toHaveLength(1);
+      expect(slot0.transform?.steps[0]?.functionName).toBe('upper');
+    }
   });
 });

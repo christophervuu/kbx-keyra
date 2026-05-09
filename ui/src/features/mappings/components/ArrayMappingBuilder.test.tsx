@@ -56,6 +56,65 @@ const TARGET_SCHEMA: ParsedSchema = {
   inferred: false,
 };
 
+const TARGET_SCHEMA_ARRAY_OF_OBJECTS: ParsedSchema = {
+  nodes: [
+    makeNode('lineItems', 'lineItems', 'array'),
+    makeNode('lineItems.item', 'item', 'object', 'lineItems', 1),
+    makeNode('lineItems.item.productCode', 'productCode', 'string', 'lineItems.item', 2),
+    makeNode('lineItems.item.quantity', 'quantity', 'number', 'lineItems.item', 2),
+  ],
+  totalFieldCount: 4,
+  format: 'json-schema',
+  parseTimeMs: 0,
+  inferred: false,
+};
+
+const SOURCE_SCHEMA_HIERARCHICAL: ParsedSchema = {
+  nodes: [
+    {
+      ...makeNode('order', 'order', 'object'),
+      children: [
+        {
+          ...makeNode('order.items', 'items', 'array', 'order', 1),
+          children: [
+            makeNode('order.items.sku', 'sku', 'string', 'order.items', 2),
+            makeNode('order.items.qty', 'qty', 'number', 'order.items', 2),
+          ],
+          childCount: 2,
+        },
+      ],
+      childCount: 1,
+    },
+  ],
+  totalFieldCount: 4,
+  format: 'json-schema',
+  parseTimeMs: 0,
+  inferred: false,
+};
+
+const TARGET_SCHEMA_HIERARCHICAL: ParsedSchema = {
+  nodes: [
+    {
+      ...makeNode('invoice', 'invoice', 'object'),
+      children: [
+        {
+          ...makeNode('invoice.lineItems', 'lineItems', 'array', 'invoice', 1),
+          children: [
+            makeNode('invoice.lineItems.productCode', 'productCode', 'string', 'invoice.lineItems', 2),
+            makeNode('invoice.lineItems.quantity', 'quantity', 'number', 'invoice.lineItems', 2),
+          ],
+          childCount: 2,
+        },
+      ],
+      childCount: 1,
+    },
+  ],
+  totalFieldCount: 4,
+  format: 'json-schema',
+  parseTimeMs: 0,
+  inferred: false,
+};
+
 const DEFAULT_PROPS = {
   targetArrayPath: 'lineItems',
   parsedSourceSchema: SOURCE_SCHEMA,
@@ -193,6 +252,54 @@ describe('ArrayMappingBuilder', () => {
     expect(screen.getByTestId('step-3-fields')).toBeInTheDocument();
     expect(screen.getByTestId('source-fields-list')).toBeInTheDocument();
     expect(screen.getByTestId('target-fields-list')).toBeInTheDocument();
+  });
+
+  it('Step 3 scopes source fields to selected source array item fields', () => {
+    render(<ArrayMappingBuilder {...DEFAULT_PROPS} />);
+    fireEvent.click(screen.getByTestId('source-array-order.items'));
+    fireEvent.click(screen.getByTestId('btn-next'));
+    fireEvent.click(screen.getByTestId('btn-next')); // step 3
+
+    expect(screen.getByTestId('source-field-order.items.sku')).toBeInTheDocument();
+    expect(screen.getByTestId('source-field-order.items.qty')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-field-order.tags')).not.toBeInTheDocument();
+  });
+
+  it('Step 3 resolves target fields for array-of-object target schema', () => {
+    render(
+      <ArrayMappingBuilder
+        {...DEFAULT_PROPS}
+        parsedTargetSchema={TARGET_SCHEMA_ARRAY_OF_OBJECTS}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('source-array-order.items'));
+    fireEvent.click(screen.getByTestId('btn-next'));
+    fireEvent.click(screen.getByTestId('btn-next')); // step 3
+
+    expect(screen.getByTestId('target-field-lineItems.item.productCode')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-lineItems.item.quantity')).toBeInTheDocument();
+    expect(screen.queryByText('No target item fields found')).not.toBeInTheDocument();
+  });
+
+  it('Step 3 resolves source and target item fields from hierarchical schema nodes', () => {
+    render(
+      <ArrayMappingBuilder
+        {...DEFAULT_PROPS}
+        targetArrayPath="invoice.lineItems"
+        parsedSourceSchema={SOURCE_SCHEMA_HIERARCHICAL}
+        parsedTargetSchema={TARGET_SCHEMA_HIERARCHICAL}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('source-array-order.items'));
+    fireEvent.click(screen.getByTestId('btn-next'));
+    fireEvent.click(screen.getByTestId('btn-next')); // step 3
+
+    expect(screen.getByTestId('source-field-order.items.sku')).toBeInTheDocument();
+    expect(screen.getByTestId('source-field-order.items.qty')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-invoice.lineItems.productCode')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-invoice.lineItems.quantity')).toBeInTheDocument();
+    expect(screen.queryByText('No source fields available')).not.toBeInTheDocument();
+    expect(screen.queryByText('No target item fields found')).not.toBeInTheDocument();
   });
 
   it('Step 4 displays generated expression', () => {

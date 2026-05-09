@@ -358,6 +358,8 @@ ui/
           source-card-expression-generator.test.ts  FS-029 generator tests (T-07): AE-01/02/03/04/07 canonical cases, nested transforms, expression slots, PendingConnector→null, literal type detection, string escaping, variadic functions
           source-card-decomposer.ts       FS-029 DSL→SourceCardValueModeState decomposer (T-08): source→DirectCopy, single-input-transform(source,...)→SourceWithTransform, fn(args)→FunctionCall; recursive slot decomposition (source/literal/expression/inline-transform); SINGLE_INPUT_TRANSFORMS heuristic; null for unsupported patterns
           source-card-decomposer.test.ts  FS-029 decomposer tests (T-08): AE-01/02/03/07 decomposition, round-trip generate(decompose(expr))===expr, literal types, null/unsupported inputs, SourceWithTransform vs FunctionCall heuristic, variadic, string escaping
+          transform-chain-utils.ts        FS-030 shared chain utilities (T-05): getChainOutputType(), getCompatibleChainableTransforms(), re-exports CHAINABLE_TRANSFORMS from decomposer
+          transform-chain-utils.test.ts   FS-030 unit tests for chain utilities (T-05): getChainOutputType (empty/sourceType/known-fn/unknown-fn), getCompatibleChainableTransforms (number/string/any/boolean filtering)
           __tests__/
             pipeline-expression-generator.test.ts  FS-023 unit tests for state→DSL generation across AE-01/02/03/04/05/06/14/15
             pipeline-decomposer.test.ts  FS-023 unit tests for DSL→state decomposition (28 tests: pipeline, conditional, valueMap, failures, roundtrips)

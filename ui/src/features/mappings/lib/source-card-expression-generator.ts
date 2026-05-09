@@ -12,13 +12,13 @@
  *
  * State → DSL mapping:
  *   DirectCopy              → source("path")
- *   SourceWithTransform     → fn(source("path"), arg2, ...)
+ *   SourceWithTransform     → stepN(…step1(source("path"), arg2)…, argN)
  *   FunctionCall            → fn(slot1, slot2, ...)
  *   PendingConnector        → null  (incomplete)
  *
  * Slot resolution:
  *   source (no transform)   → source("path")
- *   source + transform      → transformFn(source("path"), ...extraArgs)
+ *   source + transform      → chain of stepN(…step1(source("path"))…)
  *   literal                 → quoted string, bare number, bare boolean
  *   expression              → recursive generation of nested ArgumentFormNode
  */
@@ -85,22 +85,32 @@ function generateSlot(slot: ArgumentSlot): string | null {
 }
 
 /**
- * Generates the DSL for an inline transform applied to a source.
- * e.g. upper(source("firstName"))
- * e.g. formatDate(source("createdAt"), "ISO8601", "YYYY-MM-DD")
+ * Generates the DSL for an inline transform chain applied to a source.
+ *
+ * Iterates through `transform.steps` sequentially, each step wrapping the
+ * previous expression as its implicit first argument.
+ *
+ * Single step:  upper(source("firstName"))
+ * Multi-step:   round(multiply(divide(source("x"), source("y")), 100), 2)
+ *
+ * Returns null if steps is empty or any argument slot fails to generate.
  */
 function generateInlineTransform(sourcePath: string, transform: InlineTransform): string | null {
-  const sourceExpr = `source(${quoteString(sourcePath)})`;
-  const extraArgs: string[] = [];
+  if (transform.steps.length === 0) return null;
 
-  for (const arg of transform.args) {
-    const generated = generateSlot(arg);
-    if (generated === null) return null;
-    extraArgs.push(generated);
+  let expression = `source(${quoteString(sourcePath)})`;
+
+  for (const step of transform.steps) {
+    const extraArgs: string[] = [];
+    for (const arg of step.args) {
+      const generated = generateSlot(arg);
+      if (generated === null) return null;
+      extraArgs.push(generated);
+    }
+    expression = `${step.functionName}(${[expression, ...extraArgs].join(', ')})`;
   }
 
-  const allArgs = [sourceExpr, ...extraArgs];
-  return `${transform.functionName}(${allArgs.join(', ')})`;
+  return expression;
 }
 
 /**

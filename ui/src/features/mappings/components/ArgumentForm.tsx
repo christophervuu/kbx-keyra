@@ -351,12 +351,15 @@ export function ArgumentForm({
   const computeEffectiveSlots = useCallback((): ArgumentSlot[] => {
     if (!entry) return [...slots];
 
-    const requiredCount = entry.parameters
-      .slice(parameterOffset)
-      .filter((p) => p.required && !p.variadic).length;
+    const visibleParams = entry.parameters.slice(parameterOffset);
+    const requiredCount = visibleParams.filter((p) => p.required && !p.variadic).length;
+    const fixedParamCount = visibleParams.filter((p) => !p.variadic).length;
+    // For SourceCard transform-step forms (parameterOffset > 0), include optional
+    // fixed params so users can configure values like round(..., decimals).
+    const minimumCount = parameterOffset > 0 ? fixedParamCount : requiredCount;
     const effective: ArgumentSlot[] = [...slots];
 
-    while (effective.length < requiredCount) {
+    while (effective.length < minimumCount) {
       const param = getParamForSlot(entry, effective.length, parameterOffset);
       effective.push(param ? makeDefaultSlot(functionName, param) : makeSourceSlot(''));
     }

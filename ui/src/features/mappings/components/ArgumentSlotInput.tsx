@@ -33,6 +33,7 @@ import {
   makeSourceSlot,
   makeSourceSlotWithTransform,
   makeLiteralSlot,
+  makeSingleStepTransform,
 } from '../lib/expression-builder-state';
 
 import type { FunctionCatalogParameter } from '@/lib/data/dsl-functions';
@@ -386,10 +387,10 @@ export function ArgumentSlotInput({
   const handleTransformSelect = useCallback(
     (functionName: string) => {
       setTransformPickerOpen(false);
-      const newTransform: InlineTransform = {
+      const newTransform = makeSingleStepTransform(
         functionName,
-        args: buildDefaultTransformArgs(functionName),
-      };
+        buildDefaultTransformArgs(functionName),
+      );
       onSlotChange(makeSourceSlotWithTransform(sourcePath, newTransform));
     },
     [sourcePath, onSlotChange],
@@ -615,101 +616,110 @@ export function ArgumentSlotInput({
               className="space-y-2 rounded bg-amber-900/30 border border-amber-800/60 px-2 py-1.5"
               data-testid={`${slotTestId}-transform-display`}
             >
-              <div className="flex items-center gap-2">
-                <Zap className="h-3 w-3 text-amber-400 shrink-0" aria-hidden="true" />
-                <span className="text-xs font-mono text-amber-300 flex-1">
-                  {currentTransform.functionName}(…)
-                </span>
-                <button
-                  type="button"
-                  onClick={handleRemoveTransform}
-                  aria-label={`Remove ${currentTransform.functionName} transform from ${effectiveName}`}
-                  className="text-zinc-500 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded p-0.5"
-                  data-testid={`${slotTestId}-remove-transform`}
-                >
-                  <X className="h-3 w-3" aria-hidden="true" />
-                </button>
-              </div>
-
-              {currentTransform.args.map((arg, index) => {
-                const param = resolveTransformParameter(currentTransform.functionName, index);
-                const argTestIdBase = `${slotTestId}-transform-arg-${index}`;
-                const fallbackParam: FunctionCatalogParameter = {
-                  name: `arg${index + 2}`,
-                  type: 'any',
-                  required: false,
-                };
-                const effectiveParam = param ?? fallbackParam;
-                const isFilterConditionArg =
-                  isFilterConditionFunction(currentTransform.functionName) &&
-                  effectiveParam.name === 'condition';
-                const parsedFilterCondition = isFilterConditionArg
-                  ? parseFilterConditionSlotToRow(arg)
-                  : null;
-
-                const nestedHint = (() => {
-                  const hintCfg = getParameterHint(currentTransform.functionName, effectiveParam.name);
-                  if (!hintCfg) return undefined;
-                  if (hintCfg.type === 'enum') {
-                    return { options: hintCfg.options, allowFreeform: false };
-                  }
-                  if (hintCfg.type === 'tokens') {
-                    return {
-                      options: hintCfg.presets,
-                      allowFreeform: hintCfg.allowFreeform ?? true,
-                    };
-                  }
-                  return undefined;
-                })();
-
+              {(() => {
+                // Nested slot transforms are always single-step chains.
+                const step = currentTransform.steps[0];
+                if (!step) return null;
+                const stepFunctionName = step.functionName;
+                const stepArgs = step.args;
                 return (
-                  <div key={index} className="space-y-1" data-testid={argTestIdBase}>
-                    {isFilterConditionArg && parsedFilterCondition !== null ? (
-                      <ConditionRowEditor
-                        condition={parsedFilterCondition}
-                        onChange={(updated) => {
-                          if (currentTransform === undefined || currentMode !== 'source') return;
-                          const nextArgs = currentTransform.args.map((currentArg, i) =>
-                            i === index ? buildFilterConditionSlot(updated) : currentArg,
-                          );
-                          onSlotChange(
-                            makeSourceSlotWithTransform(sourcePath, {
-                              ...currentTransform,
-                              args: nextArgs,
-                            }),
-                          );
-                        }}
-                        parsedSourceSchema={null}
-                        sourceFieldOptions={buildArrayItemFieldOptions(sourcePath, sourceOptions)}
-                        allowPipelineOperands={false}
-                        rowIndex={index}
-                      />
-                    ) : (
-                      <ArgumentSlotInput
-                        slotIndex={index}
-                        slot={arg}
-                        parameter={effectiveParam}
-                        hint={nestedHint}
-                        sourceOptions={sourceOptions}
-                        onSlotChange={(updated) => {
-                          if (currentTransform === undefined || currentMode !== 'source') return;
-                          const nextArgs = currentTransform.args.map((currentArg, i) =>
-                            i === index ? updated : currentArg,
-                          );
-                          onSlotChange(
-                            makeSourceSlotWithTransform(sourcePath, {
-                              ...currentTransform,
-                              args: nextArgs,
-                            }),
-                          );
-                        }}
-                        exampleHint={exampleHint}
-                        testIdPrefix={`${slotTestId}-transform-arg`}
-                      />
-                    )}
-                  </div>
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-3 w-3 text-amber-400 shrink-0" aria-hidden="true" />
+                      <span className="text-xs font-mono text-amber-300 flex-1">
+                        {stepFunctionName}(…)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRemoveTransform}
+                        aria-label={`Remove ${stepFunctionName} transform from ${effectiveName}`}
+                        className="text-zinc-500 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded p-0.5"
+                        data-testid={`${slotTestId}-remove-transform`}
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    </div>
+
+                    {stepArgs.map((arg, index) => {
+                      const param = resolveTransformParameter(stepFunctionName, index);
+                      const argTestIdBase = `${slotTestId}-transform-arg-${index}`;
+                      const fallbackParam: FunctionCatalogParameter = {
+                        name: `arg${index + 2}`,
+                        type: 'any',
+                        required: false,
+                      };
+                      const effectiveParam = param ?? fallbackParam;
+                      const isFilterConditionArg =
+                        isFilterConditionFunction(stepFunctionName) &&
+                        effectiveParam.name === 'condition';
+                      const parsedFilterCondition = isFilterConditionArg
+                        ? parseFilterConditionSlotToRow(arg)
+                        : null;
+
+                      const nestedHint = (() => {
+                        const hintCfg = getParameterHint(stepFunctionName, effectiveParam.name);
+                        if (!hintCfg) return undefined;
+                        if (hintCfg.type === 'enum') {
+                          return { options: hintCfg.options, allowFreeform: false };
+                        }
+                        if (hintCfg.type === 'tokens') {
+                          return {
+                            options: hintCfg.presets,
+                            allowFreeform: hintCfg.allowFreeform ?? true,
+                          };
+                        }
+                        return undefined;
+                      })();
+
+                      return (
+                        <div key={index} className="space-y-1" data-testid={argTestIdBase}>
+                          {isFilterConditionArg && parsedFilterCondition !== null ? (
+                            <ConditionRowEditor
+                              condition={parsedFilterCondition}
+                              onChange={(updated) => {
+                                if (currentTransform === undefined || currentMode !== 'source') return;
+                                const nextArgs = stepArgs.map((currentArg, i) =>
+                                  i === index ? buildFilterConditionSlot(updated) : currentArg,
+                                );
+                                onSlotChange(
+                                  makeSourceSlotWithTransform(sourcePath, {
+                                    steps: [{ functionName: stepFunctionName, args: nextArgs }],
+                                  }),
+                                );
+                              }}
+                              parsedSourceSchema={null}
+                              sourceFieldOptions={buildArrayItemFieldOptions(sourcePath, sourceOptions)}
+                              allowPipelineOperands={false}
+                              rowIndex={index}
+                            />
+                          ) : (
+                            <ArgumentSlotInput
+                              slotIndex={index}
+                              slot={arg}
+                              parameter={effectiveParam}
+                              hint={nestedHint}
+                              sourceOptions={sourceOptions}
+                              onSlotChange={(updated) => {
+                                if (currentTransform === undefined || currentMode !== 'source') return;
+                                const nextArgs = stepArgs.map((currentArg, i) =>
+                                  i === index ? updated : currentArg,
+                                );
+                                onSlotChange(
+                                  makeSourceSlotWithTransform(sourcePath, {
+                                    steps: [{ functionName: stepFunctionName, args: nextArgs }],
+                                  }),
+                                );
+                              }}
+                              exampleHint={exampleHint}
+                              testIdPrefix={`${slotTestId}-transform-arg`}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
                 );
-              })}
+              })()}
             </div>
           ) : (
             /* Add nested transform button */

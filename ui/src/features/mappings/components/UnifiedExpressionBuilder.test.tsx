@@ -307,6 +307,6 @@ describe('UnifiedExpressionBuilder — saved expression hydration', () => {
     });
 
     expect(screen.getByTestId('source-card')).toBeInTheDocument();
-    expect(screen.getByTestId('source-card-transform-badge')).toHaveTextContent('upper');
+    expect(screen.getByTestId('source-card-step-badge-0')).toHaveTextContent('upper');
   });
 });

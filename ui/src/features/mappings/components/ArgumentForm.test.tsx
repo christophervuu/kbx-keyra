@@ -74,6 +74,19 @@ describe('ArgumentForm — formatDate (AE-02)', () => {
     expect(screen.getByTestId('argument-slot-input-1-param-name')).toHaveTextContent('Output date format');
   });
 
+  it('with parameterOffset=1, round renders optional decimals slot', () => {
+    render(
+      <ArgumentForm
+        functionName="round"
+        slots={[]}
+        parameterOffset={1}
+        onSlotsChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('argument-slot-input-0-param-name')).toHaveTextContent('Decimal places');
+  });
+
   it('defaults value slot to source mode and format slots to literal mode when slots are missing', () => {
     renderForm('formatDate', []);
     expect(screen.getByTestId('argument-slot-input-0-mode-source')).toHaveAttribute('aria-checked', 'true');
@@ -498,7 +511,11 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
       expect.objectContaining({
         mode: 'source',
         path: 'firstName',
-        transform: expect.objectContaining({ functionName: 'upper' }),
+        transform: expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({ functionName: 'upper' }),
+          ]),
+        }),
       }),
     );
   });
@@ -523,25 +540,27 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
     expect(emitted.mode).toBe('source');
     if (emitted.mode === 'source') {
       expect(emitted.transform).toEqual({
-        functionName: 'filter',
-        args: [
-          makeExpressionSlot({
-            functionName: 'eq',
-            slots: [
-              makeExpressionSlot({
-                functionName: 'item',
-                slots: [makeLiteralSlot('')],
-              }),
-              makeLiteralSlot(''),
-            ],
-          }),
-        ],
+        steps: [{
+          functionName: 'filter',
+          args: [
+            makeExpressionSlot({
+              functionName: 'eq',
+              slots: [
+                makeExpressionSlot({
+                  functionName: 'item',
+                  slots: [makeLiteralSlot('')],
+                }),
+                makeLiteralSlot(''),
+              ],
+            }),
+          ],
+        }],
       });
     }
   });
 
   it('shows transform display when slot has an inline transform', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     render(
       <ArgumentSlotInput
         slotIndex={0}
@@ -555,7 +574,7 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
   });
 
   it('does not show [+ Transform] button when transform is already active', () => {
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     render(
       <ArgumentSlotInput
         slotIndex={0}
@@ -570,7 +589,7 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
   it('clicking remove-transform calls onSlotChange with source slot (no transform)', async () => {
     const user = userEvent.setup();
     const onSlotChange = vi.fn();
-    const transform: InlineTransform = { functionName: 'upper', args: [] };
+    const transform: InlineTransform = { steps: [{ functionName: 'upper', args: [] }] };
     render(
       <ArgumentSlotInput
         slotIndex={0}
@@ -610,8 +629,7 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
     if (emitted.mode === 'source') {
       expect(emitted.path).toBe('sourceSchema.version');
       expect(emitted.transform).toEqual({
-        functionName: 'cast',
-        args: [makeLiteralSlot('string')],
+        steps: [{ functionName: 'cast', args: [makeLiteralSlot('string')] }],
       });
     }
   });
@@ -620,8 +638,7 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
     const user = userEvent.setup();
     const onSlotChange = vi.fn();
     const castTransform: InlineTransform = {
-      functionName: 'cast',
-      args: [makeLiteralSlot('string')],
+      steps: [{ functionName: 'cast', args: [makeLiteralSlot('string')] }],
     };
 
     render(
@@ -642,8 +659,7 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
     expect(emitted.mode).toBe('source');
     if (emitted.mode === 'source') {
       expect(emitted.transform).toEqual({
-        functionName: 'cast',
-        args: [makeLiteralSlot('number')],
+        steps: [{ functionName: 'cast', args: [makeLiteralSlot('number')] }],
       });
     }
   });

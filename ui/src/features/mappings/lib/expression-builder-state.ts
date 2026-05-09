@@ -37,6 +37,8 @@ export type StaticValue =
 export interface Operand {
   readonly kind: 'source' | 'static' | 'expression' | 'pipeline';
   readonly value: string;
+  /** Optional source field type metadata (e.g. string, number, boolean). */
+  readonly sourceType?: string;
   /**
    * Structured pipeline state for kind:'pipeline' operands (T-03).
    * Present only when kind === 'pipeline'.
@@ -159,18 +161,38 @@ export type ArgumentSlot =
     };
 
 /**
- * An inline transform applied to a source within an argument slot.
- * Represents a single function wrapping the source, e.g. upper(source("x")).
- * The source itself is the implicit first argument; `args` holds any additional arguments.
+ * A single step in a transform chain.
+ * Has the same shape as the old InlineTransform for mechanical migration.
+ * The source (or previous step's output) is the implicit first argument;
+ * `args` holds any additional arguments.
  */
-export interface InlineTransform {
+export interface TransformChainStep {
   readonly functionName: string;
   /**
-   * Additional argument slots beyond the implicit source first argument.
+   * Additional argument slots beyond the implicit first argument.
    * For unary transforms (upper, lower, trim) this is empty.
    * For multi-param transforms (formatDate, replace) this holds the extra params.
    */
   readonly args: readonly ArgumentSlot[];
+}
+
+/**
+ * A chain of transforms applied sequentially to a source value (FS-030).
+ * Each step consumes the output of the previous step as its implicit first argument.
+ *
+ * Single-transform (backward compat): steps has one entry.
+ * Multi-step chain: steps has 2+ entries, ordered innermost-first
+ * (first step applied to the source, last step produces the final output).
+ *
+ * Example: round(multiply(divide(source("x"), source("y")), 100), 2)
+ * steps = [
+ *   { functionName: 'divide', args: [sourceSlot("y")] },
+ *   { functionName: 'multiply', args: [literalSlot("100")] },
+ *   { functionName: 'round', args: [literalSlot("2")] },
+ * ]
+ */
+export interface InlineTransform {
+  readonly steps: readonly TransformChainStep[];
 }
 
 /**
@@ -327,4 +349,31 @@ export function makeLiteralSlot(value: string): ArgumentSlot {
 /** Creates an expression-mode ArgumentSlot wrapping a nested ArgumentFormNode. */
 export function makeExpressionSlot(node: ArgumentFormNode): ArgumentSlot {
   return { mode: 'expression', node };
+}
+
+// ---------------------------------------------------------------------------
+// Transform chain factory helpers (FS-030)
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a single TransformChainStep with the given function name and args.
+ * Convenience helper for constructing chain steps concisely.
+ */
+export function makeChainStep(
+  functionName: string,
+  args: readonly ArgumentSlot[] = [],
+): TransformChainStep {
+  return { functionName, args };
+}
+
+/**
+ * Creates an InlineTransform with a single step.
+ * Convenience helper for single-transform cases (backward compat with pre-FS-030 usage).
+ * Equivalent to: { steps: [{ functionName, args }] }
+ */
+export function makeSingleStepTransform(
+  functionName: string,
+  args: readonly ArgumentSlot[] = [],
+): InlineTransform {
+  return { steps: [{ functionName, args }] };
 }

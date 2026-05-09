@@ -137,6 +137,28 @@ describe('generateExpressionFromState (conditional mode)', () => {
     );
   });
 
+  it('emits numeric literal when comparing static value against typed number source', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'stats.unmappedFields', sourceType: 'number' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: '0' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'true', valueType: 'boolean' },
+      elseBranch: { kind: 'static', value: 'false', valueType: 'boolean' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(eq(source("stats.unmappedFields"), 0), true, false)',
+    );
+  });
+
   it('AE-05: nested else-if chain', () => {
     const nested: ExpressionBuilderState = {
       mode: 'conditional',
@@ -209,6 +231,75 @@ describe('generateExpressionFromState (conditional mode)', () => {
 
     expect(generateExpressionFromState(state)).toBe(
       'if(and(gt(source("amount"), 1000), or(eq(source("channel"), "web"), eq(source("channel"), "mobile"))), "approved", "pending")',
+    );
+  });
+
+  it('folds 3-condition AND group into nested binary and() calls', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'and',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'lastRun.status' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: 'success' },
+          },
+          {
+            leftOperand: { kind: 'source', value: 'lastRun.errorCount' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: '0' },
+          },
+          {
+            leftOperand: { kind: 'source', value: 'settings.archived' },
+            comparison: 'eq',
+            rightOperand: { kind: 'static', value: 'false' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'HEALTHY' },
+      elseBranch: { kind: 'static', value: '' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(and(and(eq(source("lastRun.status"), "success"), eq(source("lastRun.errorCount"), "0")), eq(source("settings.archived"), "false")), "HEALTHY", "")',
+    );
+  });
+
+  it('folds 4-condition OR group into nested binary or() calls', () => {
+    const state: ExpressionBuilderState = {
+      mode: 'conditional',
+      condition: {
+        operator: 'or',
+        conditions: [
+          {
+            leftOperand: { kind: 'source', value: 'flags.a' },
+            comparison: 'isTruthy',
+            rightOperand: { kind: 'static', value: '' },
+          },
+          {
+            leftOperand: { kind: 'source', value: 'flags.b' },
+            comparison: 'isTruthy',
+            rightOperand: { kind: 'static', value: '' },
+          },
+          {
+            leftOperand: { kind: 'source', value: 'flags.c' },
+            comparison: 'isTruthy',
+            rightOperand: { kind: 'static', value: '' },
+          },
+          {
+            leftOperand: { kind: 'source', value: 'flags.d' },
+            comparison: 'isTruthy',
+            rightOperand: { kind: 'static', value: '' },
+          },
+        ],
+      },
+      thenBranch: { kind: 'static', value: 'yes' },
+      elseBranch: { kind: 'static', value: 'no' },
+    };
+
+    expect(generateExpressionFromState(state)).toBe(
+      'if(or(or(or(source("flags.a"), source("flags.b")), source("flags.c")), source("flags.d")), "yes", "no")',
     );
   });
 
