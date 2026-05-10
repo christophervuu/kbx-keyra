@@ -37,12 +37,19 @@ import type {
   ParseResult,
   AstNode,
   FunctionCallNode,
+  StringLiteralNode,
+  NumberLiteralNode,
+  BooleanLiteralNode,
+  NullLiteralNode,
+  ObjectTemplateNode,
+  ObjectTemplateProperty,
   ParseOptions,
   FunctionSignature,
   FunctionParameter,
   RegisteredFunction,
   EvaluationContext,
   EvaluationResult,
+  ValueType,
 } from '@keyra/engine';
 import { FunctionRegistry } from '@keyra/engine';
 
@@ -259,4 +266,110 @@ export type {
   // Evaluation types (T-10)
   EvaluationContext,
   EvaluationResult,
+  // FS-040 T-01
+  ValueType,
 };
+
+// ---------------------------------------------------------------------------
+// inferExpressionType — lightweight output type inference for UI validation
+// (FS-040 T-01)
+//
+// Infers the output ValueType of a parsed AST node using only the public
+// engine API (defaultRegistry for function return types). Source-dependent
+// inference (source(), item(), parent()) returns 'any' since no SchemaTree
+// is available at the UI validation layer.
+//
+// Returns undefined when inference is uncertain — callers must treat this
+// as "no mismatch" (cannot prove incompatibility → skip).
+// ---------------------------------------------------------------------------
+
+/**
+ * Infers the output type of a parsed DSL AST node.
+ *
+ * Uses the engine's function registry for return type lookup.
+ * Source-path-dependent inference (source/item/parent) returns 'any'
+ * since no schema is available at the UI validation boundary.
+ *
+ * @param ast - The root AST node from a successful parse result
+ * @returns The inferred ValueType, or undefined if inference is uncertain
+ */
+export function inferExpressionType(ast: AstNode): ValueType | undefined {
+  return inferAstNodeType(ast);
+}
+
+function inferAstNodeType(node: AstNode): ValueType | undefined {
+  switch (node.type) {
+    case 'StringLiteral':
+      return 'string';
+    case 'NumberLiteral':
+      return 'number';
+    case 'BooleanLiteral':
+      return 'boolean';
+    case 'NullLiteral':
+      return 'null';
+    case 'ObjectTemplate':
+      return 'object';
+    case 'FunctionCall':
+      return inferFunctionCallNodeType(node);
+    default:
+      return undefined;
+  }
+}
+
+function inferFunctionCallNodeType(
+  node: Extract<AstNode, { type: 'FunctionCall' }>,
+): ValueType | undefined {
+  switch (node.name) {
+    // Source-access functions — type depends on schema, return 'any'
+    case 'source':
+    case 'item':
+    case 'parent':
+      return 'any';
+
+    case 'cast': {
+      const targetTypeArg = node.arguments[1];
+      if (!targetTypeArg || targetTypeArg.type !== 'StringLiteral') {
+        return undefined;
+      }
+      return isValueType(targetTypeArg.value) ? targetTypeArg.value : undefined;
+    }
+
+    case 'map':
+    case 'filter':
+      return 'array';
+
+    case 'find':
+      return 'any';
+
+    case 'if': {
+      const thenArg = node.arguments[1];
+      const elseArg = node.arguments[2];
+      if (!thenArg || !elseArg) return undefined;
+      const thenType = inferAstNodeType(thenArg);
+      const elseType = inferAstNodeType(elseArg);
+      if (!thenType || !elseType) return undefined;
+      return thenType === elseType ? thenType : 'any';
+    }
+
+    case 'static': {
+      const valueArg = node.arguments[0];
+      if (!valueArg) return undefined;
+      return inferAstNodeType(valueArg);
+    }
+
+    default: {
+      const registered = defaultRegistry.getFunction(node.name);
+      if (!registered) return undefined;
+      if (registered.signature.returnType === 'any') return undefined;
+      return registered.signature.returnType as ValueType;
+    }
+  }
+}
+
+const VALUE_TYPES: readonly string[] = [
+  'string', 'number', 'boolean', 'null', 'array', 'object', 'any',
+];
+
+function isValueType(value: string): value is ValueType {
+  return VALUE_TYPES.includes(value);
+}

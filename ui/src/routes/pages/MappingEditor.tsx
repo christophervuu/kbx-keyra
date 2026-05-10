@@ -480,6 +480,7 @@ export default function MappingEditor() {
         revertDraft={editor.actions.revertDraft}
         getDraftExpression={editor.actions.getDraftExpression}
         onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
+        savedRules={editor.savedRules}
         className="h-full"
       />
     );

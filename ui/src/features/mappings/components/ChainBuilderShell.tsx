@@ -25,8 +25,6 @@
 
 import { Lightbulb, MessageSquare, Wand2, X } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { LiveExpressionDisplay } from './LiveExpressionDisplay';
-import { LiveResultDisplay } from './LiveResultDisplay';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -272,23 +270,6 @@ export function ChainBuilderShell({
 
       {/* ── AI action bar ──────────────────────────────────────────────── */}
       <AiActionBar isMapped={isMapped} onClearMapping={onClearMapping} />
-
-      {/* ── Pinned Expression + Result sections ────────────────────────── */}
-      <div
-        className="flex-shrink-0 px-3 py-2 space-y-2 border-b border-zinc-800"
-        data-testid="chain-shell-pinned-sections"
-      >
-        <LiveExpressionDisplay
-          expression={expression}
-          onClickToEdit={onExpressionClick}
-          data-testid="chain-shell-expression"
-        />
-        <LiveResultDisplay
-          expression={expression}
-          sourceData={sourceDataAvailable ? result : null}
-          data-testid="chain-shell-result"
-        />
-      </div>
 
       {/* ── Scrollable content area ─────────────────────────────────────── */}
       <div

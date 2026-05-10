@@ -19,8 +19,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ConfirmDialog } from './ConfirmDialog';
 import { ConditionalModeBuilder } from './ConditionalModeBuilder';
-import { LiveExpressionDisplay } from './LiveExpressionDisplay';
-import { LiveResultDisplay } from './LiveResultDisplay';
 import { SourceChipPicker } from './SourceChipPicker';
 import { ValueMapModeBuilder } from './ValueMapModeBuilder';
 // FS-029 Source Card builder components (T-09)
@@ -596,17 +594,6 @@ export function UnifiedExpressionBuilder({
           />
         </div>
       )}
-
-      {/* Live Expression / Live Result (T-07) */}
-      <LiveExpressionDisplay
-        expression={currentExpression}
-        onClickToEdit={onSwitchToEditor ?? (() => {})}
-        data-testid="live-expression-display"
-      />
-      <LiveResultDisplay
-        expression={currentExpression}
-        sourceData={sourceData ?? null}
-      />
 
       {/* Mode switch confirmation dialog */}
       <ConfirmDialog

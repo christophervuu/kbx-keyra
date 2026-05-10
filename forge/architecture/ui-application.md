@@ -96,7 +96,7 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row); conditional Suggested Sources (hidden when empty); Clear mapping action; live result display wired to PreviewContext (FS-021, FS-023, FS-027)
+        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions), AI placeholder buttons with descriptive tooltips (FS-040 T-04); savedRules prop drives per-field diff (FS-040 T-05)
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
@@ -669,6 +669,7 @@ The editor uses an **auto-draft save model** with three persistence layers:
 - `revertAllDrafts()` — clear all draft entries
 - `getDraftExpression(targetPath)` — returns draft expression or null if no draft
 - `getUnsavedChangeSummary()` — returns `UnsavedChangeSummary[]` per field
+- `savedRules: readonly MappingRule[]` — snapshot of last-persisted rules (updated on successful `save()`); passed to `ScalarFieldBuilder` as `savedRules` prop to drive `useUnsavedDiff` (FS-040 T-05)
 - `applyRule(targetPath, expression)` — **deprecated** wrapper; calls `updateDraft` + fires `onRuleApplied`; kept for backward compat during migration
 - `unsavedRuleCount` — **deprecated** alias for `unsavedChangeCount`
 
@@ -1137,17 +1138,26 @@ The expression builder is a dual-surface authoring system used in two contexts:
 - `ExpressionPreview`
 - `FunctionReferencePanel`
 
-#### Component hierarchy (Target View / ScalarFieldBuilder) — FS-038
+#### Component hierarchy (Target View / ScalarFieldBuilder) — FS-038, updated FS-040
 
-`ScalarFieldBuilder`
-- header: target path, type badge, required/optional, status
-- suggested sources (editor mode only; hidden in builder mode per AE-11)
-- mode toggle (Builder / Editor)
-- expression area (drop zone for DnD):
-  - `ChainBuilderShell` (builder mode) — see Chain-Based Builder Model below
-  - `RawDslEditor` (editor mode)
-- disabled AI action buttons (placeholder)
-- apply button (gated on `isChainComplete(state) && isValid && expression.trim()`)
+```
+ScalarFieldBuilder
+├── Header (target path, type badge, required/optional, status, Builder|Editor toggle, ⋮ overflow menu)
+│   └── HeaderOverflowMenu (Remove mapping with alertdialog confirmation)
+├── BuilderFeedbackArea (FS-040 T-02 — pinned, always visible)
+│   ├── Expression row (syntax-highlighted DSL; "Expression (incomplete)" label when chain incomplete)
+│   ├── Result row (useExpressionPreview; "Load test data" prompt when sourceData null)
+│   └── Validation row (Structure badge + Output Type badge)
+├── UnsavedDiffPanel (FS-040 T-05 — collapsible, always rendered)
+│   ├── Trigger button (aria-expanded, unsaved badge when hasUnsavedChanges)
+│   └── Expanded content (Last saved vs Current draft, status badge, Revert to saved button)
+├── Expression Area (drop zone for DnD):
+│   ├── ChainBuilderShell (builder mode) — see Chain-Based Builder Model below
+│   └── RawDslEditor (editor mode)
+└── Action Row (AI placeholder buttons: Suggest, Explain, Fix; Reset draft with confirmation; Discard changes)
+```
+
+Note: "Remove mapping" is in the header overflow menu (⋮), not in the action row.
 
 #### State model (legacy — pre-FS-038)
 
@@ -1814,6 +1824,127 @@ ui/src/features/mappings/
 Modified files:
 - `components/ScalarFieldBuilder.tsx` — builder mode now uses chain builder surface (T-12)
 - `components/ExpressionBuilderPanel.tsx` — builder mode now uses chain builder surface (T-13)
+
+---
+
+---
+
+## Builder Panel Enhancements (FS-040)
+
+FS-040 introduces two-level validation, a pinned feedback area, a redesigned action row, and per-field unsaved diff capability to the `ScalarFieldBuilder` panel.
+
+### Builder Validation Model (FS-040 T-01, T-02)
+
+Validation runs at two independent levels:
+
+**Level 1 — Structural validation** (synchronous, Builder state inspection):
+- Checks whether the current `ChainBuilderState` is complete enough to produce a valid expression.
+- Mode-specific rules: Value mode requires a source path or static value; Conditional mode requires a condition + both branches; ValueMap mode requires an input source + at least one mapping row + a default.
+- In Editor mode, structural validation is bypassed (the raw DSL is the source of truth).
+- Returns `structureValid: boolean` and `structureIssues: StructureIssue[]` with BA-friendly messages.
+
+**Level 2 — Output type validation** (AST-based, engine boundary):
+- Calls `inferExpressionType(expression)` via the engine to derive the inferred output `ValueType`.
+- Compares against `selectedTargetType` using a compatibility matrix.
+- `unknown` / `any` inferred type → no mismatch (treated as compatible).
+- Returns `outputTypeValid: boolean` and `outputTypeMismatch: OutputTypeMismatch | null`.
+
+**Gating:**
+- `canApply = structureValid && isParseValid && expression.trim() !== ''`
+- `canSave = canApply && outputTypeValid`
+- Apply is gated by structural + parse validity. Save is additionally gated by output type validity.
+
+**Hook contract — `useBuilderValidation`:**
+
+```ts
+interface UseBuilderValidationInput {
+  builderState: ExpressionBuilderState | null; // null for ChainBuilderState (structural deferred)
+  expression: string;
+  targetType: TargetFieldType;
+  mode: 'builder' | 'editor';
+  parseResult: ParseResult | null;
+  isParseValid: boolean;
+}
+
+interface BuilderValidationState {
+  structureValid: boolean;
+  structureIssues: StructureIssue[];
+  outputTypeValid: boolean;
+  outputTypeMismatch: OutputTypeMismatch | null;
+  canApply: boolean;
+  canSave: boolean;
+}
+```
+
+### Builder Feedback Area (FS-040 T-02)
+
+`BuilderFeedbackArea` is a pinned panel rendered between the header and the expression area in `ScalarFieldBuilder`. It is always visible regardless of builder/editor mode.
+
+**Rows:**
+- **Expression row:** syntax-highlighted DSL expression using `tokenizeDsl`. Shows `"Expression (incomplete)"` label when the chain is incomplete; empty placeholder when expression is blank.
+- **Result row:** live evaluation result via `useExpressionPreview`. Shows `"Load test data to see live results."` when `sourceData` is null.
+- **Validation row:** two badges:
+  - *Structure badge* — green (valid) / amber (issues) / neutral (editor mode or empty).
+  - *Output type badge* — green (compatible) / amber (mismatch with inferred vs expected types) / neutral (unknown/any).
+
+`BuilderFeedbackArea` replaces the former `LiveExpressionDisplay` + `LiveResultDisplay` sections that were previously rendered inside `UnifiedExpressionBuilder` and `ChainBuilderShell`. Those component files are retained but no longer rendered in the scalar field builder path.
+
+**Suggested Sources removed:** The conditional Suggested Sources row (source field suggestions based on name matching) has been removed from `ScalarFieldBuilder` in FS-040. The feedback area provides richer, always-visible expression context in its place.
+
+### Action Row Redesign (FS-040 T-04)
+
+The action row in `ScalarFieldBuilder` was redesigned for FS-040:
+
+- **AI placeholder buttons** (Suggest, Explain, Fix): retained as disabled placeholders with descriptive `title` / `aria-label` tooltips explaining the future capability.
+- **Reset draft** (`RotateCcw` icon): replaces the old "Clear" button. For trivial expressions (matching `TRIVIAL_EXPRESSION_RE`), clears immediately. For non-trivial expressions, shows an inline confirmation (`confirmingReset` state) with Confirm / Cancel.
+- **Remove mapping**: moved out of the action row into the header overflow menu (⋮ `HeaderOverflowMenu` sub-component). Uses `role="alertdialog"` confirmation before firing `onClearMapping`.
+- **Discard changes**: visible when `isDirty` (draft exists for the current field); fires `revertDraft`.
+
+**`HeaderOverflowMenu`** is a `useState`-based dropdown (no external library). Closes on outside `mousedown` and Escape key. The confirmation dialog is a fixed-position overlay with `role="alertdialog"`.
+
+### Unsaved Diff (FS-040 T-05)
+
+Per-target-field unsaved diff capability compares the current draft expression against the last-persisted rule baseline.
+
+**`useUnsavedDiff` hook:**
+
+```ts
+type UnsavedDiffStatus = 'no-mapping' | 'new' | 'unchanged' | 'modified' | 'removed';
+
+interface UnsavedDiffState {
+  status: UnsavedDiffStatus;
+  savedExpression: string | null;   // null when no saved rule exists
+  currentExpression: string;
+  hasUnsavedChanges: boolean;       // true for new / modified / removed
+}
+
+function useUnsavedDiff(input: {
+  targetPath: string;
+  currentExpression: string;
+  savedRules: readonly MappingRule[];
+}): UnsavedDiffState
+```
+
+Status semantics:
+- `no-mapping` — no saved rule and no current expression (field untouched)
+- `new` — no saved rule but current expression exists (new mapping being authored)
+- `unchanged` — saved rule exists and expressions are identical (whitespace-trimmed comparison)
+- `modified` — saved rule exists and expressions differ
+- `removed` — saved rule exists but current expression is empty (mapping being deleted)
+
+The hook is pure (no side effects, memoized on inputs). Comparison is whitespace-trimmed.
+
+**`UnsavedDiffPanel` component:**
+
+Collapsible panel rendered below `BuilderFeedbackArea` in `ScalarFieldBuilder`. Always rendered; expand/collapse state is local (`isDiffExpanded`).
+
+- **Trigger button:** `aria-expanded`, `aria-controls`. Shows an amber badge with the status label when `hasUnsavedChanges` is true.
+- **Expanded content:** status badge (colour-coded per status), "Last saved" expression block, "Current draft" expression block (both syntax-highlighted via `tokenizeDsl`), "Revert to saved" button (visible only for `modified` and `removed` statuses).
+- **Revert to saved:** fires `handleRevertToSaved` in `ScalarFieldBuilder`, which calls `revertDraft(targetPath)`, restores the saved expression into local state, re-decomposes it into `ChainBuilderState` (or falls back to editor mode with a warning), and collapses the panel.
+
+**Baseline source:** `useMappingEditor.savedRules` — a `readonly MappingRule[]` snapshot of the last-persisted rules, updated on every successful `save()`. Passed to `ScalarFieldBuilder` as the `savedRules` prop and forwarded to `useUnsavedDiff`.
+
+**Scope:** per-field diff only. Global diff across all fields is provided by `UnsavedChangesOverlay` (FS-039 T-10).
 
 ---
 

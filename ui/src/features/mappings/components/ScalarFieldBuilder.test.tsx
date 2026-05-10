@@ -109,45 +109,14 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('header-status')).toHaveTextContent('Mapped');
   });
 
-  // Suggestions
-  it('renders suggested source fields based on heuristic matching', () => {
+  // Suggestions section removed (FS-040 T-02/T-03) — replaced by BuilderFeedbackArea
+  it('does not render suggested-sources-section (removed in FS-040)', () => {
     renderBuilder();
-    // 'firstName' target → 'firstName' source (exact match)
-    expect(screen.getByTestId('suggestion-firstName')).toBeInTheDocument();
-  });
-
-  it('hides Suggested Sources section when no suggestions match (T-07)', () => {
-    renderBuilder({
-      selectedTargetPath: 'zzznomatch',
-      selectedTargetType: 'string',
-    });
     expect(screen.queryByTestId('suggested-sources-section')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('suggestions-empty')).not.toBeInTheDocument();
   });
 
-  it('shows at most 5 suggestions', () => {
-    const manyNodes = Array.from({ length: 20 }, (_, i) =>
-      makeNode(`nameField${i}`, `nameField${i}`, 'string'),
-    );
-    const schema: ParsedSchema = {
-      nodes: manyNodes,
-      totalFieldCount: 20,
-      format: 'json-schema',
-      parseTimeMs: 0,
-      inferred: false,
-    };
-    renderBuilder({ selectedTargetPath: 'name', parsedSourceSchema: schema });
-    const pills = screen.getAllByTestId(/^suggestion-/);
-    expect(pills.length).toBeLessThanOrEqual(5);
-  });
-
-  it('excludes type-incompatible suggestions', () => {
-    // Target is boolean — should not show string/number suggestions
-    renderBuilder({
-      selectedTargetPath: 'isActive',
-      selectedTargetType: 'boolean',
-    });
-    // 'isActive' boolean source should appear; 'firstName' string should not
+  it('does not render suggestion pills (removed in FS-040)', () => {
+    renderBuilder();
     expect(screen.queryByTestId('suggestion-firstName')).not.toBeInTheDocument();
   });
 
@@ -200,12 +169,27 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('ai-fix-btn')).toBeDisabled();
   });
 
-  it('AI buttons have Coming soon tooltip', () => {
+  it('AI buttons have descriptive per-action tooltips (FS-040 T-04)', () => {
     renderBuilder();
-    const tooltip = 'Coming soon \u2014 AI features available in a future release';
-    expect(screen.getByTestId('ai-suggest-btn')).toHaveAttribute('title', tooltip);
-    expect(screen.getByTestId('ai-explain-btn')).toHaveAttribute('title', tooltip);
-    expect(screen.getByTestId('ai-fix-btn')).toHaveAttribute('title', tooltip);
+    expect(screen.getByTestId('ai-suggest-btn')).toHaveAttribute(
+      'title',
+      'AI-powered expression suggestions \u2014 available in a future release',
+    );
+    expect(screen.getByTestId('ai-explain-btn')).toHaveAttribute(
+      'title',
+      'AI-powered explanation \u2014 available in a future release',
+    );
+    expect(screen.getByTestId('ai-fix-btn')).toHaveAttribute(
+      'title',
+      'AI-powered fix suggestions \u2014 available in a future release',
+    );
+  });
+
+  it('AI buttons have descriptive aria-labels (FS-040 T-04)', () => {
+    renderBuilder();
+    expect(screen.getByTestId('ai-suggest-btn').getAttribute('aria-label')).toContain('Suggest');
+    expect(screen.getByTestId('ai-explain-btn').getAttribute('aria-label')).toContain('Explain');
+    expect(screen.getByTestId('ai-fix-btn').getAttribute('aria-label')).toContain('Fix');
   });
 
   // Target change resets state
@@ -495,7 +479,82 @@ describe('ScalarFieldBuilder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T-07: Header compression — type badge left, toggle in header, suggestions hidden when empty
+  // FS-040 T-04: Reset draft button
+  // ---------------------------------------------------------------------------
+
+  describe('FS-040 T-04: Reset draft button', () => {
+    it('Reset draft button is hidden when expression is empty', () => {
+      renderBuilder({ currentExpression: '' });
+      expect(screen.queryByTestId('reset-draft-btn')).not.toBeInTheDocument();
+    });
+
+    it('Reset draft button is visible when expression is non-empty', () => {
+      renderBuilder({ currentExpression: 'source("firstName")', currentStatus: 'mapped' });
+      expect(screen.getByTestId('reset-draft-btn')).toBeInTheDocument();
+    });
+
+    it('Reset draft button has correct aria-label', () => {
+      renderBuilder({ currentExpression: 'source("firstName")', currentStatus: 'mapped' });
+      expect(screen.getByTestId('reset-draft-btn')).toHaveAttribute(
+        'aria-label',
+        'Reset current draft expression',
+      );
+    });
+
+    it('clicking Reset draft on a trivial expression resets immediately (no confirmation)', () => {
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+      renderBuilder({
+        currentExpression: '{"id": "x"}', // forces editor mode
+        updateDraft,
+        revertDraft,
+        getDraftExpression,
+      });
+      // Type a trivial expression in editor
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("email")' } });
+      // Now reset — trivial expression, no confirmation
+      fireEvent.click(screen.getByTestId('reset-draft-btn'));
+      expect(screen.queryByTestId('reset-draft-confirm-prompt')).not.toBeInTheDocument();
+    });
+
+    it('clicking Reset draft on a non-trivial expression shows confirmation prompt', () => {
+      renderBuilder({
+        currentExpression: '{"id": "x"}', // forces editor mode
+      });
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
+      fireEvent.click(screen.getByTestId('reset-draft-btn'));
+      expect(screen.getByTestId('reset-draft-confirm-prompt')).toBeInTheDocument();
+    });
+
+    it('confirming reset clears the expression', () => {
+      renderBuilder({
+        currentExpression: '{"id": "x"}', // forces editor mode
+      });
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
+      fireEvent.click(screen.getByTestId('reset-draft-btn'));
+      fireEvent.click(screen.getByTestId('reset-draft-confirm'));
+      expect(screen.queryByTestId('reset-draft-confirm-prompt')).not.toBeInTheDocument();
+    });
+
+    it('canceling reset preserves the expression and hides prompt', () => {
+      renderBuilder({
+        currentExpression: '{"id": "x"}', // forces editor mode
+      });
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
+      fireEvent.click(screen.getByTestId('reset-draft-btn'));
+      fireEvent.click(screen.getByTestId('reset-draft-cancel'));
+      expect(screen.queryByTestId('reset-draft-confirm-prompt')).not.toBeInTheDocument();
+      // Expression textarea should still have the value
+      expect(screen.getByRole('textbox')).toHaveValue('upper(source("email"))');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // T-07: Header compression — type badge left, toggle in header
+  // (Suggested Sources tests removed — section replaced by BuilderFeedbackArea in FS-040)
   // ---------------------------------------------------------------------------
 
   describe('T-07: header compression', () => {
@@ -514,61 +573,128 @@ describe('ScalarFieldBuilder', () => {
       expect(header).toContainElement(screen.getByTestId('mode-toggle-editor'));
     });
 
-    it('Suggested Sources section is shown when suggestions exist', () => {
-      renderBuilder(); // 'patient.firstName' → 'firstName' exact match
-      expect(screen.getByTestId('suggested-sources-section')).toBeInTheDocument();
-    });
-
-    it('Suggested Sources section is hidden when no suggestions exist', () => {
-      renderBuilder({ selectedTargetPath: 'zzznomatch', selectedTargetType: 'string' });
+    it('Suggested Sources section is absent (replaced by BuilderFeedbackArea)', () => {
+      renderBuilder();
       expect(screen.queryByTestId('suggested-sources-section')).not.toBeInTheDocument();
     });
   });
 
   // ---------------------------------------------------------------------------
-  // T-08: Clear mapping button
+  // T-08 / FS-040 T-04: Remove mapping — now in header overflow menu (⋮)
   // ---------------------------------------------------------------------------
 
-  describe('T-08: clear mapping button', () => {
-    it('Clear mapping button is visible when currentStatus=mapped and onClearMapping provided', () => {
+  describe('T-08 / FS-040 T-04: Remove mapping via header overflow menu', () => {
+    it('overflow trigger (⋮) is visible when currentStatus=mapped and onClearMapping provided', () => {
       renderBuilder({
         currentStatus: 'mapped',
         currentExpression: 'source("firstName")',
         onClearMapping: vi.fn(),
       });
-      expect(screen.getByTestId('clear-mapping-btn')).toBeInTheDocument();
+      expect(screen.getByTestId('header-overflow-trigger')).toBeInTheDocument();
     });
 
-    it('Clear mapping button is hidden when currentStatus=unmapped', () => {
+    it('overflow trigger is hidden when currentStatus=unmapped', () => {
       renderBuilder({
         currentStatus: 'unmapped',
         onClearMapping: vi.fn(),
       });
-      expect(screen.queryByTestId('clear-mapping-btn')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('header-overflow-trigger')).not.toBeInTheDocument();
     });
 
-    it('Clear mapping button is hidden when onClearMapping not provided', () => {
+    it('overflow trigger is hidden when onClearMapping not provided', () => {
       renderBuilder({ currentStatus: 'mapped', currentExpression: 'source("firstName")' });
-      expect(screen.queryByTestId('clear-mapping-btn')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('header-overflow-trigger')).not.toBeInTheDocument();
     });
 
-    it('clicking Clear mapping calls onClearMapping with target path', () => {
+    it('overflow trigger has aria-haspopup="menu" and aria-label="More actions"', () => {
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+      const trigger = screen.getByTestId('header-overflow-trigger');
+      expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+      expect(trigger).toHaveAttribute('aria-label', 'More actions');
+    });
+
+    it('clicking overflow trigger opens the menu', () => {
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+      expect(screen.queryByTestId('header-overflow-menu')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      expect(screen.getByTestId('header-overflow-menu')).toBeInTheDocument();
+    });
+
+    it('overflow menu contains "Remove mapping" menuitem', () => {
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      const item = screen.getByTestId('remove-mapping-btn');
+      expect(item).toBeInTheDocument();
+      expect(item).toHaveAttribute('role', 'menuitem');
+    });
+
+    it('clicking "Remove mapping" shows confirmation dialog with role="alertdialog"', () => {
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      fireEvent.click(screen.getByTestId('remove-mapping-btn'));
+      expect(screen.getByTestId('remove-mapping-dialog')).toBeInTheDocument();
+      expect(screen.getByTestId('remove-mapping-dialog')).toHaveAttribute('role', 'alertdialog');
+    });
+
+    it('confirming "Remove mapping" calls onClearMapping with target path', () => {
       const onClearMapping = vi.fn();
       renderBuilder({
         currentStatus: 'mapped',
         currentExpression: 'source("firstName")',
         onClearMapping,
       });
-      fireEvent.click(screen.getByTestId('clear-mapping-btn'));
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      fireEvent.click(screen.getByTestId('remove-mapping-btn'));
+      fireEvent.click(screen.getByTestId('remove-mapping-confirm'));
       expect(onClearMapping).toHaveBeenCalledWith('patient.firstName');
+    });
+
+    it('canceling "Remove mapping" dialog does not call onClearMapping', () => {
+      const onClearMapping = vi.fn();
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping,
+      });
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      fireEvent.click(screen.getByTestId('remove-mapping-btn'));
+      fireEvent.click(screen.getByTestId('remove-mapping-cancel'));
+      expect(onClearMapping).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('remove-mapping-dialog')).not.toBeInTheDocument();
+    });
+
+    it('old clear-mapping-btn is no longer in the action row', () => {
+      renderBuilder({
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+      expect(screen.queryByTestId('clear-mapping-btn')).not.toBeInTheDocument();
     });
   });
 
   // ---------------------------------------------------------------------------
-  // T-04: LiveResultDisplay wired from PreviewContext (AE-05 / AE-06)
+  // FS-040 T-02/T-03: BuilderFeedbackArea replaces LiveResultDisplay in ScalarFieldBuilder
+  // (AE-05 / AE-06 — result display now lives in BuilderFeedbackArea)
   // ---------------------------------------------------------------------------
 
-  describe('T-04: LiveResultDisplay sourceData from PreviewContext', () => {
+  describe('FS-040 T-02: BuilderFeedbackArea integration', () => {
     /** Wrapper that seeds PreviewContext with a parsed sourceData value */
     function WithSourceData({
       sourceData,
@@ -598,24 +724,135 @@ describe('ScalarFieldBuilder', () => {
       );
     }
 
+    it('renders BuilderFeedbackArea (AE-04)', () => {
+      renderBuilderWithContext({}, null);
+      expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
+    });
+
+    it('BuilderFeedbackArea has correct ARIA region label', () => {
+      renderBuilderWithContext({}, null);
+      expect(screen.getByRole('region', { name: 'Expression feedback' })).toBeInTheDocument();
+    });
+
     it('shows "Load test data to see live results." when no sourceData in context (AE-06)', () => {
       renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('live-result-no-data')).toHaveTextContent(
+      expect(screen.getByTestId('feedback-result-no-data')).toHaveTextContent(
         'Load test data to see live results.',
       );
     });
 
-    it('LiveResultDisplay is present in the builder (AE-05)', () => {
+    it('feedback result area is present in the builder (AE-05)', () => {
       renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('live-result-display')).toBeInTheDocument();
+      expect(screen.getByTestId('feedback-result')).toBeInTheDocument();
     });
 
     it('does not show no-data message when sourceData is provided (AE-05)', async () => {
       renderBuilderWithContext({}, { firstName: 'Alice' });
       // The no-data placeholder should not be visible when sourceData is set
       await waitFor(() => {
-        expect(screen.queryByTestId('live-result-no-data')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('feedback-result-no-data')).not.toBeInTheDocument();
       });
+    });
+
+    it('renders validation structure badge', () => {
+      renderBuilderWithContext({}, null);
+      expect(screen.getByTestId('validation-structure-badge')).toBeInTheDocument();
+    });
+
+    it('renders validation output type badge', () => {
+      renderBuilderWithContext({}, null);
+      expect(screen.getByTestId('validation-output-type-badge')).toBeInTheDocument();
+    });
+
+    it('BuilderFeedbackArea is visible in both builder and editor modes', () => {
+      renderBuilderWithContext({}, null);
+      // Builder mode — feedback area present
+      expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
+
+      // Switch to editor mode
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      // Feedback area still present
+      expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
+    });
+
+    it('structure badge shows neutral state in editor mode', () => {
+      renderBuilderWithContext({}, null);
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const badge = screen.getByTestId('validation-structure-badge');
+      expect(badge.getAttribute('aria-label')).toContain('not applicable');
+    });
+  });
+
+  // FS-040 T-05: UnsavedDiffPanel integration
+  describe('FS-040 T-05: UnsavedDiffPanel integration', () => {
+    const SAVED_RULES = [
+      { target: 'patient.firstName', expression: 'source("firstName")', type: 'direct' as const, description: '' },
+    ];
+
+    it('renders the unsaved diff panel trigger', () => {
+      renderBuilder({ savedRules: SAVED_RULES });
+      expect(screen.getByTestId('unsaved-diff-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('unsaved-diff-trigger')).toBeInTheDocument();
+    });
+
+    it('diff panel is collapsed by default', () => {
+      renderBuilder({ savedRules: SAVED_RULES });
+      expect(screen.getByTestId('unsaved-diff-trigger')).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByTestId('unsaved-diff-content')).not.toBeInTheDocument();
+    });
+
+    it('clicking trigger expands the diff panel', () => {
+      renderBuilder({ savedRules: SAVED_RULES, currentExpression: 'source("firstName")' });
+      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
+      expect(screen.getByTestId('unsaved-diff-content')).toBeInTheDocument();
+    });
+
+    it('shows unsaved badge when expression differs from saved', () => {
+      renderBuilder({
+        savedRules: SAVED_RULES,
+        currentExpression: 'upper(source("firstName"))',
+      });
+      expect(screen.getByTestId('unsaved-diff-badge')).toBeInTheDocument();
+    });
+
+    it('does not show unsaved badge when expression matches saved', () => {
+      renderBuilder({
+        savedRules: SAVED_RULES,
+        currentExpression: 'source("firstName")',
+      });
+      expect(screen.queryByTestId('unsaved-diff-badge')).not.toBeInTheDocument();
+    });
+
+    it('shows "Revert to saved" button when expanded and expression is modified', () => {
+      renderBuilder({
+        savedRules: SAVED_RULES,
+        currentExpression: 'upper(source("firstName"))',
+      });
+      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
+      expect(screen.getByTestId('revert-to-saved-btn')).toBeInTheDocument();
+    });
+
+    it('clicking "Revert to saved" calls revertDraft', () => {
+      const { revertDraft } = makeDraftApi();
+      renderBuilder({
+        savedRules: SAVED_RULES,
+        currentExpression: 'upper(source("firstName"))',
+        revertDraft,
+      });
+      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
+      fireEvent.click(screen.getByTestId('revert-to-saved-btn'));
+      expect(revertDraft).toHaveBeenCalledWith('patient.firstName');
+    });
+
+    it('diff panel collapses after revert', () => {
+      renderBuilder({
+        savedRules: SAVED_RULES,
+        currentExpression: 'upper(source("firstName"))',
+      });
+      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
+      expect(screen.getByTestId('unsaved-diff-content')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('revert-to-saved-btn'));
+      expect(screen.queryByTestId('unsaved-diff-content')).not.toBeInTheDocument();
     });
   });
 });

@@ -879,6 +879,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     sourceSchemaName,
     targetSchemaName,
     rules,
+    savedRules: lastSavedRules,
     configOptions,
     config: validationConfig,
     sourceSchemaDetail: sourceSchema,

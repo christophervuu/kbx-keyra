@@ -3,10 +3,12 @@
  *
  * Shown when a scalar (non-object, non-array) target field is selected in the
  * Target Worklist. Provides:
- *   - Header: target path, type badge, required/optional label, mapping status
- *   - Suggested Sources: client-side heuristic suggestions from parsed source schema
+ *   - Header: target path, type badge, required/optional label, mapping status,
+ *             Builder|Editor toggle, ⋮ overflow menu (Remove mapping)
+ *   - Feedback Area: pinned Expression / Result / Validation (FS-040 T-02)
  *   - Expression Builder: ChainBuilderShell (new, default) or RawDslEditor (toggle)
- *   - AI Action buttons: placeholder (Coming soon tooltip)
+ *   - AI Action buttons: placeholder with descriptive tooltips (FS-040 T-04)
+ *   - Reset draft button: clears expression with confirmation for non-trivial expressions
  *   - Discard changes button: visible when current field has an unsaved draft
  *
  * FS-039 T-05: Auto-draft model — every expression change calls updateDraft().
@@ -15,9 +17,12 @@
  * FS-038 T-12: Integrates the new chain builder (ChainBuilderShell + chain state)
  * replacing UnifiedExpressionBuilder in Builder mode. UnifiedExpressionBuilder is
  * retained for Rules View (T-13) and as a fallback.
+ *
+ * FS-040 T-04: Action row redesign — Reset draft (with confirmation), Remove mapping
+ * moved to header overflow menu (⋮), AI tooltips updated.
  */
 
-import { Lightbulb, Sparkles, Undo2, Wrench } from 'lucide-react';
+import { Lightbulb, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { RawDslEditor } from './RawDslEditor';
@@ -28,11 +33,13 @@ import { EntryPointSelector } from './EntryPointSelector';
 import { ChainSourceCard } from './ChainSourceCard';
 import { StaticValueInput } from './StaticValueInput';
 import { LogicStepList } from './LogicStepList';
+import { BuilderFeedbackArea } from './BuilderFeedbackArea';
+import { UnsavedDiffPanel } from './UnsavedDiffPanel';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
-import { suggestSourceFields } from '../lib/suggest-source-fields';
-import type { SuggestedField } from '../lib/suggest-source-fields';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
+import { useBuilderValidation } from '../hooks/use-builder-validation';
+import { useUnsavedDiff } from '../hooks/use-unsaved-diff';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 import { PreviewContext } from '../context/preview-context';
@@ -53,7 +60,7 @@ import { decomposeToChainState } from '../lib/chain-decomposer';
 import type { LogicKind } from './AddLogicPicker';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 
-import type { ParsedSchema } from '@/lib/types/domain';
+import type { ParsedSchema, MappingRule } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,6 +107,12 @@ export interface ScalarFieldBuilderProps {
    * The parent removes the rule from the working session.
    */
   onClearMapping?: (targetPath: string) => void;
+  /**
+   * Last-saved rules from useMappingEditor.savedRules.
+   * Used by useUnsavedDiff to compute the per-field diff state (FS-040 T-05).
+   * Defaults to empty array when not provided (diff panel shows 'no-mapping').
+   */
+  savedRules?: readonly MappingRule[];
   /** Optional className */
   className?: string;
 }
@@ -132,13 +145,12 @@ const STATUS_LABELS: Record<TargetFieldStatus, string> = {
   error: 'Error',
 };
 
-const MATCH_KIND_LABEL: Record<SuggestedField['matchKind'], string> = {
-  exact: 'Exact',
-  'case-insensitive': 'Name',
-  contains: 'Contains',
-};
+const AI_SUGGEST_TOOLTIP = 'AI-powered expression suggestions \u2014 available in a future release';
+const AI_EXPLAIN_TOOLTIP = 'AI-powered explanation \u2014 available in a future release';
+const AI_FIX_TOOLTIP = 'AI-powered fix suggestions \u2014 available in a future release';
 
-const AI_COMING_SOON = 'Coming soon \u2014 AI features available in a future release';
+/** Regex for a trivial bare source reference — no confirmation needed on reset */
+const TRIVIAL_EXPRESSION_RE = /^source\("[^"]*"\)$/;
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -179,19 +191,127 @@ function ModeToggle({
   );
 }
 
-function SuggestionPill({ suggestion, onSelect }: { suggestion: SuggestedField; onSelect: (path: string) => void }) {
+/**
+ * Header overflow menu (⋮) — contains destructive actions like "Remove mapping".
+ * Only rendered when there are applicable overflow actions.
+ */
+function HeaderOverflowMenu({
+  targetPath,
+  onRemoveMapping,
+}: {
+  targetPath: string;
+  onRemoveMapping: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => { document.removeEventListener('mousedown', handleOutside); };
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('keydown', handleKey); };
+  }, [open]);
+
   return (
-    <button
-      type="button"
-      data-testid={`suggestion-${suggestion.path}`}
-      onClick={() => onSelect(suggestion.path)}
-      className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs text-slate-300 transition-colors hover:border-blue-500/50 hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-    >
-      <span className="font-mono">{suggestion.fieldName}</span>
-      <span className="rounded bg-slate-700 px-1 py-0.5 text-[9px] text-slate-500">
-        {MATCH_KIND_LABEL[suggestion.matchKind]}
-      </span>
-    </button>
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        data-testid="header-overflow-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        onClick={() => { setOpen((prev) => !prev); }}
+        className="flex items-center justify-center rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+      >
+        <MoreVertical size={14} aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          data-testid="header-overflow-menu"
+          className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded border border-slate-700 bg-slate-900 py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="remove-mapping-btn"
+            aria-label={`Remove saved mapping for ${targetPath}`}
+            onClick={() => {
+              setOpen(false);
+              setConfirmingRemove(true);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-slate-800 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-red-500"
+          >
+            Remove mapping
+          </button>
+        </div>
+      )}
+
+      {/* Remove mapping confirmation dialog */}
+      {confirmingRemove && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="remove-mapping-dialog-title"
+          aria-describedby="remove-mapping-dialog-desc"
+          data-testid="remove-mapping-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        >
+          <div className="w-80 rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl">
+            <h2
+              id="remove-mapping-dialog-title"
+              className="mb-2 text-sm font-semibold text-slate-100"
+            >
+              Remove mapping
+            </h2>
+            <p
+              id="remove-mapping-dialog-desc"
+              className="mb-4 text-xs text-slate-400"
+            >
+              Remove mapping for <span className="font-mono text-slate-200">{targetPath}</span>? This will delete the saved rule.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                data-testid="remove-mapping-cancel"
+                onClick={() => { setConfirmingRemove(false); }}
+                className="rounded border border-slate-600 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="remove-mapping-confirm"
+                onClick={() => {
+                  setConfirmingRemove(false);
+                  onRemoveMapping();
+                }}
+                className="rounded border border-red-700 bg-red-900/40 px-3 py-1.5 text-xs text-red-300 transition-colors hover:border-red-600 hover:bg-red-900/60 hover:text-red-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -211,6 +331,7 @@ export function ScalarFieldBuilder({
   getDraftExpression,
   onExpressionChange,
   onClearMapping,
+  savedRules = [],
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
@@ -222,6 +343,12 @@ export function ScalarFieldBuilder({
   const [chainState, setChainState] = useState<ChainBuilderState>(() => createEmptyChainState());
   // Whether the add-logic picker is open (shown below source card / static input)
   const [addLogicPickerOpen, setAddLogicPickerOpen] = useState(false);
+
+  // FS-040 T-04: Reset draft confirmation state
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  // FS-040 T-05: Unsaved diff panel expanded state
+  const [isDiffExpanded, setIsDiffExpanded] = useState(false);
 
   // Keep callbacks in refs to avoid stale closure issues
   const onExpressionChangeRef = useRef(onExpressionChange);
@@ -301,7 +428,7 @@ export function ScalarFieldBuilder({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath, currentExpression]);
 
-  const { errorDecorations } = useDslValidation(expression);
+  const { errorDecorations, parseResult, isValid: isParseValid } = useDslValidation(expression);
 
   // isDirty: current expression differs from the saved (committed) expression.
   // A draft exists when getDraftExpression returns non-null.
@@ -311,11 +438,46 @@ export function ScalarFieldBuilder({
   const previewCtx = useContext(PreviewContext);
   const sourceData = previewCtx?.sourceData ?? null;
 
-  const suggestions = suggestSourceFields(
-    selectedTargetPath,
-    selectedTargetType,
-    parsedSourceSchema,
-  );
+  // FS-040 T-02: Two-level validation state
+  const validationState = useBuilderValidation({
+    builderState: null, // ChainBuilderState is not ExpressionBuilderState; structural validation deferred
+    expression,
+    targetType: selectedTargetType,
+    mode,
+    parseResult: parseResult ?? null,
+    isParseValid,
+  });
+
+  // FS-040 T-05: Unsaved diff state
+  const diffState = useUnsavedDiff({
+    targetPath: selectedTargetPath,
+    currentExpression: expression,
+    savedRules,
+  });
+
+  // Revert to saved: restore the saved expression and re-decompose builder state
+  const handleRevertToSaved = useCallback(() => {
+    const expr = diffState.savedExpression ?? '';
+    revertDraft(selectedTargetPath);
+    setExpression(expr);
+    setIsDiffExpanded(false);
+    if (!expr) {
+      setDecompositionWarning(null);
+      setChainState(createEmptyChainState());
+      setMode('builder');
+      return;
+    }
+    const chainResult = decomposeToChainState(expr);
+    if (chainResult.success) {
+      setChainState(chainResult.state);
+      setDecompositionWarning(null);
+      setMode('builder');
+    } else {
+      setChainState(createEmptyChainState());
+      setDecompositionWarning('Expression cannot be loaded into the guided builder.');
+      setMode('editor');
+    }
+  }, [diffState.savedExpression, revertDraft, selectedTargetPath]);
 
   const handleInsertSourceField = useCallback(
     (path: string) => {
@@ -332,9 +494,6 @@ export function ScalarFieldBuilder({
     },
     [mode],
   );
-
-  // Alias for suggestion pill clicks (same behaviour)
-  const handleSuggestionSelect = handleInsertSourceField;
 
   const { isDragOver, dropHandlers } = useDropZone({ onDrop: handleInsertSourceField });
 
@@ -361,7 +520,37 @@ export function ScalarFieldBuilder({
     }
   }, [revertDraft, selectedTargetPath, currentExpression]);
 
+  // FS-040 T-04: Reset draft — clears expression and builder state.
+  // Trivial expressions (empty or bare source ref) reset immediately.
+  // Non-trivial expressions require confirmation via confirmingReset state.
+  const isTrivialExpression = expression.trim() === '' || TRIVIAL_EXPRESSION_RE.test(expression.trim());
 
+  const handleResetDraftRequest = useCallback(() => {
+    if (isTrivialExpression) {
+      // Immediate reset — no confirmation needed
+      handleExpressionChange('');
+      setChainState(createEmptyChainState());
+      setDecompositionWarning(null);
+      setMode('builder');
+    } else {
+      setConfirmingReset(true);
+    }
+  }, [isTrivialExpression, handleExpressionChange]);
+
+  const handleResetDraftConfirm = useCallback(() => {
+    setConfirmingReset(false);
+    handleExpressionChange('');
+    setChainState(createEmptyChainState());
+    setDecompositionWarning(null);
+    setMode('builder');
+  }, [handleExpressionChange]);
+
+  const handleResetDraftCancel = useCallback(() => {
+    setConfirmingReset(false);
+  }, []);
+
+  // Reset draft is enabled when expression is non-empty
+  const canResetDraft = expression.trim().length > 0;
 
   // FS-038 T-12: Chain state update handlers
   const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
@@ -454,6 +643,14 @@ export function ScalarFieldBuilder({
 
           {/* Builder | Editor toggle */}
           <ModeToggle mode={mode} onSwitch={setMode} />
+
+          {/* ⋮ Overflow menu — only when destructive actions are applicable */}
+          {currentStatus === 'mapped' && onClearMapping && (
+            <HeaderOverflowMenu
+              targetPath={selectedTargetPath}
+              onRemoveMapping={() => { onClearMapping(selectedTargetPath); }}
+            />
+          )}
         </div>
 
         <div className="mt-1 flex items-center gap-3">
@@ -476,22 +673,26 @@ export function ScalarFieldBuilder({
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Suggested Sources — hidden when empty (AE-11: no suggested row in  */}
-      {/* chain builder; kept here for Editor mode only)                      */}
+      {/* Feedback Area — Expression, Result, Validation (FS-040 T-02)      */}
+      {/* Replaces the old Suggested Sources section.                        */}
       {/* ------------------------------------------------------------------ */}
-      {suggestions.length > 0 && mode === 'editor' && (
-        <div className="shrink-0 border-b border-slate-700 px-4 py-3" data-testid="suggested-sources-section">
-          <div className="mb-2 flex items-center gap-1.5">
-            <Lightbulb size={12} className="text-slate-500" aria-hidden="true" />
-            <span className="text-xs font-medium text-slate-400">Suggested Sources</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5" data-testid="suggestions-list">
-            {suggestions.map((s) => (
-              <SuggestionPill key={s.path} suggestion={s} onSelect={handleSuggestionSelect} />
-            ))}
-          </div>
-        </div>
-      )}
+      <BuilderFeedbackArea
+        expression={expression}
+        sourceData={sourceData}
+        validationState={validationState}
+        mode={mode}
+      />
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Unsaved Diff Panel (FS-040 T-05)                                   */}
+      {/* ------------------------------------------------------------------ */}
+      <UnsavedDiffPanel
+        diffState={diffState}
+        targetPath={selectedTargetPath}
+        isExpanded={isDiffExpanded}
+        onToggle={() => { setIsDiffExpanded((prev) => !prev); }}
+        onRevert={handleRevertToSaved}
+      />
 
       <div
         className={[
@@ -598,16 +799,43 @@ export function ScalarFieldBuilder({
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* AI Actions + Discard                                               */}
+      {/* AI Actions + Reset draft + Discard (FS-040 T-04)                  */}
       {/* ------------------------------------------------------------------ */}
       <div className="shrink-0 border-t border-slate-700 px-4 py-3">
+        {/* Reset draft confirmation prompt — inline, shown above action row */}
+        {confirmingReset && (
+          <div
+            data-testid="reset-draft-confirm-prompt"
+            className="mb-2 flex items-center gap-2 rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs"
+          >
+            <span className="flex-1 text-amber-300">Reset draft? Your current expression will be cleared.</span>
+            <button
+              type="button"
+              data-testid="reset-draft-confirm"
+              onClick={handleResetDraftConfirm}
+              className="rounded border border-amber-600 px-2 py-1 text-amber-300 transition-colors hover:border-amber-500 hover:text-amber-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              data-testid="reset-draft-cancel"
+              onClick={handleResetDraftCancel}
+              className="rounded border border-slate-600 px-2 py-1 text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
-          {/* AI action buttons — placeholders */}
+          {/* AI action buttons — placeholders with descriptive tooltips */}
           <button
             type="button"
             disabled
             aria-disabled="true"
-            title={AI_COMING_SOON}
+            title={AI_SUGGEST_TOOLTIP}
+            aria-label={`Suggest — ${AI_SUGGEST_TOOLTIP}`}
             data-testid="ai-suggest-btn"
             className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
           >
@@ -618,7 +846,8 @@ export function ScalarFieldBuilder({
             type="button"
             disabled
             aria-disabled="true"
-            title={AI_COMING_SOON}
+            title={AI_EXPLAIN_TOOLTIP}
+            aria-label={`Explain — ${AI_EXPLAIN_TOOLTIP}`}
             data-testid="ai-explain-btn"
             className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
           >
@@ -629,7 +858,8 @@ export function ScalarFieldBuilder({
             type="button"
             disabled
             aria-disabled="true"
-            title={AI_COMING_SOON}
+            title={AI_FIX_TOOLTIP}
+            aria-label={`Fix — ${AI_FIX_TOOLTIP}`}
             data-testid="ai-fix-btn"
             className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
           >
@@ -637,16 +867,17 @@ export function ScalarFieldBuilder({
             Fix
           </button>
 
-          {/* Clear mapping button — only shown when target has an applied rule */}
-          {currentStatus === 'mapped' && onClearMapping && (
+          {/* Reset draft button — clears expression; confirmation for non-trivial */}
+          {canResetDraft && (
             <button
               type="button"
-              data-testid="clear-mapping-btn"
-              onClick={() => { onClearMapping(selectedTargetPath); }}
-              aria-label={`Clear mapping for ${selectedTargetPath}`}
-              className="flex items-center gap-1 rounded border border-red-800/60 px-2 py-1 text-xs text-red-400 transition-colors hover:border-red-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500"
+              data-testid="reset-draft-btn"
+              onClick={handleResetDraftRequest}
+              aria-label="Reset current draft expression"
+              className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
             >
-              Clear
+              <RotateCcw size={12} aria-hidden="true" />
+              Reset draft
             </button>
           )}
 
