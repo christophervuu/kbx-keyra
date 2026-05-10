@@ -229,6 +229,8 @@ ui/
             detect-schema-format.test.ts  Unit tests for schema format detection heuristics (FS-013 T-02)
       mappings/           Mapping Editor (panels, expression builder, preview, AI features)
         index.ts          Feature barrel (re-exports hooks + components)
+        types.ts          Feature-shared mapping types (TargetFilter/TargetSort/EditorView, linked debug selection, comparison mode config)
+        types.test.ts     Type contract tests for mappings shared types (including FS-037 comparison types)
         components/       Editor page shell components
           index.ts        Components barrel
           ArgumentConfigurator.tsx    Renders one ArgumentSlot per function parameter; handles variadic "Add argument", known enum options (cast targetType), nestingLevel threading (T-06)
@@ -316,6 +318,20 @@ ui/
             ExecutionSummaryBar.test.tsx  Component tests (all state variants, diagnostic badge counts, zero-count suppression, rule stats formatting, aria-live)
             index.ts              Preview barrel (re-exports all preview components)
             PreviewPanel.tsx      Panel 5 shell: toolbar (Run/auto-run/trace), Test Case Manager, 4-tab bar (Output/Diagnostics/Trace/Diff), stats bar, empty/loading states, wired to usePreviewExecution (FS-012 T-06); accepts mappingId prop for test case scoping
+          comparison/       Comparison tab components (FS-037)
+            ComparisonModeSelector.tsx       Segmented mode selector: all 5 comparison modes as radio buttons, disabled+tooltip for unavailable modes, Phase 0 messaging, aria-checked, radiogroup role (FS-037 T-05)
+            ComparisonModeSelector.test.tsx  Component tests (all 5 modes rendered, selected mode aria-checked, onModeChange fires, disabled modes not clickable, Phase 0 all-disabled, mixed availability, reason tooltip, screen-reader text, labels)
+            EnvironmentMetadataBar.tsx       Compact metadata bar: client/server context badge (blue/green/amber/red), version, relative deployment timestamp with ISO tooltip, engine version, unsaved badge, saved-at timestamp (FS-037 T-06)
+            EnvironmentMetadataBar.test.tsx  Component tests (client badge, version format, no timestamp for client, unsaved badge, saved-at, server DEV/QA/PROD badges, snapshot version, deployment timestamp, engine version)
+            ComparisonSidePanel.tsx          Single comparison side panel: idle placeholder, executing spinner, success (metadata bar + JSON output), error (metadata bar + error message) (FS-037 T-06)
+            ComparisonSidePanel.test.tsx     Component tests (left/right test-ids, idle placeholder, executing spinner, success output, error message, fallback error text, metadata bar presence per state)
+            ComparisonDiffDisplay.tsx        Read-only diff display: idle/executing=null, one-side-null=cannot-compute, match=green indicator, diff=count+entry list with left/right labels, value truncation, color conventions matching DiffDisplay (FS-037 T-07)
+            ComparisonDiffDisplay.test.tsx   Component tests (idle/executing null, cannot-compute for null sides, match indicator, diff count, diff entries, label references, missing/extra field labels, value truncation)
+            CompareTab.tsx                   Composed Compare tab: mode selector + run button (top bar), two side panels (50/50 split), diff display (below), Save Comparison button (after run); wires useEnvironmentComparison; no deploy/promote/rollback elements (FS-037 T-08, T-09)
+            CompareTab.test.tsx              Component tests (renders all elements, run button disabled without source data, no deploy elements, idle side panels, mode selector, default mode selection, Save Comparison not shown before run)
+            ComparisonSnapshotView.tsx       Read-only snapshot indicator badge (GitCompare icon + count, aria-expanded) and expandable snapshot list (mode, timestamp, match/diff summary, left/right labels, delete button) (FS-037 T-09)
+            ComparisonSnapshotView.test.tsx  Component tests (indicator count/aria, onToggle, view empty state, snapshot item, match/diff summary, mode label, labels, onDelete)
+            index.ts                         Barrel export for all comparison components
             PreviewPanel.test.tsx Component tests (render, tabs, toolbar disabled states, ARIA)
             SourceDataInput.tsx   JSON textarea with 150ms debounced validation, inline error, publishes to PreviewContext, accepts initialValue for test case loading (FS-012 T-07)
             SourceDataInput.test.tsx Component tests (valid/invalid/empty states, debounce, aria-invalid, error clear)
@@ -359,6 +375,14 @@ ui/
           use-test-lab-layout.test.ts    Hook unit tests (defaults, breakpoint detection, togglePanel, output no-op at medium, trace auto-behavior, split ratio clamping, localStorage read/write/fallback, storage write failure)
           use-linked-debug-selection.ts  Linked debug selection state hook (FS-036 T-01): select/clear/isPathSelected/isRuleSelected; auto-clears on executionStatus === 'executing'
           use-linked-debug-selection.test.ts  Hook unit tests (select, clear, isPathSelected, isRuleSelected, auto-clear on executing, multiple runs)
+          use-server-preview.ts          Server-side preview hook (FS-037 T-02): wraps adapter.previewOnServer() with 10s timeout, Phase 0 offline detection (isAvailable), stable execute callback via ref pattern
+          use-server-preview.test.ts     Hook unit tests (idle state, success, timeout, Phase 0 offline error, sticky isAvailable=false, generic error, sequential calls, adapter call args)
+          use-deployment-context.ts      Deployment context hook (FS-037 T-03): loads DeploymentContext via adapter, derives per-environment status map, isModeAvailable() gates comparison modes by deploy status, refresh(), Phase 0 error → all env modes unavailable
+          use-deployment-context.test.ts Hook unit tests (load success, environmentStatus map, isModeAvailable per mode, Phase 0 error handling, current-vs-saved always available, refresh, all-deployed)
+          use-environment-comparison.ts  Comparison orchestration hook (FS-037 T-04): two-sided parallel execution via Promise.allSettled, client-side (working/saved config) and server-side (direct adapter call with 10s timeout), stale-run cancellation via runId ref, diff via computeDiff(), canRun gating
+          use-environment-comparison.test.ts Hook unit tests (idle state, canRun gating, current-vs-saved, diff on mismatch, server-side delegation, dual-server parallel, partial failure, JSON parse error, mode change reset, unavailable mode)
+          use-comparison-snapshots.ts    ComparisonSnapshot CRUD hook (FS-037 T-09): localStorage persistence under keyra:comparison-snapshots:{mappingId}, saveSnapshot (generates ID), snapshotsForTestCase filter, deleteSnapshot, deleteSnapshotsForTestCase
+          use-comparison-snapshots.test.ts Hook unit tests (init empty, save+persist, snapshotsForTestCase filter, deleteSnapshot, deleteSnapshotsForTestCase, load from storage, corrupted storage graceful fallback)
         context/          Feature-scoped React contexts
           preview-context.tsx  PreviewContext (read) + PreviewSettersContext (write) + PreviewProvider + usePreviewContext() + usePreviewSetters() (FS-012 T-03)
         lib/              Pure utility functions

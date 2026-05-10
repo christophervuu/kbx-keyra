@@ -2,6 +2,8 @@
 // Mappings feature — shared types
 // ---------------------------------------------------------------------------
 
+import type { ComparisonMode, Environment } from '@/lib/types';
+
 // ---------------------------------------------------------------------------
 // Linked debug selection (FS-036)
 // ---------------------------------------------------------------------------
@@ -78,3 +80,43 @@ export interface PreviewDiagnostic {
   /** Zero-based index of the affected rule (for navigation). */
   ruleIndex: number;
 }
+
+export interface ComparisonModeSideConfig {
+  readonly label: string;
+  readonly context: 'client' | 'server';
+  readonly environment?: Environment;
+}
+
+export interface ComparisonModeConfig {
+  readonly left: ComparisonModeSideConfig;
+  readonly right: ComparisonModeSideConfig;
+}
+
+/**
+ * Canonical comparison mode definitions:
+ * - Current = working config (includes unsaved changes)
+ * - Saved = latest persisted mapping version
+ * - DEV/QA/PROD = currently deployed snapshot in that environment
+ */
+export const COMPARISON_MODES: Readonly<Record<ComparisonMode, ComparisonModeConfig>> = {
+  'current-vs-saved': {
+    left: { label: 'Current', context: 'client' },
+    right: { label: 'Saved', context: 'client' },
+  },
+  'current-vs-dev': {
+    left: { label: 'Current', context: 'client' },
+    right: { label: 'DEV', context: 'server', environment: 'DEV' },
+  },
+  'current-vs-qa': {
+    left: { label: 'Current', context: 'client' },
+    right: { label: 'QA', context: 'server', environment: 'QA' },
+  },
+  'dev-vs-qa': {
+    left: { label: 'DEV', context: 'server', environment: 'DEV' },
+    right: { label: 'QA', context: 'server', environment: 'QA' },
+  },
+  'qa-vs-prod': {
+    left: { label: 'QA', context: 'server', environment: 'QA' },
+    right: { label: 'PROD', context: 'server', environment: 'PROD' },
+  },
+};

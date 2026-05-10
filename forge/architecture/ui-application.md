@@ -90,7 +90,7 @@ ui/src/
 
     mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023)
       index.ts                Feature barrel (components + hooks + utilities)
-      types.ts                TargetFilter, TargetSort, EditorView types
+      types.ts                Feature-shared mappings types: TargetFilter/TargetSort/EditorView, linked debug selection, and comparison mode config (`COMPARISON_MODES`)
       components/
         MappingEditorPage.tsx Three-column editor shell with draggable resize handles, persistent pixel widths, source expand strip, and bottom collapse/resize behavior (FS-022)
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
@@ -103,6 +103,14 @@ ui/src/
         InlinePreviewStrip.tsx Collapsed bar + expanded strip; unconditional auto-preview on Apply when sourceData is present; test case selector; output flash animation; Run disabled when sourceData empty (FS-022)
         ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
         TestLabPage.tsx      Full-page test lab: multi-panel simultaneous layout (2×2 wide, vertical stack medium, tab fallback narrow); resizable main split; ExecutionSummaryBar; ResultPanel wrappers; useTestLabLayout hook; own isolated PreviewProvider (FS-021 T-06, FS-032, FS-033)
+        comparison/
+          CompareTab.tsx               Compare tab composition: mode selector + run/save actions, side-by-side result panels, read-only diff, save-comparison flow
+          ComparisonModeSelector.tsx   Segmented comparison mode selector (5 modes, disabled+reason tooltip for unavailable modes)
+          ComparisonSidePanel.tsx      Single-side comparison renderer (idle/executing/success/error)
+          EnvironmentMetadataBar.tsx   Side metadata strip (execution context, env badge, version, timestamps, engine version)
+          ComparisonDiffDisplay.tsx    Read-only comparison diff renderer using `computeDiff`
+          ComparisonSnapshotView.tsx   Snapshot indicator + expandable read-only snapshot list
+          index.ts                     Comparison component barrel
         preview/
           ResultPanel.tsx      Reusable panel chrome: header (title + badge + collapse toggle) + content area; children always mounted; CSS hidden for collapse; ARIA aria-expanded on toggle (FS-033)
           ExecutionSummaryBar.tsx  Sticky compact bar: hidden when idle; executing (spinner); pass (green) | fail (red) | error (amber) verdict with duration, diagnostic severity badges, rules summary, version badge, environment badge, optional diff summary label; verdict derived via deriveExecutionVerdict (FS-033, FS-035)
@@ -151,6 +159,10 @@ ui/src/
         use-test-run-results.ts    Test run result persistence hook keyed by mappingId (FS-034 T-02, FS-035 T-05): recordResult/clearResult/clearAll; sessionStorage key keyra:test-results:{id}; results stored as Record<string, TestRunResult> for O(1) lookup; cleared on tab/window close
         use-batch-execution.ts     Sequential batch execution hook (FS-034 T-05): runAll/rerunFailed/cancel; pass/fail/error from error diagnostics or engine throw; onCaseComplete callback; cancellation ref; unmount cleanup
         use-test-lab-layout.ts     Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence (keyra:testlab-layout) (FS-033)
+        use-server-preview.ts      Server preview wrapper hook: `adapter.previewOnServer` with 10s timeout and Phase 0 `isAvailable` gating
+        use-deployment-context.ts  Deployment context loader + per-mode availability derivation for comparison workflows
+        use-environment-comparison.ts Two-sided comparison orchestration (parallel side execution, progressive state, diff computation)
+        use-comparison-snapshots.ts Comparison snapshot CRUD hook (`keyra:comparison-snapshots:{mappingId}`), linked by `testCaseId`
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
       lib/
@@ -817,6 +829,154 @@ Storage key: `keyra:test-results:{mappingId}` (sessionStorage) — stored as `Re
 - After `runAll` or `rerunFailed` completes, `TestLabInner` computes `{ passed, failed }` from the updated `runResults` and passes it to `TestCaseListPanel` as `batchState.summary`
 - Summary is shown inline in the batch toolbar row; cleared when a new batch starts
 - `SuiteSummaryRows` are also populated after batch completion and rendered above the tab content
+
+### Comparison Workflow Architecture (FS-037)
+
+FS-037 extends Test Lab with an environment-aware **Compare** workflow that executes two contexts side-by-side and computes a read-only structural diff.
+
+#### Type model
+
+Core comparison types are defined in `ui/src/lib/types/domain.ts` and mode config lives in `ui/src/features/mappings/types.ts`.
+
+- `ComparisonMode` (union):
+  - `'current-vs-saved'`
+  - `'current-vs-dev'`
+  - `'current-vs-qa'`
+  - `'dev-vs-qa'`
+  - `'qa-vs-prod'`
+- `COMPARISON_MODES: Record<ComparisonMode, ComparisonModeConfig>` defines left/right labels, execution context (`client | server`), and optional environment.
+- `ComparisonSideMetadata` captures execution provenance per side:
+  - execution context, environment (when server), config/snapshot version, deploy/saved timestamps, engine version, unsaved-change marker.
+- `ComparisonSideResult` captures one side's runtime result:
+  - `label`, `status` (`idle | executing | success | error`), `metadata`, `output`, `diagnostics`, optional `error`.
+- `ComparisonState` is the two-sided aggregate:
+  - `{ mode, left, right, diffEntries, overallStatus }` where `overallStatus` is `idle | executing | complete | partial-error`.
+- `ComparisonSnapshot` is a persisted historical record:
+  - independent record with `{ id, testCaseId, mappingId, mode, leftResult, rightResult, diffEntries, capturedAt }`.
+
+Relationship model:
+- `ComparisonState` is ephemeral UI state for the current run.
+- `ComparisonSnapshot` is historical persisted state linked to a test case via `testCaseId` (not embedded on `TestCase`).
+
+#### Hook contracts
+
+**`useServerPreview(mappingId, environment)`** (`ui/src/features/mappings/hooks/use-server-preview.ts`)
+
+- Purpose: wrapper over `adapter.previewOnServer` with timeout and offline/availability handling.
+- Inputs: `mappingId`, `environment`.
+- Outputs:
+  - `preview(sourceData)` async action,
+  - `isAvailable` (sticky false after offline-mode failures in Phase 0),
+  - execution/error state.
+- Behavior:
+  - applies 10s timeout boundary,
+  - maps Phase 0 adapter errors (`Not available in offline mode`) to unavailable state + user-facing messaging,
+  - keeps callback stable using ref-updated params pattern.
+
+**`useDeploymentContext(mappingId)`** (`ui/src/features/mappings/hooks/use-deployment-context.ts`)
+
+- Purpose: load deployment context and derive comparison mode availability.
+- Inputs: `mappingId`.
+- Outputs:
+  - `deploymentContext`, `isLoading`, `error`,
+  - `environmentStatus: Map<Environment, DeploymentEnvironmentStatus>`,
+  - `isModeAvailable(mode)`,
+  - `refresh()`.
+- Behavior:
+  - `current-vs-saved` is always available,
+  - environment modes require corresponding env status `=== 'deployed'`,
+  - Phase 0 adapter failures make all environment modes unavailable with reason messaging.
+
+**`useEnvironmentComparison(params)`** (`ui/src/features/mappings/hooks/use-environment-comparison.ts`)
+
+- Inputs:
+  - `{ mappingId, config, sourceSchemaDetail, targetSchemaDetail, sourceDataRaw }`.
+- Outputs:
+  - `{ state, mode, setMode, runComparison, canRun, modeAvailability }`.
+- Execution model:
+  1. parse and validate `sourceDataRaw` as JSON object,
+  2. set both sides to `executing`,
+  3. dispatch left/right side executions in parallel via `Promise.allSettled`,
+  4. execute client sides with `executeMapping` (working config or fresh-loaded saved config),
+  5. execute server sides with direct `adapter.previewOnServer` + 10s timeout,
+  6. ignore stale runs using incrementing `runId` ref cancellation,
+  7. compute diff via `computeDiff(left.output, right.output)` when both succeed,
+  8. publish final `ComparisonState` (`complete` or `partial-error`).
+- Progressive state updates are explicit: idle -> executing -> final state.
+
+**`useComparisonSnapshots(mappingId)`** (`ui/src/features/mappings/hooks/use-comparison-snapshots.ts`)
+
+- Purpose: persistent CRUD for historical comparison snapshots.
+- Outputs:
+  - `snapshots`,
+  - `snapshotsForTestCase(testCaseId)`,
+  - `saveSnapshot(snapshotWithoutId)`,
+  - `deleteSnapshot(snapshotId)`,
+  - `deleteSnapshotsForTestCase(testCaseId)`.
+
+#### Compare tab composition and hierarchy
+
+At narrow breakpoint, Test Lab tab bar adds `Compare` as the 5th tab. Compare consumes the same `sourceDataRaw` state as Output/Diff/Diagnostics/Trace (single source-of-truth via Test Lab page state + PreviewProvider boundary).
+
+Hierarchy:
+
+```text
+CompareTab
+├── ComparisonModeSelector
+├── ComparisonSidePanel (left)
+│   └── EnvironmentMetadataBar
+├── ComparisonSidePanel (right)
+│   └── EnvironmentMetadataBar
+├── ComparisonDiffDisplay
+└── Save Comparison flow (inline in Compare top bar)
+```
+
+Layout pattern:
+- top row: mode selector + run/save actions,
+- center: 50/50 side-by-side result panels,
+- bottom: read-only diff section.
+
+Diff integration:
+- Compare uses `ComparisonDiffDisplay`, which delegates structural comparison to shared `computeDiff`.
+- idle/executing renders no diff content; completed runs render either match indicator, cannot-compute state, or categorized differences list.
+
+#### Phase 0 gating pattern
+
+Comparison environment access follows Phase 0 offline boundaries:
+
+- `useDeploymentContext.isModeAvailable(mode)` gates server-backed modes.
+- `useServerPreview.isAvailable` transitions to unavailable when adapter throws offline-mode errors.
+- UI behavior:
+  - unavailable modes are disabled in `ComparisonModeSelector`,
+  - disabled modes show reason tooltips,
+  - `Run Comparison` is gated by source-data presence, mode availability, and execution state.
+
+This mirrors the adapter boundary rule: observation-only server preview is allowed only when adapter supports it; Phase 0 keeps environment comparisons disabled except `current-vs-saved`.
+
+#### Guardrails (observation-only)
+
+Compare tab is read-only for environment state:
+
+- No deploy/promote/rollback actions are rendered in Compare UI.
+- All environment interaction is preview/read access (`getDeploymentContext`, `previewOnServer`) only.
+- No mutation operations are invoked from comparison workflow.
+
+#### Snapshot storage model (separate from TestCase)
+
+`ComparisonSnapshot` persistence is intentionally independent from test-case persistence (Q2 resolution):
+
+- Test case key: `keyra:testcases:{mappingId}`.
+- Comparison snapshot key: `keyra:comparison-snapshots:{mappingId}`.
+- Linking key: `ComparisonSnapshot.testCaseId`.
+- `TestCase` type is not extended with embedded comparison data.
+
+Save flow in Compare:
+- existing selected test case -> save snapshot linked to that `testCaseId`,
+- scratchpad (no selected test case) -> create new test case first, then save linked snapshot.
+
+Test-case list integration:
+- rows display snapshot indicator (icon + count) when linked snapshots exist,
+- expandable read-only snapshot view shows mode, capture time, match/diff summary, side labels, and delete action.
 
 ### Diff Infrastructure and Diff-First UX (FS-035)
 

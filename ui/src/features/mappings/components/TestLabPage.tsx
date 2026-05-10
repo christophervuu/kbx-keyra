@@ -15,6 +15,7 @@ import {
   TraceDisplay,
 } from './preview';
 import type { BatchState, SuiteSummaryRow } from './preview';
+import { CompareTab } from './comparison';
 import { PreviewProvider } from '../context/preview-context';
 import { usePreviewExecution } from '../hooks/use-preview-execution';
 import { useMappingEditor } from '../hooks/use-mapping-editor';
@@ -23,6 +24,7 @@ import { useTestCases } from '../hooks/use-test-cases';
 import { useTestRunResults } from '../hooks/use-test-run-results';
 import { useBatchExecution } from '../hooks/use-batch-execution';
 import { useLinkedDebugSelection } from '../hooks/use-linked-debug-selection';
+import { useComparisonSnapshots } from '../hooks/use-comparison-snapshots';
 import { computeDiff } from '@/lib/utils/json-diff';
 import { formatDiffSummary } from '../lib/execution-result-utils';
 import { explainDiagnostic } from '../lib/failure-explainer';
@@ -40,13 +42,14 @@ export interface TestLabPageProps {
 }
 
 // Narrow fallback tab layout
-type TabId = 'output' | 'diagnostics' | 'trace' | 'diff';
+type TabId = 'output' | 'diagnostics' | 'trace' | 'diff' | 'compare';
 
 const TABS: readonly { id: TabId; label: string }[] = [
   { id: 'output', label: 'Output' },
   { id: 'diagnostics', label: 'Diagnostics' },
   { id: 'trace', label: 'Trace' },
   { id: 'diff', label: 'Diff' },
+  { id: 'compare', label: 'Compare' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -252,6 +255,15 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   const { testCases, saveTestCase, renameTestCase, duplicateTestCase, deleteTestCase } =
     useTestCases(mappingId);
 
+  // Comparison snapshots
+  const { saveSnapshot, deleteSnapshot, deleteSnapshotsForTestCase, snapshotsForTestCase } =
+    useComparisonSnapshots(mappingId);
+
+  // Build snapshotsByTestCase map for TestCaseListPanel
+  const snapshotsByTestCase = Object.fromEntries(
+    testCases.map((tc) => [tc.id, snapshotsForTestCase(tc.id)]),
+  );
+
   // Run results
   const { results: runResults, recordResult, clearResult } = useTestRunResults(mappingId);
 
@@ -351,6 +363,13 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   // ---------------------------------------------------------------------------
   // Batch handlers
   // ---------------------------------------------------------------------------
+
+  // Called by CompareTab when saving a comparison with no test case loaded
+  function handleSaveNewTestCaseForComparison(name: string, sourceData: string): string | null {
+    const result = saveTestCase({ name, sourceData });
+    if (!result.success || result.id === undefined) return null;
+    return result.id;
+  }
 
   async function handleRunAll() {
     setBatchSummary(null);
@@ -602,6 +621,26 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
             data-testid="tabpanel-diff"
           >
             {diffContent()}
+          </div>
+          <div
+            role="tabpanel"
+            id="atp-tabpanel-compare"
+            aria-labelledby="atp-tab-compare"
+            hidden={activeTab !== 'compare'}
+            data-testid="tabpanel-compare"
+          >
+            {activeTab === 'compare' && (
+              <CompareTab
+                mappingId={mappingId}
+                config={editor.config}
+                sourceSchemaDetail={editor.sourceSchemaDetail}
+                targetSchemaDetail={editor.targetSchemaDetail}
+                sourceDataRaw={sourceDataRaw}
+                selectedTestCaseId={selectedTestCaseId}
+                onSaveNewTestCase={handleSaveNewTestCaseForComparison}
+                onSaveSnapshot={saveSnapshot}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -929,6 +968,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
               onDelete={(id) => {
                 deleteTestCase(id);
                 clearResult(id);
+                deleteSnapshotsForTestCase(id);
                 if (selectedTestCaseId === id) handleSelectScratchpad();
               }}
               onAddNew={handleAddNew}
@@ -938,6 +978,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
               onRerunFailed={() => { void handleRerunFailed(); }}
               onCancel={cancel}
               batchState={batchState}
+              snapshotsByTestCase={snapshotsByTestCase}
+              onDeleteSnapshot={deleteSnapshot}
             />
           </div>
 

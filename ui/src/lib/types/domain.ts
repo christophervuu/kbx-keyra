@@ -1,5 +1,7 @@
 import type { ExecutionResult } from '@keyra/engine';
 
+import type { DiffEntry } from './diff';
+
 export type ISODateString = string;
 
 export type Environment = 'DEV' | 'QA' | 'PROD';
@@ -396,6 +398,52 @@ export interface TestRunResult {
   readonly executedAt: ISODateString;
   readonly durationMs: number;
   readonly outputSnapshot?: unknown;
+}
+
+export type ComparisonMode =
+  | 'current-vs-saved'
+  | 'current-vs-dev'
+  | 'current-vs-qa'
+  | 'dev-vs-qa'
+  | 'qa-vs-prod';
+
+export interface ComparisonSideMetadata {
+  readonly executionContext: 'client' | 'server';
+  readonly environment?: Environment;
+  readonly configVersion: number;
+  readonly snapshotVersion?: number;
+  readonly deployedAt?: ISODateString;
+  readonly engineVersion: string;
+  readonly savedAt?: ISODateString;
+  readonly hasUnsavedChanges?: boolean;
+}
+
+export interface ComparisonSideResult {
+  readonly label: string;
+  readonly output: Readonly<Record<string, unknown>> | null;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly metadata: ComparisonSideMetadata;
+  readonly status: 'idle' | 'executing' | 'success' | 'error';
+  readonly error?: string;
+}
+
+export interface ComparisonState {
+  readonly mode: ComparisonMode;
+  readonly left: ComparisonSideResult;
+  readonly right: ComparisonSideResult;
+  readonly diffEntries: readonly DiffEntry[] | null;
+  readonly overallStatus: 'idle' | 'executing' | 'complete' | 'partial-error';
+}
+
+export interface ComparisonSnapshot {
+  readonly id: string;
+  readonly testCaseId: string;
+  readonly mappingId: string;
+  readonly mode: ComparisonMode;
+  readonly leftResult: ComparisonSideResult;
+  readonly rightResult: ComparisonSideResult;
+  readonly diffEntries: readonly DiffEntry[];
+  readonly capturedAt: ISODateString;
 }
 
 export interface PreviewContextValue {

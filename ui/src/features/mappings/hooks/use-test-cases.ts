@@ -69,6 +69,8 @@ export interface SaveTestCaseParams {
 
 export interface SaveTestCaseResult {
   success: boolean;
+  /** The ID of the newly created test case (only present on success) */
+  id?: string;
   error?: string;
 }
 
@@ -147,7 +149,7 @@ export function useTestCases(mappingId: string): UseTestCasesResult {
       }
 
       setTestCases(updated);
-      return { success: true };
+      return { success: true, id: newCase.id };
     },
     [mappingId, testCases],
   );

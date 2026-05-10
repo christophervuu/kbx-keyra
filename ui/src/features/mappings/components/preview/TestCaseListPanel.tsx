@@ -1,7 +1,11 @@
 import { useRef, useState } from 'react';
 import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
-import type { TestCase, TestRunResult } from '@/lib/types/domain';
+import type { ComparisonSnapshot, TestCase, TestRunResult } from '@/lib/types/domain';
+import {
+  ComparisonSnapshotIndicator,
+  ComparisonSnapshotView,
+} from '../comparison/ComparisonSnapshotView';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -66,6 +70,15 @@ export interface TestCaseListPanelProps {
    * Optional slot rendered below the batch toolbar row.
    */
   toolbarSlot?: React.ReactNode;
+  /**
+   * Map of testCaseId → comparison snapshots for that test case.
+   * Used to show the comparison indicator badge on rows with linked snapshots.
+   */
+  snapshotsByTestCase?: Readonly<Record<string, ComparisonSnapshot[]>>;
+  /**
+   * Called when the user deletes a comparison snapshot from the row view.
+   */
+  onDeleteSnapshot?: (snapshotId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +169,8 @@ export function TestCaseListPanel({
   onCancel,
   batchState,
   toolbarSlot,
+  snapshotsByTestCase = {},
+  onDeleteSnapshot,
 }: TestCaseListPanelProps) {
   // Inline rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -168,6 +183,21 @@ export function TestCaseListPanel({
   // Save As inline flow state
   const [isSavingAs, setIsSavingAs] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
+
+  // Expanded snapshot rows
+  const [expandedSnapshotIds, setExpandedSnapshotIds] = useState<Set<string>>(new Set());
+
+  function toggleSnapshotExpanded(id: string) {
+    setExpandedSnapshotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
 
   const isScratchpadSelected = selectedId === null;
   const canSaveAs = isScratchpadSelected && sourceDataRaw !== null && sourceDataRaw.trim() !== '';
@@ -507,6 +537,14 @@ export function TestCaseListPanel({
                     {/* Action buttons — visible on hover / focus-within */}
                     {!isRenaming && (
                       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                        {/* Comparison snapshot indicator */}
+                        {(snapshotsByTestCase[tc.id]?.length ?? 0) > 0 && (
+                          <ComparisonSnapshotIndicator
+                            count={snapshotsByTestCase[tc.id].length}
+                            expanded={expandedSnapshotIds.has(tc.id)}
+                            onToggle={() => { toggleSnapshotExpanded(tc.id); }}
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() => { onDuplicate(tc.id); }}
@@ -556,6 +594,14 @@ export function TestCaseListPanel({
                     <div className="pl-4 text-zinc-600">
                       {formatRelativeTime(result.executedAt)}
                     </div>
+                  )}
+
+                  {/* Comparison snapshot view — expanded when indicator is clicked */}
+                  {expandedSnapshotIds.has(tc.id) && (
+                    <ComparisonSnapshotView
+                      snapshots={snapshotsByTestCase[tc.id] ?? []}
+                      onDelete={(snapshotId) => { onDeleteSnapshot?.(snapshotId); }}
+                    />
                   )}
                 </>
               )}

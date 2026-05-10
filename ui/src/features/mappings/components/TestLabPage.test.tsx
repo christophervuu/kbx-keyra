@@ -511,4 +511,84 @@ describe('TestLabPage', () => {
     expect(screen.getByTestId('test-lab-page')).toBeInTheDocument();
     expect(screen.getByTestId('left-panel')).toHaveStyle({ width: '35%' });
   });
+
+  // ---------------------------------------------------------------------------
+  // Compare tab — narrow viewport (tab bar visible)
+  // ---------------------------------------------------------------------------
+
+  describe('Compare tab (narrow viewport)', () => {
+    beforeEach(() => {
+      mockMatchMedia(false, false);
+    });
+
+    it('renders the Compare tab in the tab bar', () => {
+      renderComponent();
+      expect(screen.getByTestId('tab-compare')).toBeInTheDocument();
+    });
+
+    it('Compare tab has correct label', () => {
+      renderComponent();
+      expect(screen.getByTestId('tab-compare')).toHaveTextContent('Compare');
+    });
+
+    it('Compare tab is the 5th tab', () => {
+      renderComponent();
+      const tabList = screen.getByRole('tablist');
+      const tabs = tabList.querySelectorAll('[role="tab"]');
+      expect(tabs).toHaveLength(5);
+      expect(tabs[4]).toHaveAttribute('data-testid', 'tab-compare');
+    });
+
+    it('clicking Compare tab switches to comparison view', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      expect(screen.getByTestId('compare-tab')).toBeInTheDocument();
+    });
+
+    it('Compare tab is not selected by default', () => {
+      renderComponent();
+      expect(screen.getByTestId('tab-compare')).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('Compare tab becomes selected after clicking', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      expect(screen.getByTestId('tab-compare')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('switching back to Output tab after Compare still works', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      fireEvent.click(screen.getByTestId('tab-output'));
+      expect(screen.getByTestId('tab-output')).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('tab-compare')).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('other tabs still render after switching to Compare and back', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      fireEvent.click(screen.getByTestId('tab-diagnostics'));
+      expect(screen.getByTestId('tab-diagnostics')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('Compare tab panel contains the compare-run-btn', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      expect(screen.getByTestId('compare-run-btn')).toBeInTheDocument();
+    });
+
+    it('Compare tab panel contains the comparison mode selector', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      expect(screen.getByTestId('comparison-mode-selector')).toBeInTheDocument();
+    });
+
+    it('Compare tab does not contain deploy/promote/rollback elements', () => {
+      renderComponent();
+      fireEvent.click(screen.getByTestId('tab-compare'));
+      expect(screen.queryByText(/deploy/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/promote/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/rollback/i)).not.toBeInTheDocument();
+    });
+  });
 });
