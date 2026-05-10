@@ -41,4 +41,6 @@ export { useTestRunResults } from './use-test-run-results';
 export type { UseTestRunResultsResult } from './use-test-run-results';
 export { useBatchExecution } from './use-batch-execution';
 export type { UseBatchExecutionOptions, UseBatchExecutionResult, BatchProgress } from './use-batch-execution';
+export { useLinkedDebugSelection } from './use-linked-debug-selection';
+export type { UseLinkedDebugSelectionResult } from './use-linked-debug-selection';
 

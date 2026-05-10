@@ -1,10 +1,11 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 
 import { DiffDisplay } from './DiffDisplay';
 import type { PreviewExecutionState } from '@/lib/types/domain';
 import type { ExecutionResult } from '@keyra/engine';
+import type { DebugSelection } from '@/features/mappings/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -22,8 +23,11 @@ function makeSuccessState(output: unknown): PreviewExecutionState {
   };
 }
 
-function renderDiff(state: PreviewExecutionState) {
-  return render(createElement(DiffDisplay, { state }));
+function renderDiff(
+  state: PreviewExecutionState,
+  extra?: Partial<React.ComponentProps<typeof DiffDisplay>>,
+) {
+  return render(createElement(DiffDisplay, { state, ...extra }));
 }
 
 function getExpectedInput() {
@@ -276,5 +280,102 @@ describe('DiffDisplay', () => {
     expect(entry.getAttribute('data-entry-type')).toBe('value_mismatch');
     expect(entry).toHaveTextContent('80');
     expect(entry).toHaveTextContent('100');
+  });
+
+  // -------------------------------------------------------------------------
+  // T-05: click-to-select and highlight
+  // -------------------------------------------------------------------------
+
+  it('clicking a diff entry fires onSelect with correct DebugSelection', () => {
+    const onSelect = vi.fn<[DebugSelection], void>();
+    renderDiff(makeSuccessState({ name: 'Alice' }), { onSelect });
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob' }) },
+    });
+
+    fireEvent.click(screen.getByTestId('diff-entry-0'));
+
+    expect(onSelect).toHaveBeenCalledOnce();
+    const call = onSelect.mock.calls[0][0];
+    expect(call.source).toBe('diff');
+    expect(call.targetPath).toBe('name');
+    expect(call.ruleIndex).toBeUndefined();
+  });
+
+  it('keyboard Enter on a diff entry fires onSelect', () => {
+    const onSelect = vi.fn<[DebugSelection], void>();
+    renderDiff(makeSuccessState({ name: 'Alice' }), { onSelect });
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob' }) },
+    });
+
+    fireEvent.keyDown(screen.getByTestId('diff-entry-0'), { key: 'Enter' });
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it('diff entry has role=button when onSelect is provided', () => {
+    const onSelect = vi.fn();
+    renderDiff(makeSuccessState({ name: 'Alice' }), { onSelect });
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob' }) },
+    });
+
+    expect(screen.getByTestId('diff-entry-0')).toHaveAttribute('role', 'button');
+  });
+
+  it('without onSelect, diff entries are not clickable (no role=button)', () => {
+    renderDiff(makeSuccessState({ name: 'Alice' }));
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob' }) },
+    });
+
+    expect(screen.getByTestId('diff-entry-0')).not.toHaveAttribute('role', 'button');
+  });
+
+  it('diff entry matching selectedTargetPath renders highlight class', () => {
+    const onSelect = vi.fn();
+    renderDiff(makeSuccessState({ name: 'Alice', age: 30 }), {
+      onSelect,
+      selectedTargetPath: 'name',
+    });
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob', age: 30 }) },
+    });
+
+    const highlighted = screen.getByTestId('diff-entry-0');
+    expect(highlighted.className).toContain('ring-2');
+    expect(highlighted.className).toContain('ring-white/30');
+  });
+
+  it('diff entry not matching selectedTargetPath does not render highlight class', () => {
+    const onSelect = vi.fn();
+    renderDiff(makeSuccessState({ name: 'Alice', score: 80 }), {
+      onSelect,
+      selectedTargetPath: 'other.path',
+    });
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob', score: 80 }) },
+    });
+
+    const entry = screen.getByTestId('diff-entry-0');
+    expect(entry.className).not.toContain('ring-white/30');
+  });
+
+  it('without selectedTargetPath, no highlight applied', () => {
+    const onSelect = vi.fn();
+    renderDiff(makeSuccessState({ name: 'Alice' }), { onSelect });
+
+    fireEvent.change(getExpectedInput(), {
+      target: { value: JSON.stringify({ name: 'Bob' }) },
+    });
+
+    const entry = screen.getByTestId('diff-entry-0');
+    expect(entry.className).not.toContain('ring-white/30');
   });
 });

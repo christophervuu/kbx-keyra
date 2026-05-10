@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   MinusCircle,
   PlusCircle,
@@ -11,6 +11,7 @@ import {
 
 import type { DiffEntry, DiffSummary } from '@/lib/types/diff';
 import type { PreviewExecutionState } from '@/lib/types/domain';
+import type { DebugSelection } from '@/features/mappings/types';
 import { computeDiff } from '@/lib/utils/json-diff';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,10 @@ export interface DiffDisplayProps {
    * Passes the raw string when JSON is valid, null when invalid or empty.
    */
   onExpectedRawChange?: (raw: string | null) => void;
+  /** Called when the user clicks a diff entry to initiate linked selection. */
+  onSelect?: (selection: DebugSelection) => void;
+  /** The targetPath of the currently active linked selection (from another panel). */
+  selectedTargetPath?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,17 +148,62 @@ function DiffSummaryHeader({ summary }: DiffSummaryHeaderProps) {
 interface DiffEntryRowProps {
   entry: DiffEntry;
   index: number;
+  isSelected: boolean;
+  scrollIntoView: boolean;
+  onSelect?: (selection: DebugSelection) => void;
 }
 
-function DiffEntryRow({ entry, index }: DiffEntryRowProps) {
+function DiffEntryRow({ entry, index, isSelected, scrollIntoView, onSelect }: DiffEntryRowProps) {
   const meta = CATEGORY_META[entry.type];
   const { Icon } = meta;
+  const rowRef = useRef<HTMLLIElement>(null);
+
+  // Auto-scroll when externally selected
+  useEffect(() => {
+    if (scrollIntoView && rowRef.current) {
+      rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [scrollIntoView]);
+
+  const handleClick = useCallback(() => {
+    if (!onSelect) return;
+    onSelect({ targetPath: entry.path, ruleIndex: undefined, source: 'diff' });
+  }, [onSelect, entry.path]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleClick();
+      }
+    },
+    [handleClick],
+  );
+
+  const interactiveProps = onSelect
+    ? {
+        role: 'button' as const,
+        tabIndex: 0,
+        onClick: handleClick,
+        onKeyDown: handleKeyDown,
+        'aria-pressed': isSelected,
+        className: [
+          `px-3 py-2.5 text-xs ${meta.rowClass}`,
+          'cursor-pointer transition-colors',
+          isSelected ? 'ring-2 ring-inset ring-white/30' : '',
+        ].join(' '),
+      }
+    : {
+        className: `px-3 py-2.5 text-xs ${meta.rowClass}`,
+      };
 
   return (
     <li
-      className={`px-3 py-2.5 text-xs ${meta.rowClass}`}
+      ref={rowRef}
       data-testid={`diff-entry-${index}`}
       data-entry-type={entry.type}
+      data-selected={isSelected || undefined}
+      {...interactiveProps}
     >
       {/* Category badge */}
       <div className={`mb-1 flex items-center gap-1 font-semibold ${meta.textClass}`}>
@@ -267,7 +317,7 @@ function ExpectedInput({ value, onChange, error }: ExpectedInputProps) {
  * execution result using `computeDiff`. Renders color-coded structural diff
  * entries with categorized mismatch types and a summary header (FS-035 T-02).
  */
-export function DiffDisplay({ state, initialExpectedOutput, onExpectedRawChange }: DiffDisplayProps) {
+export function DiffDisplay({ state, initialExpectedOutput, onExpectedRawChange, onSelect, selectedTargetPath }: DiffDisplayProps) {
   const [expectedRaw, setExpectedRaw] = useState(initialExpectedOutput ?? '');
   const [expectedError, setExpectedError] = useState<string | null>(null);
   const [expectedParsed, setExpectedParsed] = useState<unknown>(() => {
@@ -398,7 +448,16 @@ export function DiffDisplay({ state, initialExpectedOutput, onExpectedRawChange 
                   data-testid="diff-entries-list"
                 >
                   {diffResult.entries.map((entry, i) => (
-                    <DiffEntryRow key={i} entry={entry} index={i} />
+                    <DiffEntryRow
+                      key={i}
+                      entry={entry}
+                      index={i}
+                      isSelected={selectedTargetPath != null && entry.path === selectedTargetPath}
+                      scrollIntoView={
+                        selectedTargetPath != null && entry.path === selectedTargetPath
+                      }
+                      onSelect={onSelect}
+                    />
                   ))}
                 </ul>
               </>

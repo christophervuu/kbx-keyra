@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useBlocker, useParams } from 'react-router-dom';
+import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 
 import { Button } from '@/components';
@@ -117,6 +117,8 @@ export default function MappingEditor() {
     projectId: string;
     mappingId: string;
   }>();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // ---------------------------------------------------------------------------
   // Inline preview strip state
@@ -172,6 +174,17 @@ export default function MappingEditor() {
   // Target View selection state
   // ---------------------------------------------------------------------------
   const [selectedTargetPath, setSelectedTargetPath] = useState<string | null>(null);
+
+  // Consume jump-to-rule route state from TestLabPage (FS-036 T-07)
+  useEffect(() => {
+    const incomingPath = (location.state as Record<string, unknown> | null)?.selectedTargetPath;
+    if (incomingPath && typeof incomingPath === 'string') {
+      setSelectedTargetPath(incomingPath);
+      // Clear the state to prevent stale re-application on refresh
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally run only on mount
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Rules View selection state

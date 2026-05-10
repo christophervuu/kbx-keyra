@@ -357,6 +357,8 @@ ui/
           use-batch-execution.test.ts    Hook unit tests (sequential execution, pass/fail, invalid JSON, engine throw, config null, onCaseComplete, rerunFailed filter, cancellation)
           use-test-lab-layout.ts         Test Lab multi-panel layout state: breakpoint detection (wide/medium/narrow via matchMedia), panel collapsed states, split ratios (mainSplit/columnSplit/rowSplit), trace auto-expand/collapse, localStorage persistence under keyra:testlab-layout (FS-033)
           use-test-lab-layout.test.ts    Hook unit tests (defaults, breakpoint detection, togglePanel, output no-op at medium, trace auto-behavior, split ratio clamping, localStorage read/write/fallback, storage write failure)
+          use-linked-debug-selection.ts  Linked debug selection state hook (FS-036 T-01): select/clear/isPathSelected/isRuleSelected; auto-clears on executionStatus === 'executing'
+          use-linked-debug-selection.test.ts  Hook unit tests (select, clear, isPathSelected, isRuleSelected, auto-clear on executing, multiple runs)
         context/          Feature-scoped React contexts
           preview-context.tsx  PreviewContext (read) + PreviewSettersContext (write) + PreviewProvider + usePreviewContext() + usePreviewSetters() (FS-012 T-03)
         lib/              Pure utility functions
@@ -384,6 +386,8 @@ ui/
           infer-rule-type.ts         Maps outermost expression function name to display label
           infer-rule-type.test.ts    Unit tests (14 tests: all rule type patterns)
           execution-result-utils.ts  deriveExecutionVerdict (idle/executing/pass/fail/error from PreviewExecutionState + optional DiffResult) + formatDiffSummary (human-readable diff summary label) (FS-035 T-03, T-04)
+          failure-explainer.ts       explainDiagnostic() — pattern-matches Diagnostic + optional TraceEntry to produce FailureExplanation (summary + suggestion); 5 patterns: null+source, type mismatch, missing path, unknown function, general null (FS-036 T-08)
+          failure-explainer.test.ts  Unit tests for all 5 patterns + no-match case + edge cases
       deployments/        Deployment Page (mapping-level and project-level)
       templates/          Template Library
       settings/           Global Settings

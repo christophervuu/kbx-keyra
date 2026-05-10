@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
-import { ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertCircle, ArrowUpRight } from 'lucide-react';
 
 import {
   DiagnosticsDisplay,
@@ -22,8 +22,10 @@ import { useTestLabLayout } from '../hooks/use-test-lab-layout';
 import { useTestCases } from '../hooks/use-test-cases';
 import { useTestRunResults } from '../hooks/use-test-run-results';
 import { useBatchExecution } from '../hooks/use-batch-execution';
+import { useLinkedDebugSelection } from '../hooks/use-linked-debug-selection';
 import { computeDiff } from '@/lib/utils/json-diff';
 import { formatDiffSummary } from '../lib/execution-result-utils';
+import { explainDiagnostic } from '../lib/failure-explainer';
 
 import type { DiffResult } from '@/lib/types/diff';
 import type { TestCase, TestRunResult } from '@/lib/types/domain';
@@ -185,6 +187,7 @@ function PanelLoadingState() {
 
 function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   const editor = useMappingEditor(mappingId);
+  const navigate = useNavigate();
 
   const [sourceDataRaw, setSourceDataRaw] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
@@ -212,6 +215,9 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     targetSchemaDetail: editor.targetSchemaDetail,
     sourceDataRaw,
   });
+
+  // Linked cross-panel debug selection (FS-036)
+  const debugSelection = useLinkedDebugSelection(state.status);
 
   const { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit } = useTestLabLayout({
     traceEnabled,
@@ -418,7 +424,15 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
       return (
         <PanelEmptyState message="Enter source data and click Run to see the mapping output." />
       );
-    return <OutputDisplay state={state} />;
+    return (
+      <OutputDisplay
+        state={state}
+        highlightPath={debugSelection.selection?.targetPath ?? null}
+        onPathClick={(path) =>
+          debugSelection.select({ targetPath: path, ruleIndex: undefined, source: 'output' })
+        }
+      />
+    );
   }
 
   function diffContent() {
@@ -431,6 +445,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
         state={state}
         initialExpectedOutput={loadedExpectedOutput}
         onExpectedRawChange={setCurrentExpectedOutput}
+        onSelect={debugSelection.select}
+        selectedTargetPath={debugSelection.selection?.targetPath ?? null}
       />
     );
   }
@@ -439,7 +455,16 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     if (isExecuting) return <PanelLoadingState />;
     if (!hasAnyResult)
       return <PanelEmptyState message="No diagnostics from the last execution." />;
-    return <DiagnosticsDisplay state={state} />;
+    return (
+      <DiagnosticsDisplay
+        state={state}
+        onSelect={debugSelection.select}
+        selectedTargetPath={debugSelection.selection?.targetPath ?? null}
+        selectedRuleIndex={debugSelection.selection?.ruleIndex ?? null}
+        explainDiagnostic={explainDiagnostic}
+        traceEntries={state.status === 'success' ? (state.result.trace ?? undefined) : undefined}
+      />
+    );
   }
 
   function traceContent() {
@@ -456,6 +481,10 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
       <TraceDisplay
         trace={state.status === 'success' ? (state.result.trace ?? []) : undefined}
         traceEnabled={traceEnabled}
+        onSelect={debugSelection.select}
+        selectedRuleIndex={debugSelection.selection?.ruleIndex ?? null}
+        selectedTargetPath={debugSelection.selection?.targetPath ?? null}
+        selectionSource={debugSelection.selection?.source ?? null}
       />
     );
   }
@@ -790,6 +819,26 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
         </Link>
 
         <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
+
+        {/* Jump to rule — visible when a debug selection with targetPath is active */}
+        {debugSelection.selection?.targetPath && (
+          <>
+            <button
+              type="button"
+              data-testid="jump-to-rule-button"
+              onClick={() => {
+                navigate(editorUrl, {
+                  state: { selectedTargetPath: debugSelection.selection!.targetPath },
+                });
+              }}
+              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-400 ring-1 ring-blue-500/40 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <ArrowUpRight size={12} aria-hidden="true" />
+              Jump to rule
+            </button>
+            <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
+          </>
+        )}
 
         <span className="text-xs font-medium text-slate-200" data-testid="mapping-name">
           {editor.mappingName}

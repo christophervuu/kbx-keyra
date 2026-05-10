@@ -1283,6 +1283,123 @@ This preserves adapter boundaries for domain consistency while allowing lightwei
 
 ---
 
+## Linked Debugging Model (FS-036)
+
+The Test Lab (TestLabPage) supports cross-panel linked selection: clicking a diagnostic, trace entry, output path, or diff entry highlights the corresponding item in all other panels simultaneously.
+
+### DebugSelection State Model
+
+```typescript
+type DebugSelectionSource = 'diagnostics' | 'trace' | 'output' | 'diff';
+
+interface DebugSelection {
+  targetPath: string;          // Primary linking dimension (dot-separated path)
+  ruleIndex?: number;          // Secondary linking dimension (undefined for diff/output sources)
+  source: DebugSelectionSource; // Which panel fired the selection
+}
+```
+
+### useLinkedDebugSelection Hook
+
+Located at `ui/src/features/mappings/hooks/use-linked-debug-selection.ts`.
+
+```typescript
+function useLinkedDebugSelection(
+  executionStatus?: string
+): UseLinkedDebugSelectionResult;
+
+interface UseLinkedDebugSelectionResult {
+  selection: DebugSelection | null;
+  select: (selection: DebugSelection) => void;
+  clear: () => void;
+  isTargetSelected: (targetPath: string) => boolean;
+  isRuleSelected: (ruleIndex: number) => boolean;
+}
+```
+
+- Instantiated at page level in `TestLabInner` (not a context provider).
+- Auto-clears when `executionStatus` transitions to `'executing'` (AE-11).
+- `isRuleSelected(n)` returns `false` when `selection.ruleIndex` is `undefined` (no false positives from diff/output selections).
+
+### Panel Interaction Matrix
+
+| Panel | Fires selection | Receives highlight |
+|---|---|---|
+| DiagnosticsDisplay | `onSelect` → `source: 'diagnostics'` | `selectedTargetPath`, `selectedRuleIndex` |
+| TraceDisplay | `onSelect` → `source: 'trace'` | `selectedRuleIndex`, `selectedTargetPath`; auto-scrolls when source ≠ 'trace' |
+| OutputDisplay | `onPathClick` → `source: 'output'` | `highlightPath` (key-value pair highlight) |
+| DiffDisplay | `onSelect` → `source: 'diff'` | `selectedTargetPath`; auto-scrolls when externally selected |
+
+### Linking Dimensions
+
+- **Primary:** `targetPath` — dot-separated output field path (e.g., `Order.Header.DocumentType`). Used by all four panels.
+- **Secondary:** `ruleIndex` — integer rule index. Used by diagnostics ↔ trace linking. Not available from diff or output sources.
+
+### Jump-to-Rule Route State (T-07)
+
+When a debug selection is active in TestLabPage, a "Jump to rule" button appears in the top bar. Clicking it navigates to the Mapping Editor in the same tab:
+
+```typescript
+navigate(`/projects/${projectId}/mappings/${mappingId}`, {
+  state: { selectedTargetPath: debugSelection.selection.targetPath },
+});
+```
+
+The MappingEditor route page (`ui/src/routes/pages/MappingEditor.tsx`) consumes this on mount:
+
+```typescript
+useEffect(() => {
+  const incomingPath = location.state?.selectedTargetPath;
+  if (incomingPath && typeof incomingPath === 'string') {
+    setSelectedTargetPath(incomingPath);
+    navigate(location.pathname, { replace: true, state: {} });
+  }
+}, []);
+```
+
+This uses React Router v6 transient route state — not visible in the URL, lost on refresh (desired behavior). Normal `navigate()` (without `replace`) preserves back-button history.
+
+### Failure Explainer Module
+
+Located at `ui/src/features/mappings/lib/failure-explainer.ts`.
+
+```typescript
+function explainDiagnostic(
+  diagnostic: Diagnostic,
+  traceEntry?: TraceEntry,
+): FailureExplanation | null;
+
+interface FailureExplanation {
+  summary: string;
+  suggestion?: string;
+}
+```
+
+Pattern matching order (most specific → least specific):
+1. Null output + source resolution failure → source path explanation
+2. Type mismatch (code or message) → type mismatch explanation
+3. Missing/unresolved source path → source path explanation
+4. Unknown function → DSL function explanation
+5. General null output (no specific pattern) → general null explanation
+6. No match → `null`
+
+Code-based matching always takes precedence over message-text fallbacks. The function is pure and deterministic — no side effects.
+
+Wired into `DiagnosticsDisplay` via the `explainDiagnostic` prop (dependency injection — the component does not import the module directly). Explanations render below each diagnostic message when the function returns non-null.
+
+### Module Structure Additions (FS-036)
+
+```text
+ui/src/features/mappings/
+  hooks/
+    use-linked-debug-selection.ts   Cross-panel debug selection state hook
+  lib/
+    failure-explainer.ts            Plain-language diagnostic explanation patterns
+  types.ts                          DebugSelection, DebugSelectionSource, FailureExplanation types
+```
+
+---
+
 ## Constraints
 
 - TypeScript strict mode is mandatory
