@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Clock, ExternalLink, Eye, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
@@ -42,11 +42,16 @@ export interface EditorTopBarProps {
    */
   saveStatus: SaveStatus;
   /**
-   * Number of rules modified since last save.
-   * Displayed in the unsaved state indicator.
-   * T-02 computes this; T-01 accepts it as a prop.
+   * Number of fields with unsaved draft changes.
+   * Replaces the old `unsavedCount` prop.
+   * Controls Save button disabled state and "View changes" button visibility.
    */
-  unsavedCount: number;
+  unsavedChangeCount: number;
+  /**
+   * Callback fired when the user clicks "View changes".
+   * Parent is responsible for opening the UnsavedChangesOverlay.
+   */
+  onViewUnsavedChanges: () => void;
   /** Callback for the Save button. T-02 wires the actual save action. */
   onSave: () => void;
   /** Source schema display name (shown in schema context strip) */
@@ -73,7 +78,6 @@ const saveStatusConfig: Record<SaveStatus, { label: (count: number) => string; c
   saving: { label: () => 'Saving…', className: 'text-slate-400' },
   error: { label: () => 'Save failed', className: 'text-red-400' },
 };
-
 // ---------------------------------------------------------------------------
 // Deploy badge helpers
 // ---------------------------------------------------------------------------
@@ -126,7 +130,8 @@ export function EditorTopBar({
   version,
   deployStatus,
   saveStatus,
-  unsavedCount,
+  unsavedChangeCount,
+  onViewUnsavedChanges,
   onSave,
   sourceSchemaName,
   targetSchemaName,
@@ -134,9 +139,9 @@ export function EditorTopBar({
   onHistoryToggle,
 }: EditorTopBarProps) {
   const saveConfig = saveStatusConfig[saveStatus];
-  const saveLabel = saveConfig.label(unsavedCount);
-  const isSaved = saveStatus === 'saved';
+  const saveLabel = saveConfig.label(unsavedChangeCount);
   const isSaving = saveStatus === 'saving';
+  const hasChanges = unsavedChangeCount > 0;
 
   const deployPath = PATHS.MAPPING_DEPLOYMENT.replace(':projectId', projectId).replace(
     ':mappingId',
@@ -220,11 +225,32 @@ export function EditorTopBar({
         {saveLabel}
       </span>
 
+      {/* View changes button — visible when there are unsaved changes */}
+      {hasChanges && (
+        <button
+          type="button"
+          onClick={onViewUnsavedChanges}
+          className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-amber-300 border border-amber-700/50 bg-amber-900/20 hover:bg-amber-900/40 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500"
+          data-testid="view-changes-button"
+          aria-label={`View ${unsavedChangeCount} unsaved ${unsavedChangeCount === 1 ? 'change' : 'changes'}`}
+        >
+          <Eye size={12} aria-hidden="true" />
+          View changes
+          <span
+            className="inline-flex items-center justify-center rounded-full bg-amber-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100 min-w-[1.25rem]"
+            aria-hidden="true"
+            data-testid="view-changes-badge"
+          >
+            {unsavedChangeCount}
+          </span>
+        </button>
+      )}
+
       {/* Save button */}
       <button
         type="button"
         onClick={onSave}
-        disabled={isSaved || isSaving}
+        disabled={!hasChanges || isSaving}
         className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
         data-testid="save-button"
         aria-label="Save mapping"

@@ -7,6 +7,7 @@ import { useAdapter } from '@/lib/api';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 import type { SaveStatus } from '../components/EditorTopBar';
 import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
+import type { UnsavedChangeSummary } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,13 +36,57 @@ export interface MappingEditorActions {
   updateConfig: (partial: Partial<MappingConfigOptions>) => void;
   /** Restore a previous version config — replaces working state and immediately saves */
   restore: (restoreConfig: MappingConfig) => void;
+
+  // -------------------------------------------------------------------------
+  // FS-039 draft rules API
+  // -------------------------------------------------------------------------
+
+  /**
+   * Store a draft expression for a target field.
+   * Does NOT write to saved rules — call save() to commit all drafts.
+   * An empty string expression means "delete this rule on save".
+   */
+  updateDraft: (targetPath: string, expression: string) => void;
+
+  /**
+   * Called on field navigation to persist the current draft for a field.
+   * Equivalent to updateDraft — provided as a semantic alias for call sites
+   * that want to express "I'm navigating away from this field".
+   */
+  commitDraft: (targetPath: string, expression: string) => void;
+
+  /**
+   * Remove the draft entry for a target field, reverting it to its saved state.
+   * If no draft exists, this is a no-op.
+   */
+  revertDraft: (targetPath: string) => void;
+
+  /**
+   * Clear all draft entries, reverting all fields to their saved state.
+   */
+  revertAllDrafts: () => void;
+
+  /**
+   * Returns the draft expression for a target field, or null if no draft exists.
+   */
+  getDraftExpression: (targetPath: string) => string | null;
+
+  /**
+   * Returns a list of fields with unsaved draft changes, including the change type.
+   */
+  getUnsavedChangeSummary: () => UnsavedChangeSummary[];
+
   /**
    * Apply a rule expression to the in-memory working session.
-   * Upserts the rule for `targetPath`, increments `unsavedRuleCount`, and fires
-   * the `onRuleApplied` callback (used by auto-preview in T-05).
-   * Does NOT call `adapter.updateMapping()`.
+   *
+   * @deprecated Use updateDraft() instead. Kept as a thin wrapper for backward
+   *   compatibility during the FS-039 migration. Will be removed when T-05 completes.
+   *
+   * Upserts the draft for `targetPath` and fires the `onRuleApplied` callback
+   * (used by auto-preview in T-05). Does NOT call `adapter.updateMapping()`.
    */
   applyRule: (targetPath: string, expression: string) => void;
+
   /** Persist current state to adapter */
   save: () => void;
   /** Retry a failed load */
@@ -95,11 +140,16 @@ export interface UseMappingEditorResult {
 
   /** Current save status for EditorTopBar */
   saveStatus: SaveStatus;
-  /** Whether there are unsaved changes (rules differ from last save) */
+  /** Whether there are unsaved changes (rules differ from last save, or draftRules non-empty) */
   hasUnsavedChanges: boolean;
   /**
-   * Number of rules applied to the in-memory session since the last Save.
-   * Resets to 0 on successful save. Used by EditorTopBar unsaved count display.
+   * Number of fields with draft changes that differ from their saved state.
+   * Resets to 0 on successful save.
+   */
+  unsavedChangeCount: number;
+  /**
+   * @deprecated Use unsavedChangeCount instead.
+   * Kept for backward compatibility during FS-039 migration.
    */
   unsavedRuleCount: number;
   /** Save error message (if save failed) */
@@ -107,6 +157,13 @@ export interface UseMappingEditorResult {
 
   /** Validation state from engine */
   validation: EngineValidationState;
+
+  /**
+   * The current draft rules map (read-only snapshot).
+   * Keys are target paths, values are draft DSL expressions.
+   * An empty string value means "delete this rule on save".
+   */
+  draftRules: ReadonlyMap<string, string>;
 
   /** Actions to mutate editor state */
   actions: MappingEditorActions;
@@ -169,6 +226,63 @@ function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
   }
 }
 
+/**
+ * Merges draftRules into a saved rules array.
+ *
+ * For each draft entry:
+ *   - Empty expression → delete the rule for that target path
+ *   - Non-empty expression → upsert (update existing or append new)
+ *
+ * Returns a new rules array with all drafts applied.
+ */
+function mergeDraftsIntoRules(
+  savedRules: readonly MappingRule[],
+  draftRules: ReadonlyMap<string, string>,
+): MappingRule[] {
+  // Start with a mutable copy of saved rules
+  let result: MappingRule[] = [...savedRules];
+
+  for (const [targetPath, expression] of draftRules) {
+    if (expression === '') {
+      // Empty expression = delete this rule
+      result = result.filter((r) => r.target !== targetPath);
+    } else {
+      const idx = result.findIndex((r) => r.target === targetPath);
+      if (idx >= 0) {
+        // Update existing rule
+        result[idx] = { ...result[idx]!, expression };
+      } else {
+        // Append new rule
+        result.push({ target: targetPath, type: 'string', expression });
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Determines whether a draft entry differs from the saved state.
+ *
+ * A draft entry is "changed" if:
+ *   - The expression differs from the saved rule's expression, OR
+ *   - There is no saved rule for this target (it's a new addition), OR
+ *   - The expression is empty (it's a deletion of an existing rule)
+ */
+function isDraftChanged(
+  targetPath: string,
+  draftExpression: string,
+  savedRules: readonly MappingRule[],
+): boolean {
+  const savedRule = savedRules.find((r) => r.target === targetPath);
+  if (savedRule === undefined) {
+    // New rule — changed if expression is non-empty
+    return draftExpression !== '';
+  }
+  // Existing rule — changed if expression differs
+  return savedRule.expression !== draftExpression;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -179,9 +293,9 @@ function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
  * Responsibilities:
  * - Load mapping config and schemas from the API adapter on mount
  * - Maintain local rules state that can be mutated without immediate saves
- * - Track unsaved changes by comparing current rules to last-saved snapshot
- * - Track unsaved rule count (incremented by applyRule, reset on save)
- * - Save with version increment
+ * - Maintain draftRules map for per-field in-session draft accumulation (FS-039)
+ * - Track unsaved changes by comparing current rules/drafts to last-saved snapshot
+ * - Save with version increment — merges draftRules into saved rules on save
  * - Wire engine validation with loaded schemas
  * - Handle Ctrl+S / Cmd+S keyboard shortcut
  * - Handle beforeunload warning for unsaved changes
@@ -209,12 +323,13 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   const [lastSavedConfigOptions, setLastSavedConfigOptions] = useState<MappingConfigOptions>({});
   const [version, setVersion] = useState(1);
 
+  // FS-039 draft rules map — per-field in-session draft accumulator
+  // Keys: target paths, Values: draft DSL expressions (empty = delete on save)
+  const [draftRules, setDraftRules] = useState<Map<string, string>>(new Map());
+
   // Save state
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Unsaved rule count — incremented by applyRule, reset on save
-  const [unsavedRuleCount, setUnsavedRuleCount] = useState(0);
 
   // Keep onRuleApplied callback in a ref so applyRule doesn't need it as a dep
   const onRuleAppliedRef = useRef<(() => void) | undefined>(onRuleApplied);
@@ -245,6 +360,8 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       setConfigOptions(mappingConfig.config);
       setLastSavedConfigOptions(mappingConfig.config);
       setVersion(mappingConfig.version);
+      // Clear any stale drafts on reload
+      setDraftRules(new Map());
 
       // Load schemas in parallel (graceful failure per AE-10)
       // Explicitly skip getSchema() when schemaRef is undefined (schema-optional mappings)
@@ -303,11 +420,15 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   // Engine validation (raw schema content for engine, not ParsedSchema)
   // ---------------------------------------------------------------------------
 
-  // Build a config object with current rules and config options for validation
+  // Build a config object with current rules and config options for validation.
+  // When draftRules are present, merge them into the rules for live validation.
   const validationConfig = useMemo<MappingConfig | null>(() => {
     if (!config) return null;
-    return { ...config, rules, config: configOptions };
-  }, [config, rules, configOptions]);
+    const effectiveRules = draftRules.size > 0
+      ? mergeDraftsIntoRules(rules, draftRules)
+      : rules;
+    return { ...config, rules: effectiveRules, config: configOptions };
+  }, [config, rules, draftRules, configOptions]);
 
   const sourceSchemaContent = sourceSchema?.content ?? null;
   const targetSchemaContent = targetSchema?.content ?? null;
@@ -322,9 +443,30 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   // Unsaved changes detection
   // ---------------------------------------------------------------------------
 
+  /**
+   * Count of draft entries that differ from their saved state.
+   * A draft entry is "changed" if it differs from the saved rule expression,
+   * or if it's a new addition (no saved rule), or if it's a deletion (empty expr).
+   */
+  const unsavedChangeCount = useMemo(() => {
+    let count = 0;
+    for (const [targetPath, expression] of draftRules) {
+      if (isDraftChanged(targetPath, expression, lastSavedRules)) {
+        count++;
+      }
+    }
+    return count;
+  }, [draftRules, lastSavedRules]);
+
   const hasUnsavedChanges = useMemo(() => {
-    return !rulesEqual(rules, lastSavedRules) || !configOptionsEqual(configOptions, lastSavedConfigOptions);
-  }, [rules, lastSavedRules, configOptions, lastSavedConfigOptions]);
+    // Draft rules that differ from saved state
+    if (unsavedChangeCount > 0) return true;
+    // Direct rule mutations (addRule, updateRule, deleteRule, etc.)
+    if (!rulesEqual(rules, lastSavedRules)) return true;
+    // Config option changes
+    if (!configOptionsEqual(configOptions, lastSavedConfigOptions)) return true;
+    return false;
+  }, [unsavedChangeCount, rules, lastSavedRules, configOptions, lastSavedConfigOptions]);
 
   // ---------------------------------------------------------------------------
   // Save status derivation
@@ -342,7 +484,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    if (!hasUnsavedChanges && unsavedRuleCount === 0) return;
+    if (!hasUnsavedChanges) return;
 
     function handleBeforeUnload(e: BeforeUnloadEvent) {
       e.preventDefault();
@@ -354,7 +496,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [hasUnsavedChanges, unsavedRuleCount]);
+  }, [hasUnsavedChanges]);
 
   // ---------------------------------------------------------------------------
   // Ctrl+S / Cmd+S keyboard shortcut
@@ -370,10 +512,16 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     setSaveError(null);
 
     const newVersion = version + 1;
+
+    // Merge draftRules into the current rules array before saving
+    const mergedRules = draftRules.size > 0
+      ? mergeDraftsIntoRules(rules, draftRules)
+      : [...rules];
+
     const updatedConfig: MappingConfig = {
       ...config,
       version: newVersion,
-      rules,
+      rules: mergedRules,
       config: configOptions,
     };
 
@@ -382,11 +530,13 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       if (!mountedRef.current) return;
 
       setConfig(updatedConfig);
-      setLastSavedRules(rules);
+      setRules(mergedRules);
+      setLastSavedRules(mergedRules);
       setLastSavedConfigOptions(configOptions);
       setVersion(newVersion);
       setSaveState('saved');
-      setUnsavedRuleCount(0);
+      // Clear all drafts — they've been committed to saved rules
+      setDraftRules(new Map());
 
       // Fire-and-forget version snapshot (AE-01)
       const versionEntry: MappingVersionEntry = {
@@ -406,7 +556,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, rules, configOptions, hasUnsavedChanges, adapter, mappingId]);
+  }, [config, version, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId]);
 
   // Keep ref up to date for keyboard handler
   saveRef.current = save;
@@ -426,7 +576,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Actions
+  // Actions — rule mutations
   // ---------------------------------------------------------------------------
 
   const addRule = useCallback((rule: Pick<MappingRule, 'target' | 'expression' | 'description'>) => {
@@ -532,7 +682,8 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       setLastSavedConfigOptions(fullConfig.config);
       setVersion(newVersion);
       setSaveState('saved');
-      setUnsavedRuleCount(0);
+      // Clear drafts — restore replaces all state
+      setDraftRules(new Map());
 
       // Fire-and-forget version snapshot
       const versionEntry: MappingVersionEntry = {
@@ -559,32 +710,111 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   }, [loadData]);
 
   // ---------------------------------------------------------------------------
-  // applyRule — upsert rule in-memory, increment unsaved count
+  // Actions — FS-039 draft rules API
   // ---------------------------------------------------------------------------
 
+  /**
+   * Store a draft expression for a target field.
+   * An empty string means "delete this rule on save".
+   */
+  const updateDraft = useCallback((targetPath: string, expression: string) => {
+    setDraftRules((prev) => {
+      const next = new Map(prev);
+      next.set(targetPath, expression);
+      return next;
+    });
+    setSaveState('idle');
+  }, []);
+
+  /**
+   * Semantic alias for updateDraft — called on field navigation.
+   */
+  const commitDraft = useCallback((targetPath: string, expression: string) => {
+    updateDraft(targetPath, expression);
+  }, [updateDraft]);
+
+  /**
+   * Remove the draft entry for a target field, reverting to saved state.
+   */
+  const revertDraft = useCallback((targetPath: string) => {
+    setDraftRules((prev) => {
+      if (!prev.has(targetPath)) return prev;
+      const next = new Map(prev);
+      next.delete(targetPath);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Clear all draft entries, reverting all fields to their saved state.
+   */
+  const revertAllDrafts = useCallback(() => {
+    setDraftRules(new Map());
+  }, []);
+
+  /**
+   * Returns the draft expression for a target field, or null if no draft exists.
+   */
+  const getDraftExpression = useCallback(
+    (targetPath: string): string | null => {
+      return draftRules.get(targetPath) ?? null;
+    },
+    [draftRules],
+  );
+
+  /**
+   * Returns a list of fields with unsaved draft changes.
+   */
+  const getUnsavedChangeSummary = useCallback((): UnsavedChangeSummary[] => {
+    const summary: UnsavedChangeSummary[] = [];
+    for (const [targetPath, draftExpression] of draftRules) {
+      if (!isDraftChanged(targetPath, draftExpression, lastSavedRules)) continue;
+      const savedRule = lastSavedRules.find((r) => r.target === targetPath);
+      let changeType: UnsavedChangeSummary['changeType'];
+      if (savedRule === undefined) {
+        changeType = 'added';
+      } else if (draftExpression === '') {
+        changeType = 'removed';
+      } else {
+        changeType = 'modified';
+      }
+      summary.push({
+        targetPath,
+        changeType,
+        savedExpression: savedRule?.expression ?? null,
+        draftExpression,
+      });
+    }
+    return summary;
+  }, [draftRules, lastSavedRules]);
+
+  // ---------------------------------------------------------------------------
+  // applyRule — deprecated wrapper around updateDraft (backward compat)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * @deprecated Use updateDraft() instead.
+   *
+   * Upserts the draft for `targetPath` and fires the `onRuleApplied` callback.
+   * Skips if the draft expression is unchanged from the current draft.
+   */
   const applyRule = useCallback(
     (targetPath: string, expression: string) => {
-      const existing = rules.find((r) => r.target === targetPath);
-      if (existing?.expression === expression) {
-        return;
+      // Skip if draft is already set to this expression
+      const currentDraft = draftRules.get(targetPath);
+      if (currentDraft === expression) return;
+
+      // Also skip if no draft exists and the saved rule already has this expression
+      if (currentDraft === undefined) {
+        const savedRule = lastSavedRules.find((r) => r.target === targetPath);
+        if (savedRule?.expression === expression) return;
       }
 
-      setRules((prev) => {
-        const idx = prev.findIndex((r) => r.target === targetPath);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = { ...updated[idx], expression };
-          return updated;
-        }
-        return [...prev, { target: targetPath, type: 'string', expression }];
-      });
-
-      setUnsavedRuleCount((n) => n + 1);
-      setSaveState('idle');
+      updateDraft(targetPath, expression);
       // Fire auto-preview callback (T-05)
       onRuleAppliedRef.current?.();
     },
-    [rules],
+    [draftRules, lastSavedRules, updateDraft],
   );
 
   // ---------------------------------------------------------------------------
@@ -592,11 +822,11 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   // ---------------------------------------------------------------------------
 
   const canNavigateAway = useCallback((): { allowed: boolean; reason: 'unsaved' | null } => {
-    if (unsavedRuleCount > 0 || hasUnsavedChanges) {
+    if (hasUnsavedChanges) {
       return { allowed: false, reason: 'unsaved' };
     }
     return { allowed: true, reason: null };
-  }, [unsavedRuleCount, hasUnsavedChanges]);
+  }, [hasUnsavedChanges]);
 
   // ---------------------------------------------------------------------------
   // Build actions object (stable reference)
@@ -614,12 +844,23 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       pasteRules,
       updateConfig,
       restore,
+      updateDraft,
+      commitDraft,
+      revertDraft,
+      revertAllDrafts,
+      getDraftExpression,
+      getUnsavedChangeSummary,
       applyRule,
       save,
       retry,
       canNavigateAway,
     }),
-    [addRule, updateRule, deleteRule, deleteRuleByTarget, reorderRules, bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore, applyRule, save, retry, canNavigateAway],
+    [
+      addRule, updateRule, deleteRule, deleteRuleByTarget, reorderRules,
+      bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore,
+      updateDraft, commitDraft, revertDraft, revertAllDrafts, getDraftExpression,
+      getUnsavedChangeSummary, applyRule, save, retry, canNavigateAway,
+    ],
   );
 
   // ---------------------------------------------------------------------------
@@ -647,9 +888,11 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     schemasLoaded,
     saveStatus,
     hasUnsavedChanges,
-    unsavedRuleCount,
+    unsavedChangeCount,
+    unsavedRuleCount: unsavedChangeCount, // deprecated alias
     saveError,
     validation,
+    draftRules,
     actions,
   };
 }

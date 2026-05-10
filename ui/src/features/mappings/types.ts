@@ -5,6 +5,34 @@
 import type { ComparisonMode, Environment } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
+// Draft rules (FS-039)
+// ---------------------------------------------------------------------------
+
+/**
+ * The change type for a single field in the unsaved changes summary.
+ *
+ * - 'modified' — field has a saved rule that has been changed in the draft
+ * - 'added'    — field has a draft rule but no saved rule
+ * - 'removed'  — field has a saved rule but the draft expression is empty (delete on save)
+ */
+export type UnsavedChangeType = 'modified' | 'added' | 'removed';
+
+/**
+ * A single entry in the unsaved changes summary.
+ * Used by the "View unsaved changes" overlay (T-10).
+ */
+export interface UnsavedChangeSummary {
+  /** The target field path. */
+  readonly targetPath: string;
+  /** The change type. */
+  readonly changeType: UnsavedChangeType;
+  /** The saved expression (null if this is a new addition). */
+  readonly savedExpression: string | null;
+  /** The draft expression (empty string means "delete on save"). */
+  readonly draftExpression: string;
+}
+
+// ---------------------------------------------------------------------------
 // Linked debug selection (FS-036)
 // ---------------------------------------------------------------------------
 

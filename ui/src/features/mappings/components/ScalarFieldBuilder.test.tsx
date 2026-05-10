@@ -44,6 +44,26 @@ const SOURCE_SCHEMA: ParsedSchema = {
   inferred: false,
 };
 
+/**
+ * Build a minimal draft API triple for tests.
+ * By default no draft exists (getDraftExpression returns null → field is clean).
+ */
+function makeDraftApi(overrides: {
+  draftMap?: Map<string, string>;
+  updateDraft?: ReturnType<typeof vi.fn>;
+  revertDraft?: ReturnType<typeof vi.fn>;
+} = {}) {
+  const draftMap = overrides.draftMap ?? new Map<string, string>();
+  const updateDraft = overrides.updateDraft ?? vi.fn((path: string, expr: string) => {
+    draftMap.set(path, expr);
+  });
+  const revertDraft = overrides.revertDraft ?? vi.fn((path: string) => {
+    draftMap.delete(path);
+  });
+  const getDraftExpression = vi.fn((path: string) => draftMap.get(path) ?? null);
+  return { updateDraft, revertDraft, getDraftExpression, draftMap };
+}
+
 const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   selectedTargetPath: 'patient.firstName',
   selectedTargetType: 'string',
@@ -51,7 +71,7 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   currentStatus: 'unmapped',
   currentExpression: '',
   parsedSourceSchema: SOURCE_SCHEMA,
-  onApply: vi.fn(),
+  ...makeDraftApi(),
 };
 
 function renderBuilder(overrides: Partial<ScalarFieldBuilderProps> = {}) {
@@ -152,30 +172,16 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
   });
 
-  // Apply button
-  it('apply button is disabled when expression is empty', () => {
-    renderBuilder({ currentExpression: '' });
-    expect(screen.getByTestId('apply-btn')).toBeDisabled();
-  });
-
-  it('apply button shows label "Apply"', () => {
+  // Apply button removed (FS-039 T-05)
+  it('does not render an Apply button', () => {
     renderBuilder();
-    expect(screen.getByTestId('apply-btn')).toHaveTextContent('Apply');
+    expect(screen.queryByTestId('apply-btn')).not.toBeInTheDocument();
   });
 
-  it('fires onApply with target path and expression when apply is clicked with valid expression', async () => {
-    const onApply = vi.fn();
-    renderBuilder({ currentExpression: 'source("firstName")', onApply });
-    fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-    const textarea = screen.getByRole('textbox');
-    fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-    // Wait for debounced validation to settle
-    await new Promise((r) => setTimeout(r, 400));
-    const applyBtn = screen.getByTestId('apply-btn');
-    expect(applyBtn).not.toBeDisabled();
-    fireEvent.click(applyBtn);
-    expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("lastName")');
+  // Next unmapped button removed (FS-039 T-05)
+  it('does not render a Next unmapped button', () => {
+    renderBuilder();
+    expect(screen.queryByTestId('next-unmapped-btn')).not.toBeInTheDocument();
   });
 
   // AI buttons
@@ -388,148 +394,103 @@ describe('ScalarFieldBuilder', () => {
     });
   });
 
-  // T-02: AE-09 — navigation guard fires when unapplied changes exist
-  describe('AE-09: onExpressionChange fires for parent navigation guard', () => {
+  // ---------------------------------------------------------------------------
+  // FS-039 T-05: Auto-draft model
+  // ---------------------------------------------------------------------------
+
+  describe('FS-039 T-05: auto-draft model', () => {
+    it('calls updateDraft when user types in editor mode', () => {
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+      renderBuilder({
+        currentExpression: '{"id": "x"}', // forces editor mode
+        updateDraft,
+        revertDraft,
+        getDraftExpression,
+      });
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'source("x")' } });
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("x")');
+    });
+
+    it('does not call updateDraft on initial render (no spurious draft)', () => {
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+      renderBuilder({ updateDraft, revertDraft, getDraftExpression });
+      expect(updateDraft).not.toHaveBeenCalled();
+    });
+
     it('calls onExpressionChange when user types in editor mode', () => {
       const onExpressionChange = vi.fn();
       renderBuilder({
         currentExpression: '{"id": "x"}', // forces editor mode
         onExpressionChange,
       });
-      // In editor mode, typing fires onExpressionChange
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("x")' } });
       expect(onExpressionChange).toHaveBeenCalledWith('source("x")');
     });
 
-    it('does not call onExpressionChange on initial render (no spurious guard trigger)', () => {
+    it('does not call onExpressionChange on initial render', () => {
       const onExpressionChange = vi.fn();
       renderBuilder({ onExpressionChange });
-      // No change events on mount
       expect(onExpressionChange).not.toHaveBeenCalled();
     });
-  });
 
-  // ---------------------------------------------------------------------------
-  // T-04: AE-10 — Apply stays on field, Applied state, Next unmapped button
-  // ---------------------------------------------------------------------------
-
-  describe('AE-10: Apply does not auto-advance', () => {
-    it('Apply button is disabled when expression is unchanged from current mapping', () => {
-      renderBuilder({ currentExpression: 'source("firstName")' });
-      const applyBtn = screen.getByTestId('apply-btn');
-      expect(applyBtn).toBeDisabled();
+    it('Discard changes button is hidden when field is clean (no draft)', () => {
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+      renderBuilder({ updateDraft, revertDraft, getDraftExpression });
+      expect(screen.queryByTestId('discard-btn')).not.toBeInTheDocument();
     });
 
-    it('Apply button shows "Applied" state after clicking', async () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      // After apply, button should show "Applied" text
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
+    it('Discard changes button is visible when getDraftExpression returns non-null', () => {
+      const draftMap = new Map([['patient.firstName', 'source("lastName")']]);
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi({ draftMap });
+      renderBuilder({ updateDraft, revertDraft, getDraftExpression });
+      expect(screen.getByTestId('discard-btn')).toBeInTheDocument();
     });
 
-    it('Apply button re-enables after expression changes post-apply', async () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
-
-      // Simulate expression change by typing a different expression
-      fireEvent.change(textarea, { target: { value: 'source("age")' } });
-
-      // Apply button should no longer show "Applied"
-      expect(screen.getByTestId('apply-btn')).not.toHaveTextContent('Applied');
+    it('clicking Discard calls revertDraft with target path', () => {
+      const draftMap = new Map([['patient.firstName', 'source("lastName")']]);
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi({ draftMap });
+      renderBuilder({ updateDraft, revertDraft, getDraftExpression });
+      fireEvent.click(screen.getByTestId('discard-btn'));
+      expect(revertDraft).toHaveBeenCalledWith('patient.firstName');
     });
 
-    it('onApply is called with correct args when Apply is clicked', async () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("age")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      expect(onApply).toHaveBeenCalledWith('patient.firstName', 'source("age")');
-    });
-  });
-
-  describe('AE-11: Next unmapped button', () => {
-    it('Next unmapped button is visible when hasUnmappedFields=true and onAdvanceToNext provided', () => {
-      renderBuilder({
-        hasUnmappedFields: true,
-        onAdvanceToNext: vi.fn(),
-      });
-      expect(screen.getByTestId('next-unmapped-btn')).toBeInTheDocument();
-    });
-
-    it('Next unmapped button is hidden when hasUnmappedFields=false', () => {
-      renderBuilder({
-        hasUnmappedFields: false,
-        onAdvanceToNext: vi.fn(),
-      });
-      expect(screen.queryByTestId('next-unmapped-btn')).not.toBeInTheDocument();
-    });
-
-    it('Next unmapped button is hidden when onAdvanceToNext not provided', () => {
-      renderBuilder({ hasUnmappedFields: true });
-      expect(screen.queryByTestId('next-unmapped-btn')).not.toBeInTheDocument();
-    });
-
-    it('clicking Next unmapped button calls onAdvanceToNext', () => {
-      const onAdvanceToNext = vi.fn();
-      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext });
-      fireEvent.click(screen.getByTestId('next-unmapped-btn'));
-      expect(onAdvanceToNext).toHaveBeenCalledOnce();
-    });
-
-    it('Next unmapped button has correct aria-label', () => {
-      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext: vi.fn() });
-      expect(screen.getByTestId('next-unmapped-btn')).toHaveAttribute(
+    it('Discard button has correct aria-label', () => {
+      const draftMap = new Map([['patient.firstName', 'source("lastName")']]);
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi({ draftMap });
+      renderBuilder({ updateDraft, revertDraft, getDraftExpression });
+      expect(screen.getByTestId('discard-btn')).toHaveAttribute(
         'aria-label',
-        'Navigate to next unmapped target field',
+        'Discard changes for patient.firstName',
       );
     });
-  });
 
-  describe('AE-12: Ctrl+] keyboard shortcut', () => {
-    it('Ctrl+] fires onAdvanceToNext', () => {
-      const onAdvanceToNext = vi.fn();
-      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext });
-      fireEvent.keyDown(document, { key: ']', ctrlKey: true });
-      expect(onAdvanceToNext).toHaveBeenCalledOnce();
+    it('hydrates from draft expression when getDraftExpression returns a value', () => {
+      const draftMap = new Map([['patient.firstName', 'source("lastName")']]);
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi({ draftMap });
+      renderBuilder({
+        currentExpression: 'source("firstName")',
+        updateDraft,
+        revertDraft,
+        getDraftExpression,
+      });
+      // Draft takes priority over saved expression — builder should show draft
+      // (we verify getDraftExpression was consulted)
+      expect(getDraftExpression).toHaveBeenCalledWith('patient.firstName');
     });
 
-    it('Cmd+] fires onAdvanceToNext (macOS)', () => {
-      const onAdvanceToNext = vi.fn();
-      renderBuilder({ hasUnmappedFields: true, onAdvanceToNext });
-      fireEvent.keyDown(document, { key: ']', metaKey: true });
-      expect(onAdvanceToNext).toHaveBeenCalledOnce();
-    });
-
-    it('Ctrl+] does not fire when onAdvanceToNext is not provided', () => {
-      // Should not throw
-      renderBuilder({ hasUnmappedFields: true });
-      expect(() => {
-        fireEvent.keyDown(document, { key: ']', ctrlKey: true });
-      }).not.toThrow();
+    it('falls back to saved expression when no draft exists', () => {
+      const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+      renderBuilder({
+        currentExpression: 'source("firstName")',
+        currentStatus: 'mapped',
+        updateDraft,
+        revertDraft,
+        getDraftExpression,
+      });
+      // No draft → builder mode with saved expression decomposed
+      expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     });
   });
 
@@ -600,98 +561,6 @@ describe('ScalarFieldBuilder', () => {
       });
       fireEvent.click(screen.getByTestId('clear-mapping-btn'));
       expect(onClearMapping).toHaveBeenCalledWith('patient.firstName');
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // T-09: Apply single-click commit
-  // ---------------------------------------------------------------------------
-
-  describe('T-09: Apply single-click commit', () => {
-    it('Apply button is disabled after clicking once (no double-click required)', () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const btn = screen.getByTestId('apply-btn');
-      fireEvent.click(btn);
-      expect(btn).toBeDisabled();
-    });
-
-    it('Apply button shows "Applied" text immediately after single click', async () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
-    });
-
-    it('onApply is called exactly once per click', async () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      expect(onApply).toHaveBeenCalledTimes(1);
-    });
-
-    it('keeps "Applied" state after parent re-render with same expression', async () => {
-      const onApply = vi.fn();
-      const { rerender } = renderBuilder({
-        currentExpression: 'source("firstName")',
-        onApply,
-      });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
-
-      rerender(
-        <ScalarFieldBuilder
-          {...DEFAULT_PROPS}
-          currentExpression={'source("lastName")'}
-          onApply={onApply}
-        />,
-      );
-
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
-    });
-
-    it('keeps "Applied" state on same-value editor change event', async () => {
-      const onApply = vi.fn();
-      renderBuilder({ currentExpression: 'source("firstName")', onApply });
-
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      const applyBtn = screen.getByTestId('apply-btn');
-      await waitFor(() => expect(applyBtn).not.toBeDisabled());
-      fireEvent.click(applyBtn);
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
-
-      fireEvent.change(textarea, { target: { value: 'source("lastName")' } });
-
-      expect(screen.getByTestId('apply-btn')).toHaveTextContent('Applied');
     });
   });
 

@@ -150,3 +150,9 @@ export type { CollapsibleStepContainerProps } from './CollapsibleStepContainer';
 // FS-038 logic step list
 export { LogicStepList } from './LogicStepList';
 export type { LogicStepListProps } from './LogicStepList';
+// FS-039 chain builder
+export { ChainBuilder } from './ChainBuilder';
+export type { ChainBuilderProps } from './ChainBuilder';
+// FS-039 unsaved changes overlay
+export { UnsavedChangesOverlay } from './UnsavedChangesOverlay';
+export type { UnsavedChangesOverlayProps } from './UnsavedChangesOverlay';

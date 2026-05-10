@@ -30,8 +30,10 @@ export interface MappingEditorPageProps {
    * Null when the mapping has never been deployed.
    */
   deployStatus?: HighestDeployStatus | null;
-  /** Number of rules modified since last save (for unsaved indicator) */
-  unsavedCount?: number;
+  /** Number of fields with unsaved draft changes (replaces unsavedCount) */
+  unsavedChangeCount?: number;
+  /** Callback to open the UnsavedChangesOverlay */
+  onViewUnsavedChanges?: () => void;
   /** Callback for the Save button */
   onSave?: () => void;
   /** Source schema display name */
@@ -96,7 +98,8 @@ export function MappingEditorPage({
   version = 1,
   saveStatus = 'saved',
   deployStatus = null,
-  unsavedCount = 0,
+  unsavedChangeCount = 0,
+  onViewUnsavedChanges = () => undefined,
   onSave = () => undefined,
   sourceSchemaName = null,
   targetSchemaName = null,
@@ -132,7 +135,8 @@ export function MappingEditorPage({
         version={version}
         deployStatus={deployStatus}
         saveStatus={saveStatus}
-        unsavedCount={unsavedCount}
+        unsavedChangeCount={unsavedChangeCount}
+        onViewUnsavedChanges={onViewUnsavedChanges}
         onSave={onSave}
         sourceSchemaName={sourceSchemaName}
         targetSchemaName={targetSchemaName}

@@ -98,6 +98,24 @@ export {
   isStaticBranch,
   isSourceBranch,
   isExpressionBranch,
+  // FS-039 chain model
+  createEmptyChain,
+  createFieldSourceChain,
+  createStaticSourceChain,
+  createEmptyPredicate,
+  createEmptyConditionClause,
+  createEmptyFS039ConditionStep,
+  createEmptyFS039ValueMapStep,
+  isFS039ConditionStep,
+  isFS039ValueMapStep,
+  isFS039TransformStep,
+  isFieldSource,
+  isStaticSource,
+  isNoneSource,
+  isCurrentValueOperand,
+  isFieldOperand,
+  isStaticOperand,
+  isExpressionOperand,
 } from './chain-builder-state';
 export type {
   BuilderEntryType,
@@ -113,9 +131,23 @@ export type {
   ChainValueMapEntry,
   LogicStep,
   ChainBuilderState,
+  // FS-039 chain model types
+  ChainSource,
+  ChainState,
+  OperandValue,
+  Predicate,
+  ConditionClause,
+  FS039ConditionStep,
+  FS039ValueMapEntry,
+  FS039ValueMapStep,
+  FS039TransformStep,
+  ChainStep,
+  DraftRulesMap,
+  DraftValidationState,
+  DraftFieldState,
 } from './chain-builder-state';
 // FS-038 chain expression generator
-export { generateExpressionFromChain } from './chain-expression-generator';
+export { generateExpressionFromChain, generateChainExpression } from './chain-expression-generator';
 // FS-038 chain decomposer
-export { decomposeToChainState } from './chain-decomposer';
-export type { DecomposeChainResult } from './chain-decomposer';
+export { decomposeToChainState, decomposeToChain } from './chain-decomposer';
+export type { DecomposeChainResult, DecomposeChainResult039 } from './chain-decomposer';

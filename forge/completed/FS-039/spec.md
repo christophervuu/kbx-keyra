@@ -26,7 +26,7 @@ Cross-cutting because this spec defines both UI component behavior (ui-task) and
 
 ## Status
 
-draft
+completed
 
 ---
 

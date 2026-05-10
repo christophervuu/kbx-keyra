@@ -7,14 +7,17 @@
  *   - Suggested Sources: client-side heuristic suggestions from parsed source schema
  *   - Expression Builder: ChainBuilderShell (new, default) or RawDslEditor (toggle)
  *   - AI Action buttons: placeholder (Coming soon tooltip)
- *   - Save button: enabled only when expression is non-empty and valid
+ *   - Discard changes button: visible when current field has an unsaved draft
+ *
+ * FS-039 T-05: Auto-draft model — every expression change calls updateDraft().
+ * Apply button and Next unmapped button removed. Header Save commits all drafts.
  *
  * FS-038 T-12: Integrates the new chain builder (ChainBuilderShell + chain state)
  * replacing UnifiedExpressionBuilder in Builder mode. UnifiedExpressionBuilder is
  * retained for Rules View (T-13) and as a fallback.
  */
 
-import { Check, ChevronRight, Lightbulb, Sparkles, Wand2, Wrench } from 'lucide-react';
+import { Lightbulb, Sparkles, Undo2, Wrench } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { RawDslEditor } from './RawDslEditor';
@@ -44,7 +47,6 @@ import {
   createEmptyTransformStep,
   createEmptyConditionStep,
   createEmptyValueMapStep,
-  isChainComplete,
 } from '../lib/chain-builder-state';
 import { generateExpressionFromChain } from '../lib/chain-expression-generator';
 import { decomposeToChainState } from '../lib/chain-decomposer';
@@ -66,27 +68,33 @@ export interface ScalarFieldBuilderProps {
   selectedTargetRequired: boolean;
   /** Current mapping status of the target field */
   currentStatus: TargetFieldStatus;
-  /** Current expression for this target (pre-fills the builder) */
+  /**
+   * Current saved expression for this target (from committed rules).
+   * Hydration checks getDraftExpression first, then falls back to this.
+   */
   currentExpression?: string;
   /** Parsed source schema for suggestions and field picker */
   parsedSourceSchema: ParsedSchema | null;
-  /** Fired when the user applies the expression */
-  onApply: (targetPath: string, expression: string) => void;
+  /**
+   * Called on every expression change to persist an in-memory draft.
+   * Replaces the old onApply model — no explicit Apply needed.
+   */
+  updateDraft: (targetPath: string, expression: string) => void;
+  /**
+   * Reverts the in-memory draft for the given target path back to the saved rule.
+   * Called when the user clicks "Discard changes".
+   */
+  revertDraft: (targetPath: string) => void;
+  /**
+   * Returns the current in-memory draft expression for a target path, or null
+   * if no draft exists (i.e. the field is clean / matches saved state).
+   */
+  getDraftExpression: (targetPath: string) => string | null;
   /**
    * Optional callback fired whenever the local expression text changes.
-   * Used by the parent to track unapplied expression state for navigation guards.
+   * Used by the parent to watch draft expression changes for live preview.
    */
   onExpressionChange?: (expression: string) => void;
-  /**
-   * Fires when the user clicks "Next unmapped →" or presses Ctrl+].
-   * The composition layer handles finding and selecting the next unmapped field.
-   */
-  onAdvanceToNext?: () => void;
-  /**
-   * Whether any unmapped target fields remain.
-   * Controls visibility of the "Next unmapped →" button.
-   */
-  hasUnmappedFields?: boolean;
   /**
    * Fires when the user clicks "Clear mapping" (T-08).
    * The parent removes the rule from the working session.
@@ -131,10 +139,6 @@ const MATCH_KIND_LABEL: Record<SuggestedField['matchKind'], string> = {
 };
 
 const AI_COMING_SOON = 'Coming soon \u2014 AI features available in a future release';
-
-function normalizeExpression(value: string): string {
-  return value.trim();
-}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -202,18 +206,16 @@ export function ScalarFieldBuilder({
   currentStatus,
   currentExpression = '',
   parsedSourceSchema,
-  onApply,
+  updateDraft,
+  revertDraft,
+  getDraftExpression,
   onExpressionChange,
-  onAdvanceToNext,
-  hasUnmappedFields = false,
   onClearMapping,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
   const [mode, setMode] = useState<'builder' | 'editor'>('builder');
   const [decompositionWarning, setDecompositionWarning] = useState<string | null>(null);
-  // Track whether the current expression has been applied (AE-10)
-  const [appliedExpression, setAppliedExpression] = useState<string | null>(null);
   const prevHydratedTargetRef = useRef<string>(selectedTargetPath);
 
   // FS-038 T-12: Chain builder state
@@ -221,24 +223,26 @@ export function ScalarFieldBuilder({
   // Whether the add-logic picker is open (shown below source card / static input)
   const [addLogicPickerOpen, setAddLogicPickerOpen] = useState(false);
 
-  // Keep onExpressionChange in a ref to avoid stale closure issues
+  // Keep callbacks in refs to avoid stale closure issues
   const onExpressionChangeRef = useRef(onExpressionChange);
   useEffect(() => {
     onExpressionChangeRef.current = onExpressionChange;
   });
+  const updateDraftRef = useRef(updateDraft);
+  useEffect(() => {
+    updateDraftRef.current = updateDraft;
+  });
 
   const handleExpressionChange = useCallback((next: string) => {
-    // Ignore no-op emissions from builder/editor re-hydration so
-    // the Applied visual state is not cleared spuriously.
+    // Ignore no-op emissions from builder/editor re-hydration
     if (next === expression) {
       return;
     }
 
     setExpression(next);
-    // Reset applied state only on real expression changes (AE-10)
-    setAppliedExpression(null);
+    updateDraftRef.current(selectedTargetPath, next);
     onExpressionChangeRef.current?.(next);
-  }, [expression]);
+  }, [expression, selectedTargetPath]);
 
   const rawDslRef = useRef<RawDslEditorRef>(null);
 
@@ -250,16 +254,12 @@ export function ScalarFieldBuilder({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainState, mode]);
 
-  // Hydrate builder state when target field or its expression changes
+  // Hydrate builder state when target field changes.
+  // Priority: draft expression → saved expression → empty state.
   useEffect(() => {
-    const expr = currentExpression ?? '';
-    const targetChanged = selectedTargetPath !== prevHydratedTargetRef.current;
-
+    const draftExpr = getDraftExpression(selectedTargetPath);
+    const expr = draftExpr ?? currentExpression ?? '';
     setExpression(expr);
-    if (targetChanged) {
-      // Clear applied state when navigating to a different target field.
-      setAppliedExpression(null);
-    }
     prevHydratedTargetRef.current = selectedTargetPath;
 
     if (!expr) {
@@ -298,10 +298,14 @@ export function ScalarFieldBuilder({
         setMode('editor');
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath, currentExpression]);
 
-  const { isValid, isValidating, errorDecorations } = useDslValidation(expression);
-  const isDirty = normalizeExpression(expression) !== normalizeExpression(currentExpression ?? '');
+  const { errorDecorations } = useDslValidation(expression);
+
+  // isDirty: current expression differs from the saved (committed) expression.
+  // A draft exists when getDraftExpression returns non-null.
+  const isDirty = getDraftExpression(selectedTargetPath) !== null;
 
   // Read sourceData from PreviewContext for live result display
   const previewCtx = useContext(PreviewContext);
@@ -334,41 +338,30 @@ export function ScalarFieldBuilder({
 
   const { isDragOver, dropHandlers } = useDropZone({ onDrop: handleInsertSourceField });
 
-  const handleSave = useCallback(() => {
-    if (expression.trim() && isValid) {
-      onApply(selectedTargetPath, expression);
-      setAppliedExpression(expression);
+  // Discard changes: revert draft and re-hydrate from saved expression
+  const handleDiscard = useCallback(() => {
+    revertDraft(selectedTargetPath);
+    const expr = currentExpression ?? '';
+    setExpression(expr);
+    if (!expr) {
+      setDecompositionWarning(null);
+      setChainState(createEmptyChainState());
+      setMode('builder');
+      return;
     }
-  }, [expression, isValid, onApply, selectedTargetPath]);
-
-  // Ctrl+] / Cmd+] → advance to next unmapped field (AE-12)
-  const onAdvanceToNextRef = useRef(onAdvanceToNext);
-  useEffect(() => {
-    onAdvanceToNextRef.current = onAdvanceToNext;
-  });
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === ']') {
-        e.preventDefault();
-        onAdvanceToNextRef.current?.();
-      }
+    const chainResult = decomposeToChainState(expr);
+    if (chainResult.success) {
+      setChainState(chainResult.state);
+      setDecompositionWarning(null);
+      setMode('builder');
+    } else {
+      setChainState(createEmptyChainState());
+      setDecompositionWarning('Expression cannot be loaded into the guided builder.');
+      setMode('editor');
     }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => { document.removeEventListener('keydown', handleKeyDown); };
-  }, []);
+  }, [revertDraft, selectedTargetPath, currentExpression]);
 
-  const isApplied = appliedExpression !== null && appliedExpression === expression;
 
-  // FS-038 T-12: Apply is gated on chain completeness in builder mode
-  const chainComplete = isChainComplete(chainState);
-  const canSave =
-    isDirty &&
-    expression.trim().length > 0 &&
-    isValid &&
-    !isValidating &&
-    !isApplied &&
-    (mode !== 'builder' || chainComplete);
 
   // FS-038 T-12: Chain state update handlers
   const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
@@ -605,7 +598,7 @@ export function ScalarFieldBuilder({
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* AI Actions + Save                                                   */}
+      {/* AI Actions + Discard                                               */}
       {/* ------------------------------------------------------------------ */}
       <div className="shrink-0 border-t border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -660,48 +653,19 @@ export function ScalarFieldBuilder({
           {/* Spacer */}
           <span className="flex-1" />
 
-          {/* Next unmapped → button */}
-          {hasUnmappedFields && onAdvanceToNext && (
+          {/* Discard changes button — visible when field has an unsaved draft */}
+          {isDirty && (
             <button
               type="button"
-              data-testid="next-unmapped-btn"
-              onClick={onAdvanceToNext}
-              aria-label="Navigate to next unmapped target field"
-              className="flex items-center gap-1 rounded border border-slate-600 px-2.5 py-1.5 text-xs text-slate-300 transition-colors hover:border-blue-500 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              data-testid="discard-btn"
+              onClick={handleDiscard}
+              aria-label={`Discard changes for ${selectedTargetPath}`}
+              className="flex items-center gap-1.5 rounded border border-slate-600 px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:border-amber-500/60 hover:text-amber-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500"
             >
-              Next unmapped
-              <ChevronRight size={12} aria-hidden="true" />
+              <Undo2 size={12} aria-hidden="true" />
+              Discard changes
             </button>
           )}
-
-          {/* Apply button */}
-          <button
-            type="button"
-            data-testid="apply-btn"
-            disabled={!canSave}
-            onClick={handleSave}
-            className={[
-              'flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-              isApplied
-                ? 'cursor-default bg-green-800/60 text-green-300'
-                : canSave
-                  ? 'bg-blue-600 text-white hover:bg-blue-500'
-                  : 'cursor-not-allowed bg-slate-700 text-slate-500',
-            ].join(' ')}
-          >
-            {isApplied ? (
-              <>
-                <Check size={12} aria-hidden="true" />
-                Applied
-              </>
-            ) : (
-              <>
-                <Wand2 size={12} aria-hidden="true" />
-                Apply
-              </>
-            )}
-          </button>
         </div>
       </div>
     </div>

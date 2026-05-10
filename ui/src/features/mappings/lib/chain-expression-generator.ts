@@ -1,15 +1,18 @@
 /**
- * chain-expression-generator.ts — FS-038 T-02
+ * chain-expression-generator.ts — FS-038 T-02 / FS-039 T-02
  *
- * Pure function that converts a ChainBuilderState into a valid DSL expression string.
- * This is the forward path: state → DSL.
+ * Two generators in one file:
  *
- * Entry point:
  *   generateExpressionFromChain(state: ChainBuilderState): string
+ *     FS-038 generator — operates on ChainBuilderState (legacy chain model).
+ *     Kept for backward compatibility during migration.
  *
- * Returns empty string for incomplete states (no sourcePath, no staticValue, etc.).
+ *   generateChainExpression(chain: ChainState): string
+ *     FS-039 generator — operates on ChainState (unified chain model).
+ *     Handles OperandValue types including the 'currentValue' kind which
+ *     substitutes the accumulated chain expression at the point of the condition.
  *
- * Chain composition:
+ * Chain composition (both generators):
  *   base value → step 1 wraps base → step 2 wraps step 1 → ... → final expression
  *
  * @pure — no side effects, no hooks, deterministic output for a given input.
@@ -28,6 +31,16 @@ import type {
   StaticValueBranch,
   TransformLogicStep,
   ValueMapLogicStep,
+  // FS-039 types
+  type ChainState,
+  type ChainStep,
+  type OperandValue,
+  type Predicate,
+  type ConditionClause,
+  type FS039ConditionStep,
+  type FS039ValueMapStep,
+  type FS039TransformStep,
+  type FS039ValueMapEntry,
 } from './chain-builder-state';
 
 // ---------------------------------------------------------------------------
@@ -299,4 +312,200 @@ export function generateExpressionFromChain(state: ChainBuilderState): string {
   }
 
   return expression;
+}
+
+// ===========================================================================
+// FS-039 Generator — generateChainExpression(chain: ChainState): string
+//
+// Operates on the FS-039 ChainState model with OperandValue predicates.
+// The key difference from the FS-038 generator is the 'currentValue' operand
+// kind: when a condition predicate's left operand is { kind: 'currentValue' },
+// the generator substitutes the accumulated chain expression at that point —
+// NOT the final chain output.
+//
+// Accumulator tracking:
+//   The generator maintains `accumulator` as it walks the steps array.
+//   Before processing step N, accumulator = expression produced by steps 0..N-1.
+//   When a condition step's predicate has left.kind === 'currentValue',
+//   the generator uses the current accumulator value.
+// ===========================================================================
+
+/**
+ * Generates a DSL expression string from a FS-039 ChainState.
+ *
+ * Returns empty string for:
+ *   - source kind 'none' with no steps
+ *   - field source with empty path
+ *
+ * @pure — no side effects, deterministic output for a given input.
+ */
+export function generateChainExpression(chain: ChainState): string {
+  const baseExpr = generateChainSourceExpr(chain.source);
+  if (baseExpr === '' && chain.steps.length === 0) return '';
+
+  let accumulator = baseExpr;
+  for (const step of chain.steps) {
+    accumulator = applyChainStep(step, accumulator);
+  }
+  return accumulator;
+}
+
+// ---------------------------------------------------------------------------
+// FS-039 internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates the base expression for a ChainSource.
+ */
+function generateChainSourceExpr(source: ChainState['source']): string {
+  switch (source.kind) {
+    case 'none':
+      return '';
+    case 'field':
+      return source.path ? `source(${quoteString(source.path)})` : '';
+    case 'static':
+      return staticValueToDsl(source.value);
+  }
+}
+
+/**
+ * Resolves an OperandValue to its DSL expression string.
+ *
+ * @param operand - The operand to resolve.
+ * @param accumulatorExpr - The accumulated chain expression at this point.
+ *   Used when operand.kind === 'currentValue'.
+ */
+function resolveOperandValue(operand: OperandValue, accumulatorExpr: string): string {
+  switch (operand.kind) {
+    case 'currentValue':
+      // Substitute the accumulated chain expression at this step.
+      // This is the core of the currentValue semantics: the condition tests
+      // whatever the chain has produced up to (but not including) this step.
+      return accumulatorExpr;
+    case 'field':
+      return operand.path ? `source(${quoteString(operand.path)})` : '';
+    case 'static':
+      return staticValueToDsl(operand.value);
+    case 'expression':
+      return operand.dsl;
+  }
+}
+
+/**
+ * Generates the DSL predicate expression for a single Predicate.
+ *
+ * @param predicate - The predicate to generate.
+ * @param accumulatorExpr - The accumulated chain expression (for currentValue resolution).
+ */
+function generatePredicateExpr(predicate: Predicate, accumulatorExpr: string): string {
+  const leftExpr = resolveOperandValue(predicate.left, accumulatorExpr);
+  const rightExpr = resolveOperandValue(predicate.right, accumulatorExpr);
+  const op = predicate.operator;
+
+  switch (op) {
+    case 'isTruthy':
+      return leftExpr;
+    case 'isFalsy':
+      return `not(${leftExpr})`;
+    case 'isNull':
+      return `isNull(${leftExpr})`;
+    case 'isNotNull':
+      return `not(isNull(${leftExpr}))`;
+    default:
+      return `${op}(${leftExpr}, ${rightExpr})`;
+  }
+}
+
+/**
+ * Generates the DSL predicate expression for a ConditionClause.
+ * Multiple predicates are AND-combined: and(pred1, pred2, ...).
+ * A single predicate is emitted directly without wrapping.
+ */
+function generateClausePredicateExpr(clause: ConditionClause, accumulatorExpr: string): string {
+  const predicateExprs = clause.predicates.map((p) => generatePredicateExpr(p, accumulatorExpr));
+  if (predicateExprs.length === 0) return '';
+  if (predicateExprs.length === 1) return predicateExprs[0];
+  return `and(${predicateExprs.join(', ')})`;
+}
+
+/**
+ * Generates DSL for a FS-039 ConditionStep.
+ *
+ * Structure:
+ *   Single IF clause:  if(predicate, thenExpr, elseExpr)
+ *   With ELSE-IF:      if(pred1, then1, if(pred2, then2, elseExpr))
+ *
+ * The accumulator is passed to predicate resolution so 'currentValue'
+ * operands substitute the chain value at this point.
+ */
+function generateFS039ConditionStep(step: FS039ConditionStep, accumulatorExpr: string): string {
+  // Build the else expression first (innermost)
+  let elseExpr = generateChainExpression(step.elseBranch);
+
+  // Fold ELSE-IF clauses from the inside out (reverse order)
+  // conditions[0] = IF, conditions[1..] = ELSE-IF
+  const elseIfClauses = step.conditions.slice(1);
+  for (let i = elseIfClauses.length - 1; i >= 0; i--) {
+    const clause = elseIfClauses[i];
+    const clausePredicate = generateClausePredicateExpr(clause, accumulatorExpr);
+    const clauseThen = generateChainExpression(clause.thenBranch);
+    elseExpr = `if(${clausePredicate}, ${clauseThen}, ${elseExpr})`;
+  }
+
+  // Build the IF clause (conditions[0])
+  const ifClause = step.conditions[0];
+  if (!ifClause) return elseExpr; // degenerate: no IF clause, return else
+  const ifPredicate = generateClausePredicateExpr(ifClause, accumulatorExpr);
+  const ifThen = generateChainExpression(ifClause.thenBranch);
+
+  return `if(${ifPredicate}, ${ifThen}, ${elseExpr})`;
+}
+
+/**
+ * Generates DSL for a FS-039 ValueMapStep.
+ *
+ * Pattern: valueMap(accumulator, {"key1": val1, "key2": val2}, defaultExpr)
+ */
+function generateFS039ValueMapStep(step: FS039ValueMapStep, accumulatorExpr: string): string {
+  const validMappings = step.mappings.filter((m) => m.whenValue.trim().length > 0);
+  let entriesStr: string;
+  if (validMappings.length === 0) {
+    entriesStr = '{}';
+  } else {
+    const pairs = validMappings.map((m: FS039ValueMapEntry) => {
+      const key = quoteString(m.whenValue);
+      const value = generateChainExpression(m.outputChain);
+      return `${key}: ${value}`;
+    });
+    entriesStr = `{${pairs.join(', ')}}`;
+  }
+  const defaultExpr = generateChainExpression(step.defaultValue);
+  return `valueMap(${accumulatorExpr}, ${entriesStr}, ${defaultExpr})`;
+}
+
+/**
+ * Generates DSL for a FS-039 TransformStep wrapping the accumulator.
+ * Pattern: functionName(accumulator, arg2, arg3, ...)
+ */
+function generateFS039TransformStep(step: FS039TransformStep, accumulatorExpr: string): string {
+  if (!step.functionName) return accumulatorExpr;
+  const extraArgs = step.args.map(generateArgSlot).filter(Boolean);
+  const allArgs = [accumulatorExpr, ...extraArgs];
+  return `${step.functionName}(${allArgs.join(', ')})`;
+}
+
+/**
+ * Applies a single FS-039 ChainStep to the accumulated expression.
+ * Passes the current accumulator to each step so 'currentValue' operands
+ * resolve correctly.
+ */
+function applyChainStep(step: ChainStep, accumulatorExpr: string): string {
+  switch (step.kind) {
+    case 'transform':
+      return generateFS039TransformStep(step, accumulatorExpr);
+    case 'condition':
+      return generateFS039ConditionStep(step, accumulatorExpr);
+    case 'valueMap':
+      return generateFS039ValueMapStep(step, accumulatorExpr);
+  }
 }

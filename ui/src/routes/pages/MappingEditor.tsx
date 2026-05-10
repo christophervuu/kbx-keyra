@@ -15,6 +15,7 @@ import {
   ScalarFieldBuilder,
   SourceSchemaPanel,
   TargetWorklist,
+  UnsavedChangesOverlay,
   VersionDiffView,
   VersionHistoryDrawer,
   type ChildFieldInfo,
@@ -70,10 +71,6 @@ function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldT
   }
 }
 
-function normalizeExpression(value: string): string {
-  return value.trim();
-}
-
 // ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
@@ -123,13 +120,9 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   // Inline preview strip state
   // ---------------------------------------------------------------------------
-  const [lastApplyTimestamp, setLastApplyTimestamp] = useState<number | null>(null);
 
-  const editor = useMappingEditor(mappingId, () => {
-    setLastApplyTimestamp(Date.now());
-  });
+  const editor = useMappingEditor(mappingId);
   const history = useVersionHistory(mappingId, editor.config);
-
   // ---------------------------------------------------------------------------
   // Project name (lightweight fetch — display only)
   // ---------------------------------------------------------------------------
@@ -149,6 +142,7 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isChangesOverlayOpen, setIsChangesOverlayOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Restore handler
@@ -227,68 +221,25 @@ export default function MappingEditor() {
   );
 
   // ---------------------------------------------------------------------------
-  // Target node selection — with unapplied-changes guard
+  // Target node selection — auto-draft model.
+  // Field-to-field navigation auto-commits the current field's draft (no dialog).
   // ---------------------------------------------------------------------------
-
-  // Pending navigation: the path the user clicked while an unapplied expression exists
-  const [pendingTargetPath, setPendingTargetPath] = useState<string | null>(null);
-  // Whether the unapplied-changes dialog is open
-  const [unappliedDialogOpen, setUnappliedDialogOpen] = useState(false);
-  // The current expression as reported by ScalarFieldBuilder on every change
-  const [unappliedExpression, setUnappliedExpression] = useState<string>('');
-  // The "clean" baseline expression for the currently selected field.
-  // Dirty = unappliedExpression !== lastAppliedExpressionRef.current.
-  // Using a ref avoids triggering re-renders when the baseline is updated.
-  const lastAppliedExpressionRef = useRef<string>('');
 
   const handleSelectTargetNode = useCallback(
     (path: string) => {
-      if (
-        selectedTargetPath !== null &&
-        path !== selectedTargetPath &&
-        normalizeExpression(unappliedExpression) !==
-          normalizeExpression(lastAppliedExpressionRef.current)
-      ) {
-        // Expression has been edited since last apply — show the guard dialog
-        setPendingTargetPath(path);
-        setUnappliedDialogOpen(true);
-      } else {
-        setSelectedTargetPath(path);
+      // Auto-commit the outgoing field's draft before hydrating the new field.
+      // The draft is already stored via updateDraft on every keystroke; this
+      // call is a semantic commit that makes the intent explicit.
+      if (selectedTargetPath !== null) {
+        const currentDraft = editor.actions.getDraftExpression(selectedTargetPath);
+        if (currentDraft !== null) {
+          editor.actions.commitDraft(selectedTargetPath, currentDraft);
+        }
       }
+      setSelectedTargetPath(path);
     },
-    [unappliedExpression, selectedTargetPath],
+    [selectedTargetPath, editor.actions],
   );
-
-  // "Apply & Continue" — apply current expression then navigate to the clicked field
-  const handleUnappliedApplyAndContinue = useCallback(() => {
-    if (selectedTargetPath && normalizeExpression(unappliedExpression)) {
-      editor.actions.applyRule(selectedTargetPath, unappliedExpression);
-    }
-    setUnappliedDialogOpen(false);
-    setUnappliedExpression('');
-    lastAppliedExpressionRef.current = '';
-    if (pendingTargetPath !== null) {
-      setSelectedTargetPath(pendingTargetPath);
-      setPendingTargetPath(null);
-    }
-  }, [selectedTargetPath, unappliedExpression, pendingTargetPath, editor.actions]);
-
-  // "Discard" — discard unapplied expression and navigate to the clicked field
-  const handleUnappliedDiscard = useCallback(() => {
-    setUnappliedDialogOpen(false);
-    setUnappliedExpression('');
-    lastAppliedExpressionRef.current = '';
-    if (pendingTargetPath !== null) {
-      setSelectedTargetPath(pendingTargetPath);
-      setPendingTargetPath(null);
-    }
-  }, [pendingTargetPath]);
-
-  // "Cancel" — stay on current field
-  const handleUnappliedCancel = useCallback(() => {
-    setUnappliedDialogOpen(false);
-    setPendingTargetPath(null);
-  }, []);
 
   // ---------------------------------------------------------------------------
   // Derived: target status map (for ObjectSummaryPanel child info)
@@ -336,19 +287,6 @@ export default function MappingEditor() {
   // Sync the "clean" baseline expression when the selected target field changes.
   // We update a ref (not state) so this does not trigger an extra render.
   // The baseline is the expression already applied for this field (or "" if
-  // unmapped). Dirty = unappliedExpression !== lastAppliedExpressionRef.current.
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    const existing =
-      selectedTargetPath !== null
-        ? (editor.rules.find((r) => r.target === selectedTargetPath)?.expression ?? '')
-        : '';
-    lastAppliedExpressionRef.current = existing;
-    setUnappliedExpression(existing);
-  // Intentionally only re-runs when the selected field changes, not on every rules update.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTargetPath]);
-
   // ---------------------------------------------------------------------------
   // "Start with required fields" CTA from BuilderEmptyState
   // ---------------------------------------------------------------------------
@@ -357,52 +295,14 @@ export default function MappingEditor() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Apply expression from ScalarFieldBuilder — upserts rule, no auto-advance (FS-025 T-04)
+  // Apply expression — used by ArrayMappingBuilder (scalar fields use auto-draft)
   // ---------------------------------------------------------------------------
-
-  // Compute next unmapped path after a given path (document order, single pass)
-  const getNextUnmappedPath = useCallback(
-    (afterPath: string): string | null => {
-      if (!editor.parsedTargetSchema || !targetMappingStatus) return null;
-      const allPaths = collectTargetSchemaPaths(editor.parsedTargetSchema.nodes);
-      const currentIdx = allPaths.indexOf(afterPath);
-      if (currentIdx < 0) return null;
-      for (let i = currentIdx + 1; i < allPaths.length; i++) {
-        if (targetMappingStatus.get(allPaths[i]) === 'unmapped') return allPaths[i];
-      }
-      return null;
-    },
-    [editor.parsedTargetSchema, targetMappingStatus],
-  );
-
   const handleApplyExpression = useCallback(
     (targetPath: string, expression: string) => {
       editor.actions.applyRule(targetPath, expression);
-      setUnappliedExpression(expression);
-      lastAppliedExpressionRef.current = expression;
-      // NOTE: Auto-advance removed (FS-025 T-04 / AE-10).
-      // Navigation is now explicit via "Next unmapped →" button or Ctrl+].
     },
     [editor.actions],
   );
-
-  // Advance to next unmapped field — used by ScalarFieldBuilder's "Next unmapped →" button
-  const handleAdvanceToNext = useCallback(() => {
-    if (!selectedTargetPath) return;
-    const next = getNextUnmappedPath(selectedTargetPath);
-    if (next !== null) {
-      setSelectedTargetPath(next);
-    }
-  }, [selectedTargetPath, getNextUnmappedPath]);
-
-  // Whether any unmapped fields remain (drives button visibility in ScalarFieldBuilder)
-  const hasUnmappedFields = useMemo(() => {
-    if (!targetMappingStatus) return false;
-    for (const status of targetMappingStatus.values()) {
-      if (status === 'unmapped') return true;
-    }
-    return false;
-  }, [targetMappingStatus]);
 
   // ---------------------------------------------------------------------------
   // Derived: selected node info (for right panel)
@@ -429,18 +329,18 @@ export default function MappingEditor() {
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       currentLocation.pathname !== nextLocation.pathname &&
-      !editor.actions.canNavigateAway().allowed,
+      editor.hasUnsavedChanges,
   );
 
-  // "Save & Leave" — save then let the blocked navigation proceed
-  const handleBlockerSaveAndLeave = useCallback(() => {
-    editor.actions.save();
+  // "Discard & Leave" — clear all drafts then proceed
+  const handleBlockerDiscard = useCallback(() => {
+    editor.actions.revertAllDrafts();
     blocker.proceed?.();
   }, [editor.actions, blocker]);
 
-  // "Discard & Leave" — discard and proceed
-  const handleBlockerDiscard = useCallback(() => {
-    blocker.proceed?.();
+  // "Cancel" — stay and preserve drafts
+  const handleBlockerCancel = useCallback(() => {
+    blocker.reset?.();
   }, [blocker]);
 
   // ---------------------------------------------------------------------------
@@ -576,10 +476,9 @@ export default function MappingEditor() {
         currentStatus={selectedNodeStatus}
         currentExpression={selectedNodeExpression}
         parsedSourceSchema={editor.parsedSourceSchema}
-        onApply={handleApplyExpression}
-        onExpressionChange={setUnappliedExpression}
-        onAdvanceToNext={handleAdvanceToNext}
-        hasUnmappedFields={hasUnmappedFields}
+        updateDraft={editor.actions.updateDraft}
+        revertDraft={editor.actions.revertDraft}
+        getDraftExpression={editor.actions.getDraftExpression}
         onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
         className="h-full"
       />
@@ -593,7 +492,8 @@ export default function MappingEditor() {
       targetSchemaDetail={editor.targetSchemaDetail}
       projectId={projectId}
       mappingId={mappingId}
-      lastApplyTimestamp={lastApplyTimestamp}
+      selectedTargetPath={selectedTargetPath}
+      getDraftExpression={editor.actions.getDraftExpression}
       onNavigateToRule={(ruleIndex) => {
         const rule = editor.rules[ruleIndex];
         if (rule) setSelectedTargetPath(rule.target);
@@ -611,7 +511,8 @@ export default function MappingEditor() {
         version={editor.version}
         saveStatus={editor.saveStatus}
         deployStatus={null}
-        unsavedCount={editor.unsavedRuleCount}
+        unsavedChangeCount={editor.unsavedChangeCount}
+        onViewUnsavedChanges={() => { setIsChangesOverlayOpen(true); }}
         onSave={editor.actions.save}
         sourceSchemaName={editor.sourceSchemaName}
         targetSchemaName={editor.targetSchemaName}
@@ -656,71 +557,25 @@ export default function MappingEditor() {
         )}
       </VersionHistoryDrawer>
 
-      {/* Unapplied-changes guard dialog (switching target selection) */}
-      {unappliedDialogOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          role="presentation"
-          data-testid="unapplied-dialog-overlay"
-        >
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={handleUnappliedCancel}
-            aria-hidden="true"
-          />
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="unapplied-dialog-title"
-            aria-describedby="unapplied-dialog-message"
-            className="relative z-10 w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-6 shadow-xl"
-            data-testid="unapplied-dialog"
-          >
-            <h2 id="unapplied-dialog-title" className="text-sm font-semibold text-slate-100">
-              Unapplied expression
-            </h2>
-            <p id="unapplied-dialog-message" className="mt-2 text-sm text-slate-400">
-              You have an expression that hasn&apos;t been applied. What would you like to do?
-            </p>
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleUnappliedCancel}
-                className="rounded px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition-colors"
-                data-testid="unapplied-dialog-cancel"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleUnappliedDiscard}
-                className="rounded border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors"
-                data-testid="unapplied-dialog-discard"
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                onClick={handleUnappliedApplyAndContinue}
-                className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition-colors"
-                data-testid="unapplied-dialog-apply-continue"
-              >
-                Apply &amp; Continue
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Unsaved changes overlay */}
+      {isChangesOverlayOpen && (
+        <UnsavedChangesOverlay
+          changes={editor.actions.getUnsavedChangeSummary()}
+          onRevert={(targetPath) => { editor.actions.revertDraft(targetPath); }}
+          onNavigate={(targetPath) => { setSelectedTargetPath(targetPath); }}
+          onClose={() => { setIsChangesOverlayOpen(false); }}
+        />
       )}
 
       {/* Route-level unsaved-changes guard dialog */}
       <ConfirmDialog
         open={blocker.state === 'blocked'}
         title="Unsaved changes"
-        message="You have unsaved changes. Save before leaving or your changes will be lost."
-        confirmLabel="Save & Leave"
-        cancelLabel="Discard"
-        onConfirm={handleBlockerSaveAndLeave}
-        onCancel={handleBlockerDiscard}
+        message={`You have unsaved changes to ${editor.unsavedChangeCount} field(s). Discard and leave?`}
+        confirmLabel="Discard & Leave"
+        cancelLabel="Cancel"
+        onConfirm={handleBlockerDiscard}
+        onCancel={handleBlockerCancel}
       />
     </>
   );

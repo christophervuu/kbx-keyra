@@ -624,3 +624,331 @@ export function isExpressionBranch(
 ): branch is { kind: 'expression'; raw: string } {
   return branch.kind === 'expression';
 }
+
+// ---------------------------------------------------------------------------
+// FS-039 — Unified chain model types
+//
+// These types define the FS-039 chain model with cleaner naming conventions.
+// The FS-038 types above (ChainBuilderState, LogicStep, etc.) remain for
+// backward compatibility during migration. FS-039 components use these types.
+//
+// Key differences from FS-038 model:
+//   - ChainSource is a proper discriminated union (vs BuilderEntryType + fields)
+//   - OperandValue has 4 kinds including 'expression' (vs ConditionOperand's 3)
+//   - Predicate is a standalone type (vs inline fields on ConditionLogicStep)
+//   - ChainState / ChainStep use the FS-039 spec naming
+//   - DraftRulesMap and DraftFieldState are new (used by useMappingEditor)
+// ---------------------------------------------------------------------------
+
+/**
+ * The source of a chain's base value.
+ *
+ * - 'field'  — value derived from a source schema field path
+ * - 'static' — value is a literal constant
+ * - 'none'   — no source selected yet (initial/empty state)
+ */
+export type ChainSource =
+  | { readonly kind: 'field'; readonly path: string }
+  | { readonly kind: 'static'; readonly value: StaticValueBranch }
+  | { readonly kind: 'none' };
+
+/**
+ * The top-level chain state for the FS-039 chain-based builder.
+ *
+ * A chain is a source value passed through an ordered sequence of steps.
+ * Each step receives the output of the previous step as its implicit input.
+ */
+export interface ChainState {
+  /** The base value that enters the chain. */
+  readonly source: ChainSource;
+  /** Ordered sequence of steps applied to the source value. */
+  readonly steps: readonly ChainStep[];
+}
+
+/**
+ * An operand value in a condition predicate.
+ *
+ * - 'currentValue' — the accumulated chain value at this step (default for left operand)
+ * - 'field'        — a source schema field reference: source("path")
+ * - 'static'       — a literal constant value
+ * - 'expression'   — a raw DSL expression string (fallback / advanced)
+ *
+ * The 'currentValue' kind is critical: it enables conditions to test the
+ * accumulated chain value without requiring the user to explicitly re-select
+ * the source field. The expression generator substitutes the actual chain
+ * accumulator expression when it encounters kind: 'currentValue'.
+ */
+export type OperandValue =
+  | { readonly kind: 'currentValue' }
+  | { readonly kind: 'field'; readonly path: string }
+  | { readonly kind: 'static'; readonly value: StaticValueBranch }
+  | { readonly kind: 'expression'; readonly dsl: string };
+
+/**
+ * A single predicate in a condition clause.
+ *
+ * Predicates are AND-combined within a ConditionClause.
+ * The left operand defaults to { kind: 'currentValue' } on creation.
+ */
+export interface Predicate {
+  readonly left: OperandValue;
+  readonly operator: ConditionOperatorType;
+  readonly right: OperandValue;
+}
+
+/**
+ * A single condition clause (IF or ELSE-IF).
+ *
+ * Multiple predicates within a clause are AND-combined.
+ */
+export interface ConditionClause {
+  /** AND-combined predicates. At least one required. */
+  readonly predicates: readonly Predicate[];
+  /** The output chain when this clause's predicates all pass. */
+  readonly thenBranch: ChainState;
+}
+
+/**
+ * A condition step in the FS-039 chain model.
+ *
+ * Conditions are total: the else branch is always required and cannot be removed.
+ * Supports else-if via additional ConditionClause entries in `conditions`.
+ *
+ * The first entry in `conditions` is the IF clause.
+ * Subsequent entries are ELSE-IF clauses.
+ * The `elseBranch` is the final ELSE (always present).
+ */
+export interface FS039ConditionStep {
+  readonly kind: 'condition';
+  /** IF and ELSE-IF clauses. At least one (the IF clause) is required. */
+  readonly conditions: readonly ConditionClause[];
+  /**
+   * The ELSE branch — always present, structurally non-optional.
+   * This enforces totality: every condition must handle all cases.
+   */
+  readonly elseBranch: ChainState;
+}
+
+/**
+ * A single value map entry row.
+ */
+export interface FS039ValueMapEntry {
+  /** The input value to match (literal string). */
+  readonly whenValue: string;
+  /** The output chain when this input matches. */
+  readonly outputChain: ChainState;
+}
+
+/**
+ * A value map step in the FS-039 chain model.
+ *
+ * Maps the current chain value to an output based on exact string matches.
+ * The default case is always required and cannot be removed.
+ */
+export interface FS039ValueMapStep {
+  readonly kind: 'valueMap';
+  /** Ordered list of input→output mapping rows. */
+  readonly mappings: readonly FS039ValueMapEntry[];
+  /**
+   * The default output chain — always present, structurally non-optional.
+   * Used when no mapping row matches the current value.
+   */
+  readonly defaultValue: ChainState;
+}
+
+/**
+ * A transform step in the FS-039 chain model.
+ *
+ * The current accumulated value is the implicit first argument.
+ * `args` holds any additional arguments beyond that implicit first.
+ */
+export interface FS039TransformStep {
+  readonly kind: 'transform';
+  readonly functionName: string;
+  /** Additional argument slots beyond the implicit first argument. */
+  readonly args: readonly ArgumentSlotRef[];
+}
+
+/**
+ * The discriminated union of all FS-039 chain step kinds.
+ *
+ * Any step kind can follow any other — post-condition and post-value-map
+ * transform steps are structurally supported (AE-22, AE-23).
+ */
+export type ChainStep = FS039TransformStep | FS039ConditionStep | FS039ValueMapStep;
+
+// ---------------------------------------------------------------------------
+// Draft state types (used by useMappingEditor — T-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * A map from target field path to draft DSL expression.
+ *
+ * Keys are target field paths (e.g. "output.customerName").
+ * Values are draft DSL expression strings.
+ * An empty string value means "delete this rule on save".
+ *
+ * This is the in-session draft accumulator — changes are committed to
+ * saved rules only when the user explicitly saves.
+ */
+export type DraftRulesMap = Map<string, string>;
+
+/**
+ * The validation state of a draft field expression.
+ */
+export type DraftValidationState =
+  | { readonly status: 'valid' }
+  | { readonly status: 'invalid'; readonly errors: readonly string[] }
+  | { readonly status: 'pending' };
+
+/**
+ * Per-field draft lifecycle state.
+ *
+ * Tracks the draft expression and its validation state for a single
+ * target field. Used internally by the builder to manage in-progress edits.
+ */
+export interface DraftFieldState {
+  /** The target field path this draft belongs to. */
+  readonly targetPath: string;
+  /** The current draft DSL expression (may be empty). */
+  readonly expression: string;
+  /** Whether this draft differs from the saved rule for this field. */
+  readonly isDirty: boolean;
+  /** Validation state of the current draft expression. */
+  readonly validation: DraftValidationState;
+}
+
+// ---------------------------------------------------------------------------
+// FS-039 factory functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates an empty ChainState with no source and no steps.
+ */
+export function createEmptyChain(): ChainState {
+  return {
+    source: { kind: 'none' },
+    steps: [],
+  };
+}
+
+/**
+ * Creates a ChainState with a field source and no steps.
+ */
+export function createFieldSourceChain(path: string): ChainState {
+  return {
+    source: { kind: 'field', path },
+    steps: [],
+  };
+}
+
+/**
+ * Creates a ChainState with a static source and no steps.
+ */
+export function createStaticSourceChain(value: StaticValueBranch): ChainState {
+  return {
+    source: { kind: 'static', value },
+    steps: [],
+  };
+}
+
+/**
+ * Creates a default empty Predicate.
+ * Left operand defaults to currentValue (AE-24: condition left-operand default).
+ */
+export function createEmptyPredicate(): Predicate {
+  return {
+    left: { kind: 'currentValue' },
+    operator: 'eq',
+    right: { kind: 'expression', dsl: '' },
+  };
+}
+
+/**
+ * Creates a default empty ConditionClause with one empty predicate.
+ */
+export function createEmptyConditionClause(): ConditionClause {
+  return {
+    predicates: [createEmptyPredicate()],
+    thenBranch: createEmptyChain(),
+  };
+}
+
+/**
+ * Creates a default empty FS039ConditionStep.
+ * Starts with one IF clause and an empty else branch.
+ * Left operand defaults to currentValue per AE-24.
+ */
+export function createEmptyFS039ConditionStep(): FS039ConditionStep {
+  return {
+    kind: 'condition',
+    conditions: [createEmptyConditionClause()],
+    elseBranch: createEmptyChain(),
+  };
+}
+
+/**
+ * Creates a default empty FS039ValueMapStep.
+ * Starts with one empty mapping row and an empty default chain.
+ */
+export function createEmptyFS039ValueMapStep(): FS039ValueMapStep {
+  return {
+    kind: 'valueMap',
+    mappings: [{ whenValue: '', outputChain: createEmptyChain() }],
+    defaultValue: createEmptyChain(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// FS-039 type guards
+// ---------------------------------------------------------------------------
+
+export function isFS039ConditionStep(step: ChainStep): step is FS039ConditionStep {
+  return step.kind === 'condition';
+}
+
+export function isFS039ValueMapStep(step: ChainStep): step is FS039ValueMapStep {
+  return step.kind === 'valueMap';
+}
+
+export function isFS039TransformStep(step: ChainStep): step is FS039TransformStep {
+  return step.kind === 'transform';
+}
+
+export function isFieldSource(source: ChainSource): source is { kind: 'field'; path: string } {
+  return source.kind === 'field';
+}
+
+export function isStaticSource(
+  source: ChainSource,
+): source is { kind: 'static'; value: StaticValueBranch } {
+  return source.kind === 'static';
+}
+
+export function isNoneSource(source: ChainSource): source is { kind: 'none' } {
+  return source.kind === 'none';
+}
+
+export function isCurrentValueOperand(
+  operand: OperandValue,
+): operand is { kind: 'currentValue' } {
+  return operand.kind === 'currentValue';
+}
+
+export function isFieldOperand(
+  operand: OperandValue,
+): operand is { kind: 'field'; path: string } {
+  return operand.kind === 'field';
+}
+
+export function isStaticOperand(
+  operand: OperandValue,
+): operand is { kind: 'static'; value: StaticValueBranch } {
+  return operand.kind === 'static';
+}
+
+export function isExpressionOperand(
+  operand: OperandValue,
+): operand is { kind: 'expression'; dsl: string } {
+  return operand.kind === 'expression';
+}

@@ -24,7 +24,8 @@ const DEFAULT_TOP_BAR_PROPS = {
   version: 3,
   saveStatus: 'saved' as SaveStatus,
   deployStatus: null as HighestDeployStatus | null,
-  unsavedCount: 0,
+  unsavedChangeCount: 0,
+  onViewUnsavedChanges: vi.fn(),
   onSave: vi.fn(),
   sourceSchemaName: 'OrderRequest',
   targetSchemaName: 'PurchaseOrder',
@@ -68,7 +69,7 @@ describe('EditorTopBar', () => {
 
   it('renders save status with unsaved count', () => {
     renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedCount={3} />,
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedChangeCount={3} />,
     );
     expect(screen.getByTestId('save-status')).toHaveTextContent('3 unsaved changes');
   });
@@ -144,14 +145,14 @@ describe('EditorTopBar', () => {
   it('calls onSave when Save button is clicked', () => {
     const onSave = vi.fn();
     renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedCount={1} onSave={onSave} />,
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedChangeCount={1} onSave={onSave} />,
     );
     fireEvent.click(screen.getByTestId('save-button'));
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
-  it('Save button is disabled when saveStatus is "saved"', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saved" />);
+  it('Save button is disabled when unsavedChangeCount is 0', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} unsavedChangeCount={0} />);
     expect(screen.getByTestId('save-button')).toBeDisabled();
   });
 

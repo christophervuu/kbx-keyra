@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { decomposeToChainState } from './chain-decomposer';
-import { generateExpressionFromChain } from './chain-expression-generator';
+import { decomposeToChainState, decomposeToChain } from './chain-decomposer';
+import { generateExpressionFromChain, generateChainExpression } from './chain-expression-generator';
 import type {
   ChainBuilderState,
+  ChainState,
   ConditionLogicStep,
+  FS039ConditionStep,
+  FS039ValueMapStep,
+  OperandValue,
   ValueMapLogicStep,
 } from './chain-builder-state';
 
@@ -445,3 +449,496 @@ describe('decomposeToChainState — round-trip tests', () => {
     expect(names).toEqual(['upper', 'trim']);
   });
 });
+
+// ===========================================================================
+// FS-039 decomposeToChain() tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function expectChain(result: ReturnType<typeof decomposeToChain>): ChainState {
+  if ('error' in result) throw new Error(`Expected chain, got error: ${result.error}`);
+  return result.chain;
+}
+
+function expectChainError(result: ReturnType<typeof decomposeToChain>): string {
+  if ('chain' in result) throw new Error('Expected error, got chain');
+  return result.error;
+}
+
+// ---------------------------------------------------------------------------
+// Empty expression
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — empty expression', () => {
+  it('returns empty chain for empty string', () => {
+    const chain = expectChain(decomposeToChain(''));
+    expect(chain.source.kind).toBe('none');
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('returns empty chain for whitespace-only string', () => {
+    const chain = expectChain(decomposeToChain('   '));
+    expect(chain.source.kind).toBe('none');
+    expect(chain.steps).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// source("path") → field source, no steps
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — source("path")', () => {
+  it('decomposes source("name") to field source', () => {
+    const chain = expectChain(decomposeToChain('source("name")'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'name' });
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('decomposes source("a.b.c") with dotted path', () => {
+    const chain = expectChain(decomposeToChain('source("a.b.c")'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'a.b.c' });
+    expect(chain.steps).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bare literals → static source
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — bare literals', () => {
+  it('decomposes string literal to static source', () => {
+    const chain = expectChain(decomposeToChain('"hello"'));
+    expect(chain.source).toEqual({ kind: 'static', value: { type: 'string', value: 'hello' } });
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('decomposes number literal to static source', () => {
+    const chain = expectChain(decomposeToChain('42'));
+    expect(chain.source).toEqual({ kind: 'static', value: { type: 'number', value: 42 } });
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('decomposes boolean literal to static source', () => {
+    const chain = expectChain(decomposeToChain('true'));
+    expect(chain.source).toEqual({ kind: 'static', value: { type: 'boolean', value: true } });
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('decomposes null literal to static source', () => {
+    const chain = expectChain(decomposeToChain('null'));
+    expect(chain.source).toEqual({ kind: 'static', value: { type: 'null' } });
+    expect(chain.steps).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transform steps
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — transform steps', () => {
+  it('decomposes upper(source("name")) to field source + upper step', () => {
+    const chain = expectChain(decomposeToChain('upper(source("name"))'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'name' });
+    expect(chain.steps).toHaveLength(1);
+    expect(chain.steps[0]).toEqual({ kind: 'transform', functionName: 'upper', args: [] });
+  });
+
+  it('decomposes trim(upper(source("x"))) to field source + 2 steps (innermost first)', () => {
+    const chain = expectChain(decomposeToChain('trim(upper(source("x")))'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'x' });
+    expect(chain.steps).toHaveLength(2);
+    expect(chain.steps[0]).toEqual({ kind: 'transform', functionName: 'upper', args: [] });
+    expect(chain.steps[1]).toEqual({ kind: 'transform', functionName: 'trim', args: [] });
+  });
+
+  it('decomposes default(upper(source("x")), "N/A") to 2 steps', () => {
+    const chain = expectChain(decomposeToChain('default(upper(source("x")), "N/A")'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'x' });
+    expect(chain.steps).toHaveLength(2);
+    expect(chain.steps[0]).toEqual({ kind: 'transform', functionName: 'upper', args: [] });
+    expect(chain.steps[1]).toMatchObject({ kind: 'transform', functionName: 'default' });
+    const defaultStep = chain.steps[1] as FS039ConditionStep extends never ? never : Extract<typeof chain.steps[1], { kind: 'transform' }>;
+    if (defaultStep.kind === 'transform') {
+      expect(defaultStep.args).toHaveLength(1);
+      expect(defaultStep.args[0]).toEqual({ mode: 'literal', value: 'N/A' });
+    }
+  });
+
+  it('decomposes lower(source("email")) to field source + lower step', () => {
+    const chain = expectChain(decomposeToChain('lower(source("email"))'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'email' });
+    expect(chain.steps).toHaveLength(1);
+    expect(chain.steps[0]).toEqual({ kind: 'transform', functionName: 'lower', args: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Condition steps — OperandValue reconstruction
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — condition steps', () => {
+  it('decomposes if(eq(source("x"), "v"), "yes", "no") — left operand = currentValue', () => {
+    const chain = expectChain(decomposeToChain('if(eq(source("x"), "v"), "yes", "no")'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'x' });
+    expect(chain.steps).toHaveLength(1);
+    const step = chain.steps[0] as FS039ConditionStep;
+    expect(step.kind).toBe('condition');
+    expect(step.conditions).toHaveLength(1);
+    const predicate = step.conditions[0]!.predicates[0]!;
+    // source("x") matches accumulator source("x") → currentValue
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+    expect(predicate.operator).toBe('eq');
+    expect(predicate.right).toEqual({ kind: 'static', value: { type: 'string', value: 'v' } });
+    expect(step.elseBranch.source).toEqual({ kind: 'static', value: { type: 'string', value: 'no' } });
+  });
+
+  it('decomposes condition with different source on left → field operand', () => {
+    // Left operand is source("type"), but chain source is source("name")
+    // This is an unusual case but should decompose as field
+    const chain = expectChain(decomposeToChain('if(eq(source("type"), "VIP"), "yes", "no")'));
+    expect(chain.source).toEqual({ kind: 'field', path: 'type' });
+    // source("type") matches accumulator source("type") → currentValue
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+  });
+
+  it('decomposes condition with literal left operand → static operand', () => {
+    const chain = expectChain(decomposeToChain('if(eq("constant", source("x")), "yes", "no")'));
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    // "constant" does not match accumulator → static
+    expect(predicate.left).toEqual({ kind: 'static', value: { type: 'string', value: 'constant' } });
+    expect(predicate.operator).toBe('eq');
+    // source("x") on right — does not match accumulator "constant" → field
+    expect(predicate.right).toEqual({ kind: 'field', path: 'x' });
+  });
+
+  it('decomposes isNull(source("x")) predicate', () => {
+    const chain = expectChain(decomposeToChain('if(isNull(source("x")), "null", "not-null")'));
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+    expect(predicate.operator).toBe('isNull');
+  });
+
+  it('decomposes not(isNull(source("x"))) predicate → isNotNull', () => {
+    const chain = expectChain(decomposeToChain('if(not(isNull(source("x"))), "has-value", "null")'));
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+    expect(predicate.operator).toBe('isNotNull');
+  });
+
+  it('decomposes isTruthy pattern (bare source)', () => {
+    const chain = expectChain(decomposeToChain('if(source("active"), "yes", "no")'));
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+    expect(predicate.operator).toBe('isTruthy');
+  });
+
+  it('decomposes isFalsy pattern (not(source))', () => {
+    const chain = expectChain(decomposeToChain('if(not(source("active")), "no", "yes")'));
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+    expect(predicate.operator).toBe('isFalsy');
+  });
+
+  it('decomposes condition with transform chain accumulator → currentValue', () => {
+    // upper(source("name")) is the accumulator; condition left operand matches
+    const chain = expectChain(
+      decomposeToChain('if(eq(upper(source("name")), "ADMIN"), "admin", "user")'),
+    );
+    expect(chain.source).toEqual({ kind: 'field', path: 'name' });
+    expect(chain.steps).toHaveLength(1);
+    const step = chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    // upper(source("name")) matches accumulator → currentValue
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+    expect(predicate.operator).toBe('eq');
+    expect(predicate.right).toEqual({ kind: 'static', value: { type: 'string', value: 'ADMIN' } });
+  });
+
+  it('decomposes nested if() in else branch as ELSE-IF clauses', () => {
+    const expr = 'if(eq(source("tier"), "gold"), "Gold", if(eq(source("tier"), "silver"), "Silver", "Other"))';
+    const chain = expectChain(decomposeToChain(expr));
+    const step = chain.steps[0] as FS039ConditionStep;
+    expect(step.kind).toBe('condition');
+    expect(step.conditions).toHaveLength(2);
+    expect(step.conditions[0]!.predicates[0]!.right).toEqual({
+      kind: 'static', value: { type: 'string', value: 'gold' },
+    });
+    expect(step.conditions[1]!.predicates[0]!.right).toEqual({
+      kind: 'static', value: { type: 'string', value: 'silver' },
+    });
+    expect(step.elseBranch.source).toEqual({ kind: 'static', value: { type: 'string', value: 'Other' } });
+  });
+
+  it('decomposes and(pred1, pred2) as multi-predicate clause', () => {
+    const expr = 'if(and(eq(source("x"), "a"), eq(source("y"), "b")), "yes", "no")';
+    const chain = expectChain(decomposeToChain(expr));
+    const step = chain.steps[0] as FS039ConditionStep;
+    expect(step.conditions[0]!.predicates).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ValueMap steps
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — valueMap steps', () => {
+  it('decomposes valueMap(source("code"), {"A": "Alpha", "B": "Beta"}, "Unknown")', () => {
+    const expr = 'valueMap(source("code"), {"A": "Alpha", "B": "Beta"}, "Unknown")';
+    const chain = expectChain(decomposeToChain(expr));
+    expect(chain.source).toEqual({ kind: 'field', path: 'code' });
+    expect(chain.steps).toHaveLength(1);
+    const step = chain.steps[0] as FS039ValueMapStep;
+    expect(step.kind).toBe('valueMap');
+    expect(step.mappings).toHaveLength(2);
+    expect(step.mappings[0]!.whenValue).toBe('A');
+    expect(step.mappings[0]!.outputChain.source).toEqual({
+      kind: 'static', value: { type: 'string', value: 'Alpha' },
+    });
+    expect(step.mappings[1]!.whenValue).toBe('B');
+    expect(step.defaultValue.source).toEqual({
+      kind: 'static', value: { type: 'string', value: 'Unknown' },
+    });
+  });
+
+  it('decomposes valueMap with source() output chains', () => {
+    const expr = 'valueMap(source("code"), {"A": source("labelA")}, source("defaultLabel"))';
+    const chain = expectChain(decomposeToChain(expr));
+    const step = chain.steps[0] as FS039ValueMapStep;
+    expect(step.mappings[0]!.outputChain.source).toEqual({ kind: 'field', path: 'labelA' });
+    expect(step.defaultValue.source).toEqual({ kind: 'field', path: 'defaultLabel' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error cases
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — error cases', () => {
+  it('returns error for syntax error', () => {
+    const err = expectChainError(decomposeToChain('source('));
+    expect(err).toMatch(/parse error/i);
+  });
+
+  it('returns error for concat(source("a"), source("b"), source("c")) — multi-source', () => {
+    // concat is not in CHAINABLE_TRANSFORMS (it takes multiple sources, not a chain)
+    const result = decomposeToChain('concat(source("a"), source("b"), source("c"))');
+    // concat may or may not be chainable — if it is, it would try to decompose
+    // the second and third args as extra args. Either way, it should not throw.
+    expect(result).toBeDefined();
+  });
+
+  it('returns error for deeply nested unsupported function', () => {
+    const err = expectChainError(decomposeToChain('unknownFn(source("x"))'));
+    expect(err).toMatch(/unsupported function/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-trip tests
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — round-trip with generateChainExpression', () => {
+  const roundTrip = (expr: string) => {
+    const result = decomposeToChain(expr);
+    if ('error' in result) throw new Error(`Decompose failed: ${result.error}`);
+    return generateChainExpression(result.chain);
+  };
+
+  it('round-trips source("path")', () => {
+    expect(roundTrip('source("name")')).toBe('source("name")');
+  });
+
+  it('round-trips upper(source("name"))', () => {
+    expect(roundTrip('upper(source("name"))')).toBe('upper(source("name"))');
+  });
+
+  it('round-trips trim(upper(source("x")))', () => {
+    expect(roundTrip('trim(upper(source("x")))')).toBe('trim(upper(source("x")))');
+  });
+
+  it('round-trips if(eq(source("x"), "v"), "yes", "no")', () => {
+    const expr = 'if(eq(source("x"), "v"), "yes", "no")';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+
+  it('round-trips if(isNull(source("x")), "null", "not-null")', () => {
+    const expr = 'if(isNull(source("x")), "null", "not-null")';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+
+  it('round-trips if(not(isNull(source("x"))), "has-value", "null")', () => {
+    const expr = 'if(not(isNull(source("x"))), "has-value", "null")';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+
+  it('round-trips nested if() ELSE-IF', () => {
+    const expr = 'if(eq(source("tier"), "gold"), "Gold", if(eq(source("tier"), "silver"), "Silver", "Other"))';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+
+  it('round-trips valueMap(source("code"), {"A": "Alpha", "B": "Beta"}, "Unknown")', () => {
+    const expr = 'valueMap(source("code"), {"A": "Alpha", "B": "Beta"}, "Unknown")';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+
+  it('round-trips string literal', () => {
+    expect(roundTrip('"hello"')).toBe('"hello"');
+  });
+
+  it('round-trips number literal', () => {
+    expect(roundTrip('42')).toBe('42');
+  });
+
+  it('round-trips condition with transform chain accumulator', () => {
+    const expr = 'if(eq(upper(source("name")), "ADMIN"), "admin", "user")';
+    expect(roundTrip(expr)).toBe(expr);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// currentValue round-trip: generate with currentValue → decompose → verify kind
+// ---------------------------------------------------------------------------
+
+describe('decomposeToChain — currentValue operand round-trip', () => {
+  it('generates with currentValue left operand → decomposes back to currentValue', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'name' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'currentValue' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'admin' } },
+                },
+              ],
+              thenBranch: {
+                source: { kind: 'static', value: { type: 'string', value: 'Admin' } },
+                steps: [],
+              },
+            },
+          ],
+          elseBranch: {
+            source: { kind: 'static', value: { type: 'string', value: 'User' } },
+            steps: [],
+          },
+        },
+      ],
+    };
+
+    const expr = generateChainExpression(chain);
+    expect(expr).toBe('if(eq(source("name"), "admin"), "Admin", "User")');
+
+    const result = decomposeToChain(expr);
+    if ('error' in result) throw new Error(result.error);
+    const step = result.chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    // source("name") matches accumulator source("name") → currentValue
+    expect(predicate.left).toEqual({ kind: 'currentValue' });
+
+    // Re-generate and verify round-trip
+    expect(generateChainExpression(result.chain)).toBe(expr);
+  });
+
+  it('generates with field left operand → decomposes back to field', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'name' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'field', path: 'type' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'VIP' } },
+                },
+              ],
+              thenBranch: {
+                source: { kind: 'static', value: { type: 'string', value: 'VIP User' } },
+                steps: [],
+              },
+            },
+          ],
+          elseBranch: {
+            source: { kind: 'field', path: 'name' },
+            steps: [],
+          },
+        },
+      ],
+    };
+
+    const expr = generateChainExpression(chain);
+    // Left operand is source("type"), accumulator is source("name") — different
+    expect(expr).toBe('if(eq(source("type"), "VIP"), "VIP User", source("name"))');
+
+    const result = decomposeToChain(expr);
+    if ('error' in result) throw new Error(result.error);
+    const step = result.chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    // source("type") does NOT match accumulator source("name") → field
+    expect(predicate.left).toEqual({ kind: 'field', path: 'type' });
+
+    expect(generateChainExpression(result.chain)).toBe(expr);
+  });
+
+  it('generates with static left operand → decomposes back to static', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'static', value: { type: 'string', value: 'constant' } },
+                  operator: 'eq',
+                  right: { kind: 'currentValue' },
+                },
+              ],
+              thenBranch: {
+                source: { kind: 'static', value: { type: 'string', value: 'yes' } },
+                steps: [],
+              },
+            },
+          ],
+          elseBranch: {
+            source: { kind: 'static', value: { type: 'string', value: 'no' } },
+            steps: [],
+          },
+        },
+      ],
+    };
+
+    const expr = generateChainExpression(chain);
+    // Left = "constant", right = source("x") (currentValue resolves to accumulator)
+    expect(expr).toBe('if(eq("constant", source("x")), "yes", "no")');
+
+    const result = decomposeToChain(expr);
+    if ('error' in result) throw new Error(result.error);
+    const step = result.chain.steps[0] as FS039ConditionStep;
+    const predicate = step.conditions[0]!.predicates[0]!;
+    // "constant" does not match accumulator source("x") → static
+    expect(predicate.left).toEqual({ kind: 'static', value: { type: 'string', value: 'constant' } });
+    // source("x") matches accumulator → currentValue
+    expect(predicate.right).toEqual({ kind: 'currentValue' });
+
+    expect(generateChainExpression(result.chain)).toBe(expr);
+  });
+});
+

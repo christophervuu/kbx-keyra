@@ -96,12 +96,12 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode; onApply/onExpressionChange callbacks; compressed header (type badge left, Builder|Editor toggle in header row); conditional Suggested Sources (hidden when empty); Clear mapping action; live result display wired to PreviewContext (FS-021, FS-023, FS-027)
+        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row); conditional Suggested Sources (hidden when empty); Clear mapping action; live result display wired to PreviewContext (FS-021, FS-023, FS-027)
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
-        InlinePreviewStrip.tsx Collapsed bar + expanded strip; unconditional auto-preview on Apply when sourceData is present; test case selector; output flash animation; Run disabled when sourceData empty (FS-022)
-        ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05)
+        InlinePreviewStrip.tsx Collapsed bar + expanded strip; auto-preview triggered by draft expression stabilization (300ms debounce in ConnectedInlinePreviewStrip); test case selector; output flash animation; Run disabled when sourceData empty (FS-022); lastApplyTimestamp prop deprecated (optional, backward compat only)
+        ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05); FS-039 T-13: replaced lastApplyTimestamp with selectedTargetPath+getDraftExpression; debounced auto-preview watches draft expression (300ms)
         TestLabPage.tsx      Full-page test lab: multi-panel simultaneous layout (2×2 wide, vertical stack medium, tab fallback narrow); resizable main split; ExecutionSummaryBar; ResultPanel wrappers; useTestLabLayout hook; own isolated PreviewProvider (FS-021 T-06, FS-032, FS-033)
         comparison/
           CompareTab.tsx               Compare tab composition: mode selector + run/save actions, side-by-side result panels, read-only diff, save-comparison flow
@@ -116,12 +116,17 @@ ui/src/
           ExecutionSummaryBar.tsx  Sticky compact bar: hidden when idle; executing (spinner); pass (green) | fail (red) | error (amber) verdict with duration, diagnostic severity badges, rules summary, version badge, environment badge, optional diff summary label; verdict derived via deriveExecutionVerdict (FS-033, FS-035)
           SuiteSummary.tsx         Inline batch suite summary: header with total/passed/failed/errored counts; scrollable per-test rows with verdict icon, name, duration, error count; clickable rows load test results into standard tabs (FS-035)
         TargetFieldRow.tsx    Atomic target field row (status icon, type badge, expression summary)
-        EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01)
+        EditorTopBar.tsx      Editor metadata strip (name/version/save/deploy/schema refs); two-row layout (FS-021 T-01); FS-039 T-11: unsavedChangeCount prop (replaces unsavedCount), onViewUnsavedChanges prop, "View changes" button with badge (visible when unsavedChangeCount > 0), Save disabled when unsavedChangeCount === 0
         PanelPlaceholder.tsx  Placeholder renderer for inactive panels
         RuleList.tsx          Rule list panel surface (CRUD/reorder/bulk + diagnostics + debounced search/filter by target/expression/type; DnD disabled during active search)
         ExpressionBuilderPanel.tsx  Rules View expression shell (mode toggle + composition); embeds UnifiedExpressionBuilder in builder mode and RawDslEditor in editor mode (FS-023)
         RawDslEditor.tsx      Raw DSL textarea editor (overlay highlighting + autocomplete)
-        UnifiedExpressionBuilder.tsx Single-form multi-mode builder (Value / Conditional / Value Map) with live expression/result sections (FS-023); FS-029 Source Card integration + FS-030 transform-chain argument wiring and decomposition hydration
+        UnifiedExpressionBuilder.tsx Single-form multi-mode builder (Value / Conditional / Value Map) with live expression/result sections (FS-023); FS-029 Source Card integration + FS-030 transform-chain argument wiring and decomposition hydration [LEGACY — superseded by ChainBuilder.tsx for scalar fields in FS-039; retained for Rules View ExpressionBuilderPanel]
+        ChainBuilder.tsx      FS-039 chain-based scalar field builder: manages ChainState; hydrates via decomposeToChain(); generates DSL via generateChainExpression(); source entry toggle, step list, [+ Add Step], StepPickerPanel; wires ConditionStepEditor + ValueMapStepEditor + ChainStepCard; expandedStepIndex accordion state
+        ChainStepCard.tsx     FS-039 T-07 accordion wrapper for chain steps: collapsed summary header + expanded body; onExpand/onCollapse/onRemove; isComplete collapse guard; aria-expanded; keyboard nav; accentColor variants
+        ConditionStepEditor.tsx FS-039 T-08 full condition step editor: IF/THEN/ELSE structure; OperandValueEditor (currentValue/field/static/expression kinds); PredicateEditor (left operand defaults to currentValue chip, operator dropdown, unary operator hides right); BranchChainEditor (field/static toggle + autocomplete); ConditionClauseEditor (AND predicates, THEN branch); required ELSE non-removable; else-if support
+        ValueMapStepEditor.tsx FS-039 T-09 full value map step editor: mapping rows (when→map to), [+ Add Mapping], per-row remove, required default (non-removable); MappingRowEditor + BranchChainEditor sub-components
+        UnsavedChangesOverlay.tsx FS-039 T-10 right-side drawer: role="dialog", aria-modal, focus trap, Escape key close, backdrop dismiss; changes grouped Modified→Added→Removed; each entry: clickable field path (navigate + close), saved vs draft expression, Revert button; empty state
         SourceChipPicker.tsx  Value-mode source chip picker with search and static-value toggle (FS-023)
         SourceCard.tsx        FS-029/FS-030 Source Card builder surface: DirectCopy + SourceWithTransform chain pipeline, per-step argument rendering, add/remove step actions, and type-compatible add-step picker wiring
         ArgumentForm.tsx      Parameter-driven argument editor used by FunctionCall and per-step SourceCard chain forms; supports implicit-first-arg offset and variadic slots
@@ -144,7 +149,7 @@ ui/src/
         AutocompleteDropdown.tsx    Portal dropdown for DSL autocomplete suggestions
       hooks/
         use-engine-validation.ts  Debounced engine validate() integration hook
-        use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring); applyRule(), deleteRuleByTarget(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02, FS-027 T-08)
+        use-mapping-editor.ts     Editor orchestration (load/save/rules/validation wiring); FS-039 T-04: draftRules map, updateDraft/commitDraft/revertDraft/revertAllDrafts/getDraftExpression/getUnsavedChangeSummary API; save() merges drafts; hasUnsavedChanges covers drafts; unsavedChangeCount; applyRule() kept as deprecated wrapper; canNavigateAway() uses hasUnsavedChanges (FS-021 T-02, FS-027 T-08)
         use-expression-builder.ts  Rules View expression orchestration + mode switch/decomposition flow (pipeline-decomposer first, legacy fallback) + debounced commit (FS-023)
         use-expression-preview.ts  Single-expression parse/evaluate preview hook
         use-dsl-autocomplete.ts    Context-aware DSL autocomplete state hook
@@ -169,6 +174,10 @@ ui/src/
         infer-rule-type.ts    Expression outer-function -> display label mapping
         dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
         expression-builder-state.ts Discriminated union state model for UnifiedExpressionBuilder modes (Value/Conditional/ValueMap); ValueModeState includes `inputType: 'source' | 'static'` and `staticValue?: StaticValue`; FS-029/FS-030 Source Card types (SourceCardValueModeState, ArgumentSlot, TransformChainStep, InlineTransform chain model)
+        chain-builder-state.ts FS-039 T-01: ChainState, ChainSource (field/static/none), ChainStep (TransformStep/ConditionStep/ValueMapStep), OperandValue (currentValue/field/static/expression), Predicate, ConditionClause, DraftRulesMap, DraftFieldState; factory functions (createEmptyChain, createEmptyConditionStep, createEmptyValueMapStep, createEmptyConditionClause, createEmptyPredicate) and type guards
+        chain-expression-generator.ts FS-039 T-02: generateChainExpression(chain: ChainState) → DSL string; handles all source/operand/step variants; currentValue operand substitutes accumulated chain expression
+        chain-decomposer.ts   FS-039 T-03: decomposeToChain(expression) → DecomposeChainResult039; detects currentValue kind by reconstructing left operand and comparing to accumulator; FS-038 .entries → .properties fix
+        chain-summary.ts      FS-039 T-07: summarizeSource, summarizeStep, summarizeChain pure functions with ~80-char truncation; used by ChainStepCard collapsed header
         pipeline-expression-generator.ts Pure state -> DSL generator for UnifiedExpressionBuilder (FS-023)
         pipeline-decomposer.ts DSL -> ExpressionBuilderState decomposer with mode auto-detection and failure reason (FS-023)
         source-card-expression-generator.ts FS-029/FS-030 SourceCardValueModeState -> DSL generator (DirectCopy/SourceWithTransform chain/FunctionCall/PendingConnector)
@@ -600,7 +609,7 @@ Patterns: `1:1 map`, `filter-then-map`, `merge-arrays`, `build-from-scalars`, `a
 
 This replaces the legacy "No rules yet" empty state from `RuleList` in the target-driven view. `RuleList`'s own empty state is still shown in Rules View.
 
-### Top Bar Contract (FS-021)
+### Top Bar Contract (FS-021, FS-039)
 
 `EditorTopBar` is the canonical metadata strip for Mapping Editor pages. FS-021 T-01 redesigns it as a **2-row layout** replacing the previous single-row strip:
 
@@ -613,41 +622,67 @@ Props contract:
 - `mappingName` — displayed in context bar
 - `version` — displayed as `v{N}` badge
 - `saveStatus: 'saved' | 'unsaved' | 'saving' | 'error'` — drives save indicator display
-- `unsavedCount: number` — count of applied-but-not-saved rules; shown as badge when > 0
+- `unsavedChangeCount: number` — count of fields with unsaved draft changes; "View changes" button visible when > 0 (FS-039 T-11; replaces `unsavedCount`)
+- `onViewUnsavedChanges: () => void` — opens `UnsavedChangesOverlay` (FS-039 T-11)
 - `deployStatus: HighestDeployStatus | null` — derived from deployment context; drives stale badge (strictly version-based, no content diff)
 - `sourceSchemaName`, `targetSchemaName` — schema context labels
-- `onSave` — save callback
+- `onSave` — save callback; Save button disabled when `unsavedChangeCount === 0 || isSaving`
 - `onHistoryToggle` — optional; when provided, renders "History" button (clock icon) for version history drawer
 - Auto-map placeholder action is rendered in this top bar as a disabled control (feature intentionally not implemented)
 
-### Two-Tier Save Model (FS-021 T-02)
+### Auto-Draft Save Model (FS-039, replaces Two-Tier Save Model from FS-021)
 
-The editor uses a **two-tier save model** to separate expression authoring from persistence:
+The editor uses an **auto-draft save model** with three persistence layers:
 
-**Tier 1 — Apply:**
-- `ScalarFieldBuilder` exposes an `onApply` callback and an `apply-btn` test ID.
-- Clicking Apply calls `useMappingEditor.applyRule(targetPath, expression)`, which upserts the rule into local state and increments `unsavedRuleCount`.
-- After applying, the builder **remains on the current field** in a committed state: the Apply button shows a disabled "Applied ✓" indicator until the user makes further edits. Auto-advance was removed in FS-025 T-04.
-- `onExpressionChange` fires on every keystroke so the parent can track the in-progress expression.
-- **"Next unmapped →" button:** visible when unmapped target fields remain; clicking it navigates to the next unmapped field in document order. Keyboard shortcut: `Ctrl+]` / `Cmd+]`.
-- `onAdvanceToNext` callback on `ScalarFieldBuilder` is wired to the composition layer's `getNextUnmappedPath` logic in `MappingEditor.tsx`.
+**Layer 1 — In-memory draft (per keystroke):**
+- `ScalarFieldBuilder` calls `updateDraft(targetPath, expression)` on every expression change.
+- The draft is stored in `draftRules: Map<string, string>` inside `useMappingEditor`.
+- No Apply button. No dialog on field navigation.
 
-**Tier 2 — Save:**
-- `useMappingEditor.save()` persists all applied rules to `LocalStorageAdapter` and resets `unsavedRuleCount` to 0.
+**Layer 2 — Draft rules map (cross-field session):**
+- `draftRules` accumulates drafts for all fields edited in the session.
+- `hasUnsavedChanges` is `true` when `draftRules` is non-empty or rules differ from last save.
+- `unsavedChangeCount` counts fields with draft changes (non-empty draft that differs from saved rule, or empty draft that deletes a saved rule).
+- `getUnsavedChangeSummary()` returns `UnsavedChangeSummary[]` with change type (Modified/Added/Removed) per field.
+
+**Layer 3 — Save (persist to adapter):**
+- `useMappingEditor.save()` merges `draftRules` into saved rules (empty string draft = delete rule; non-empty = upsert), persists to `LocalStorageAdapter`, increments version, clears `draftRules`.
 - Triggered by Ctrl+S or the Save button in `EditorTopBar`.
 - `saveStatus` reflects the persistence lifecycle: `'saved' | 'unsaved' | 'saving' | 'error'`.
+- Save is never blocked by validation errors.
 
-**Navigation guard:**
-- `useMappingEditor.canNavigateAway()` returns `true` when `unsavedRuleCount === 0`.
-- `MappingEditor.tsx` uses React Router v6 `useBlocker` to intercept navigation when `!canNavigateAway()`.
-- A confirmation dialog is shown: "You have unapplied changes. Leave anyway?" with Confirm/Cancel.
+**Field-to-field navigation (seamless, no dialog):**
+- `MappingEditor.tsx` calls `commitDraft(previousPath, currentDraft)` before switching `selectedTargetPath`.
+- `commitDraft` is a semantic alias for `updateDraft` — the draft is already stored; this call makes the intent explicit.
+- No confirmation dialog is shown for field-to-field navigation.
 
-**`useMappingEditor` additions (FS-021 T-02, FS-027 T-08):**
-- `applyRule(targetPath: string, expression: string): void` — upserts rule, increments `unsavedRuleCount`
-- `deleteRuleByTarget(targetPath: string): void` — removes the rule for a given target path from working session; marks session as having unsaved changes (FS-027 T-08)
-- `unsavedRuleCount: number` — count of applied-but-not-saved rules
-- `canNavigateAway(): boolean` — returns `unsavedRuleCount === 0`
-- `onRuleApplied?: () => void` — optional callback fired after each `applyRule()` call; used by `ConnectedInlinePreviewStrip` to trigger auto-preview
+**Route-level navigation guard:**
+- `MappingEditor.tsx` uses React Router v6 `useBlocker` with `editor.hasUnsavedChanges` as the gate.
+- Dialog text: "You have unsaved changes to N field(s). Discard and leave?"
+- Confirm: calls `revertAllDrafts()` then `blocker.proceed()` — clears all drafts and navigates.
+- Cancel: calls `blocker.reset()` — stays on page, preserves all drafts.
+
+**`useMappingEditor` draft API (FS-039 T-04):**
+- `updateDraft(targetPath, expression)` — store draft; does not write to saved rules
+- `commitDraft(targetPath, expression)` — semantic alias for updateDraft (field navigation intent)
+- `revertDraft(targetPath)` — remove draft entry for a field; reverts to saved state
+- `revertAllDrafts()` — clear all draft entries
+- `getDraftExpression(targetPath)` — returns draft expression or null if no draft
+- `getUnsavedChangeSummary()` — returns `UnsavedChangeSummary[]` per field
+- `applyRule(targetPath, expression)` — **deprecated** wrapper; calls `updateDraft` + fires `onRuleApplied`; kept for backward compat during migration
+- `unsavedRuleCount` — **deprecated** alias for `unsavedChangeCount`
+
+**EditorTopBar props (FS-039 T-11):**
+- `unsavedChangeCount: number` — count of fields with unsaved draft changes (replaces `unsavedCount`)
+- `onViewUnsavedChanges: () => void` — opens `UnsavedChangesOverlay`
+- "View changes" button: visible when `unsavedChangeCount > 0`; shows count badge; fires `onViewUnsavedChanges`
+- Save button: disabled when `unsavedChangeCount === 0 || isSaving`
+
+**UnsavedChangesOverlay (FS-039 T-10):**
+- Right-side drawer; `role="dialog"`, `aria-modal`, focus trap, Escape key close, backdrop dismiss
+- Changes grouped: Modified → Added → Removed
+- Each entry: clickable field path (fires `onNavigate(targetPath)` + `onClose()`), saved vs draft expression, Revert button (fires `onRevert(targetPath)`)
+- Empty state when no changes
 
 ### Per-Panel Search
 
@@ -665,11 +700,11 @@ This change was made in FS-021 T-03 to reduce prop drilling and allow each panel
 
 - **Collapsed state (default):** a slim bar showing last output summary and a Run button.
 - **Expanded state:** full strip with source data input, output display, and run controls.
-- **Unconditional auto-preview on Apply:** when `lastApplyTimestamp` changes (rule Apply event), the strip calls `onRun()` whenever `sourceData` is non-empty. There is no auto-preview toggle in this strip.
+- **Auto-preview on draft stabilization (FS-039 T-13):** `ConnectedInlinePreviewStrip` watches the draft expression for the selected field via `getDraftExpression(selectedTargetPath)`; when the draft stabilizes (300ms debounce), calls `run()` if `autoRun` is on and `sourceData` is non-empty. The old `lastApplyTimestamp`/`onRuleApplied` mechanism is removed.
 - **Test case selector:** the strip supports `testCases` and `onLoadTestCase` props; users can load saved test cases directly into the source textarea. If no saved cases exist, selector shows a disabled empty-state option.
 - **Output flash animation:** a brief highlight animation plays on the output area when new results arrive.
 - **Run disabled:** the Run button is disabled when `sourceData` is empty (AE-14 compliance).
-- **`ConnectedInlinePreviewStrip`:** thin wrapper that owns `usePreviewExecution` and local state; must be rendered inside `<PreviewProvider>`. Used as `bottomContent` in `MappingEditor.tsx`.
+- **`ConnectedInlinePreviewStrip`:** thin wrapper that owns `usePreviewExecution` and local state; must be rendered inside `<PreviewProvider>`. Accepts `selectedTargetPath` and `getDraftExpression` props (FS-039 T-13). Used as `bottomContent` in `MappingEditor.tsx`.
 - **Rules View parity:** `BottomArea` also exposes the same test case selector behavior so saved test cases can be loaded without switching views.
 - **`PreviewProvider` isolation:** `MappingEditor.tsx` wraps its content in a `<PreviewProvider>`. The Test Lab page has its own separate `<PreviewProvider>` — they are never co-mounted.
 
@@ -1131,6 +1166,90 @@ This model is retained for backward compatibility. New builder surfaces use `Cha
 
 FS-038 redesigns the Builder panel with a chain-based model that replaces the 3-mode tab system (Value/Conditional/ValueMap) with a progressive, entry-point-first flow.
 
+---
+
+### FS-039 Chain Model (ChainState)
+
+FS-039 introduces a new `ChainState` type system in `chain-builder-state.ts` that supersedes the FS-038 `ChainBuilderState` for scalar field authoring. The FS-038 types are retained for backward compatibility.
+
+#### ChainState type system
+
+```typescript
+interface ChainState {
+  source: ChainSource;
+  steps: readonly ChainStep[];
+}
+
+type ChainSource =
+  | { kind: 'field'; path: string }
+  | { kind: 'static'; value: StaticValueBranch }
+  | { kind: 'none' };
+
+type ChainStep = TransformStep | ConditionStep | ValueMapStep;
+
+interface TransformStep {
+  type: 'transform';
+  functionName: string;
+  args: readonly ArgumentSlotRef[];
+}
+
+interface ConditionStep {
+  type: 'condition';
+  clauses: readonly ConditionClause[];  // IF + else-if clauses
+  elseValue: BranchChainValue;          // required ELSE
+}
+
+interface ValueMapStep {
+  type: 'valueMap';
+  mappings: readonly ValueMapEntry[];
+  defaultValue: BranchChainValue;       // required default
+}
+```
+
+#### OperandValue and currentValue default
+
+Condition left operands use `OperandValue` with four kinds:
+
+| Kind | Description |
+|---|---|
+| `currentValue` | Substitutes the accumulated chain expression (default for left operand) |
+| `field` | A source schema field path |
+| `static` | A literal constant |
+| `expression` | A raw DSL expression string |
+
+The `currentValue` kind is the default for condition left operands. In the UI it renders as an explicit labeled token ("current value"). Users can switch to `field`/`static`/`expression` via a "Change input" escape hatch.
+
+**Generator behavior:** when `operand.kind === 'currentValue'`, `generateChainExpression` substitutes the accumulated expression string built from the source + all preceding steps.
+
+**Decomposer behavior:** `decomposeToChain` detects `currentValue` by reconstructing the left operand expression string and comparing it to the accumulated chain expression. If they match, the operand is reconstructed as `{ kind: 'currentValue' }`.
+
+#### Conditions are total (else required)
+
+`ConditionStep.elseValue` is always required — conditions must have an else branch. The UI renders the ELSE branch as non-removable.
+
+#### Value maps have required default
+
+`ValueMapStep.defaultValue` is always required. The UI renders the default row as non-removable.
+
+#### Step collapse/expand (accordion)
+
+`ChainBuilder.tsx` manages `expandedStepIndex: number | null`. Only one step can be expanded at a time. New steps auto-expand on creation. Completed steps can be collapsed to their summary text (via `chain-summary.ts`). The `isStepComplete(step)` check gates collapse: transform steps require a non-empty `functionName`; condition/valueMap steps are always collapsible.
+
+#### Component boundary decision
+
+`ChainBuilder.tsx` is a **new component**, not a refactor of `UnifiedExpressionBuilder`. This boundary was chosen because:
+- The FS-039 `ChainState` model is structurally different from `ExpressionBuilderState`
+- `UnifiedExpressionBuilder` is retained for the Rules View `ExpressionBuilderPanel` surface
+- A clean boundary avoids entangling the two state models during migration
+
+#### Legacy retirement strategy
+
+- `UnifiedExpressionBuilder`, `ExpressionBuilderState`, `pipeline-expression-generator.ts`, `pipeline-decomposer.ts`, `source-card-expression-generator.ts`, `source-card-decomposer.ts` are retained during the FS-039 migration.
+- These will be retired in a follow-up cleanup spec once the Rules View is migrated to `ChainBuilder`.
+- `applyRule()` and `unsavedRuleCount` are deprecated aliases retained for backward compat.
+
+---
+
 #### Entry-point model
 
 The user first selects how the base value is established:
@@ -1199,8 +1318,8 @@ Defined in: `ui/src/features/mappings/lib/chain-builder-state.ts`
 
 | File | Purpose |
 |---|---|
-| `chain-expression-generator.ts` | `generateExpressionFromChain(state) → string` — forward path: state → DSL |
-| `chain-decomposer.ts` | `decomposeToChainState(expression) → DecomposeChainResult` — reverse path: DSL → state |
+| `chain-expression-generator.ts` | `generateExpressionFromChain(state) → string` — FS-038 forward path: state → DSL; `generateChainExpression(chain) → string` — FS-039 forward path |
+| `chain-decomposer.ts` | `decomposeToChainState(expression) → DecomposeChainResult` — FS-038 reverse path: DSL → ChainBuilderState; `decomposeToChain(expression) → DecomposeChainResult039` — FS-039 reverse path: DSL → ChainState with OperandValue reconstruction |
 
 The decomposer handles all standard patterns: `source("x")`, `upper(source("x"))`, `if(...)`, `valueMap(...)`, `static("value")`, and multi-step transform chains.
 
@@ -1671,9 +1790,14 @@ ui/src/features/mappings/
 ui/src/features/mappings/
   lib/
     chain-builder-state.ts          ChainBuilderState, LogicStep union, factory functions,
-                                    isChainComplete, summarizeLogicStep, type guards
-    chain-expression-generator.ts   generateExpressionFromChain(state) → DSL string
-    chain-decomposer.ts             decomposeToChainState(expression) → DecomposeChainResult
+                                    isChainComplete, summarizeLogicStep, type guards;
+                                    FS-039: ChainState, ChainStep, OperandValue, Predicate,
+                                    ConditionClause, FS039ConditionStep, FS039ValueMapStep,
+                                    FS039TransformStep, DraftRulesMap, DraftFieldState
+    chain-expression-generator.ts   generateExpressionFromChain(state) → DSL string (FS-038);
+                                    generateChainExpression(chain) → DSL string (FS-039)
+    chain-decomposer.ts             decomposeToChainState(expression) → DecomposeChainResult (FS-038);
+                                    decomposeToChain(expression) → DecomposeChainResult039 (FS-039)
   components/
     ChainBuilderShell.tsx           Shell layout: pinned Expression/Result, AI bar, scrollable slot
     EntryPointSelector.tsx          Segmented control: Source / Static / External

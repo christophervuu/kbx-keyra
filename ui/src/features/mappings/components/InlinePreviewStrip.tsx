@@ -35,11 +35,11 @@ export interface InlinePreviewStripProps {
   /** Toggle collapsed/expanded state */
   onToggleCollapse: () => void;
   /**
-   * Incremented each time a rule is applied.
-   * When auto-preview is on and sourceData is non-empty, a change here
-   * triggers an automatic run.
+   * @deprecated Use ConnectedInlinePreviewStrip's draft-expression-change trigger instead.
+   * Kept for backward compatibility. When provided, auto-preview fires on each change
+   * (if autoRun is on and sourceData is non-empty).
    */
-  lastApplyTimestamp: number | null;
+  lastApplyTimestamp?: number | null;
   /** Saved test cases available for loading into the source textarea */
   testCases?: readonly TestCase[];
   /** Fired when a test case is selected from the dropdown */

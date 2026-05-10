@@ -482,7 +482,8 @@ describe('EditorTopBar save status ARIA', () => {
           version={1}
           saveStatus="saved"
           deployStatus={null}
-          unsavedCount={0}
+          unsavedChangeCount={0}
+          onViewUnsavedChanges={() => undefined}
           onSave={() => undefined}
           sourceSchemaName={null}
           targetSchemaName={null}
@@ -504,7 +505,8 @@ describe('EditorTopBar save status ARIA', () => {
           version={1}
           saveStatus="unsaved"
           deployStatus={null}
-          unsavedCount={1}
+          unsavedChangeCount={1}
+          onViewUnsavedChanges={() => undefined}
           onSave={() => undefined}
           sourceSchemaName={null}
           targetSchemaName={null}

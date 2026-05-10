@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateExpressionFromChain } from './chain-expression-generator';
+import { generateExpressionFromChain, generateChainExpression } from './chain-expression-generator';
 import {
   createEmptyChainState,
   createSourceCopyState,
@@ -7,12 +7,27 @@ import {
   createTransformStep,
   createEmptyConditionStep,
   createEmptyValueMapStep,
+  // FS-039 factories
+  createEmptyChain,
+  createFieldSourceChain,
+  createStaticSourceChain,
+  createEmptyPredicate,
+  createEmptyFS039ConditionStep,
+  createEmptyFS039ValueMapStep,
 } from './chain-builder-state';
 import type {
   ChainBuilderState,
   ConditionLogicStep,
   ValueMapLogicStep,
   ChainBranch,
+  // FS-039 types
+  ChainState,
+  ChainStep,
+  OperandValue,
+  Predicate,
+  FS039ConditionStep,
+  FS039ValueMapStep,
+  FS039TransformStep,
 } from './chain-builder-state';
 
 // ---------------------------------------------------------------------------
@@ -530,5 +545,665 @@ describe('literal arg type detection', () => {
       expandedStepIndex: null,
     };
     expect(generateExpressionFromChain(state)).toBe('concat(source("first"), " ", source("last"))');
+  });
+});
+
+// ===========================================================================
+// FS-039 generateChainExpression tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// ChainSource variants
+// ---------------------------------------------------------------------------
+
+describe('FS-039: ChainSource — none', () => {
+  it('returns empty string for none source with no steps', () => {
+    const chain = createEmptyChain();
+    expect(generateChainExpression(chain)).toBe('');
+  });
+});
+
+describe('FS-039: ChainSource — field', () => {
+  it('generates source("path") for field source', () => {
+    const chain = createFieldSourceChain('order.customerName');
+    expect(generateChainExpression(chain)).toBe('source("order.customerName")');
+  });
+
+  it('returns empty string for field source with empty path', () => {
+    const chain: ChainState = { source: { kind: 'field', path: '' }, steps: [] };
+    expect(generateChainExpression(chain)).toBe('');
+  });
+
+  it('escapes double quotes in field path', () => {
+    const chain = createFieldSourceChain('order."quoted"');
+    expect(generateChainExpression(chain)).toBe('source("order.\\"quoted\\"")');
+  });
+});
+
+describe('FS-039: ChainSource — static', () => {
+  it('generates quoted string for string static source', () => {
+    const chain = createStaticSourceChain({ type: 'string', value: 'WEB' });
+    expect(generateChainExpression(chain)).toBe('"WEB"');
+  });
+
+  it('generates bare number for number static source', () => {
+    const chain = createStaticSourceChain({ type: 'number', value: 42 });
+    expect(generateChainExpression(chain)).toBe('42');
+  });
+
+  it('generates true for boolean true static source', () => {
+    const chain = createStaticSourceChain({ type: 'boolean', value: true });
+    expect(generateChainExpression(chain)).toBe('true');
+  });
+
+  it('generates false for boolean false static source', () => {
+    const chain = createStaticSourceChain({ type: 'boolean', value: false });
+    expect(generateChainExpression(chain)).toBe('false');
+  });
+
+  it('generates null for null static source', () => {
+    const chain = createStaticSourceChain({ type: 'null' });
+    expect(generateChainExpression(chain)).toBe('null');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transform steps
+// ---------------------------------------------------------------------------
+
+describe('FS-039: TransformStep', () => {
+  it('generates upper(source("path")) for unary transform', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'customer.name' },
+      steps: [{ kind: 'transform', functionName: 'upper', args: [] }],
+    };
+    expect(generateChainExpression(chain)).toBe('upper(source("customer.name"))');
+  });
+
+  it('generates multiply(source("x"), 100) for transform with literal arg', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.amount' },
+      steps: [{ kind: 'transform', functionName: 'multiply', args: [{ mode: 'literal', value: '100' }] }],
+    };
+    expect(generateChainExpression(chain)).toBe('multiply(source("order.amount"), 100)');
+  });
+
+  it('generates concat with source arg', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'customer.first_name' },
+      steps: [
+        {
+          kind: 'transform',
+          functionName: 'concat',
+          args: [
+            { mode: 'literal', value: ' ' },
+            { mode: 'source', path: 'customer.last_name' },
+          ],
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'concat(source("customer.first_name"), " ", source("customer.last_name"))',
+    );
+  });
+
+  it('generates correct nesting for multi-step transform chain', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        { kind: 'transform', functionName: 'upper', args: [] },
+        { kind: 'transform', functionName: 'trim', args: [] },
+        { kind: 'transform', functionName: 'lower', args: [] },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe('lower(trim(upper(source("x"))))');
+  });
+
+  it('passes through accumulator unchanged for empty functionName', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [{ kind: 'transform', functionName: '', args: [] }],
+    };
+    expect(generateChainExpression(chain)).toBe('source("x")');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OperandValue kinds — all four
+// ---------------------------------------------------------------------------
+
+describe('FS-039: OperandValue — currentValue kind (AE-24)', () => {
+  it('substitutes accumulated chain expression for currentValue left operand', () => {
+    // Chain: source("order.tier") → IF(currentValue = "premium")
+    // currentValue at condition step = source("order.tier")
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'currentValue' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'premium' } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'VIP' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'Standard' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(source("order.tier"), "premium"), "VIP", "Standard")',
+    );
+  });
+
+  it('substitutes accumulated expression after transform for currentValue', () => {
+    // Chain: source("order.status") → upper() → IF(currentValue = "ACTIVE")
+    // currentValue at condition step = upper(source("order.status"))
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        { kind: 'transform', functionName: 'upper', args: [] },
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'currentValue' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'ACTIVE' } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(upper(source("order.status")), "ACTIVE"), "yes", "no")',
+    );
+  });
+
+  it('AE-21: substitutes multi-step accumulator for currentValue', () => {
+    // Chain: source("name") → upper() → trim() → IF(currentValue = "ADMIN")
+    // currentValue = trim(upper(source("name")))
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'name' },
+      steps: [
+        { kind: 'transform', functionName: 'upper', args: [] },
+        { kind: 'transform', functionName: 'trim', args: [] },
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'currentValue' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'ADMIN' } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'admin' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'user' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(trim(upper(source("name"))), "ADMIN"), "admin", "user")',
+    );
+  });
+});
+
+describe('FS-039: OperandValue — field kind', () => {
+  it('generates source("path") for field operand', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.amount' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'field', path: 'customer.type' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'VIP' } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(source("customer.type"), "VIP"), "yes", "no")',
+    );
+  });
+});
+
+describe('FS-039: OperandValue — static kind', () => {
+  it('generates literal DSL for static operand', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'static', value: { type: 'number', value: 100 } },
+                  operator: 'gt',
+                  right: { kind: 'static', value: { type: 'number', value: 50 } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'big' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'small' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe('if(gt(100, 50), "big", "small")');
+  });
+});
+
+describe('FS-039: OperandValue — expression kind', () => {
+  it('passes through raw DSL for expression operand', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'expression', dsl: 'upper(source("order.name"))' },
+                  operator: 'eq',
+                  right: { kind: 'expression', dsl: '"ADMIN"' },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(upper(source("order.name")), "ADMIN"), "yes", "no")',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AND-combined predicates
+// ---------------------------------------------------------------------------
+
+describe('FS-039: AND-combined predicates', () => {
+  it('wraps two predicates in and()', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'currentValue' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'active' } },
+                },
+                {
+                  left: { kind: 'field', path: 'order.amount' },
+                  operator: 'gt',
+                  right: { kind: 'static', value: { type: 'number', value: 100 } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(and(eq(source("order.status"), "active"), gt(source("order.amount"), 100)), "yes", "no")',
+    );
+  });
+
+  it('emits single predicate directly without and() wrapper', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                { left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'a' } } },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+      ],
+    };
+    const result = generateChainExpression(chain);
+    expect(result).not.toContain('and(');
+    expect(result).toBe('if(eq(source("x"), "a"), "yes", "no")');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Else-if (multiple ConditionClause entries)
+// ---------------------------------------------------------------------------
+
+describe('FS-039: else-if via multiple conditions entries', () => {
+  it('generates nested if() for two clauses + else', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'customer.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'gold' } } }],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'VIP' }),
+            },
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'silver' } } }],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'Premium' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'Standard' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(source("customer.tier"), "gold"), "VIP", if(eq(source("customer.tier"), "silver"), "Premium", "Standard"))',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ValueMapStep
+// ---------------------------------------------------------------------------
+
+describe('FS-039: ValueMapStep', () => {
+  it('generates valueMap(accumulator, {mappings}, default)', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status_code' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [
+            { whenValue: 'A', outputChain: createStaticSourceChain({ type: 'string', value: 'Active' }) },
+            { whenValue: 'I', outputChain: createStaticSourceChain({ type: 'string', value: 'Inactive' }) },
+          ],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'Unknown' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'valueMap(source("order.status_code"), {"A": "Active", "I": "Inactive"}, "Unknown")',
+    );
+  });
+
+  it('generates {} for empty mappings', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'default' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe('valueMap(source("x"), {}, "default")');
+  });
+
+  it('skips mapping rows with empty whenValue', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [
+            { whenValue: 'A', outputChain: createStaticSourceChain({ type: 'string', value: 'Active' }) },
+            { whenValue: '', outputChain: createStaticSourceChain({ type: 'string', value: 'Empty' }) },
+          ],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'Unknown' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'valueMap(source("x"), {"A": "Active"}, "Unknown")',
+    );
+  });
+
+  it('uses accumulated expression as first arg (after transform)', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        { kind: 'transform', functionName: 'upper', args: [] },
+        {
+          kind: 'valueMap',
+          mappings: [
+            { whenValue: 'ACTIVE', outputChain: createStaticSourceChain({ type: 'string', value: 'Active' }) },
+          ],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'Unknown' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'valueMap(upper(source("order.status")), {"ACTIVE": "Active"}, "Unknown")',
+    );
+  });
+
+  it('output chains in mappings are recursively generated', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'x' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [
+            {
+              whenValue: 'A',
+              outputChain: {
+                source: { kind: 'field', path: 'output.active' },
+                steps: [{ kind: 'transform', functionName: 'upper', args: [] }],
+              },
+            },
+          ],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'default' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'valueMap(source("x"), {"A": upper(source("output.active"))}, "default")',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AE-22/AE-23: Steps after condition / value map
+// ---------------------------------------------------------------------------
+
+describe('FS-039: AE-22 — steps after condition step', () => {
+  it('wraps condition output in subsequent transform', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'premium' } } }],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'vip' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'standard' }),
+        },
+        { kind: 'transform', functionName: 'upper', args: [] },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'upper(if(eq(source("order.tier"), "premium"), "vip", "standard"))',
+    );
+  });
+});
+
+describe('FS-039: AE-23 — steps after value map step', () => {
+  it('wraps value map output in subsequent transform', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [{ whenValue: 'A', outputChain: createStaticSourceChain({ type: 'string', value: 'active' }) }],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'unknown' }),
+        },
+        { kind: 'transform', functionName: 'upper', args: [] },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'upper(valueMap(source("order.status"), {"A": "active"}, "unknown"))',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nested condition branches with their own chains
+// ---------------------------------------------------------------------------
+
+describe('FS-039: nested condition branches with chains', () => {
+  it('generates correct DSL for condition with chain in thenBranch', () => {
+    const thenChain: ChainState = {
+      source: { kind: 'field', path: 'output.premium' },
+      steps: [{ kind: 'transform', functionName: 'upper', args: [] }],
+    };
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'premium' } } }],
+              thenBranch: thenChain,
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'standard' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(source("order.tier"), "premium"), upper(source("output.premium")), "standard")',
+    );
+  });
+
+  it('generates correct DSL for deeply nested conditions', () => {
+    // Outer: IF tier = premium → inner condition, ELSE standard
+    // Inner: IF amount > 1000 → "platinum", ELSE "gold"
+    const innerChain: ChainState = {
+      source: { kind: 'field', path: 'order.amount' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'gt', right: { kind: 'static', value: { type: 'number', value: 1000 } } }],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'platinum' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'gold' }),
+        },
+      ],
+    };
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'premium' } } }],
+              thenBranch: innerChain,
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'standard' }),
+        },
+      ],
+    };
+    expect(generateChainExpression(chain)).toBe(
+      'if(eq(source("order.tier"), "premium"), if(gt(source("order.amount"), 1000), "platinum", "gold"), "standard")',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Operator variants
+// ---------------------------------------------------------------------------
+
+describe('FS-039: operator variants', () => {
+  const makeChain = (operator: FS039ConditionStep['conditions'][0]['predicates'][0]['operator']): ChainState => ({
+    source: { kind: 'field', path: 'x' },
+    steps: [
+      {
+        kind: 'condition',
+        conditions: [
+          {
+            predicates: [{ left: { kind: 'currentValue' }, operator, right: { kind: 'static', value: { type: 'string', value: 'v' } } }],
+            thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+          },
+        ],
+        elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+      },
+    ],
+  });
+
+  it('isTruthy: emits bare left operand', () => {
+    expect(generateChainExpression(makeChain('isTruthy'))).toBe('if(source("x"), "yes", "no")');
+  });
+
+  it('isFalsy: wraps in not()', () => {
+    expect(generateChainExpression(makeChain('isFalsy'))).toBe('if(not(source("x")), "yes", "no")');
+  });
+
+  it('isNull: wraps in isNull()', () => {
+    expect(generateChainExpression(makeChain('isNull'))).toBe('if(isNull(source("x")), "yes", "no")');
+  });
+
+  it('isNotNull: wraps in not(isNull())', () => {
+    expect(generateChainExpression(makeChain('isNotNull'))).toBe('if(not(isNull(source("x"))), "yes", "no")');
+  });
+
+  it('neq: emits neq(left, right)', () => {
+    expect(generateChainExpression(makeChain('neq'))).toBe('if(neq(source("x"), "v"), "yes", "no")');
+  });
+
+  it('gt: emits gt(left, right)', () => {
+    expect(generateChainExpression(makeChain('gt'))).toBe('if(gt(source("x"), "v"), "yes", "no")');
+  });
+
+  it('lte: emits lte(left, right)', () => {
+    expect(generateChainExpression(makeChain('lte'))).toBe('if(lte(source("x"), "v"), "yes", "no")');
   });
 });

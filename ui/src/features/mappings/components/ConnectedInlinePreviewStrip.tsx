@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { InlinePreviewStrip } from './InlinePreviewStrip';
 import { usePreviewExecution } from '../hooks/use-preview-execution';
@@ -47,10 +47,15 @@ export interface ConnectedInlinePreviewStripProps {
   /** Mapping ID — used to build the testing page URL */
   mappingId: string;
   /**
-   * Incremented each time a rule is applied (from useMappingEditor).
-   * Triggers auto-preview when autoRun is on and sourceData is non-empty.
+   * The currently selected target field path.
+   * Used to watch the draft expression for auto-preview triggering.
    */
-  lastApplyTimestamp: number | null;
+  selectedTargetPath: string | null;
+  /**
+   * Returns the current draft expression for a target field, or null if no draft exists.
+   * Used to watch for expression changes and trigger debounced auto-preview.
+   */
+  getDraftExpression: (targetPath: string) => string | null;
   /**
    * Callback to navigate to a specific rule in the target worklist.
    * Provided by the composition layer (MappingEditor.tsx).
@@ -87,7 +92,8 @@ export function ConnectedInlinePreviewStrip({
   targetSchemaDetail,
   projectId,
   mappingId,
-  lastApplyTimestamp,
+  selectedTargetPath,
+  getDraftExpression,
   onNavigateToRule,
 }: ConnectedInlinePreviewStripProps) {
   const [sourceData, setSourceData] = useState('');
@@ -133,6 +139,39 @@ export function ConnectedInlinePreviewStrip({
     targetSchemaDetail,
     sourceDataRaw: sourceData.trim() ? sourceData : null,
   });
+
+  // ---------------------------------------------------------------------------
+  // Auto-preview: watch the draft expression for the selected field.
+  // When it stabilizes (300ms debounce), trigger a full mapping preview
+  // if autoRun is on and sourceData is non-empty.
+  // Replaces the old lastApplyTimestamp / onRuleApplied mechanism.
+  // ---------------------------------------------------------------------------
+  const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevDraftExpressionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentDraft = selectedTargetPath ? getDraftExpression(selectedTargetPath) : null;
+
+    // Only trigger when the draft expression actually changes
+    if (currentDraft === prevDraftExpressionRef.current) return;
+    prevDraftExpressionRef.current = currentDraft;
+
+    if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
+
+    if (!autoRun) return;
+    if (!sourceData.trim()) return;
+    if (!currentDraft?.trim()) return;
+
+    previewDebounceRef.current = setTimeout(() => {
+      run();
+    }, 300);
+
+    return () => {
+      if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
+    };
+  // getDraftExpression is stable (useCallback in hook) — safe to include
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargetPath, getDraftExpression, autoRun, sourceData, run]);
 
   const output =
     state.status === 'success'
@@ -190,7 +229,6 @@ export function ConnectedInlinePreviewStrip({
       testingPageUrl={`/projects/${projectId}/mappings/${mappingId}/test-lab`}
       isCollapsed={isCollapsed}
       onToggleCollapse={() => setIsCollapsed((prev) => !prev)}
-      lastApplyTimestamp={lastApplyTimestamp}
       testCases={testCases}
       onLoadTestCase={handleLoadTestCase}
       autoRun={autoRun}

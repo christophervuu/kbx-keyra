@@ -1039,11 +1039,11 @@ describe('useMappingEditor', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // applyRule
+  // applyRule (deprecated wrapper — backward compat)
   // ---------------------------------------------------------------------------
 
   describe('applyRule', () => {
-    it('upserts a new rule and increments unsavedRuleCount', async () => {
+    it('stores draft for a new target path and reflects in draftRules', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -1055,11 +1055,12 @@ describe('useMappingEditor', () => {
         result.current.actions.applyRule('A.D', 'static("hello")');
       });
 
-      expect(result.current.rules.find((r) => r.target === 'A.D')?.expression).toBe('static("hello")');
+      // Draft is stored in draftRules, not rules
+      expect(result.current.draftRules.get('A.D')).toBe('static("hello")');
       expect(result.current.unsavedRuleCount).toBe(1);
     });
 
-    it('updates an existing rule expression and increments unsavedRuleCount', async () => {
+    it('stores draft for an existing target path', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -1071,11 +1072,11 @@ describe('useMappingEditor', () => {
         result.current.actions.applyRule('A.B', 'static("updated")');
       });
 
-      expect(result.current.rules.find((r) => r.target === 'A.B')?.expression).toBe('static("updated")');
+      expect(result.current.draftRules.get('A.B')).toBe('static("updated")');
       expect(result.current.unsavedRuleCount).toBe(1);
     });
 
-    it('increments unsavedRuleCount on each applyRule call', async () => {
+    it('counts distinct changed fields (not calls) in unsavedRuleCount', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -1089,7 +1090,24 @@ describe('useMappingEditor', () => {
       expect(result.current.unsavedRuleCount).toBe(2);
     });
 
-    it('does not increment unsavedRuleCount for duplicate apply of same expression', async () => {
+    it('does not count a field if draft matches saved expression', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // A.B already has expression 'source("x")' in saved rules
+      act(() => {
+        result.current.actions.applyRule('A.B', 'source("x")');
+      });
+
+      // Draft is not stored because expression matches saved rule
+      expect(result.current.unsavedRuleCount).toBe(0);
+    });
+
+    it('does not re-store draft for same expression applied twice', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -1098,13 +1116,13 @@ describe('useMappingEditor', () => {
       await waitFor(() => expect(result.current.loadState).toBe('loaded'));
 
       act(() => {
-        result.current.actions.applyRule('A.B', 'source("x")');
+        result.current.actions.applyRule('A.B', 'static("new")');
       });
 
       const firstCount = result.current.unsavedRuleCount;
 
       act(() => {
-        result.current.actions.applyRule('A.B', 'source("x")');
+        result.current.actions.applyRule('A.B', 'static("new")');
       });
 
       expect(result.current.unsavedRuleCount).toBe(firstCount);
@@ -1155,7 +1173,7 @@ describe('useMappingEditor', () => {
   // ---------------------------------------------------------------------------
 
   describe('canNavigateAway', () => {
-    it('returns allowed=true when no unsaved changes and no applied rules', async () => {
+    it('returns allowed=true when no unsaved changes and no drafts', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -1166,7 +1184,7 @@ describe('useMappingEditor', () => {
       expect(result.current.actions.canNavigateAway()).toEqual({ allowed: true, reason: null });
     });
 
-    it('returns allowed=false with reason "unsaved" when unsavedRuleCount > 0', async () => {
+    it('returns allowed=false with reason "unsaved" when draftRules has changes', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -1191,6 +1209,369 @@ describe('useMappingEditor', () => {
       act(() => { result.current.actions.addRule({ target: 'A.D', expression: 'static("x")', description: undefined }); });
 
       expect(result.current.actions.canNavigateAway()).toEqual({ allowed: false, reason: 'unsaved' });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FS-039 draft rules API
+  // ---------------------------------------------------------------------------
+
+  describe('updateDraft', () => {
+    it('stores draft expression in draftRules', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'static("draft")');
+      });
+
+      expect(result.current.draftRules.get('A.D')).toBe('static("draft")');
+    });
+
+    it('sets hasUnsavedChanges to true', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      expect(result.current.hasUnsavedChanges).toBe(false);
+
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'static("draft")');
+      });
+
+      expect(result.current.hasUnsavedChanges).toBe(true);
+    });
+
+    it('does not count as changed when draft matches saved expression', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // A.B has saved expression 'source("x")'
+      act(() => {
+        result.current.actions.updateDraft('A.B', 'source("x")');
+      });
+
+      // Draft is stored but doesn't count as changed
+      expect(result.current.draftRules.get('A.B')).toBe('source("x")');
+      expect(result.current.unsavedChangeCount).toBe(0);
+      expect(result.current.hasUnsavedChanges).toBe(false);
+    });
+
+    it('overwrites previous draft for same target', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.D', 'static("first")'); });
+      act(() => { result.current.actions.updateDraft('A.D', 'static("second")'); });
+
+      expect(result.current.draftRules.get('A.D')).toBe('static("second")');
+      expect(result.current.unsavedChangeCount).toBe(1);
+    });
+  });
+
+  describe('getDraftExpression', () => {
+    it('returns null when no draft exists', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.actions.getDraftExpression('A.D')).toBeNull();
+    });
+
+    it('returns draft expression when draft exists', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.D', 'static("val")'); });
+
+      expect(result.current.actions.getDraftExpression('A.D')).toBe('static("val")');
+    });
+  });
+
+  describe('commitDraft', () => {
+    it('stores draft expression (semantic alias for updateDraft)', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.commitDraft('A.D', 'static("committed")');
+      });
+
+      expect(result.current.draftRules.get('A.D')).toBe('static("committed")');
+    });
+  });
+
+  describe('revertDraft', () => {
+    it('removes draft entry for a target path', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.D', 'static("draft")'); });
+      expect(result.current.draftRules.has('A.D')).toBe(true);
+
+      act(() => { result.current.actions.revertDraft('A.D'); });
+      expect(result.current.draftRules.has('A.D')).toBe(false);
+    });
+
+    it('reverts hasUnsavedChanges to false when last draft is removed', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.D', 'static("draft")'); });
+      expect(result.current.hasUnsavedChanges).toBe(true);
+
+      act(() => { result.current.actions.revertDraft('A.D'); });
+      expect(result.current.hasUnsavedChanges).toBe(false);
+    });
+
+    it('is a no-op when no draft exists for target', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // Should not throw
+      act(() => { result.current.actions.revertDraft('NonExistent'); });
+      expect(result.current.draftRules.size).toBe(0);
+    });
+  });
+
+  describe('revertAllDrafts', () => {
+    it('clears all draft entries', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.B', 'static("x")');
+        result.current.actions.updateDraft('A.C', 'static("y")');
+      });
+
+      expect(result.current.draftRules.size).toBe(2);
+
+      act(() => { result.current.actions.revertAllDrafts(); });
+
+      expect(result.current.draftRules.size).toBe(0);
+      expect(result.current.hasUnsavedChanges).toBe(false);
+    });
+  });
+
+  describe('save() with draftRules', () => {
+    it('merges draft additions into saved rules on save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'static("new")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      // Draft should be cleared after save
+      expect(result.current.draftRules.size).toBe(0);
+      // The new rule should be in saved rules
+      expect(result.current.rules.find((r) => r.target === 'A.D')?.expression).toBe('static("new")');
+      // adapter should have been called with the merged rules
+      expect(adapter.updateMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          rules: expect.arrayContaining([
+            expect.objectContaining({ target: 'A.D', expression: 'static("new")' }),
+          ]),
+        }),
+      );
+    });
+
+    it('merges draft updates into saved rules on save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.B', 'static("updated")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.rules.find((r) => r.target === 'A.B')?.expression).toBe('static("updated")');
+    });
+
+    it('empty expression draft deletes rule on save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // A.B exists in saved rules — empty draft = delete on save
+      act(() => {
+        result.current.actions.updateDraft('A.B', '');
+      });
+
+      expect(result.current.hasUnsavedChanges).toBe(true);
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.rules.find((r) => r.target === 'A.B')).toBeUndefined();
+      expect(result.current.draftRules.size).toBe(0);
+    });
+
+    it('clears draftRules after successful save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'static("x")');
+        result.current.actions.updateDraft('A.B', 'static("y")');
+      });
+
+      expect(result.current.draftRules.size).toBe(2);
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.draftRules.size).toBe(0);
+      expect(result.current.unsavedChangeCount).toBe(0);
+    });
+  });
+
+  describe('getUnsavedChangeSummary', () => {
+    it('returns empty array when no drafts', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.actions.getUnsavedChangeSummary()).toEqual([]);
+    });
+
+    it('returns "added" for new target paths', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.D', 'static("new")'); });
+
+      const summary = result.current.actions.getUnsavedChangeSummary();
+      expect(summary).toHaveLength(1);
+      expect(summary[0]).toMatchObject({
+        targetPath: 'A.D',
+        changeType: 'added',
+        savedExpression: null,
+        draftExpression: 'static("new")',
+      });
+    });
+
+    it('returns "modified" for changed existing rules', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.B', 'static("changed")'); });
+
+      const summary = result.current.actions.getUnsavedChangeSummary();
+      expect(summary).toHaveLength(1);
+      expect(summary[0]).toMatchObject({
+        targetPath: 'A.B',
+        changeType: 'modified',
+        savedExpression: 'source("x")',
+        draftExpression: 'static("changed")',
+      });
+    });
+
+    it('returns "removed" for empty expression drafts on existing rules', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.updateDraft('A.B', ''); });
+
+      const summary = result.current.actions.getUnsavedChangeSummary();
+      expect(summary).toHaveLength(1);
+      expect(summary[0]).toMatchObject({
+        targetPath: 'A.B',
+        changeType: 'removed',
+        savedExpression: 'source("x")',
+        draftExpression: '',
+      });
+    });
+
+    it('excludes drafts that match saved expression', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // A.B already has 'source("x")' — draft matches saved
+      act(() => { result.current.actions.updateDraft('A.B', 'source("x")'); });
+
+      expect(result.current.actions.getUnsavedChangeSummary()).toHaveLength(0);
     });
   });
 });

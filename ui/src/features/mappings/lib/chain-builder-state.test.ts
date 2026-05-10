@@ -18,6 +18,25 @@ import {
   isValueMapStep,
   isStaticBranch,
   isSourceBranch,
+  // FS-039 factories
+  createEmptyChain,
+  createFieldSourceChain,
+  createStaticSourceChain,
+  createEmptyPredicate,
+  createEmptyConditionClause,
+  createEmptyFS039ConditionStep,
+  createEmptyFS039ValueMapStep,
+  // FS-039 type guards
+  isFS039ConditionStep,
+  isFS039ValueMapStep,
+  isFS039TransformStep,
+  isFieldSource,
+  isStaticSource,
+  isNoneSource,
+  isCurrentValueOperand,
+  isFieldOperand,
+  isStaticOperand,
+  isExpressionOperand,
   isExpressionBranch,
   // Types
   type ChainBuilderState,
@@ -26,6 +45,19 @@ import {
   type ValueMapLogicStep,
   type ChainBranch,
   type LogicStep,
+  // FS-039 types
+  type ChainSource,
+  type ChainState,
+  type OperandValue,
+  type Predicate,
+  type ConditionClause,
+  type FS039ConditionStep,
+  type FS039ValueMapStep,
+  type FS039TransformStep,
+  type ChainStep,
+  type DraftFieldState,
+  type DraftValidationState,
+  type DraftRulesMap,
 } from './chain-builder-state';
 
 // ---------------------------------------------------------------------------
@@ -761,5 +793,496 @@ describe('type guards', () => {
     expect(isExpressionBranch(branch)).toBe(true);
     expect(isStaticBranch(branch)).toBe(false);
     expect(isSourceBranch(branch)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// FS-039 Chain Model Tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// ChainSource — factory and type guards
+// ---------------------------------------------------------------------------
+
+describe('FS-039 ChainSource — createEmptyChain', () => {
+  it('creates chain with none source', () => {
+    const chain = createEmptyChain();
+    expect(chain.source.kind).toBe('none');
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('isNoneSource returns true for none source', () => {
+    const chain = createEmptyChain();
+    expect(isNoneSource(chain.source)).toBe(true);
+    expect(isFieldSource(chain.source)).toBe(false);
+    expect(isStaticSource(chain.source)).toBe(false);
+  });
+});
+
+describe('FS-039 ChainSource — createFieldSourceChain', () => {
+  it('creates chain with field source', () => {
+    const chain = createFieldSourceChain('order.customerName');
+    expect(chain.source.kind).toBe('field');
+    if (chain.source.kind === 'field') {
+      expect(chain.source.path).toBe('order.customerName');
+    }
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('isFieldSource returns true for field source', () => {
+    const chain = createFieldSourceChain('order.status');
+    expect(isFieldSource(chain.source)).toBe(true);
+    expect(isNoneSource(chain.source)).toBe(false);
+    expect(isStaticSource(chain.source)).toBe(false);
+  });
+});
+
+describe('FS-039 ChainSource — createStaticSourceChain', () => {
+  it('creates chain with static string source', () => {
+    const chain = createStaticSourceChain({ type: 'string', value: 'WEB' });
+    expect(chain.source.kind).toBe('static');
+    if (chain.source.kind === 'static') {
+      expect(chain.source.value).toEqual({ type: 'string', value: 'WEB' });
+    }
+  });
+
+  it('creates chain with static number source', () => {
+    const chain = createStaticSourceChain({ type: 'number', value: 42 });
+    expect(chain.source.kind).toBe('static');
+    if (chain.source.kind === 'static') {
+      expect(chain.source.value).toEqual({ type: 'number', value: 42 });
+    }
+  });
+
+  it('creates chain with static boolean source', () => {
+    const chain = createStaticSourceChain({ type: 'boolean', value: true });
+    expect(chain.source.kind).toBe('static');
+  });
+
+  it('creates chain with static null source', () => {
+    const chain = createStaticSourceChain({ type: 'null' });
+    expect(chain.source.kind).toBe('static');
+  });
+
+  it('isStaticSource returns true for static source', () => {
+    const chain = createStaticSourceChain({ type: 'string', value: 'WEB' });
+    expect(isStaticSource(chain.source)).toBe(true);
+    expect(isFieldSource(chain.source)).toBe(false);
+    expect(isNoneSource(chain.source)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OperandValue — all four kinds
+// ---------------------------------------------------------------------------
+
+describe('FS-039 OperandValue — createEmptyPredicate defaults', () => {
+  it('AE-24: left operand defaults to currentValue kind', () => {
+    const predicate = createEmptyPredicate();
+    expect(predicate.left.kind).toBe('currentValue');
+  });
+
+  it('right operand defaults to expression kind with empty dsl', () => {
+    const predicate = createEmptyPredicate();
+    expect(predicate.right.kind).toBe('expression');
+    if (predicate.right.kind === 'expression') {
+      expect(predicate.right.dsl).toBe('');
+    }
+  });
+
+  it('operator defaults to eq', () => {
+    const predicate = createEmptyPredicate();
+    expect(predicate.operator).toBe('eq');
+  });
+});
+
+describe('FS-039 OperandValue — all four kinds', () => {
+  it('supports currentValue kind', () => {
+    const operand: OperandValue = { kind: 'currentValue' };
+    expect(isCurrentValueOperand(operand)).toBe(true);
+    expect(isFieldOperand(operand)).toBe(false);
+    expect(isStaticOperand(operand)).toBe(false);
+    expect(isExpressionOperand(operand)).toBe(false);
+  });
+
+  it('supports field kind', () => {
+    const operand: OperandValue = { kind: 'field', path: 'order.status' };
+    expect(isFieldOperand(operand)).toBe(true);
+    expect(isCurrentValueOperand(operand)).toBe(false);
+    expect(isStaticOperand(operand)).toBe(false);
+    expect(isExpressionOperand(operand)).toBe(false);
+    if (operand.kind === 'field') {
+      expect(operand.path).toBe('order.status');
+    }
+  });
+
+  it('supports static kind with string value', () => {
+    const operand: OperandValue = { kind: 'static', value: { type: 'string', value: 'premium' } };
+    expect(isStaticOperand(operand)).toBe(true);
+    expect(isCurrentValueOperand(operand)).toBe(false);
+    expect(isFieldOperand(operand)).toBe(false);
+    expect(isExpressionOperand(operand)).toBe(false);
+  });
+
+  it('supports static kind with number value', () => {
+    const operand: OperandValue = { kind: 'static', value: { type: 'number', value: 100 } };
+    expect(isStaticOperand(operand)).toBe(true);
+  });
+
+  it('supports expression kind', () => {
+    const operand: OperandValue = { kind: 'expression', dsl: 'upper(source("x"))' };
+    expect(isExpressionOperand(operand)).toBe(true);
+    expect(isCurrentValueOperand(operand)).toBe(false);
+    expect(isFieldOperand(operand)).toBe(false);
+    expect(isStaticOperand(operand)).toBe(false);
+    if (operand.kind === 'expression') {
+      expect(operand.dsl).toBe('upper(source("x"))');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS039ConditionStep — structure and non-optional elseBranch
+// ---------------------------------------------------------------------------
+
+describe('FS-039 ConditionStep — createEmptyFS039ConditionStep', () => {
+  it('has kind condition', () => {
+    const step = createEmptyFS039ConditionStep();
+    expect(step.kind).toBe('condition');
+  });
+
+  it('starts with one IF clause', () => {
+    const step = createEmptyFS039ConditionStep();
+    expect(step.conditions).toHaveLength(1);
+  });
+
+  it('IF clause has one empty predicate', () => {
+    const step = createEmptyFS039ConditionStep();
+    expect(step.conditions[0].predicates).toHaveLength(1);
+  });
+
+  it('AE-24: IF clause predicate left operand defaults to currentValue', () => {
+    const step = createEmptyFS039ConditionStep();
+    expect(step.conditions[0].predicates[0].left.kind).toBe('currentValue');
+  });
+
+  it('IF clause thenBranch is an empty chain', () => {
+    const step = createEmptyFS039ConditionStep();
+    expect(step.conditions[0].thenBranch.source.kind).toBe('none');
+    expect(step.conditions[0].thenBranch.steps).toHaveLength(0);
+  });
+
+  it('elseBranch is non-optional and is an empty chain', () => {
+    const step = createEmptyFS039ConditionStep();
+    // TypeScript enforces this at compile time; runtime check confirms it exists
+    expect(step.elseBranch).toBeDefined();
+    expect(step.elseBranch.source.kind).toBe('none');
+    expect(step.elseBranch.steps).toHaveLength(0);
+  });
+
+  it('isFS039ConditionStep returns true', () => {
+    const step = createEmptyFS039ConditionStep();
+    expect(isFS039ConditionStep(step)).toBe(true);
+    expect(isFS039ValueMapStep(step)).toBe(false);
+    expect(isFS039TransformStep(step)).toBe(false);
+  });
+});
+
+describe('FS-039 ConditionStep — type-level: elseBranch is non-optional', () => {
+  it('FS039ConditionStep with explicit elseBranch is valid', () => {
+    // This test verifies the type structure at runtime — TypeScript enforces
+    // non-optionality at compile time. If elseBranch were optional, this
+    // object literal would still work; the compile-time check is the real guard.
+    const step: FS039ConditionStep = {
+      kind: 'condition',
+      conditions: [
+        {
+          predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'expression', dsl: '"premium"' } }],
+          thenBranch: createFieldSourceChain('output.premium'),
+        },
+      ],
+      elseBranch: createFieldSourceChain('output.standard'),
+    };
+    expect(step.elseBranch).toBeDefined();
+    expect(step.elseBranch.source.kind).toBe('field');
+  });
+
+  it('supports else-if via additional conditions entries', () => {
+    const step: FS039ConditionStep = {
+      kind: 'condition',
+      conditions: [
+        {
+          predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'premium' } } }],
+          thenBranch: createFieldSourceChain('output.premium'),
+        },
+        {
+          predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'static', value: { type: 'string', value: 'basic' } } }],
+          thenBranch: createFieldSourceChain('output.basic'),
+        },
+      ],
+      elseBranch: createFieldSourceChain('output.default'),
+    };
+    expect(step.conditions).toHaveLength(2);
+    expect(step.elseBranch).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS039ValueMapStep — structure and non-optional defaultValue
+// ---------------------------------------------------------------------------
+
+describe('FS-039 ValueMapStep — createEmptyFS039ValueMapStep', () => {
+  it('has kind valueMap', () => {
+    const step = createEmptyFS039ValueMapStep();
+    expect(step.kind).toBe('valueMap');
+  });
+
+  it('starts with one empty mapping row', () => {
+    const step = createEmptyFS039ValueMapStep();
+    expect(step.mappings).toHaveLength(1);
+    expect(step.mappings[0].whenValue).toBe('');
+  });
+
+  it('defaultValue is non-optional and is an empty chain', () => {
+    const step = createEmptyFS039ValueMapStep();
+    expect(step.defaultValue).toBeDefined();
+    expect(step.defaultValue.source.kind).toBe('none');
+    expect(step.defaultValue.steps).toHaveLength(0);
+  });
+
+  it('isFS039ValueMapStep returns true', () => {
+    const step = createEmptyFS039ValueMapStep();
+    expect(isFS039ValueMapStep(step)).toBe(true);
+    expect(isFS039ConditionStep(step)).toBe(false);
+    expect(isFS039TransformStep(step)).toBe(false);
+  });
+});
+
+describe('FS-039 ValueMapStep — type-level: defaultValue is non-optional', () => {
+  it('FS039ValueMapStep with explicit defaultValue is valid', () => {
+    const step: FS039ValueMapStep = {
+      kind: 'valueMap',
+      mappings: [
+        { whenValue: 'A', outputChain: createFieldSourceChain('output.active') },
+        { whenValue: 'I', outputChain: createFieldSourceChain('output.inactive') },
+      ],
+      defaultValue: createFieldSourceChain('output.unknown'),
+    };
+    expect(step.defaultValue).toBeDefined();
+    expect(step.defaultValue.source.kind).toBe('field');
+    expect(step.mappings).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ChainState — structural composition
+// ---------------------------------------------------------------------------
+
+describe('FS-039 ChainState — structural composition', () => {
+  it('represents simple field source chain', () => {
+    const chain: ChainState = createFieldSourceChain('order.customerName');
+    expect(chain.source.kind).toBe('field');
+    expect(chain.steps).toHaveLength(0);
+  });
+
+  it('represents source + transform steps', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        { kind: 'transform', functionName: 'upper', args: [] },
+        { kind: 'transform', functionName: 'trim', args: [] },
+      ],
+    };
+    expect(chain.steps).toHaveLength(2);
+    expect(chain.steps[0].kind).toBe('transform');
+  });
+
+  it('represents source + condition step with currentValue operand', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [
+                {
+                  left: { kind: 'currentValue' },
+                  operator: 'eq',
+                  right: { kind: 'static', value: { type: 'string', value: 'premium' } },
+                },
+              ],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+      ],
+    };
+    const condStep = chain.steps[0] as FS039ConditionStep;
+    expect(condStep.conditions[0].predicates[0].left.kind).toBe('currentValue');
+    expect(condStep.elseBranch).toBeDefined();
+  });
+
+  it('represents source + valueMap step', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [
+            { whenValue: 'A', outputChain: createStaticSourceChain({ type: 'string', value: 'Active' }) },
+          ],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'Unknown' }),
+        },
+      ],
+    };
+    const vmStep = chain.steps[0] as FS039ValueMapStep;
+    expect(vmStep.defaultValue).toBeDefined();
+    expect(vmStep.mappings).toHaveLength(1);
+  });
+
+  it('represents nested condition branches with their own chains', () => {
+    // Condition step where thenBranch itself has a transform step
+    const innerChain: ChainState = {
+      source: { kind: 'field', path: 'output.premium' },
+      steps: [{ kind: 'transform', functionName: 'upper', args: [] }],
+    };
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'expression', dsl: '"premium"' } }],
+              thenBranch: innerChain,
+            },
+          ],
+          elseBranch: createEmptyChain(),
+        },
+      ],
+    };
+    const condStep = chain.steps[0] as FS039ConditionStep;
+    expect(condStep.conditions[0].thenBranch.steps).toHaveLength(1);
+    expect(condStep.conditions[0].thenBranch.steps[0].kind).toBe('transform');
+  });
+
+  it('AE-22/AE-23: supports steps after condition step', () => {
+    // Post-condition transform step — structurally valid
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.tier' },
+      steps: [
+        {
+          kind: 'condition',
+          conditions: [
+            {
+              predicates: [{ left: { kind: 'currentValue' }, operator: 'eq', right: { kind: 'expression', dsl: '"premium"' } }],
+              thenBranch: createStaticSourceChain({ type: 'string', value: 'yes' }),
+            },
+          ],
+          elseBranch: createStaticSourceChain({ type: 'string', value: 'no' }),
+        },
+        { kind: 'transform', functionName: 'upper', args: [] },
+      ],
+    };
+    expect(chain.steps).toHaveLength(2);
+    expect(chain.steps[1].kind).toBe('transform');
+  });
+
+  it('AE-22/AE-23: supports steps after valueMap step', () => {
+    const chain: ChainState = {
+      source: { kind: 'field', path: 'order.status' },
+      steps: [
+        {
+          kind: 'valueMap',
+          mappings: [{ whenValue: 'A', outputChain: createStaticSourceChain({ type: 'string', value: 'Active' }) }],
+          defaultValue: createStaticSourceChain({ type: 'string', value: 'Unknown' }),
+        },
+        { kind: 'transform', functionName: 'trim', args: [] },
+      ],
+    };
+    expect(chain.steps).toHaveLength(2);
+    expect(chain.steps[1].kind).toBe('transform');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DraftFieldState and DraftRulesMap — type-level tests
+// ---------------------------------------------------------------------------
+
+describe('FS-039 DraftFieldState', () => {
+  it('can represent a valid draft field state', () => {
+    const draft: DraftFieldState = {
+      targetPath: 'output.customerName',
+      expression: 'upper(source("order.name"))',
+      isDirty: true,
+      validation: { status: 'valid' },
+    };
+    expect(draft.targetPath).toBe('output.customerName');
+    expect(draft.isDirty).toBe(true);
+    expect(draft.validation.status).toBe('valid');
+  });
+
+  it('can represent an invalid draft field state', () => {
+    const draft: DraftFieldState = {
+      targetPath: 'output.status',
+      expression: 'upper(',
+      isDirty: true,
+      validation: { status: 'invalid', errors: ['Unexpected end of expression'] },
+    };
+    expect(draft.validation.status).toBe('invalid');
+    if (draft.validation.status === 'invalid') {
+      expect(draft.validation.errors).toHaveLength(1);
+    }
+  });
+
+  it('can represent a pending draft field state', () => {
+    const draft: DraftFieldState = {
+      targetPath: 'output.amount',
+      expression: 'multiply(source("order.amount"), 100)',
+      isDirty: false,
+      validation: { status: 'pending' },
+    };
+    expect(draft.validation.status).toBe('pending');
+  });
+});
+
+describe('FS-039 DraftRulesMap', () => {
+  it('is a Map<string, string>', () => {
+    const map: DraftRulesMap = new Map<string, string>();
+    map.set('output.name', 'upper(source("order.name"))');
+    map.set('output.status', '');
+    expect(map.get('output.name')).toBe('upper(source("order.name"))');
+    // Empty string means "delete this rule on save"
+    expect(map.get('output.status')).toBe('');
+    expect(map.size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-039 ChainStep type guard — isFS039TransformStep
+// ---------------------------------------------------------------------------
+
+describe('FS-039 ChainStep type guards', () => {
+  it('isFS039TransformStep returns true for transform step', () => {
+    const step: ChainStep = { kind: 'transform', functionName: 'upper', args: [] };
+    expect(isFS039TransformStep(step)).toBe(true);
+    expect(isFS039ConditionStep(step)).toBe(false);
+    expect(isFS039ValueMapStep(step)).toBe(false);
+  });
+
+  it('isFS039ConditionStep returns true for condition step', () => {
+    const step: ChainStep = createEmptyFS039ConditionStep();
+    expect(isFS039ConditionStep(step)).toBe(true);
+    expect(isFS039TransformStep(step)).toBe(false);
+    expect(isFS039ValueMapStep(step)).toBe(false);
+  });
+
+  it('isFS039ValueMapStep returns true for value map step', () => {
+    const step: ChainStep = createEmptyFS039ValueMapStep();
+    expect(isFS039ValueMapStep(step)).toBe(true);
+    expect(isFS039TransformStep(step)).toBe(false);
+    expect(isFS039ConditionStep(step)).toBe(false);
   });
 });
