@@ -17,7 +17,7 @@ FS-040
 Owner: TBD
 Reviewers: TBD
 Created: 2026-05-09
-Last Updated: 2026-05-09
+Last Updated: 2026-05-10
 Type: cross-cutting
 
 ---
@@ -30,7 +30,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -241,7 +241,12 @@ Output type validation checks whether the expression's resulting value type is c
 
 When inference returns `unknown` (cannot determine type), no mismatch is reported — consistent with the engine's "cannot prove mismatch → skip" philosophy.
 
-**Effect:** Type mismatch sets `outputTypeValid = false`. A clear message is shown near the Result display: "Expression produces {inferred type} but target expects {target type}". This blocks Save but not Apply, to allow the user to continue working on the expression while seeing the warning. (See Open Questions Q1 for discussion.)
+**Effect:** Type mismatch sets `outputTypeValid = false`. A clear message is shown near the Result display: "Expression produces {inferred type} but target expects {target type}". This **blocks Save but not Apply**. During authoring, users often build intermediate expressions that are temporarily wrong-typed while refining a transform chain. Blocking intermediate progress increases friction and harms TTFSM. Save is the correct enforcement boundary — a draft can be imperfect, but a saved rule must be valid.
+
+**UX requirement:** Output type mismatch must be highly visible in three locations:
+- Near the Result display in the feedback area
+- In the validation status badges
+- In Save-disabled reason text (e.g., "Save disabled — output type mismatch: expected string, expression resolves to number")
 
 #### 1.3 Validation in Editor Mode
 
@@ -282,7 +287,7 @@ A new persistent section is added to `ScalarFieldBuilder`, positioned between th
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ Header (target path, type, status, mode toggle) │
+│ Header (target path, type, status, toggle, ⋮)   │
 ├─────────────────────────────────────────────────┤
 │ Pinned Feedback Area                            │
 │ ┌─────────────────────────────────────────────┐ │
@@ -301,7 +306,7 @@ A new persistent section is added to `ScalarFieldBuilder`, positioned between th
 
 | Row | Content | Behavior |
 |---|---|---|
-| Expression | Syntax-highlighted DSL expression (reuses `LiveExpressionDisplay` rendering) | Always visible. Shows the generated expression in Builder mode, the typed expression in Editor mode. Empty state: italic placeholder. |
+| Expression | Syntax-highlighted DSL expression (reuses `LiveExpressionDisplay` rendering) | Always visible. Shows the generated expression in Builder mode, the typed expression in Editor mode. When structural validation fails but a partial expression exists, show it with label "Expression (incomplete)". When no expression exists, show italic placeholder "Complete the expression to see DSL output". |
 | Result | Evaluated result value (reuses `LiveResultDisplay` rendering logic) | Always visible. Shows the live-evaluated result when source data is loaded. Empty state: "Load test data to see results". Error state: shows evaluation error. |
 | Validation | Two status badges: Structure (✓/✗) and Output Type (✓/✗) | Structure badge shows green check when `structureValid`, red X with first issue message when invalid. Output Type badge shows green check when `outputTypeValid`, amber warning with mismatch message when invalid. |
 
@@ -337,7 +342,7 @@ The action row at the bottom of `ScalarFieldBuilder` is redesigned:
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│ [✨ Suggest] [💡 Explain] [🔧 Fix] │ [Reset draft] │ ◄ │ [Apply] │
+│ [✨ Suggest] [💡 Explain] [🔧 Fix] [↺ Reset draft] │ ◄ │ [Apply] │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -348,10 +353,12 @@ The action row at the bottom of `ScalarFieldBuilder` is redesigned:
 | **Fix** | Wrench | Propose a fix for validation or logic issues. Future: calls `smart-fix` Lambda with current diagnostics as context. | AI backend available + validation issue present | "AI-powered fix suggestions — available in a future release" |
 | **Reset draft** | RotateCcw | Clear the current in-progress expression and reset builder state to empty. Replaces the old "Clear" label. Does *not* delete the saved rule — it only resets the working draft. | Expression is non-empty OR builder state is dirty | — |
 
+**Remove mapping** (destructive action — deletes the saved rule) is relocated out of the action row entirely. It is placed in a **kebab/overflow menu (⋮) in the Builder header row**, physically and conceptually separated from the iterative draft actions. This prevents confusion between "reset my current draft" and "delete the saved rule" — a critical distinction for non-technical users managing two versions of truth (draft vs. saved).
+
 **Behavioral changes from current:**
 
 - "Clear" is renamed to "Reset draft" to communicate that it resets the in-progress authoring state, not the saved mapping. The action resets expression to empty and builder state to default.
-- "Clear mapping" (the red destructive action that deletes the saved rule) is renamed to "Remove mapping" and moved to a secondary position or overflow — it should not be visually co-located with Reset draft to avoid confusion. Implementation: render it as a small text link or secondary button below the action row, not inline.
+- "Clear mapping" (the red destructive action that deletes the saved rule) is renamed to "Remove mapping" and moved to the header overflow menu. The overflow menu is a kebab icon (⋮) button in the header row, right-aligned near the mode toggle. It contains "Remove mapping" as a destructive option with red text styling and confirmation gating.
 - AI action tooltips are updated from "Coming soon" to more descriptive text that explains what the action will do.
 - Fix button gains future contextual awareness: when validation issues exist, its tooltip will indicate it can address those specific issues.
 
@@ -414,9 +421,13 @@ Alternatively, it could be shown as a drawer or popover. The inline panel is rec
 
 #### 5.5 Data Source for Baseline
 
-The "last saved" baseline comes from `useMappingEditor`'s persisted config. Specifically:
-- On save, the mapping config is persisted via the adapter. The hook should expose a `getSavedRuleForTarget(targetPath): MappingRule | null` accessor (or the full saved config for comparison).
-- This requires either caching the last-saved config in memory or re-reading it from the adapter. The recommended approach is to snapshot the config at last save time in the hook state.
+The "last saved" baseline is owned by `useMappingEditor` as editor state — not by the diff hook. Draft-vs-saved is a core editor concern: multiple features need the same baseline (per-field diff, top-bar unsaved status, save enablement, revert, future global diff view).
+
+**`useMappingEditor` exposes:**
+- `savedRules: readonly MappingRule[]` — snapshot of rules as they were at the last successful `save()` call. Initialized from the adapter-loaded rules on mount.
+- `getSavedRuleForTarget(targetPath: string): MappingRule | null` — convenience accessor that looks up the saved rule matching the given target path.
+
+The diff hook (`useUnsavedDiff`) consumes these as inputs — it owns comparison logic but not baseline ownership. This creates a single source of truth for both the current working draft and the last saved state.
 
 ### 6. Accessibility Implications
 
@@ -427,7 +438,7 @@ The "last saved" baseline comes from `useMappingEditor`'s persisted config. Spec
 | Diff panel | `aria-expanded` on trigger button. Panel content is labelled (`aria-labelledby`). |
 | Action buttons | `aria-disabled="true"` (not just `disabled`) for disabled AI actions, with descriptive `aria-label`. |
 | Reset draft | Confirmation if expression is non-trivial (more than a simple source reference). `aria-label="Reset current draft expression"`. |
-| Remove mapping | Confirmation dialog with `role="alertdialog"`. |
+| Remove mapping | Located in header overflow menu. Confirmation dialog with `role="alertdialog"`. Menu trigger has `aria-haspopup="menu"` and `aria-expanded`. |
 | Pinned feedback area | `role="region"`, `aria-label="Expression feedback"`. Expression and Result are `aria-live="polite"` regions. |
 | Keyboard | Tab order: Header → Feedback area → Expression area → Action row. All interactive elements reachable via keyboard. |
 
@@ -595,34 +606,41 @@ The "last saved" baseline comes from `useMappingEditor`'s persisted config. Spec
 - Output Type badge remains visible and accurate
 - Expression and Result in feedback area continue updating
 
-### AE-10 — Remove mapping action
+### AE-10 — Remove mapping action via overflow menu
 
 **Given**
 - Target field has a saved mapping (`currentStatus === 'mapped'`)
 
 **When**
-- User clicks "Remove mapping"
+- User opens the header overflow menu (⋮) and clicks "Remove mapping"
 
 **Then**
 - Confirmation dialog: "Remove mapping for {targetPath}? This will delete the saved rule."
 - On confirm: `onClearMapping(targetPath)` is called
 - On cancel: no change
+- The overflow menu closes after action
 
 ---
 
 ## Open Questions
 
-- `Q1.` Should output type mismatch block Apply in addition to blocking Save? The current design allows Apply so the user can continue iterating, but this means an invalid-output expression can be applied to local state. If this causes confusion downstream (e.g., preview runs but shows unexpected type), it may be better to block Apply as well. **Recommendation: allow Apply, block Save — revisit if user confusion is observed.**
+- none
 
-- `Q2.` Should the unsaved diff show a per-field view only, or should there also be a global "View all unsaved changes" action in the top bar (EditorTopBar)? This spec scopes to per-field. A global diff is a natural follow-on but may be more valuable.
+### Resolved Questions (Rev 2)
 
-- `Q3.` For the type inference utility — should we directly import and reuse `inferExpressionType` from `src/engine/validate/type-inference.ts` in the browser, or create a UI-side lightweight adapter? The engine code is already bundled into the UI via Vite alias, so direct import is feasible. **Recommendation: import via the `ui/src/lib/engine/` boundary, consistent with existing engine integration patterns.**
+The following questions from Rev 1 were resolved and incorporated into the spec:
 
-- `Q4.` When the user is in Builder mode and structural validation fails, should the generated expression still be shown in the feedback area (it may be partial/empty), or should the Expression row show a placeholder like "Complete the expression to see DSL output"? **Recommendation: show the partial expression if one exists, show placeholder if empty.**
+- **Q1. Output type mismatch: block Apply?** → **No.** Allow Apply, block Save. Draft can be imperfect; saved rule must be valid. Output type mismatch is surfaced prominently near Result, in validation badges, and in Save-disabled reason text. Revisit only if user testing shows meaningful confusion.
 
-- `Q5.` Should "Remove mapping" (the destructive delete-saved-rule action) be in the action row at all, or should it move to the header area or a context menu? Keeping it near Reset draft risks confusion between "reset my draft" and "delete the saved rule."
+- **Q2. Per-field diff only, or also global?** → **Per-field only** in this spec. Global "View all unsaved changes" in EditorTopBar is a strong follow-on enhancement (group by target field, summary + DSL diff).
 
-- `Q6.` For the `getSavedRuleForTarget` accessor needed by the diff — should `useMappingEditor` expose the last-saved config snapshot directly, or should the diff hook manage its own baseline from adapter reads?
+- **Q3. Engine type inference: reuse or rewrite?** → **Reuse** `inferExpressionType` from the engine, imported through `ui/src/lib/engine/` boundary. No separate UI-side inference. The engine is the source of truth for type behavior — duplicating inference creates drift risk.
+
+- **Q4. Partial expression display when structural validation fails?** → **Show the partial expression** if one exists, with label "Expression (incomplete)". Show placeholder "Complete the expression to see DSL output" only when no expression exists at all. Partial visibility supports learnability and reinforces that the Builder generates real DSL.
+
+- **Q5. Remove mapping placement?** → **Move to header overflow menu (⋮)**, physically and conceptually separated from the iterative draft actions (Reset draft, Suggest, Explain, Fix). This prevents confusion between "reset my draft" and "delete the saved rule" — critical for non-technical users managing draft vs. saved state.
+
+- **Q6. Saved baseline ownership?** → **`useMappingEditor` owns it.** The hook exposes `savedRules` (snapshot at last save) and `getSavedRuleForTarget(targetPath)`. The diff hook consumes the baseline — it owns comparison logic, not baseline state. This creates a single source of truth for draft-vs-saved across multiple consumers (diff, save enablement, dirty checks, future global diff).
 
 ---
 
@@ -652,7 +670,7 @@ Recommended decomposition:
 
 3. **T-03 (ui-task):** Wire validation to Apply/Save gating — update `ScalarFieldBuilder` to use `useBuilderValidation` for Apply button gating (replace current `isValid` check), wire `canSave` to the save flow (or expose it for parent consumption). Remove suggested-sources row.
 
-4. **T-04 (ui-task):** Assistive action row redesign — rename Clear to "Reset draft" with confirmation logic, rename destructive Clear to "Remove mapping" with confirmation dialog and repositioning, update AI placeholder tooltips, update test IDs and ARIA attributes.
+4. **T-04 (ui-task):** Assistive action row redesign — rename Clear to "Reset draft" with confirmation logic, move destructive "Remove mapping" to header overflow menu (⋮), update AI placeholder tooltips, update test IDs and ARIA attributes.
 
 5. **T-05 (ui-task):** Unsaved diff capability — implement `useUnsavedDiff` hook (baseline from saved config, current from working state), create `UnsavedDiffPanel` component (inline expandable), wire "View unsaved changes" trigger and "Revert to saved" action into `ScalarFieldBuilder`.
 
@@ -664,5 +682,13 @@ Sequencing: T-01 → T-02 → T-03 (sequential dependency chain). T-04 and T-05 
 
 ## Change Log
 
+- Rev 2 — 2026-05-10
+  - Resolved all 6 open questions (Q1–Q6) and incorporated decisions into spec body
+  - Q1: Confirmed output type mismatch allows Apply, blocks Save. Added triple-location UX visibility requirement.
+  - Q2: Confirmed per-field diff only. Noted global diff as follow-on.
+  - Q3: Confirmed engine type inference reuse via UI boundary.
+  - Q4: Added "Expression (incomplete)" label for partial expressions, placeholder for empty.
+  - Q5: **Material change** — moved "Remove mapping" from secondary action row to header overflow menu (⋮). Updated layout diagrams, AE-10, accessibility table.
+  - Q6: Confirmed `useMappingEditor` owns saved baseline. Added `savedRules` and `getSavedRuleForTarget` to §5.5.
 - Rev 1 — 2026-05-09
   - Initial draft

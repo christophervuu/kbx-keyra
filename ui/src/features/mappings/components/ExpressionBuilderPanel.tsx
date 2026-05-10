@@ -1,4 +1,4 @@
-import { forwardRef, useContext, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { ExpressionBuilderResult, ExpressionBuilderMode } from '../hooks/use-expression-builder';
 import type { ParsedSchema } from '@/lib/types/domain';
 import { useExpressionPreview } from '../hooks/use-expression-preview';
@@ -6,9 +6,30 @@ import { PreviewContext } from '../context/preview-context';
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { ExpressionPreview } from './ExpressionPreview';
 import { FunctionReferencePanel } from './FunctionReferencePanel';
-import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
+import { ChainBuilderShell } from './ChainBuilderShell';
+import { EntryPointSelector } from './EntryPointSelector';
+import { ChainSourceCard } from './ChainSourceCard';
+import { StaticValueInput } from './StaticValueInput';
+import { LogicStepList } from './LogicStepList';
+import type { LogicKind } from './AddLogicPicker';
+import type {
+  ChainBuilderState,
+  LogicStep,
+  BuilderEntryType,
+  StaticValueBranch,
+} from '../lib/chain-builder-state';
+import {
+  createEmptyChainState,
+  createEmptyTransformStep,
+  createEmptyConditionStep,
+  createEmptyValueMapStep,
+  isChainComplete,
+} from '../lib/chain-builder-state';
+import { generateExpressionFromChain } from '../lib/chain-expression-generator';
+import { decomposeToChainState } from '../lib/chain-decomposer';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,20 +131,30 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
   function ExpressionBuilderPanel({ builderState, parsedSourceSchema = null, sampleSourceData = null }, ref) {
   const rawDslRef = useRef<RawDslEditorRef>(null);
 
+  // FS-038 T-13: Chain builder state for Rules View
+  const [chainState, setChainState] = useState<ChainBuilderState>(() => createEmptyChainState());
+  const [addLogicPickerOpen, setAddLogicPickerOpen] = useState(false);
+  // Track which rule expression we last hydrated from to avoid re-hydrating on chain changes
+  const lastHydratedExpressionRef = useRef<string>('');
+
   // Expose insertSourceField to parent via ref
   useImperativeHandle(ref, () => ({
     insertSourceField(path: string) {
       if (!builderState || builderState.selectedRule === null) return;
       if (builderState.mode === 'editor') {
         rawDslRef.current?.insertText(`source("${path}")`);
+      } else {
+        // FS-038 T-13: In builder mode, update chain state source path
+        setChainState((prev) => ({
+          ...prev,
+          entryType: 'source',
+          sourcePath: path,
+        }));
       }
-      // Builder mode: UnifiedExpressionBuilder manages its own source state
     },
   }), [builderState]);
 
-  // Read sourceData from PreviewContext when available (FS-012 T-13).
-  // Falls back to the sampleSourceData prop so the component remains usable
-  // outside <PreviewProvider> (e.g. isolated unit tests).
+  // Read sourceData from PreviewContext when available.
   const previewCtx = useContext(PreviewContext);
   const resolvedSourceData = previewCtx?.sourceData ?? sampleSourceData ?? null;
 
@@ -133,6 +164,110 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
     expression: previewExpression,
     sourceData: resolvedSourceData,
   });
+
+  // FS-038 T-13: Hydrate chain state when rule expression changes
+  useEffect(() => {
+    if (!builderState || builderState.selectedRule === null) {
+      setChainState(createEmptyChainState());
+      lastHydratedExpressionRef.current = '';
+      return;
+    }
+    const expr = builderState.expression;
+    if (expr === lastHydratedExpressionRef.current) return;
+
+    if (!expr) {
+      setChainState(createEmptyChainState());
+      lastHydratedExpressionRef.current = '';
+      return;
+    }
+
+    const result = decomposeToChainState(expr);
+    if (result.success) {
+      setChainState(result.state);
+      lastHydratedExpressionRef.current = expr;
+    } else {
+      // Decomposition failed — chain state stays empty; editor mode handles it
+      setChainState(createEmptyChainState());
+      lastHydratedExpressionRef.current = expr;
+    }
+  }, [builderState?.expression, builderState?.selectedRule]);
+
+  // FS-038 T-13: Propagate chain expression to rule store on chain state change
+  const setExpressionRef = useRef(builderState?.setExpression);
+  useEffect(() => {
+    setExpressionRef.current = builderState?.setExpression;
+  });
+
+  useEffect(() => {
+    if (!builderState || builderState.mode !== 'builder') return;
+    const generated = generateExpressionFromChain(chainState);
+    // Only propagate if different from current expression to avoid loops
+    if (generated !== lastHydratedExpressionRef.current) {
+      lastHydratedExpressionRef.current = generated;
+      setExpressionRef.current?.(generated);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainState]);
+
+  // FS-038 T-13: Chain state update handlers
+  const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
+    setChainState((prev) => ({
+      ...createEmptyChainState(),
+      entryType: type,
+      sourcePath: type === 'source' ? prev.sourcePath : undefined,
+    }));
+  }, []);
+
+  const handleSourceSelect = useCallback((path: string) => {
+    setChainState((prev) => ({ ...prev, sourcePath: path }));
+  }, []);
+
+  const handleStaticValueChange = useCallback((value: StaticValueBranch) => {
+    setChainState((prev) => ({ ...prev, staticValue: value }));
+  }, []);
+
+  const handleAddStep = useCallback((kind: LogicKind) => {
+    setAddLogicPickerOpen(false);
+    const newStep: LogicStep =
+      kind === 'transform'
+        ? createEmptyTransformStep()
+        : kind === 'condition'
+          ? createEmptyConditionStep()
+          : createEmptyValueMapStep();
+    setChainState((prev) => ({
+      ...prev,
+      logicSteps: [...prev.logicSteps, newStep],
+      expandedStepIndex: prev.logicSteps.length,
+    }));
+  }, []);
+
+  const handleStepChange = useCallback((index: number, step: LogicStep) => {
+    setChainState((prev) => ({
+      ...prev,
+      logicSteps: prev.logicSteps.map((s, i) => (i === index ? step : s)),
+    }));
+  }, []);
+
+  const handleRemoveStep = useCallback((index: number) => {
+    setChainState((prev) => ({
+      ...prev,
+      logicSteps: prev.logicSteps.filter((_, i) => i !== index),
+      expandedStepIndex:
+        prev.expandedStepIndex === index
+          ? null
+          : prev.expandedStepIndex !== null && prev.expandedStepIndex > index
+            ? prev.expandedStepIndex - 1
+            : prev.expandedStepIndex,
+    }));
+  }, []);
+
+  const handleExpandedStepIndexChange = useCallback((index: number | null) => {
+    setChainState((prev) => ({ ...prev, expandedStepIndex: index }));
+  }, []);
+
+  const sourceOptions = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [];
+  const currentValueLabel = chainState.sourcePath ?? 'the current value';
+  const selectedTargetPath = builderState?.selectedRule?.target ?? '';
 
   // No rule selected — show empty state
   if (builderState === null || builderState.selectedRule === null) {
@@ -156,8 +291,6 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
     setExpression,
     errorDecorations,
     decompositionWarning,
-    initialBuilderState: _initialBuilderState,
-    initialUnifiedBuilderState,
   } = builderState;
 
   /** Insert a function from the reference panel into the active mode. */
@@ -165,7 +298,7 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
     if (mode === 'editor') {
       rawDslRef.current?.insertText(`${functionName}()`);
     }
-    // Builder mode: no direct function insertion in UnifiedExpressionBuilder
+    // Builder mode: no direct function insertion
   };
 
   return (
@@ -193,7 +326,7 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
         </div>
       )}
 
-      {/* Content area — editor mode uses RawDslEditor; builder mode uses GuidedBuilder */}
+      {/* Content area */}
       <div className="flex-1 overflow-hidden p-3">
         {mode === 'editor' ? (
           <div data-testid="expression-editor-slot">
@@ -207,22 +340,74 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
             />
           </div>
         ) : (
+          /* FS-038 T-13: New chain builder surface for Rules View */
           <div data-testid="expression-builder-slot" className="h-full overflow-y-auto">
-            <UnifiedExpressionBuilder
+            <ChainBuilderShell
+              key={selectedTargetPath}
+              targetPath={selectedTargetPath}
+              targetType="string"
+              isRequired={false}
               expression={expression}
-              onExpressionChange={setExpression}
-              onApply={() => {}}
-              selectedTargetPath={builderState.selectedRule?.target ?? ''}
-              parsedSourceSchema={parsedSourceSchema}
-              sourceData={resolvedSourceData}
-              onSwitchToEditor={switchToEditor}
-              initialState={initialUnifiedBuilderState}
-            />
+              result={null}
+              isEvaluating={false}
+              sourceDataAvailable={resolvedSourceData !== null}
+              isMapped={expression !== ''}
+              isBuilderMode={true}
+              onToggleMode={switchToEditor}
+              onClearMapping={() => { setExpression(''); }}
+              onExpressionClick={switchToEditor}
+            >
+              {/* Entry point selector */}
+              <EntryPointSelector
+                value={chainState.entryType}
+                hasLogicSteps={chainState.logicSteps.length > 0}
+                onEntryTypeChange={handleEntryTypeChange}
+              />
+
+              {/* Source entry */}
+              {chainState.entryType === 'source' && (
+                <ChainSourceCard
+                  sourcePath={chainState.sourcePath}
+                  logicStepCount={chainState.logicSteps.length}
+                  onSourceSelect={handleSourceSelect}
+                  onAddLogic={() => { setAddLogicPickerOpen(true); }}
+                />
+              )}
+
+              {/* Static entry */}
+              {chainState.entryType === 'static' && (
+                <StaticValueInput
+                  initialValue={
+                    chainState.staticValue !== undefined
+                      ? String(chainState.staticValue.value ?? '')
+                      : ''
+                  }
+                  targetType="string"
+                  onValueChange={handleStaticValueChange}
+                  onValidChange={() => {}}
+                  onAddLogic={() => { setAddLogicPickerOpen(true); }}
+                />
+              )}
+
+              {/* Logic step list */}
+              {(chainState.logicSteps.length > 0 || addLogicPickerOpen) && (
+                <LogicStepList
+                  steps={chainState.logicSteps}
+                  expandedStepIndex={chainState.expandedStepIndex}
+                  onExpandedStepIndexChange={handleExpandedStepIndexChange}
+                  onStepChange={handleStepChange}
+                  onRemoveStep={handleRemoveStep}
+                  onAddStep={handleAddStep}
+                  sourceOptions={sourceOptions}
+                  currentValueLabel={currentValueLabel}
+                />
+              )}
+            </ChainBuilderShell>
           </div>
         )}
       </div>
 
-      {/* Expression Preview (AE-08, T-10) */}
+      {/* Expression Preview */}
       <div className="px-3 pb-2 shrink-0">
         <ExpressionPreview
           expression={expression}
@@ -244,7 +429,7 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
         </div>
       )}
 
-      {/* Function Reference Panel (AE-11, T-09) */}
+      {/* Function Reference Panel */}
       <div className="px-3 pb-3 shrink-0">
         <FunctionReferencePanel
           onInsertFunction={handleInsertFunction}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { ArrowLeft, CheckCircle2, AlertCircle, ArrowUpRight } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ArrowUpRight, RotateCcw } from 'lucide-react';
 
 import {
   DiagnosticsDisplay,
@@ -222,7 +222,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   // Linked cross-panel debug selection (FS-036)
   const debugSelection = useLinkedDebugSelection(state.status);
 
-  const { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit } = useTestLabLayout({
+  const { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit, resetLayout } = useTestLabLayout({
     traceEnabled,
   });
 
@@ -310,6 +310,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     setSelectedTestCaseId(tc.id);
     setLoadedSourceData(tc.sourceData);
     setLoadedExpectedOutput(tc.expectedOutput);
+    setCurrentExpectedOutput(tc.expectedOutput ?? null);
     setLoadKey((k) => k + 1);
     setActiveTab('output');
   }
@@ -318,7 +319,10 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     setSelectedTestCaseId(null);
     setLoadedSourceData('');
     setLoadedExpectedOutput(undefined);
+    setCurrentExpectedOutput(null);
+    setDiffResult(null);
     setLoadKey((k) => k + 1);
+    setActiveTab('output');
   }
 
   function handleSelectSuiteTest(testCaseId: string) {
@@ -333,19 +337,14 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   function handleAddNew() {
     const name = `Test Case ${testCases.length + 1}`;
     const result = saveTestCase({ name, sourceData: '' });
-    if (result.success) {
-      // Find the newly created case (last in list after save)
-      // We re-read from the hook's updated state on next render; select by name
-      // The hook updates synchronously so testCases is stale here — use a workaround:
-      // We'll select scratchpad and let the list update trigger selection
-      // Actually: the hook returns the updated array on next render. We can't get
-      // the new ID synchronously. Instead, we'll select the last case after render.
-      // For now, clear to scratchpad and let the user click the new case.
-      // A better approach: saveTestCase could return the new case — but it returns
-      // SaveTestCaseResult. We'll find the new case by name after the state update.
-      // Since React state updates are batched, we use a ref trick or just select scratchpad.
-      // Per spec: "selects it" — we'll implement this by selecting the last case after save.
-      handleSelectScratchpad();
+    if (result.success && result.id !== undefined) {
+      setSelectedTestCaseId(result.id);
+      setLoadedSourceData('');
+      setLoadedExpectedOutput(undefined);
+      setCurrentExpectedOutput(null);
+      setDiffResult(null);
+      setLoadKey((k) => k + 1);
+      setActiveTab('output');
     }
   }
 
@@ -374,28 +373,40 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   async function handleRunAll() {
     setBatchSummary(null);
     setSuiteSummaryRows([]);
-    await runAll(testCases);
-    // Compute summary from updated results
-    const passed = testCases.filter((tc) => runResults[tc.id]?.status === 'pass').length;
-    const failed = testCases.filter((tc) => runResults[tc.id]?.status === 'fail').length;
+    const batchResults = await runAll(testCases);
+    const mergedResults = { ...runResults, ...batchResults };
+
+    const passed = testCases.filter((tc) => mergedResults[tc.id]?.status === 'pass').length;
+    const failed = testCases.filter((tc) => mergedResults[tc.id]?.status === 'fail').length;
     setBatchSummary({ passed, failed });
-    // Build suite summary rows
+
     const rows: SuiteSummaryRow[] = testCases
-      .filter((tc) => runResults[tc.id] !== undefined)
+      .filter((tc) => mergedResults[tc.id] !== undefined)
       .map((tc) => ({
         testCaseId: tc.id,
         testCaseName: tc.name,
-        result: runResults[tc.id],
+        result: mergedResults[tc.id],
       }));
     setSuiteSummaryRows(rows);
   }
 
   async function handleRerunFailed() {
     setBatchSummary(null);
-    await rerunFailed(testCases, runResults);
-    const passed = testCases.filter((tc) => runResults[tc.id]?.status === 'pass').length;
-    const failed = testCases.filter((tc) => runResults[tc.id]?.status === 'fail').length;
+    const batchResults = await rerunFailed(testCases, runResults);
+    const mergedResults = { ...runResults, ...batchResults };
+
+    const passed = testCases.filter((tc) => mergedResults[tc.id]?.status === 'pass').length;
+    const failed = testCases.filter((tc) => mergedResults[tc.id]?.status === 'fail').length;
     setBatchSummary({ passed, failed });
+
+    const rows: SuiteSummaryRow[] = testCases
+      .filter((tc) => mergedResults[tc.id] !== undefined)
+      .map((tc) => ({
+        testCaseId: tc.id,
+        testCaseName: tc.name,
+        result: mergedResults[tc.id],
+      }));
+    setSuiteSummaryRows(rows);
   }
 
   const editorUrl = `/projects/${projectId}/mappings/${mappingId}`;
@@ -748,6 +759,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
             <PanelEmptyState message="Enter source data and click Run to see the mapping output." />
           }
           className="overflow-hidden"
+          style={{ gridColumn: '1 / 2', gridRow: '1 / 2' }}
           testId="panel-output"
         >
           {outputContent()}
@@ -755,8 +767,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
         {/* Row 1, Col 2: Vertical divider (spans both rows via grid-row) */}
         <div
-          style={{ gridRow: '1 / 4' }}
-          className="flex items-stretch"
+          style={{ gridColumn: '2 / 3', gridRow: '1 / 4' }}
+          className="z-20 flex items-stretch"
           data-testid="divider-col"
         >
           <Divider
@@ -777,6 +789,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
             <PanelEmptyState message="Run a test and set expected output to see the diff." />
           }
           className="overflow-hidden"
+          style={{ gridColumn: '3 / 4', gridRow: '1 / 2' }}
           testId="panel-diff"
         >
           {diffContent()}
@@ -784,16 +797,22 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
         {/* Row 2, Col 1: Horizontal divider (spans both columns) */}
         <div
-          style={{ gridColumn: '1 / 4' }}
-          className="flex flex-col"
+          style={{ gridColumn: '1 / 4', gridRow: '2 / 3' }}
+          className="relative z-30 flex items-center"
           data-testid="divider-row"
         >
-          <Divider
-            axis="row"
-            isDragging={rowDrag.isDragging}
+          <div
+            className="flex h-3 w-full cursor-row-resize items-center"
             onMouseDown={rowDrag.handleMouseDown}
-            testId="divider-row-handle"
-          />
+            data-testid="divider-row-hitarea"
+          >
+            <Divider
+              axis="row"
+              isDragging={rowDrag.isDragging}
+              onMouseDown={rowDrag.handleMouseDown}
+              testId="divider-row-handle"
+            />
+          </div>
         </div>
 
         {/* Row 3, Col 1: Diagnostics (bottom-left) */}
@@ -807,6 +826,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
           isEmpty={!hasAnyResult && !isExecuting}
           emptyState={<PanelEmptyState message="No diagnostics from the last execution." />}
           className="overflow-hidden"
+          style={{ gridColumn: '1 / 2', gridRow: '3 / 4' }}
           testId="panel-diagnostics"
         >
           {diagnosticsContent()}
@@ -826,6 +846,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
             )
           }
           className="overflow-hidden"
+          style={{ gridColumn: '3 / 4', gridRow: '3 / 4' }}
           testId="panel-trace"
         >
           {traceContent()}
@@ -930,6 +951,16 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
           {isExecuting ? <Spinner /> : null}
           Run
         </button>
+
+        <button
+          type="button"
+          onClick={resetLayout}
+          data-testid="reset-layout-button"
+          className="flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <RotateCcw size={12} aria-hidden="true" />
+          Reset Layout
+        </button>
       </div>
 
       {/* Execution summary bar — sticky, all breakpoints */}
@@ -985,7 +1016,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
           {/* Source data input — lower portion */}
           <div
-            className="min-h-0 flex-1 overflow-auto px-2 py-2"
+            className="flex min-h-0 flex-1 overflow-hidden py-2"
             data-testid="source-input-area"
           >
             <SourceDataInput

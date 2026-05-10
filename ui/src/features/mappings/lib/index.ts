@@ -81,3 +81,41 @@ export {
   getCompatibleChainableTransforms,
   CHAINABLE_TRANSFORMS,
 } from './transform-chain-utils';
+// FS-038 chain builder state
+export {
+  createEmptyChainState,
+  createSourceCopyState,
+  createStaticState,
+  createEmptyTransformStep,
+  createTransformStep,
+  createEmptyConditionStep,
+  createEmptyValueMapStep,
+  isChainComplete,
+  summarizeLogicStep,
+  isTransformStep,
+  isConditionStep,
+  isValueMapStep,
+  isStaticBranch,
+  isSourceBranch,
+  isExpressionBranch,
+} from './chain-builder-state';
+export type {
+  BuilderEntryType,
+  ChainBranch,
+  StaticValueBranch,
+  TransformLogicStep,
+  ArgumentSlotRef,
+  ConditionLogicStep,
+  ElseIfStep,
+  ConditionOperand,
+  ConditionOperatorType,
+  ValueMapLogicStep,
+  ChainValueMapEntry,
+  LogicStep,
+  ChainBuilderState,
+} from './chain-builder-state';
+// FS-038 chain expression generator
+export { generateExpressionFromChain } from './chain-expression-generator';
+// FS-038 chain decomposer
+export { decomposeToChainState } from './chain-decomposer';
+export type { DecomposeChainResult } from './chain-decomposer';

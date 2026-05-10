@@ -110,7 +110,7 @@ export function SourceDataInput({ onRawChange, initialValue }: SourceDataInputPr
   const errorId = 'source-data-input-error';
 
   return (
-    <div className="flex flex-col gap-1" data-testid="source-data-input-container">
+    <div className="flex h-full min-h-0 w-full flex-col gap-1" data-testid="source-data-input-container">
       <label htmlFor={inputId} className="sr-only">
         Source data (JSON)
       </label>
@@ -125,7 +125,7 @@ export function SourceDataInput({ onRawChange, initialValue }: SourceDataInputPr
         aria-invalid={parseError !== null ? true : undefined}
         data-testid="source-data-textarea"
         className={[
-          'w-full resize-y rounded border bg-zinc-900 p-2 font-mono text-xs text-zinc-200',
+          'min-h-0 w-full flex-1 resize-none rounded border bg-zinc-900 p-2 font-mono text-xs text-zinc-200',
           'placeholder:text-zinc-600',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
           'min-h-[80px]',

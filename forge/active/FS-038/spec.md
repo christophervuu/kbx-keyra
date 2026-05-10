@@ -17,7 +17,7 @@ FS-038
 Owner: @chris
 Reviewers: TBD
 Created: 2026-05-09
-Last Updated: 2026-05-09
+Last Updated: 2026-05-10
 Type: ui
 
 ---
@@ -30,7 +30,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -85,8 +85,8 @@ Reduce TTFSM by restructuring the Builder panel around the user's mental model:
 - The Apply/Save two-tier model remains unchanged
 - The ScalarFieldBuilder shell (drop zone, apply button, navigation) is preserved
 - Drag-and-drop source insertion continues to work
-- The existing expression generator and decomposer patterns are the right abstraction boundary — they will be adapted, not eliminated
-- FS-029/FS-030 Source Card and chain model patterns are a valid foundation to evolve, not replace wholesale
+- The existing expression generator and decomposer patterns are the right abstraction boundary — new generator and decomposer are added alongside, legacy decomposers are retained during migration and retired in a follow-up cleanup spec
+- FS-029/FS-030 chain model patterns (TransformChainStep, InlineTransform, CHAINABLE_TRANSFORMS, type compatibility) are reused where applicable, but the Builder component itself is a new component (`ChainBuilder`) — the mental model shift justifies a clean break rather than evolving the existing SourceCard in-place
 - The product-level constraint that AI suggestions are never auto-committed remains
 
 ---
@@ -343,14 +343,17 @@ These sections never scroll out of view. They sit above the builder content area
 3. Condition builder appears inline:
    ```
    ┌─ Condition ───────────────────────┐
-   │ IF  [source.tier]  [equals]  ["premium"]  │
+   │ IF  [current value ▾]  [equals]  ["premium"]  │
+   │     (Change input)                │
    │ THEN  [source.first_name]         │
    │ ELSE  ["N/A"]                     │
    │                                   │
    │ [+ Add else-if]                   │
    └───────────────────────────────────┘
    ```
-4. Else is required — the builder pre-creates the else branch
+4. The left operand defaults to the current accumulated value (source or source + transforms) — shown explicitly
+5. "Change input" affordance below the left operand lets the user switch to a different source field
+6. Else is required — the builder pre-creates the else branch
 5. Both THEN and ELSE support full chains (source + transforms)
 6. Once complete, the condition collapses to summary:
    ```
@@ -461,9 +464,10 @@ This model treats logic as a chain of steps applied to a base value, rather than
 - The selected source (or static value) establishes the **base value**
 - Each `LogicStep` operates on the current value in the chain
 - `TransformLogicStep`: applies a function where the current value is the implicit first argument
-- `ConditionLogicStep`: wraps the entire expression in an `if()` — the condition tests, then/else branches produce the output
+- `ConditionLogicStep`: wraps the entire expression in an `if()` — the condition tests, then/else branches produce the output. The condition left operand **defaults to the current accumulated value** (the source, or source + prior transforms) and is shown explicitly in the UI (e.g., "If current value equals..."). A "Change input" affordance allows switching the left operand to a different source field if needed.
 - `ValueMapLogicStep`: wraps the expression in a `valueMap()` — the base value is the lookup key
-- Multiple steps can be chained: Source → Transform → Transform → Condition (evaluates condition on the transformed value)
+- **Post-condition and post-value-map chaining:** After a condition or value map step, the output becomes the new current value. Users can add further transform steps after a condition or value map to transform the result. The UX makes this explicit by showing "Current value: output of condition" (or similar) as the input label for the next step. This avoids artificial dead ends and is coherent with the DSL (a condition returns a value, so transforming it is valid).
+- Multiple steps can be chained: Source → Transform → Transform → Condition → Transform (transforms the conditional output)
 - Chain ordering is semantic: each step feeds into the next
 
 #### Expression Generation
@@ -645,7 +649,7 @@ Clicking a collapsed summary expands it for editing. Only one step can be expand
 - Condition builder renders inline
 
 **Then**
-- IF row is ready for input (left operand defaults to current value)
+- IF row is ready for input (left operand defaults to current value, shown explicitly as "current value" with "Change input" affordance)
 - THEN branch is empty, ready for input
 - ELSE branch is present (required) and empty, ready for input
 - Apply is disabled until both THEN and ELSE have values
@@ -818,17 +822,9 @@ Clicking a collapsed summary expands it for editing. Only one step can be expand
 
 ## Open Questions
 
-- `Q1.` **Chain + Condition interaction model:** When a user adds a condition after transform steps, should the condition test against the transformed value (i.e., the full chain up to that point becomes the left operand), or should the condition be able to reference the original source independently? The spec currently assumes the condition operates on the accumulated chain value, but this may limit certain patterns. See AE-18 for the proposed behavior.
+- none
 
-- `Q2.` **Source Card redesign vs evolution:** The current FS-029/FS-030 Source Card component already handles DirectCopy, SourceWithTransform, and chain steps. Should the redesign evolve the existing `SourceCard.tsx` component in-place, or should it create a new component (e.g., `ChainBuilder.tsx`) and deprecate the old one? The answer affects migration risk and the number of files touched.
-
-- `Q3.` **Legacy decomposer retirement timeline:** The codebase currently has two decomposition paths (legacy `pipeline-decomposer.ts` and FS-029 `source-card-decomposer.ts`). The new model needs a unified decomposer. Should the old decomposers be removed in this spec, or should the new decomposer be added alongside them with a migration period?
-
-- `Q4.` **State model naming and file placement:** Should the new state types go into the existing `expression-builder-state.ts` (extending it) or a new file (e.g., `chain-builder-state.ts`)? The existing file is already large with both legacy and FS-029 types.
-
-- `Q5.` **"+ Add logic" after condition/value map:** If a user adds a condition as their first logic step, should they be able to add a transform step AFTER the condition (i.e., transform the output of the if-expression)? The chain model supports this structurally, but the UX for "add step after condition" needs design clarity.
-
-- `Q6.` **Condition left operand default:** When adding a condition via "+ Add logic", should the left operand of the IF clause default to the current accumulated value (i.e., the source or source+transforms), or should it start empty? Defaulting to current value speeds up the common case but may confuse if the user wants to test a different field.
+All questions resolved at Rev 2 — see Change Log.
 
 ---
 
@@ -881,6 +877,19 @@ Tasks 2 and 3 (generator/decomposer) can be parallelized with UI tasks once the 
 ---
 
 ## Change Log
+
+- Rev 2 — 2026-05-10
+  - All 6 open questions resolved:
+    - Q1 resolved: Condition left operand defaults to current accumulated value (chain-preserving). "Change input" affordance available as escape hatch to switch to a different source.
+    - Q2 resolved: New component (`ChainBuilder.tsx` or similar) rather than evolving existing `SourceCard.tsx` in-place. The mental model shift justifies a clean break. Legacy `SourceCard` retained for backward compatibility during migration.
+    - Q3 resolved: Add unified decomposer first alongside legacy decomposers. Migrate all consumers. Retire legacy decomposers in a separate follow-up cleanup spec. This reduces migration risk.
+    - Q4 resolved: New file `chain-builder-state.ts`. Clearer boundary, easier migration, avoids enlarging already-large legacy file.
+    - Q5 resolved: Post-condition and post-value-map steps are structurally supported. The output of a condition or value map becomes the new current value. UX must clearly label the input for subsequent steps (e.g., "Current value: output of condition"). Avoids artificial dead ends; coherent with DSL semantics.
+    - Q6 resolved: Condition left operand defaults to current value, shown explicitly in the UI. "Change input" affordance lets user switch to a different source. Optimizes for TTFSM without making the default invisible.
+  - Updated Chain Model Semantics to document post-condition/post-value-map chaining
+  - Updated Condition flow (Flow 3) and AE-08 to reflect default left operand behavior with "Change input" affordance
+  - Updated Assumptions to reflect new component decision and decomposer migration strategy
+  - No scope change — all resolutions are design clarifications within existing scope boundaries
 
 - Rev 1 — 2026-05-09
   - Initial draft

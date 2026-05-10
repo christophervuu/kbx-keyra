@@ -38,7 +38,9 @@ function mockMatchMedia(isWide: boolean, isMedium: boolean) {
 beforeEach(() => {
   mockMatchMedia(true, true);
   // Clear localStorage
-  localStorage.clear();
+  if (typeof localStorage.clear === 'function') {
+    localStorage.clear();
+  }
 });
 
 afterEach(() => {
@@ -177,7 +179,7 @@ describe('TestLabPage', () => {
 
   it('renders the test case manager area', () => {
     renderComponent();
-    expect(screen.getByTestId('test-case-manager-area')).toBeInTheDocument();
+    expect(screen.getByTestId('test-case-list-area')).toBeInTheDocument();
   });
 
   it('renders the right panel', () => {
@@ -238,6 +240,7 @@ describe('TestLabPage', () => {
       renderComponent();
       expect(screen.getByTestId('divider-col')).toBeInTheDocument();
       expect(screen.getByTestId('divider-row')).toBeInTheDocument();
+      expect(screen.getByTestId('divider-row-hitarea')).toBeInTheDocument();
     });
 
     it('renders the main split divider', () => {
@@ -250,6 +253,14 @@ describe('TestLabPage', () => {
       const leftPanel = screen.getByTestId('left-panel');
       // Default mainSplit is 0.35 → 35%
       expect(leftPanel).toHaveStyle({ width: '35%' });
+    });
+
+    it('pins wide panels to explicit grid cells', () => {
+      renderComponent();
+      expect(screen.getByTestId('panel-output')).toHaveStyle({ gridColumn: '1 / 2', gridRow: '1 / 2' });
+      expect(screen.getByTestId('panel-diff')).toHaveStyle({ gridColumn: '3 / 4', gridRow: '1 / 2' });
+      expect(screen.getByTestId('panel-diagnostics')).toHaveStyle({ gridColumn: '1 / 2', gridRow: '3 / 4' });
+      expect(screen.getByTestId('panel-trace')).toHaveStyle({ gridColumn: '3 / 4', gridRow: '3 / 4' });
     });
 
     it('shows empty state in Output panel before execution', () => {
@@ -463,6 +474,11 @@ describe('TestLabPage', () => {
   it('renders the auto-run toggle', () => {
     renderComponent();
     expect(screen.getByTestId('auto-run-toggle')).toBeInTheDocument();
+  });
+
+  it('renders the reset layout button', () => {
+    renderComponent();
+    expect(screen.getByTestId('reset-layout-button')).toBeInTheDocument();
   });
 
   it('renders "Back to Editor" link', () => {

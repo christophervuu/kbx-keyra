@@ -17,7 +17,7 @@ FS-039
 Owner: @christophervuu
 Reviewers: TBD
 Created: 2026-05-09
-Last Updated: 2026-05-09
+Last Updated: 2026-05-10
 Type: cross-cutting
 
 Cross-cutting because this spec defines both UI component behavior (ui-task) and state management infrastructure (ui-task), with an architecture update task (task).
@@ -32,7 +32,7 @@ draft
 
 ## Revision
 
-Rev: 1
+Rev: 2
 
 ---
 
@@ -78,7 +78,7 @@ Define a complete, implementable behavior and state model for the Builder panel 
 - The Mapping Editor's existing version/save infrastructure (`useMappingEditor`, `LocalStorageAdapter`, version history) remains stable
 - The engine's `parse()` and `evaluate()` functions continue to be usable for live preview during draft editing
 - The `ScalarFieldBuilder` component remains the primary Builder panel surface for scalar target fields
-- `UnifiedExpressionBuilder` remains the internal builder implementation but its state model will change significantly
+- A new `ChainBuilder.tsx` component boundary will replace `UnifiedExpressionBuilder` as the chain-based builder orchestration component (see Component Boundary decision below). `UnifiedExpressionBuilder` is deprecated, not extended.
 - `RawDslEditor` (Editor mode) continues to exist alongside Builder mode
 - `EditorTopBar` continues to own the Save button and save status display
 - TTFSM is the primary success metric — every interaction decision should be evaluated against it
@@ -179,24 +179,33 @@ ScalarFieldBuilder
 ## Relevant Areas
 
 - `ui/src/features/mappings/components/ScalarFieldBuilder.tsx`
-- `ui/src/features/mappings/components/UnifiedExpressionBuilder.tsx`
-- `ui/src/features/mappings/components/SourceCard.tsx`
+- `ui/src/features/mappings/components/UnifiedExpressionBuilder.tsx` (deprecated — replaced by ChainBuilder)
+- `ui/src/features/mappings/components/ChainBuilder.tsx` (new — chain-based builder orchestration)
+- `ui/src/features/mappings/components/ChainStepCard.tsx` (new — step collapse/expand card)
+- `ui/src/features/mappings/components/ConditionStepEditor.tsx` (new — condition step UI)
+- `ui/src/features/mappings/components/ValueMapStepEditor.tsx` (new — value map step UI)
+- `ui/src/features/mappings/components/UnsavedChangesOverlay.tsx` (new — diff overlay)
+- `ui/src/features/mappings/components/SourceCard.tsx` (subcomponents may be reused)
 - `ui/src/features/mappings/components/TransformPipeline.tsx`
 - `ui/src/features/mappings/components/TransformPipelineStep.tsx`
-- `ui/src/features/mappings/components/ConditionalModeBuilder.tsx`
+- `ui/src/features/mappings/components/ConditionalModeBuilder.tsx` (deprecated — replaced by ConditionStepEditor)
 - `ui/src/features/mappings/components/ConditionRowEditor.tsx`
 - `ui/src/features/mappings/components/BranchValueSelector.tsx`
-- `ui/src/features/mappings/components/ValueMapModeBuilder.tsx`
+- `ui/src/features/mappings/components/ValueMapModeBuilder.tsx` (deprecated — replaced by ValueMapStepEditor)
 - `ui/src/features/mappings/components/LiveExpressionDisplay.tsx`
 - `ui/src/features/mappings/components/LiveResultDisplay.tsx`
 - `ui/src/features/mappings/components/EditorTopBar.tsx`
 - `ui/src/features/mappings/hooks/use-mapping-editor.ts`
 - `ui/src/features/mappings/hooks/use-expression-builder.ts`
-- `ui/src/features/mappings/lib/expression-builder-state.ts`
-- `ui/src/features/mappings/lib/pipeline-expression-generator.ts`
-- `ui/src/features/mappings/lib/pipeline-decomposer.ts`
-- `ui/src/features/mappings/lib/source-card-expression-generator.ts`
-- `ui/src/features/mappings/lib/source-card-decomposer.ts`
+- `ui/src/features/mappings/lib/chain-builder-state.ts` (new — chain state model types)
+- `ui/src/features/mappings/lib/chain-expression-generator.ts` (new — chain → DSL)
+- `ui/src/features/mappings/lib/chain-decomposer.ts` (new — DSL → chain)
+- `ui/src/features/mappings/lib/chain-summary.ts` (new — step summary text)
+- `ui/src/features/mappings/lib/expression-builder-state.ts` (legacy — preserved until migration complete)
+- `ui/src/features/mappings/lib/pipeline-expression-generator.ts` (legacy — preserved until migration complete)
+- `ui/src/features/mappings/lib/pipeline-decomposer.ts` (legacy — preserved until migration complete)
+- `ui/src/features/mappings/lib/source-card-expression-generator.ts` (legacy — preserved until migration complete)
+- `ui/src/features/mappings/lib/source-card-decomposer.ts` (legacy — preserved until migration complete)
 - `ui/src/features/mappings/lib/transform-chain-utils.ts`
 - `ui/src/features/mappings/types.ts`
 - `forge/architecture/ui-application.md`
@@ -421,6 +430,21 @@ A capability to compare the current draft against the saved mapping rules.
 
 ### 7. Chain Model (Unified)
 
+#### Component boundary decision
+
+The chain-based Builder is implemented as a **new component**, `ChainBuilder.tsx`, rather than extending the existing `UnifiedExpressionBuilder.tsx`. This is a deliberate component boundary decision:
+
+- `ChainBuilder.tsx` is the new orchestration component for the chain model
+- `UnifiedExpressionBuilder.tsx` is deprecated but preserved until all consumers migrate
+- Subcomponents from `SourceCard.tsx` and `TransformPipelineStep.tsx` are reused where practical
+- The old mode-branching logic (Value/Conditional/ValueMap tabs) does not carry forward
+
+Rationale: This redesign is a mental-model shift, not a cosmetic refactor. A new component boundary reduces accidental coupling to legacy behaviors and creates a cleaner migration path.
+
+#### State file placement
+
+Chain state types live in a new file, `chain-builder-state.ts`, separate from the existing `expression-builder-state.ts`. This avoids expanding an already-large hybrid state file that mixes legacy and FS-029/030 concepts. Legacy types remain in their original file until migration is complete.
+
 #### Core concept
 
 The Builder uses a **single chain model**. A chain is an ordered sequence of operations that transform an initial value into a final output. Every mapping expression is a chain.
@@ -472,6 +496,27 @@ The `[+ Add Step]` action opens a picker offering:
 - **Add condition** — wraps the remaining chain in an `if()` construct
 - **Add value map** — wraps the remaining chain in a `valueMap()` construct
 
+#### Steps after conditions and value maps
+
+Conditions and value maps are expressions that **produce a value**. Their output becomes the new current value in the chain. The Builder must allow adding subsequent steps after a completed condition or value map:
+
+- A completed condition → its output is the value from whichever branch was taken
+- A completed value map → its output is the matched value or default
+- After either, `[+ Add Step]` is available as normal
+- Subsequent transforms operate on the condition/value-map output, not the original pre-branch input
+
+This prevents the Builder from creating an artificial dead end and matches the DSL model where `if(...)` and `valueMap(...)` are expressions that return values.
+
+**Example:** Apply a fallback via condition, then uppercase the result:
+```
+source("status") → if empty then "Unknown" else current value → upper()
+```
+DSL: `upper(if(eq(source("status"), ""), "Unknown", source("status")))`
+
+**UX requirement:** The summary for post-branch steps should make it clear that they operate on the branch result:
+- `Condition → if empty then "Unknown" else current value`
+- `Transform → upper(result)`
+
 ### 8. Condition Semantics
 
 #### Total conditions
@@ -496,11 +541,39 @@ ConditionClause {
 }
 
 Predicate {
-  left: OperandValue                 // left side
+  left: OperandValue                 // left side (defaults to current value)
   operator: ComparisonOperator       // eq, neq, gt, lt, gte, lte, contains, etc.
   right: OperandValue                // right side
 }
+
+OperandValue =
+  | { kind: 'currentValue' }                     // implicit chain value
+  | { kind: 'field'; path: string }              // source("path")
+  | { kind: 'static'; value: StaticValue }       // literal value
+  | { kind: 'expression'; dsl: string }          // raw DSL expression
 ```
+
+#### Left operand defaults to current value
+
+When a condition step is created, the left operand of each predicate **defaults to the current accumulated chain value**. This is the TTFSM-optimal default — the user is already working on a value and most conditions test that value.
+
+**Default state on creation:**
+```
+If [current value] [operator] [value]
+```
+
+**"Current value" is explicit, not invisible.** The left operand is shown as a labeled token/chip (e.g., a pill reading "current value" or showing the truncated chain summary). This prevents users from misunderstanding what the condition is testing.
+
+**Escape hatch:** The user can switch the left operand away from current value via a "Change input" action (or similar affordance like a dropdown/selector on the left operand):
+- "Use a different field" → source path selector
+- "Use a static value" → literal input
+- "Use an expression" → inline DSL expression
+
+When the left operand is switched from current value to an explicit reference, the summary text must reflect this:
+- Default: `If current value is empty, then "Unknown", else current value`
+- Switched: `If source("customerType") = "VIP", then uppercase(current value), else current value`
+
+**State model distinction:** The `OperandValue` type explicitly distinguishes `{ kind: 'currentValue' }` from `{ kind: 'field' }`. This is not just a UI rendering concern — it affects expression generation. When `left.kind === 'currentValue'`, the generator must substitute the accumulated chain expression up to this step as the left operand in the predicate DSL.
 
 #### Then and Else branches contain full chains
 
@@ -609,6 +682,17 @@ Both modes operate on the same draft. The `generatedExpression` (Builder) or raw
 
 When in Editor mode, `isDirty` compares the raw editor text against `savedExpression`. Same logic as Builder mode.
 
+#### Legacy component and decomposer retirement
+
+The new chain model introduces new files (`chain-builder-state.ts`, `chain-expression-generator.ts`, `chain-decomposer.ts`, `ChainBuilder.tsx`) alongside existing legacy files. The retirement approach is:
+
+1. **Introduce new components and utilities first** — new chain model is self-contained
+2. **Route the new Builder flow through new code** — `ScalarFieldBuilder` embeds `ChainBuilder` instead of `UnifiedExpressionBuilder`
+3. **Keep legacy code temporarily** — old decomposers, generators, and `UnifiedExpressionBuilder` remain in place if they still serve Editor-mode fallback, Rules View, or other consumers
+4. **Remove old code in a follow-up cleanup** — either as a final task in this spec or a subsequent cleanup spec, once migration is proven safe
+
+This separation reduces migration risk and avoids turning a UX redesign into a simultaneous large deletion/refactor project.
+
 ### 12. Expression and Result Updates During Draft Editing
 
 #### LiveExpressionDisplay
@@ -643,6 +727,8 @@ The `[+ Add Step]` button appears only when the current last step is structurall
 | Last step is a complete transform | Yes |
 | Last step is a complete condition (all branches filled) | Yes |
 | Last step is a complete value map (all rows + default filled) | Yes |
+| After a complete condition, subsequent transforms allowed | Yes |
+| After a complete value map, subsequent transforms allowed | Yes |
 | Source not yet selected | No |
 | Last step has empty required arguments | No |
 | Last condition step missing else branch value | No |
@@ -917,10 +1003,10 @@ If the user has started building a chain but hasn't completed it:
 - Diff overlay updates: only "newField" (Added) remains
 - If user navigates to "customerName", Builder shows the saved expression
 
-### AE-08 — Condition step with required else
+### AE-08 — Condition step defaults to current value as left operand
 
 **Given**
-- Chain has: `source("customer.tier")`
+- Chain has: `source("customer.tier")` → `upper()`
 - User clicks `[+ Add Step]` → "Add condition"
 
 **When**
@@ -928,9 +1014,11 @@ If the user has started building a chain but hasn't completed it:
 
 **Then**
 - Condition step is expanded showing:
-  - IF: empty predicate (left operand / operator / right operand)
+  - IF: left operand pre-populated with `[current value]` token (representing the chain output so far: `upper(source("customer.tier"))`), operator empty, right operand empty
   - THEN: empty branch chain
   - ELSE: empty branch chain (always present, cannot be removed)
+- The `[current value]` token is visible and labeled — not hidden
+- A "Change input" action is available on the left operand to switch to a different reference
 - `[+ Add Step]` after the condition is NOT visible (condition is incomplete)
 
 ### AE-09 — Completed condition collapses to summary
@@ -1111,6 +1199,73 @@ If the user has started building a chain but hasn't completed it:
 - `[+ Add Step]` is available within the THEN branch after `round(2)` completes
 - The generated expression correctly nests: `if(condition, round(multiply(source("premium.rate"), 100), 2), elseBranch)`
 
+### AE-21 — Condition left operand switched from current value
+
+**Given**
+- Chain has: `source("order.amount")` → `round(2)`
+- User adds a condition step
+- Left operand defaults to `[current value]` (the rounded amount)
+
+**When**
+- User clicks "Change input" on the left operand
+- User selects `source("customer.type")` as the new left operand
+- User sets operator: `equals`, right operand: `"VIP"`
+- User fills THEN: `multiply(current value, 0.9)` (10% discount)
+- User fills ELSE: `current value` (no discount)
+
+**Then**
+- Summary shows: `If source("customer.type") = "VIP" then multiply(0.9) else current value`
+- The summary explicitly indicates the condition tests a different field, not the current chain value
+- Generated DSL: `if(eq(source("customer.type"), "VIP"), multiply(round(source("order.amount"), 2), 0.9), round(source("order.amount"), 2))`
+
+### AE-22 — Step added after completed condition
+
+**Given**
+- Chain: `source("status")` → condition (if empty then "Unknown" else current value)
+- The condition step is complete and collapsed
+
+**When**
+- User clicks `[+ Add Step]` after the condition
+
+**Then**
+- `[+ Add Step]` is visible (condition is complete, it produces a value)
+- Step picker opens offering transforms, conditions, value maps
+- User selects `upper()`
+- New chain: `source("status")` → condition → `upper()`
+- Generated DSL: `upper(if(eq(source("status"), ""), "Unknown", source("status")))`
+- The `upper()` step operates on the condition's output
+
+### AE-23 — Step added after completed value map
+
+**Given**
+- Chain: `source("country.code")` → value map (US→United States, UK→United Kingdom, default→current value)
+- The value map step is complete and collapsed
+
+**When**
+- User clicks `[+ Add Step]` after the value map → selects `trim()`
+
+**Then**
+- New chain: `source("country.code")` → value map → `trim()`
+- Generated DSL: `trim(valueMap(source("country.code"), {"US": "United States", "UK": "United Kingdom"}, source("country.code")))`
+- The `trim()` step operates on the value map's output
+
+### AE-24 — Condition with current value default and simple use
+
+**Given**
+- Chain has: `source("customer.name")`
+- User adds a condition step
+- Left operand defaults to `[current value]`
+
+**When**
+- User sets operator: `is empty`
+- User fills THEN: static value `"Unknown Customer"`
+- User fills ELSE: `[current value]` (passes through the source as-is)
+
+**Then**
+- Summary: `If current value is empty then "Unknown Customer" else current value`
+- Generated DSL: `if(eq(source("customer.name"), ""), "Unknown Customer", source("customer.name"))`
+- No "Change input" was needed — the default was correct
+
 ---
 
 ## Open Questions
@@ -1121,6 +1276,22 @@ If the user has started building a chain but hasn't completed it:
 - `Q4.` Should the `[+ Add Step]` picker be a dropdown menu, a popover, or an inline expanded section? Current implementation uses various patterns — need consistency.
 - `Q5.` When a user clears the source in the Builder (removes the source selection), should this be treated as "empty chain" (reverts to entry state) or "chain with no source" (keeps other steps)? Recommend: clears the entire chain since all steps depend on the source value.
 - `Q6.` How does the existing `ExpressionBuilderPanel` (Rules View context) interact with this new draft model? Rules View may need its own adaptation since it operates on individual rules, not the target-driven field model. Consider whether Rules View continues to use the old Apply model or migrates.
+
+### Resolved Design Decisions (Rev 2)
+
+The following design questions were resolved and folded into the spec body at Rev 2:
+
+- **Condition left operand defaults to current value.** Conditions added mid-chain default their left operand to the accumulated chain value, shown as an explicit labeled token. Users can switch to another reference via a "Change input" escape hatch. See Section 8 and AE-08, AE-21, AE-24.
+
+- **New ChainBuilder.tsx component boundary.** The chain-based builder is implemented as a new component (`ChainBuilder.tsx`) rather than extending `UnifiedExpressionBuilder.tsx`. This avoids carrying legacy mode-branching assumptions forward. See Section 7 (Component boundary decision).
+
+- **Legacy decomposer retirement: add new first, retire later.** New chain utilities (`chain-expression-generator.ts`, `chain-decomposer.ts`) are introduced alongside existing legacy files. Legacy files are preserved until migration is proven safe, then removed in a follow-up cleanup. See Section 11 (Legacy component and decomposer retirement).
+
+- **New state file: chain-builder-state.ts.** Chain state types live in a new file rather than extending `expression-builder-state.ts`. This avoids expanding an already-large hybrid state file. See Section 7 (State file placement).
+
+- **Steps allowed after conditions and value maps.** Conditions and value maps produce values. The Builder allows adding subsequent steps after completed conditions/value maps — the output becomes the new current value. See Section 7 (Steps after conditions and value maps) and AE-22, AE-23.
+
+- **Condition left operand shown explicitly as labeled token.** The "current value" default is visible as a chip/pill, not hidden. This prevents users from misunderstanding what the condition tests. See Section 8 (Left operand defaults to current value).
 
 ---
 
@@ -1138,7 +1309,8 @@ Map to acceptance examples:
 - AE-01 through AE-03: chain model + expression generation tests
 - AE-04, AE-05, AE-19: draft rules map + save integration tests
 - AE-06, AE-07: view unsaved changes component tests
-- AE-08 through AE-10: condition + value map structural tests
+- AE-08, AE-21, AE-24: condition left-operand default + current-value behavior tests
+- AE-09 through AE-10: condition + value map structural tests
 - AE-11: progression gating tests
 - AE-12: accordion behavior tests
 - AE-13, AE-14: mode toggle + decomposition tests
@@ -1147,6 +1319,7 @@ Map to acceptance examples:
 - AE-17: per-field revert tests
 - AE-18: empty expression save tests
 - AE-20: nested branch chain tests
+- AE-22, AE-23: post-condition/value-map step tests
 
 ---
 
@@ -1155,17 +1328,17 @@ Map to acceptance examples:
 This spec should be decomposed into the following task groups:
 
 **Phase 1 — State model foundation (task + ui-task)**
-1. Define the new `ChainState`, `ChainSource`, `ChainStep`, and related types in `expression-builder-state.ts` — **Agent: ui-task**
-2. Implement chain-to-DSL expression generator (update `pipeline-expression-generator.ts` and `source-card-expression-generator.ts` for unified chain model) — **Agent: ui-task**
-3. Implement DSL-to-chain decomposer (update `pipeline-decomposer.ts` and `source-card-decomposer.ts` for unified chain model) — **Agent: ui-task**
+1. Define the new `ChainState`, `ChainSource`, `ChainStep`, and related types in `chain-builder-state.ts` (new file) — **Agent: ui-task**
+2. Implement chain-to-DSL expression generator in `chain-expression-generator.ts` (new file) — **Agent: ui-task**
+3. Implement DSL-to-chain decomposer in `chain-decomposer.ts` (new file) — **Agent: ui-task**
 4. Implement `draftRules` map in `useMappingEditor` (draft accumulation, save merging, revert, navigation handling) — **Agent: ui-task**
 
 **Phase 2 — Builder panel behavior (ui-task)**
-5. Refactor `ScalarFieldBuilder` — remove Apply button, remove Next Unmapped, wire auto-draft behavior — **Agent: ui-task**
-6. Implement chain-based `UnifiedExpressionBuilder` (unified step model, step picker, source entry) — **Agent: ui-task**
-7. Implement step collapse/expand and summary text rendering — **Agent: ui-task**
-8. Implement condition step (total conditions, required else, branch chains, summary collapse) — **Agent: ui-task**
-9. Implement value map step (required default, chain outputs, summary collapse) — **Agent: ui-task**
+5. Refactor `ScalarFieldBuilder` — remove Apply button, remove Next Unmapped, wire auto-draft behavior, embed `ChainBuilder` — **Agent: ui-task**
+6. Implement `ChainBuilder.tsx` (new component — chain-based builder orchestration, unified step model, step picker, source entry) — **Agent: ui-task**
+7. Implement step collapse/expand and summary text rendering (`ChainStepCard.tsx`, `chain-summary.ts`) — **Agent: ui-task**
+8. Implement condition step editor (`ConditionStepEditor.tsx` — total conditions, required else, current-value default operand, branch chains, summary collapse) — **Agent: ui-task**
+9. Implement value map step editor (`ValueMapStepEditor.tsx` — required default, chain outputs, summary collapse) — **Agent: ui-task**
 
 **Phase 3 — Supporting surfaces (ui-task)**
 10. Implement "View unsaved changes" overlay (diff display, per-field revert, field navigation) — **Agent: ui-task**
@@ -1181,6 +1354,21 @@ Phases 1-2 are sequential (2 depends on 1). Phase 3 can partially parallelize wi
 ---
 
 ## Change Log
+
+- Rev 2 — 2026-05-10
+  - Resolved 6 design decisions and folded into spec body:
+    - Condition left operand defaults to current accumulated value (explicit token, escape hatch to switch)
+    - New `ChainBuilder.tsx` component boundary (does not extend `UnifiedExpressionBuilder`)
+    - Legacy decomposer retirement: add new first, keep old, retire in follow-up
+    - New state file `chain-builder-state.ts` (separate from legacy `expression-builder-state.ts`)
+    - Steps allowed after completed conditions and value maps (they produce values)
+    - Current-value default shown as explicit labeled token (not invisible)
+  - Added `OperandValue` type with `currentValue` kind to `ConditionStep.Predicate`
+  - Added AE-21 (condition with switched left operand), AE-22 (step after condition), AE-23 (step after value map), AE-24 (condition with current-value default)
+  - Updated AE-08 to show current-value pre-population and "Change input" affordance
+  - Updated component boundary, file placement, and progression rules throughout
+  - Updated Task Generation Notes to reflect new file names
+  - Original Q1–Q6 remain open
 
 - Rev 1 — 2026-05-09
   - Initial draft

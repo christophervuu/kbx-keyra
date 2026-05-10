@@ -5,20 +5,26 @@
  * Target Worklist. Provides:
  *   - Header: target path, type badge, required/optional label, mapping status
  *   - Suggested Sources: client-side heuristic suggestions from parsed source schema
- *   - Expression Builder: UnifiedExpressionBuilder (default) or RawDslEditor (toggle)
+ *   - Expression Builder: ChainBuilderShell (new, default) or RawDslEditor (toggle)
  *   - AI Action buttons: placeholder (Coming soon tooltip)
  *   - Save button: enabled only when expression is non-empty and valid
  *
- * No preview in this panel — preview lives in the bottom area (T-08).
+ * FS-038 T-12: Integrates the new chain builder (ChainBuilderShell + chain state)
+ * replacing UnifiedExpressionBuilder in Builder mode. UnifiedExpressionBuilder is
+ * retained for Rules View (T-13) and as a fallback.
  */
 
 import { Check, ChevronRight, Lightbulb, Sparkles, Wand2, Wrench } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import { UnifiedExpressionBuilder } from './UnifiedExpressionBuilder';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
+import { ChainBuilderShell } from './ChainBuilderShell';
+import { EntryPointSelector } from './EntryPointSelector';
+import { ChainSourceCard } from './ChainSourceCard';
+import { StaticValueInput } from './StaticValueInput';
+import { LogicStepList } from './LogicStepList';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
 import { suggestSourceFields } from '../lib/suggest-source-fields';
 import type { SuggestedField } from '../lib/suggest-source-fields';
@@ -26,8 +32,24 @@ import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
-import type { ExpressionBuilderState } from '../lib/expression-builder-state';
 import { PreviewContext } from '../context/preview-context';
+import type {
+  ChainBuilderState,
+  LogicStep,
+  BuilderEntryType,
+  StaticValueBranch,
+} from '../lib/chain-builder-state';
+import {
+  createEmptyChainState,
+  createEmptyTransformStep,
+  createEmptyConditionStep,
+  createEmptyValueMapStep,
+  isChainComplete,
+} from '../lib/chain-builder-state';
+import { generateExpressionFromChain } from '../lib/chain-expression-generator';
+import { decomposeToChainState } from '../lib/chain-decomposer';
+import type { LogicKind } from './AddLogicPicker';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 
 import type { ParsedSchema } from '@/lib/types/domain';
 
@@ -114,13 +136,6 @@ function normalizeExpression(value: string): string {
   return value.trim();
 }
 
-const SOURCE_CARD_HYDRATION_STATE: ExpressionBuilderState = {
-  mode: 'value',
-  inputType: 'source',
-  sources: [],
-  transforms: [],
-};
-
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -180,9 +195,6 @@ function SuggestionPill({ suggestion, onSelect }: { suggestion: SuggestedField; 
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * ScalarFieldBuilder — right panel for scalar target field authoring.
- */
 export function ScalarFieldBuilder({
   selectedTargetPath,
   selectedTargetType,
@@ -200,10 +212,14 @@ export function ScalarFieldBuilder({
   const [expression, setExpression] = useState(currentExpression);
   const [mode, setMode] = useState<'builder' | 'editor'>('builder');
   const [decompositionWarning, setDecompositionWarning] = useState<string | null>(null);
-  const [initialUnifiedBuilderState, setInitialUnifiedBuilderState] = useState<ExpressionBuilderState | null>(null);
   // Track whether the current expression has been applied (AE-10)
   const [appliedExpression, setAppliedExpression] = useState<string | null>(null);
   const prevHydratedTargetRef = useRef<string>(selectedTargetPath);
+
+  // FS-038 T-12: Chain builder state
+  const [chainState, setChainState] = useState<ChainBuilderState>(() => createEmptyChainState());
+  // Whether the add-logic picker is open (shown below source card / static input)
+  const [addLogicPickerOpen, setAddLogicPickerOpen] = useState(false);
 
   // Keep onExpressionChange in a ref to avoid stale closure issues
   const onExpressionChangeRef = useRef(onExpressionChange);
@@ -226,6 +242,14 @@ export function ScalarFieldBuilder({
 
   const rawDslRef = useRef<RawDslEditorRef>(null);
 
+  // FS-038 T-12: Propagate chain expression whenever chain state changes
+  useEffect(() => {
+    if (mode !== 'builder') return;
+    const generated = generateExpressionFromChain(chainState);
+    handleExpressionChange(generated);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainState, mode]);
+
   // Hydrate builder state when target field or its expression changes
   useEffect(() => {
     const expr = currentExpression ?? '';
@@ -234,34 +258,42 @@ export function ScalarFieldBuilder({
     setExpression(expr);
     if (targetChanged) {
       // Clear applied state when navigating to a different target field.
-      // For same-field parent re-sync, keep applied visual state sticky.
       setAppliedExpression(null);
     }
     prevHydratedTargetRef.current = selectedTargetPath;
 
     if (!expr) {
-      // Unmapped / empty → reset to default empty builder state
+      // Unmapped / empty → reset to default empty chain state
       setDecompositionWarning(null);
-      setInitialUnifiedBuilderState(null);
+      setChainState(createEmptyChainState());
       setMode('builder');
       return;
     }
 
-    // Attempt decomposition
+    // FS-038 T-12: Try chain decomposer first
+    const chainResult = decomposeToChainState(expr);
+    if (chainResult.success) {
+      setChainState(chainResult.state);
+      setDecompositionWarning(null);
+      setMode('builder');
+      return;
+    }
+
+    // Fall back to legacy decomposer for Rules View compatibility
     const result = decomposeExpressionNew(expr);
     if (result.success) {
-      setInitialUnifiedBuilderState(result.state);
       setDecompositionWarning(null);
+      setChainState(createEmptyChainState());
       setMode('builder');
     } else {
       const sourceCardResult = decomposeToSourceCardState(expr);
       if (sourceCardResult !== null) {
-        setInitialUnifiedBuilderState(SOURCE_CARD_HYDRATION_STATE);
         setDecompositionWarning(null);
+        setChainState(createEmptyChainState());
         setMode('builder');
       } else {
         // Decomposition failed → Editor mode with warning
-        setInitialUnifiedBuilderState(null);
+        setChainState(createEmptyChainState());
         setDecompositionWarning(result.reason ?? 'Expression cannot be loaded into the guided builder.');
         setMode('editor');
       }
@@ -271,7 +303,7 @@ export function ScalarFieldBuilder({
   const { isValid, isValidating, errorDecorations } = useDslValidation(expression);
   const isDirty = normalizeExpression(expression) !== normalizeExpression(currentExpression ?? '');
 
-  // Read sourceData from PreviewContext for live result display (T-10)
+  // Read sourceData from PreviewContext for live result display
   const previewCtx = useContext(PreviewContext);
   const sourceData = previewCtx?.sourceData ?? null;
 
@@ -285,8 +317,14 @@ export function ScalarFieldBuilder({
     (path: string) => {
       if (mode === 'editor') {
         rawDslRef.current?.insertText(`source("${path}")`);
+      } else {
+        // FS-038 T-12: In builder mode, update chain state source path
+        setChainState((prev) => ({
+          ...prev,
+          entryType: 'source',
+          sourcePath: path,
+        }));
       }
-      // In builder mode, UnifiedExpressionBuilder manages its own state
     },
     [mode],
   );
@@ -321,8 +359,78 @@ export function ScalarFieldBuilder({
   }, []);
 
   const isApplied = appliedExpression !== null && appliedExpression === expression;
+
+  // FS-038 T-12: Apply is gated on chain completeness in builder mode
+  const chainComplete = isChainComplete(chainState);
   const canSave =
-    isDirty && expression.trim().length > 0 && isValid && !isValidating && !isApplied;
+    isDirty &&
+    expression.trim().length > 0 &&
+    isValid &&
+    !isValidating &&
+    !isApplied &&
+    (mode !== 'builder' || chainComplete);
+
+  // FS-038 T-12: Chain state update handlers
+  const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
+    setChainState((prev) => ({
+      ...createEmptyChainState(),
+      entryType: type,
+      sourcePath: type === 'source' ? prev.sourcePath : undefined,
+    }));
+  }, []);
+
+  const handleSourceSelect = useCallback((path: string) => {
+    setChainState((prev) => ({ ...prev, sourcePath: path }));
+  }, []);
+
+  const handleStaticValueChange = useCallback((value: StaticValueBranch) => {
+    setChainState((prev) => ({ ...prev, staticValue: value }));
+  }, []);
+
+  const handleAddStep = useCallback((kind: LogicKind) => {
+    setAddLogicPickerOpen(false);
+    const newStep: LogicStep =
+      kind === 'transform'
+        ? createEmptyTransformStep()
+        : kind === 'condition'
+          ? createEmptyConditionStep()
+          : createEmptyValueMapStep();
+    setChainState((prev) => ({
+      ...prev,
+      logicSteps: [...prev.logicSteps, newStep],
+      expandedStepIndex: prev.logicSteps.length, // expand the new step
+    }));
+  }, []);
+
+  const handleStepChange = useCallback((index: number, step: LogicStep) => {
+    setChainState((prev) => ({
+      ...prev,
+      logicSteps: prev.logicSteps.map((s, i) => (i === index ? step : s)),
+    }));
+  }, []);
+
+  const handleRemoveStep = useCallback((index: number) => {
+    setChainState((prev) => ({
+      ...prev,
+      logicSteps: prev.logicSteps.filter((_, i) => i !== index),
+      expandedStepIndex:
+        prev.expandedStepIndex === index
+          ? null
+          : prev.expandedStepIndex !== null && prev.expandedStepIndex > index
+            ? prev.expandedStepIndex - 1
+            : prev.expandedStepIndex,
+    }));
+  }, []);
+
+  const handleExpandedStepIndexChange = useCallback((index: number | null) => {
+    setChainState((prev) => ({ ...prev, expandedStepIndex: index }));
+  }, []);
+
+  // Source field options for parameter slots
+  const sourceOptions = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [];
+
+  // Current value label for condition/value map forms
+  const currentValueLabel = chainState.sourcePath ?? 'the current value';
 
   return (
     <div
@@ -330,11 +438,11 @@ export function ScalarFieldBuilder({
       className={`flex flex-col gap-0 overflow-y-auto ${className}`}
     >
       {/* ------------------------------------------------------------------ */}
-      {/* Header: target context + Builder|Editor toggle (T-07)              */}
+      {/* Header: target context + Builder|Editor toggle                      */}
       {/* ------------------------------------------------------------------ */}
       <div className="shrink-0 border-b border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2">
-          {/* Type badge — left side (T-07) */}
+          {/* Type badge */}
           <span
             className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[selectedTargetType]}`}
             data-testid="header-type-badge"
@@ -351,7 +459,7 @@ export function ScalarFieldBuilder({
             {selectedTargetPath}
           </span>
 
-          {/* Builder | Editor toggle — in header row (T-07) */}
+          {/* Builder | Editor toggle */}
           <ModeToggle mode={mode} onSwitch={setMode} />
         </div>
 
@@ -375,9 +483,10 @@ export function ScalarFieldBuilder({
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Suggested Sources — hidden when empty (T-07)                        */}
+      {/* Suggested Sources — hidden when empty (AE-11: no suggested row in  */}
+      {/* chain builder; kept here for Editor mode only)                      */}
       {/* ------------------------------------------------------------------ */}
-      {suggestions.length > 0 && (
+      {suggestions.length > 0 && mode === 'editor' && (
         <div className="shrink-0 border-b border-slate-700 px-4 py-3" data-testid="suggested-sources-section">
           <div className="mb-2 flex items-center gap-1.5">
             <Lightbulb size={12} className="text-slate-500" aria-hidden="true" />
@@ -402,7 +511,7 @@ export function ScalarFieldBuilder({
         aria-label="Expression drop zone — drop a source field here"
         {...dropHandlers}
       >
-        {/* Decomposition warning banner (AE-05) */}
+        {/* Decomposition warning banner */}
         {decompositionWarning !== null && mode === 'editor' && (
           <div className="mb-3" data-testid="decomposition-warning-container">
             <ComplexExpressionWarning
@@ -428,18 +537,69 @@ export function ScalarFieldBuilder({
             />
           </div>
         ) : (
+          /* FS-038 T-12: New chain builder surface */
           <div data-testid="expression-builder-slot">
-            <UnifiedExpressionBuilder
+            <ChainBuilderShell
               key={selectedTargetPath}
+              targetPath={selectedTargetPath}
+              targetType={selectedTargetType}
+              isRequired={selectedTargetRequired}
               expression={expression}
-              onExpressionChange={handleExpressionChange}
-              onApply={onApply}
-              selectedTargetPath={selectedTargetPath}
-              parsedSourceSchema={parsedSourceSchema}
-              sourceData={sourceData}
-              onSwitchToEditor={() => { setMode('editor'); }}
-              initialState={initialUnifiedBuilderState}
-            />
+              result={null}
+              isEvaluating={false}
+              sourceDataAvailable={sourceData !== null}
+              isMapped={currentStatus === 'mapped'}
+              isBuilderMode={true}
+              onToggleMode={() => { setMode('editor'); }}
+              onClearMapping={() => { onClearMapping?.(selectedTargetPath); }}
+              onExpressionClick={() => { setMode('editor'); }}
+            >
+              {/* Entry point selector */}
+              <EntryPointSelector
+                value={chainState.entryType}
+                hasLogicSteps={chainState.logicSteps.length > 0}
+                onEntryTypeChange={handleEntryTypeChange}
+              />
+
+              {/* Source entry */}
+              {chainState.entryType === 'source' && (
+                <ChainSourceCard
+                  sourcePath={chainState.sourcePath}
+                  logicStepCount={chainState.logicSteps.length}
+                  onSourceSelect={handleSourceSelect}
+                  onAddLogic={() => { setAddLogicPickerOpen(true); }}
+                />
+              )}
+
+              {/* Static entry */}
+              {chainState.entryType === 'static' && (
+                <StaticValueInput
+                  initialValue={
+                    chainState.staticValue !== undefined
+                      ? String(chainState.staticValue.value ?? '')
+                      : ''
+                  }
+                  targetType={selectedTargetType}
+                  onValueChange={handleStaticValueChange}
+                  onValidChange={() => {}}
+                  onAddLogic={() => { setAddLogicPickerOpen(true); }}
+                />
+              )}
+
+              {/* Logic step list */}
+              {(chainState.logicSteps.length > 0 || addLogicPickerOpen) && (
+                <LogicStepList
+                  steps={chainState.logicSteps}
+                  expandedStepIndex={chainState.expandedStepIndex}
+                  onExpandedStepIndexChange={handleExpandedStepIndexChange}
+                  onStepChange={handleStepChange}
+                  onRemoveStep={handleRemoveStep}
+                  onAddStep={handleAddStep}
+                  sourceOptions={sourceOptions}
+                  currentValueLabel={currentValueLabel}
+                />
+              )}
+            </ChainBuilderShell>
           </div>
         )}
       </div>
@@ -484,7 +644,7 @@ export function ScalarFieldBuilder({
             Fix
           </button>
 
-          {/* Clear mapping button (T-08) — only shown when target has an applied rule */}
+          {/* Clear mapping button — only shown when target has an applied rule */}
           {currentStatus === 'mapped' && onClearMapping && (
             <button
               type="button"
@@ -500,7 +660,7 @@ export function ScalarFieldBuilder({
           {/* Spacer */}
           <span className="flex-1" />
 
-          {/* Next unmapped → button (AE-11) */}
+          {/* Next unmapped → button */}
           {hasUnmappedFields && onAdvanceToNext && (
             <button
               type="button"

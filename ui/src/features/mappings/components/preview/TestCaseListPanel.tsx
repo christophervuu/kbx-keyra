@@ -363,17 +363,8 @@ export function TestCaseListPanel({
               Cancel
             </button>
           </div>
-        ) : batchState.summary !== null ? (
-          /* Summary after completion */
-          <div className="flex items-center gap-2" data-testid="batch-summary">
-            <span className="min-w-0 flex-1 text-xs">
-              <span className="text-green-400">{batchState.summary.passed} passed</span>
-              {', '}
-              <span className="text-red-400">{batchState.summary.failed} failed</span>
-            </span>
-          </div>
         ) : (
-          /* Idle: Run All + Rerun Failed */
+          /* Idle: Run All + Rerun Failed (+ summary if present) */
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -405,6 +396,16 @@ export function TestCaseListPanel({
             >
               ↺ Rerun Failed
             </button>
+            {batchState.summary !== null && (
+              <span
+                className="ml-1 min-w-0 text-xs"
+                data-testid="batch-summary"
+              >
+                <span className="text-green-400">{batchState.summary.passed} passed</span>
+                {', '}
+                <span className="text-red-400">{batchState.summary.failed} failed</span>
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -449,6 +450,18 @@ export function TestCaseListPanel({
           ].join(' ')}
         >
           <span className="min-w-0 flex-1 truncate italic">Scratchpad</span>
+          {isScratchpadSelected && (
+            <span
+              className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400"
+              data-testid="scratchpad-active-badge"
+            >
+              Active
+            </span>
+          )}
+        </li>
+
+        <li className="px-3 pb-2 text-[11px] text-zinc-600" data-testid="scratchpad-help-text">
+          Scratchpad is temporary input and is not saved unless you use Save As Test Case.
         </li>
 
         {/* Saved test cases */}

@@ -106,12 +106,14 @@ describe('useBatchExecution', () => {
 
     const cases = [makeTestCase('tc-1'), makeTestCase('tc-2'), makeTestCase('tc-3')];
 
+    let batchResults: Readonly<Record<string, TestRunResult>> = {};
     await act(async () => {
-      await result.current.runAll(cases);
+      batchResults = await result.current.runAll(cases);
     });
 
     expect(mockExecuteMapping).toHaveBeenCalledTimes(3);
     expect(onCaseComplete).toHaveBeenCalledTimes(3);
+    expect(Object.keys(batchResults)).toHaveLength(3);
   });
 
   it('runAll is a no-op for empty test case list', async () => {
@@ -187,7 +189,7 @@ describe('useBatchExecution', () => {
     expect(runResult.warningCount).toBe(1);
   });
 
-  it('marks a case as fail when sourceData is invalid JSON', async () => {
+  it('marks a case as error when sourceData is invalid JSON', async () => {
     const onCaseComplete = vi.fn();
     const { result } = renderHook(() =>
       useBatchExecution({ ...defaultOptions(), onCaseComplete }),
@@ -199,11 +201,11 @@ describe('useBatchExecution', () => {
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
     const [, runResult] = onCaseComplete.mock.calls[0] as [string, TestRunResult];
-    expect(runResult.status).toBe('fail');
+    expect(runResult.status).toBe('error');
     expect(runResult.errorCount).toBe(1);
   });
 
-  it('marks a case as fail when executeMapping throws', async () => {
+  it('marks a case as error when executeMapping throws', async () => {
     mockExecuteMapping.mockImplementation(() => { throw new Error('Engine error'); });
     const onCaseComplete = vi.fn();
     const { result } = renderHook(() =>
@@ -215,10 +217,10 @@ describe('useBatchExecution', () => {
     });
 
     const [, runResult] = onCaseComplete.mock.calls[0] as [string, TestRunResult];
-    expect(runResult.status).toBe('fail');
+    expect(runResult.status).toBe('error');
   });
 
-  it('marks a case as fail when config is null', async () => {
+  it('marks a case as error when config is null', async () => {
     const onCaseComplete = vi.fn();
     const { result } = renderHook(() =>
       useBatchExecution({ ...defaultOptions(), config: null, onCaseComplete }),
@@ -230,7 +232,7 @@ describe('useBatchExecution', () => {
 
     expect(mockExecuteMapping).not.toHaveBeenCalled();
     const [, runResult] = onCaseComplete.mock.calls[0] as [string, TestRunResult];
-    expect(runResult.status).toBe('fail');
+    expect(runResult.status).toBe('error');
   });
 
   // -------------------------------------------------------------------------

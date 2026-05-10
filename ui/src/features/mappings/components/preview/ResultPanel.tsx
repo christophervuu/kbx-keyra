@@ -23,6 +23,7 @@ export interface ResultPanelProps {
   children: React.ReactNode;
   className?: string;
   testId?: string;
+  style?: React.CSSProperties;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ export function ResultPanel({
   children,
   className = '',
   testId,
+  style,
 }: ResultPanelProps) {
   const CollapseIcon = collapsed ? ChevronRight : ChevronDown;
 
@@ -70,6 +72,7 @@ export function ResultPanel({
     <div
       className={`flex flex-col overflow-hidden bg-slate-950 ${className}`}
       data-testid={testId}
+      style={style}
     >
       {/* Header bar — always visible */}
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-800 bg-slate-900 px-3 py-1.5">

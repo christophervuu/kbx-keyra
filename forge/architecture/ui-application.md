@@ -1089,40 +1089,32 @@ The expression builder is a dual-surface authoring system used in two contexts:
 - **Rules View:** `ExpressionBuilderPanel` (rule-selected panel)
 - **Target View / scalar fields:** `ScalarFieldBuilder` (target-selected panel)
 
-Both surfaces now use the same builder implementation in builder mode: `UnifiedExpressionBuilder`.
+**FS-038 update:** Both surfaces now use the new chain-based builder in builder mode (see "Chain-Based Builder Model" section below). The legacy `UnifiedExpressionBuilder` is retained in the codebase for backward compatibility but is no longer the primary builder surface.
 
-#### Component hierarchy (Rules View)
+#### Component hierarchy (Rules View) — FS-038
 
 `ExpressionBuilderPanel`
 - mode toggle (Builder / Editor)
 - decomposition warning (`ComplexExpressionWarning`) when editor expression cannot hydrate builder
 - conditional main surface:
   - `RawDslEditor` (editor mode)
-  - `UnifiedExpressionBuilder` (builder mode)
-    - mode tabs: Value | Conditional | Value Map
-    - mode-specific content:
-      - Value mode: `SourceChipPicker` + `TransformPipeline` (`TransformPipelineStep[]` + `TransformFunctionPicker`)
-      - Conditional mode: `ConditionalModeBuilder` (`ConditionRowEditor[]`, nested groups, `BranchValueSelector`)
-      - Value Map mode: `ValueMapModeBuilder`
-    - shared always-visible sections:
-      - `LiveExpressionDisplay`
-      - `LiveResultDisplay`
+  - `ChainBuilderShell` (builder mode) — see Chain-Based Builder Model below
 - `ExpressionPreview`
 - `FunctionReferencePanel`
 
-#### Component hierarchy (Target View / ScalarFieldBuilder)
+#### Component hierarchy (Target View / ScalarFieldBuilder) — FS-038
 
 `ScalarFieldBuilder`
 - header: target path, type badge, required/optional, status
-- suggested sources (heuristic, up to 5)
+- suggested sources (editor mode only; hidden in builder mode per AE-11)
 - mode toggle (Builder / Editor)
 - expression area (drop zone for DnD):
-  - `UnifiedExpressionBuilder` (builder mode)
+  - `ChainBuilderShell` (builder mode) — see Chain-Based Builder Model below
   - `RawDslEditor` (editor mode)
 - disabled AI action buttons (placeholder)
-- apply button (gated on `isValid && expression.trim()`)
+- apply button (gated on `isChainComplete(state) && isValid && expression.trim()`)
 
-#### State model
+#### State model (legacy — pre-FS-038)
 
 `UnifiedExpressionBuilder` owns a discriminated union state model:
 
@@ -1131,7 +1123,120 @@ Both surfaces now use the same builder implementation in builder mode: `UnifiedE
 - `mode: 'conditional'` — condition tree + then/else branches
 - `mode: 'valueMap'` — input source + mapping rows + fallback
 
-The expression string is derived from state on each change and propagated upward through `onExpressionChange`.
+This model is retained for backward compatibility. New builder surfaces use `ChainBuilderState` (see below).
+
+---
+
+### Chain-Based Builder Model (FS-038)
+
+FS-038 redesigns the Builder panel with a chain-based model that replaces the 3-mode tab system (Value/Conditional/ValueMap) with a progressive, entry-point-first flow.
+
+#### Entry-point model
+
+The user first selects how the base value is established:
+
+| Entry Type | Description |
+|---|---|
+| `source` | Value derived from a source schema field (default) |
+| `static` | Value is a literal constant (string, number, boolean, null) |
+| `external` | Future placeholder — disabled in FS-038 |
+
+#### Chain semantics
+
+After the base value is established, the user adds logic steps that operate on the accumulated current value:
+
+```
+base value (source or static)
+  → [TransformLogicStep]  — wraps current value in a DSL function
+  → [ConditionLogicStep]  — wraps current value in an if() call
+  → [ValueMapLogicStep]   — wraps current value in a valueMap() call
+  → ... (any step kind can follow any other)
+  → final expression
+```
+
+Each step's output becomes the current value for the next step.
+
+#### ChainBuilderState type system
+
+```typescript
+interface ChainBuilderState {
+  entryType: BuilderEntryType;       // 'source' | 'static' | 'external'
+  sourcePath?: string;               // defined when entryType === 'source'
+  staticValue?: StaticValueBranch;   // defined when entryType === 'static'
+  logicSteps: readonly LogicStep[];  // ordered chain of steps
+  expandedStepIndex: number | null;  // single-expansion constraint
+}
+
+type LogicStep = TransformLogicStep | ConditionLogicStep | ValueMapLogicStep;
+
+interface TransformLogicStep {
+  kind: 'transform';
+  functionName: string;
+  args: readonly ArgumentSlotRef[];  // additional args only (implicit first arg = current value)
+}
+
+interface ConditionLogicStep {
+  kind: 'condition';
+  useCurrentValue: boolean;          // left operand defaults to current value
+  customLeftOperand?: ConditionOperand;
+  operator: ConditionOperatorType;
+  rightOperand: ConditionOperand;
+  thenBranch: ChainBranch;
+  elseBranch: ChainBranch;           // always required
+  elseIfSteps?: readonly ElseIfStep[];
+}
+
+interface ValueMapLogicStep {
+  kind: 'valueMap';
+  mappings: readonly ChainValueMapEntry[];
+  defaultValue: ChainBranch;         // always required
+}
+```
+
+Defined in: `ui/src/features/mappings/lib/chain-builder-state.ts`
+
+#### Generator and decomposer
+
+| File | Purpose |
+|---|---|
+| `chain-expression-generator.ts` | `generateExpressionFromChain(state) → string` — forward path: state → DSL |
+| `chain-decomposer.ts` | `decomposeToChainState(expression) → DecomposeChainResult` — reverse path: DSL → state |
+
+The decomposer handles all standard patterns: `source("x")`, `upper(source("x"))`, `if(...)`, `valueMap(...)`, `static("value")`, and multi-step transform chains.
+
+Complex expressions that cannot be decomposed fall back to Editor mode with a `ComplexExpressionWarning`.
+
+#### Component hierarchy (chain builder surface)
+
+`ChainBuilderShell` — shell layout with pinned Expression/Result sections
+- header: type badge, target path, required tag, Builder/Editor toggle
+- AI bar: disabled placeholder buttons (Suggest/Explain/Fix), conditional Clear
+- pinned: `LiveExpressionDisplay` + `LiveResultDisplay`
+- scrollable content slot:
+  - `EntryPointSelector` — segmented control (Source / Static / External)
+  - `ChainSourceCard` (source entry) — drop zone + source chip + "+ Add logic"
+  - `StaticValueInput` (static entry) — literal input with type inference + validation
+  - `LogicStepList` — ordered list of collapsible step containers
+    - `CollapsibleStepContainer` — single-expansion wrapper with summary/form toggle
+      - `TransformStepForm` — function picker + additional params (implicit first arg hidden)
+      - `ChainConditionForm` — IF/THEN/ELSE with required else, else-if up to 5 levels
+      - `ChainValueMapForm` — switch-statement UX with required default
+    - `AddLogicPicker` — horizontal 3-option picker (Transformation/Condition/Value map)
+
+#### Progressive disclosure
+
+The "+ Add logic" button is shown after the source card or static input. Clicking it reveals `AddLogicPicker`. Selecting a kind appends a new step and expands it for editing. Completed steps collapse to one-line summaries (`summarizeLogicStep`).
+
+#### Single-expansion constraint
+
+Only one step can be expanded at a time. `ChainBuilderState.expandedStepIndex` tracks the currently expanded step. Expanding a new step collapses the previously expanded one.
+
+#### Backward compatibility
+
+- Legacy decomposers (`pipeline-decomposer.ts`, `source-card-decomposer.ts`) are retained for fallback paths.
+- `UnifiedExpressionBuilder` and its state model (`ExpressionBuilderState`) are retained in the codebase.
+- The chain decomposer is tried first; if it fails, the legacy decomposer is tried; if both fail, Editor mode is used.
+- Legacy components will be retired in a follow-up cleanup spec.
 
 #### Transform Chain Model (FS-030)
 
@@ -1557,6 +1662,34 @@ ui/src/features/mappings/
     failure-explainer.ts            Plain-language diagnostic explanation patterns
   types.ts                          DebugSelection, DebugSelectionSource, FailureExplanation types
 ```
+
+---
+
+### Module Structure Additions (FS-038)
+
+```text
+ui/src/features/mappings/
+  lib/
+    chain-builder-state.ts          ChainBuilderState, LogicStep union, factory functions,
+                                    isChainComplete, summarizeLogicStep, type guards
+    chain-expression-generator.ts   generateExpressionFromChain(state) → DSL string
+    chain-decomposer.ts             decomposeToChainState(expression) → DecomposeChainResult
+  components/
+    ChainBuilderShell.tsx           Shell layout: pinned Expression/Result, AI bar, scrollable slot
+    EntryPointSelector.tsx          Segmented control: Source / Static / External
+    ChainSourceCard.tsx             Source entry card with DnD drop zone and "+ Add logic"
+    StaticValueInput.tsx            Literal value input with type inference and validation
+    AddLogicPicker.tsx              Three-option picker: Transformation / Condition / Value map
+    TransformStepForm.tsx           Transform step form (implicit first arg hidden)
+    ChainConditionForm.tsx          Condition step form: IF/THEN/ELSE with required else, else-if
+    ChainValueMapForm.tsx           Value map step form: switch-statement UX with required default
+    CollapsibleStepContainer.tsx    Single-expansion collapsible wrapper with summary/form toggle
+    LogicStepList.tsx               Ordered step list with single-expansion constraint
+```
+
+Modified files:
+- `components/ScalarFieldBuilder.tsx` — builder mode now uses chain builder surface (T-12)
+- `components/ExpressionBuilderPanel.tsx` — builder mode now uses chain builder surface (T-13)
 
 ---
 

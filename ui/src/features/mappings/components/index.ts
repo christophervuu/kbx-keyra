@@ -120,3 +120,33 @@ export { ConnectedInlinePreviewStrip } from './ConnectedInlinePreviewStrip';
 export type { ConnectedInlinePreviewStripProps } from './ConnectedInlinePreviewStrip';
 export { TestLabPage } from './TestLabPage';
 export type { TestLabPageProps } from './TestLabPage';
+// FS-038 chain builder shell
+export { ChainBuilderShell } from './ChainBuilderShell';
+export type { ChainBuilderShellProps } from './ChainBuilderShell';
+// FS-038 entry point selector
+export { EntryPointSelector } from './EntryPointSelector';
+export type { EntryPointSelectorProps } from './EntryPointSelector';
+// FS-038 chain source card
+export { ChainSourceCard } from './ChainSourceCard';
+export type { ChainSourceCardProps } from './ChainSourceCard';
+// FS-038 static value input
+export { StaticValueInput } from './StaticValueInput';
+export type { StaticValueInputProps } from './StaticValueInput';
+// FS-038 add logic picker
+export { AddLogicPicker } from './AddLogicPicker';
+export type { AddLogicPickerProps, LogicKind } from './AddLogicPicker';
+// FS-038 transform step form
+export { TransformStepForm } from './TransformStepForm';
+export type { TransformStepFormProps } from './TransformStepForm';
+// FS-038 chain condition form
+export { ChainConditionForm, summarizeConditionStep } from './ChainConditionForm';
+export type { ChainConditionFormProps } from './ChainConditionForm';
+// FS-038 chain value map form
+export { ChainValueMapForm, summarizeValueMapStep } from './ChainValueMapForm';
+export type { ChainValueMapFormProps } from './ChainValueMapForm';
+// FS-038 collapsible step container
+export { CollapsibleStepContainer } from './CollapsibleStepContainer';
+export type { CollapsibleStepContainerProps } from './CollapsibleStepContainer';
+// FS-038 logic step list
+export { LogicStepList } from './LogicStepList';
+export type { LogicStepListProps } from './LogicStepList';

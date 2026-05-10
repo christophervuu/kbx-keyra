@@ -29,6 +29,7 @@ export interface UseTestLabLayoutResult {
   setMainSplit: (ratio: number) => void;
   setColumnSplit: (ratio: number) => void;
   setRowSplit: (ratio: number) => void;
+  resetLayout: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +200,79 @@ export function useTestLabLayout({ traceEnabled }: UseTestLabLayoutParams): UseT
   }, [traceEnabled]);
 
   // ---------------------------------------------------------------------------
+  // Wide-startup safety recovery
+  // ---------------------------------------------------------------------------
+
+  const didRecoverWideStartupRef = useRef(false);
+  useEffect(() => {
+    if (didRecoverWideStartupRef.current) return;
+    didRecoverWideStartupRef.current = true;
+
+    setLayout((current) => {
+      if (current.breakpoint !== 'wide') return current;
+
+      let changed = false;
+      const nextCollapsed = { ...current.collapsed };
+
+      // Wide mode should not boot into a state where Output appears "missing".
+      if (nextCollapsed.output) {
+        nextCollapsed.output = false;
+        changed = true;
+      }
+
+      // If trace is enabled, ensure Trace panel is visible on initial wide load.
+      if (traceEnabled && nextCollapsed.trace) {
+        nextCollapsed.trace = false;
+        changed = true;
+      }
+
+      if (!changed) return current;
+
+      const next: TestLabLayoutState = {
+        ...current,
+        collapsed: nextCollapsed,
+      };
+      saveLayout(next);
+      return next;
+    });
+  }, [traceEnabled]);
+
+  // Ensure wide mode always starts from a legible panel state when crossing
+  // from medium/narrow into wide.
+  const prevBreakpointRef = useRef(layout.breakpoint);
+  useEffect(() => {
+    const prev = prevBreakpointRef.current;
+    prevBreakpointRef.current = layout.breakpoint;
+
+    if (prev === layout.breakpoint) return;
+    if (layout.breakpoint !== 'wide') return;
+
+    setLayout((current) => {
+      if (current.breakpoint !== 'wide') return current;
+
+      const nextCollapsed = {
+        ...current.collapsed,
+        output: false,
+        trace: !traceEnabled,
+      };
+
+      if (
+        nextCollapsed.output === current.collapsed.output
+        && nextCollapsed.trace === current.collapsed.trace
+      ) {
+        return current;
+      }
+
+      const next: TestLabLayoutState = {
+        ...current,
+        collapsed: nextCollapsed,
+      };
+      saveLayout(next);
+      return next;
+    });
+  }, [layout.breakpoint, traceEnabled]);
+
+  // ---------------------------------------------------------------------------
   // Panel toggle
   // ---------------------------------------------------------------------------
 
@@ -256,5 +330,17 @@ export function useTestLabLayout({ traceEnabled }: UseTestLabLayoutParams): UseT
     });
   }, []);
 
-  return { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit };
+  const resetLayout = useCallback(() => {
+    setLayout((current) => {
+      const next: TestLabLayoutState = {
+        ...current,
+        collapsed: defaultCollapsed(traceEnabled),
+        ...SPLIT_DEFAULTS,
+      };
+      saveLayout(next);
+      return next;
+    });
+  }, [traceEnabled]);
+
+  return { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit, resetLayout };
 }

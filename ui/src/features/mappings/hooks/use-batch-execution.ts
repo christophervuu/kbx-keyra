@@ -22,11 +22,11 @@ export interface UseBatchExecutionOptions {
 export interface UseBatchExecutionResult {
   isRunning: boolean;
   progress: BatchProgress;
-  runAll: (testCases: readonly TestCase[]) => Promise<void>;
+  runAll: (testCases: readonly TestCase[]) => Promise<Readonly<Record<string, TestRunResult>>>;
   rerunFailed: (
     testCases: readonly TestCase[],
     results: Readonly<Record<string, TestRunResult>>,
-  ) => Promise<void>;
+  ) => Promise<Readonly<Record<string, TestRunResult>>>;
   cancel: () => void;
 }
 
@@ -98,12 +98,13 @@ export function useBatchExecution({
   }, []);
 
   const executeCases = useCallback(
-    async (cases: readonly TestCase[]): Promise<void> => {
-      if (cases.length === 0) return;
+    async (cases: readonly TestCase[]): Promise<Readonly<Record<string, TestRunResult>>> => {
+      if (cases.length === 0) return {};
 
       cancelledRef.current = false;
       setIsRunning(true);
       setProgress({ current: 0, total: cases.length });
+      const batchResults: Record<string, TestRunResult> = {};
 
       for (let i = 0; i < cases.length; i++) {
         if (cancelledRef.current) break;
@@ -157,6 +158,7 @@ export function useBatchExecution({
           }
         }
 
+        batchResults[tc.id] = result;
         onCaseCompleteRef.current?.(tc.id, result);
 
         // Update progress after each case
@@ -167,13 +169,14 @@ export function useBatchExecution({
       }
 
       setIsRunning(false);
+      return batchResults;
     },
     [config, sourceSchema, targetSchema],
   );
 
   const runAll = useCallback(
-    async (testCases: readonly TestCase[]): Promise<void> => {
-      await executeCases(testCases);
+    async (testCases: readonly TestCase[]): Promise<Readonly<Record<string, TestRunResult>>> => {
+      return executeCases(testCases);
     },
     [executeCases],
   );
@@ -182,11 +185,11 @@ export function useBatchExecution({
     async (
       testCases: readonly TestCase[],
       results: Readonly<Record<string, TestRunResult>>,
-    ): Promise<void> => {
+    ): Promise<Readonly<Record<string, TestRunResult>>> => {
       const failed = testCases.filter(
         (tc) => results[tc.id]?.status === 'fail',
       );
-      await executeCases(failed);
+      return executeCases(failed);
     },
     [executeCases],
   );

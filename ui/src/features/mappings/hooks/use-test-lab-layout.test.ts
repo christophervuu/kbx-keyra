@@ -43,10 +43,13 @@ let mediumMQL: MockMQL;
 function setupMatchMedia(isWide: boolean, isMedium: boolean) {
   wideMQL = makeMQL(isWide);
   mediumMQL = makeMQL(isMedium);
-  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
-    if (query === '(min-width: 1280px)') return wideMQL as unknown as MediaQueryList;
-    if (query === '(min-width: 1024px)') return mediumMQL as unknown as MediaQueryList;
-    return makeMQL(false) as unknown as MediaQueryList;
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn((query: string) => {
+      if (query === '(min-width: 1280px)') return wideMQL as unknown as MediaQueryList;
+      if (query === '(min-width: 1024px)') return mediumMQL as unknown as MediaQueryList;
+      return makeMQL(false) as unknown as MediaQueryList;
+    }),
   });
 }
 
@@ -131,6 +134,19 @@ describe('useTestLabLayout', () => {
     it('trace panel collapsed when traceEnabled=false', () => {
       const { result } = renderHook(() => useTestLabLayout({ traceEnabled: false }));
       expect(result.current.layout.collapsed.trace).toBe(true);
+    });
+
+    it('recovers output panel on wide startup when persisted output is collapsed', () => {
+      store['keyra:testlab-layout'] = JSON.stringify({
+        collapsed: { output: true, diff: false, diagnostics: false, trace: false },
+        mainSplit: 0.35,
+        columnSplit: 0.5,
+        rowSplit: 0.5,
+      });
+      setupMatchMedia(true, true);
+
+      const { result } = renderHook(() => useTestLabLayout({ traceEnabled: true }));
+      expect(result.current.layout.collapsed.output).toBe(false);
     });
 
     it('other panels expanded when traceEnabled=false', () => {
@@ -283,8 +299,43 @@ describe('useTestLabLayout', () => {
     });
   });
 
+  describe('resetLayout', () => {
+    it('restores default split ratios and collapsed state', () => {
+      const { result } = renderHook(() => useTestLabLayout({ traceEnabled: true }));
+
+      act(() => {
+        result.current.togglePanel('diff');
+        result.current.setMainSplit(0.5);
+        result.current.setColumnSplit(0.8);
+        result.current.setRowSplit(0.2);
+      });
+
+      act(() => {
+        result.current.resetLayout();
+      });
+
+      expect(result.current.layout.collapsed.output).toBe(false);
+      expect(result.current.layout.collapsed.diff).toBe(false);
+      expect(result.current.layout.collapsed.diagnostics).toBe(false);
+      expect(result.current.layout.collapsed.trace).toBe(false);
+      expect(result.current.layout.mainSplit).toBe(0.35);
+      expect(result.current.layout.columnSplit).toBe(0.5);
+      expect(result.current.layout.rowSplit).toBe(0.5);
+    });
+
+    it('keeps trace collapsed after reset when traceEnabled=false', () => {
+      const { result } = renderHook(() => useTestLabLayout({ traceEnabled: false }));
+
+      act(() => {
+        result.current.resetLayout();
+      });
+
+      expect(result.current.layout.collapsed.trace).toBe(true);
+    });
+  });
+
   describe('localStorage persistence', () => {
-    it('reads persisted collapsed state on mount', () => {
+    it('reads persisted collapsed state on mount with wide-startup output recovery', () => {
       store['keyra:testlab-layout'] = JSON.stringify({
         collapsed: { output: true, diff: false, diagnostics: true, trace: false },
         mainSplit: 0.35,
@@ -292,7 +343,7 @@ describe('useTestLabLayout', () => {
         rowSplit: 0.5,
       });
       const { result } = renderHook(() => useTestLabLayout({ traceEnabled: true }));
-      expect(result.current.layout.collapsed.output).toBe(true);
+      expect(result.current.layout.collapsed.output).toBe(false);
       expect(result.current.layout.collapsed.diagnostics).toBe(true);
       expect(result.current.layout.collapsed.diff).toBe(false);
     });
@@ -394,6 +445,27 @@ describe('useTestLabLayout', () => {
         wideMQL._trigger(true);
       });
       expect(result.current.layout.breakpoint).toBe('wide');
+    });
+
+    it('re-normalizes output and trace visibility when entering wide breakpoint', () => {
+      setupMatchMedia(false, false);
+      const { result } = renderHook(() => useTestLabLayout({ traceEnabled: true }));
+
+      act(() => {
+        result.current.togglePanel('output');
+        result.current.togglePanel('trace');
+      });
+      expect(result.current.layout.collapsed.output).toBe(true);
+      expect(result.current.layout.collapsed.trace).toBe(true);
+
+      act(() => {
+        mediumMQL._trigger(true);
+        wideMQL._trigger(true);
+      });
+
+      expect(result.current.layout.breakpoint).toBe('wide');
+      expect(result.current.layout.collapsed.output).toBe(false);
+      expect(result.current.layout.collapsed.trace).toBe(false);
     });
   });
 });
