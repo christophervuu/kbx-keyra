@@ -10,6 +10,7 @@ import type {
   DeploymentRecord,
   Environment,
   ExplainRuleInput,
+  ExplainRuleResult,
   GitHubFile,
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
@@ -97,7 +98,7 @@ export interface ApiAdapter {
   // AI
   autoMap(input: AutoMapInput): Promise<AutoMapResult>;
   suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult>;
-  explainRule(input: ExplainRuleInput): Promise<string>;
+  explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult>;
   smartFix(input: SmartFixInput): Promise<SmartFixResult>;
   validateMappings(input: ValidateMappingsInput): Promise<ValidationReport>;
 

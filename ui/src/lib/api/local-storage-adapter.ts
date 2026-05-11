@@ -13,6 +13,7 @@ import type {
   DeployStatus,
   Environment,
   ExplainRuleInput,
+  ExplainRuleResult,
   GitHubFile,
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
@@ -677,7 +678,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     throw new Error(OFFLINE_MODE_MESSAGE);
   }
 
-  async explainRule(input: ExplainRuleInput): Promise<string> {
+  async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
     void input;
     throw new Error(OFFLINE_MODE_MESSAGE);
   }

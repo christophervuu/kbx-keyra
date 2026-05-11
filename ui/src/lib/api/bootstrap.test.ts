@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createAdapter, LocalStorageAdapter } from '@/lib/api';
+import { explainRuleHttp } from './ai-api-client';
+
+import { createAdapter, HybridAdapter, LocalStorageAdapter } from '@/lib/api';
+
+vi.mock('./ai-api-client', () => ({
+  explainRuleHttp: vi.fn(),
+}));
 
 describe('createAdapter', () => {
   it('returns LocalStorageAdapter when VITE_API_URL is unset', () => {
@@ -15,7 +21,24 @@ describe('createAdapter', () => {
     expect(adapter).toBeInstanceOf(LocalStorageAdapter);
   });
 
-  it('throws when VITE_API_URL is set', () => {
-    expect(() => createAdapter('http://localhost:4000')).toThrow('HttpAdapter not implemented');
+  it('returns HybridAdapter when VITE_API_URL is set', () => {
+    const adapter = createAdapter('http://localhost:4000');
+
+    expect(adapter).toBeInstanceOf(HybridAdapter);
+  });
+
+  it('returned HybridAdapter is wired with apiUrl for explainRule', async () => {
+    const adapter = createAdapter('http://localhost:4000');
+    vi.mocked(explainRuleHttp).mockResolvedValue({ explanation: 'ok' });
+
+    expect(adapter).toBeInstanceOf(HybridAdapter);
+
+    const input = {
+      targetPath: 'Order.Header.DocumentType',
+      expression: 'source("InvoiceAmount")',
+    };
+
+    await expect(adapter.explainRule(input)).resolves.toEqual({ explanation: 'ok' });
+    expect(explainRuleHttp).toHaveBeenCalledWith('http://localhost:4000', input);
   });
 });

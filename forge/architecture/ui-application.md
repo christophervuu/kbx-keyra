@@ -195,6 +195,8 @@ ui/src/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
+      hybrid-adapter.ts       HybridAdapter: LocalStorageAdapter + HTTP AI overrides (FS-041)
+      ai-api-client.ts        HTTP client functions for AI endpoints (explainRuleHttp) (FS-041)
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL
     engine/
@@ -218,8 +220,9 @@ ui/src/
 
 ### Implementations
 
-- **Current:** `LocalStorageAdapter` (Phase 0)
-- **Future:** `HttpAdapter` (Phase 1+; intentionally not implemented)
+- **Current (Phase 0):** `LocalStorageAdapter` — all operations use localStorage
+- **Current (Showcase/Phase 0.5):** `HybridAdapter` — extends `LocalStorageAdapter`; overrides AI methods to call backend via HTTP; all CRUD operations remain localStorage-backed (introduced in FS-041)
+- **Future (Phase 1+):** `HttpAdapter` — all operations via HTTP (intentionally not implemented)
 
 ### Bootstrap
 
@@ -227,7 +230,18 @@ Startup behavior is centralized in `createAdapter()`:
 
 1. Read `import.meta.env.VITE_API_URL`
 2. If unset/empty → return `new LocalStorageAdapter()`
-3. If set → throw `Error("HttpAdapter not implemented")`
+3. If set → return `new HybridAdapter(apiUrl)` — provides localStorage CRUD + HTTP-backed AI calls
+
+Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced by `HybridAdapter` (FS-041).
+
+### AI API Client
+
+`ui/src/lib/api/ai-api-client.ts` provides focused HTTP client functions for individual AI endpoints:
+
+- **Purpose:** Thin HTTP wrappers consumed by `HybridAdapter` (and potentially future `HttpAdapter`)
+- **Current exports:** `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
+- **Pattern:** One exported function per AI endpoint; each handles fetch + 15s timeout + response envelope parsing + error mapping to user-friendly messages
+- **Not an adapter** — does not implement `ApiAdapter`; consumed by adapter implementations
 
 ### Dependency Injection
 
@@ -235,7 +249,7 @@ Startup behavior is centralized in `createAdapter()`:
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides the AI methods to call the backend instead.
 
 ---
 

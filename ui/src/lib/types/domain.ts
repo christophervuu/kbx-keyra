@@ -337,7 +337,12 @@ export interface SuggestExpressionResult {
 }
 
 export interface ExplainRuleInput {
+  readonly targetPath: string;
   readonly expression: string;
+}
+
+export interface ExplainRuleResult {
+  readonly explanation: string;
 }
 
 export interface SmartFixInput {

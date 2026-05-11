@@ -23,8 +23,13 @@
  * AI action buttons (Suggest/Explain/Fix) are disabled placeholders (AE-12).
  */
 
-import { Lightbulb, MessageSquare, Wand2, X } from 'lucide-react';
+import { Lightbulb, Loader2, MessageSquare, Wand2, X } from 'lucide-react';
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
+
+import { ExplanationPanel } from './ExplanationPanel';
+import { useExplainRule } from '../hooks/use-explain-rule';
+import type { ExplainRuleState } from '../hooks/use-explain-rule';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,21 +155,28 @@ function ModeToggle({
 }
 
 /**
- * AI action bar — Suggest, Explain, Fix (all disabled placeholders), plus Clear.
+ * AI action bar — Suggest, Explain, Fix (Suggest/Fix disabled placeholders), plus Clear.
  */
 function AiActionBar({
   isMapped,
   onClearMapping,
+  expression,
+  explainState,
+  onExplain,
 }: {
   isMapped: boolean;
   onClearMapping: () => void;
+  expression: string;
+  explainState: ExplainRuleState;
+  onExplain: () => void;
 }) {
+  const isExplainDisabled = !expression.trim() || explainState.status === 'loading';
   return (
     <div
       className="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-800"
       data-testid="chain-shell-ai-bar"
     >
-      {/* AI buttons — disabled placeholders */}
+      {/* AI buttons — Suggest/Fix disabled placeholders */}
       <button
         type="button"
         disabled
@@ -178,14 +190,26 @@ function AiActionBar({
       </button>
       <button
         type="button"
-        disabled
-        title="AI expression explanation — available in a future release"
-        aria-label="Explain expression (coming soon)"
-        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-600 bg-zinc-800 cursor-not-allowed select-none"
+        disabled={isExplainDisabled}
+        aria-disabled={isExplainDisabled}
+        title={expression.trim() ? 'Explain this expression using AI' : 'No expression to explain'}
+        aria-label={expression.trim() ? 'Explain this expression using AI' : 'Explain — No expression to explain'}
+        onClick={isExplainDisabled ? undefined : onExplain}
+        className={[
+          'inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+          isExplainDisabled
+            ? 'text-zinc-600 bg-zinc-800 cursor-not-allowed select-none'
+            : 'text-zinc-400 bg-zinc-800 hover:text-blue-300 hover:bg-zinc-700 cursor-pointer',
+        ].join(' ')}
         data-testid="chain-shell-ai-explain"
       >
-        <MessageSquare className="h-3 w-3" aria-hidden="true" />
-        Explain
+        {explainState.status === 'loading' ? (
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+        ) : (
+          <MessageSquare className="h-3 w-3" aria-hidden="true" />
+        )}
+        {explainState.status === 'loading' ? 'Explaining…' : 'Explain'}
       </button>
       <button
         type="button"
@@ -246,6 +270,20 @@ export function ChainBuilderShell({
   onExpressionClick,
   children,
 }: ChainBuilderShellProps) {
+  const { state: explainState, explain, dismiss: dismissExplain } = useExplainRule();
+
+  // Reset explanation when the target field or expression changes (AE-09)
+  useEffect(() => {
+    dismissExplain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetPath]);
+
+  const handleExplain = () => {
+    if (expression.trim()) {
+      explain({ targetPath, expression });
+    }
+  };
+
   return (
     <div
       className="flex flex-col h-full min-w-[300px] bg-zinc-900 text-zinc-100"
@@ -269,7 +307,24 @@ export function ChainBuilderShell({
       </div>
 
       {/* ── AI action bar ──────────────────────────────────────────────── */}
-      <AiActionBar isMapped={isMapped} onClearMapping={onClearMapping} />
+      <AiActionBar
+        isMapped={isMapped}
+        onClearMapping={onClearMapping}
+        expression={expression}
+        explainState={explainState}
+        onExplain={handleExplain}
+      />
+
+      {/* ── Inline explanation panel ────────────────────────────────────── */}
+      {(explainState.status === 'success' || explainState.status === 'error') && (
+        <div className="px-3 pb-2">
+          <ExplanationPanel
+            state={explainState}
+            onDismiss={dismissExplain}
+            onRetry={handleExplain}
+          />
+        </div>
+      )}
 
       {/* ── Scrollable content area ─────────────────────────────────────── */}
       <div

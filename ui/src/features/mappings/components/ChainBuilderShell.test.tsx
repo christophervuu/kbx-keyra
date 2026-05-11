@@ -2,11 +2,16 @@
  * ChainBuilderShell tests — FS-038 T-04
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import React from 'react';
 import { ChainBuilderShell } from './ChainBuilderShell';
 import type { ChainBuilderShellProps } from './ChainBuilderShell';
+
+import { AdapterProvider } from '@/lib/api/adapter-provider';
+import type { ApiAdapter } from '@/lib/api/types';
+import type { ExplainRuleResult } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -28,8 +33,30 @@ const DEFAULT_PROPS: ChainBuilderShellProps = {
   children: <div data-testid="test-children">Builder content</div>,
 };
 
-function renderShell(overrides: Partial<ChainBuilderShellProps> = {}) {
-  return render(<ChainBuilderShell {...DEFAULT_PROPS} {...overrides} />);
+function makeDefaultAdapter(): Partial<ApiAdapter> {
+  return {
+    explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' } satisfies ExplainRuleResult),
+  };
+}
+
+function renderShell(
+  overrides: Partial<ChainBuilderShellProps> = {},
+  adapter?: Partial<ApiAdapter>,
+) {
+  const mockAdapter = adapter ?? makeDefaultAdapter();
+  const result = render(
+    <AdapterProvider adapter={mockAdapter as ApiAdapter}>
+      <ChainBuilderShell {...DEFAULT_PROPS} {...overrides} />
+    </AdapterProvider>,
+  );
+  const rerender = (element: React.ReactElement) => {
+    result.rerender(
+      <AdapterProvider adapter={mockAdapter as ApiAdapter}>
+        {element}
+      </AdapterProvider>,
+    );
+  };
+  return { ...result, rerender };
 }
 
 // ---------------------------------------------------------------------------
@@ -288,5 +315,95 @@ describe('ChainBuilderShell — keyboard accessibility', () => {
     const clearBtn = screen.getByTestId('chain-shell-clear-btn');
     clearBtn.focus();
     expect(document.activeElement).toBe(clearBtn);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-041: Explain Rule integration (AE-02)
+// ---------------------------------------------------------------------------
+
+describe('ChainBuilderShell — Explain Rule (FS-041)', () => {
+  it('Explain button is disabled when expression is empty', () => {
+    renderShell({ expression: '' });
+    const btn = screen.getByTestId('chain-shell-ai-explain');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'No expression to explain');
+  });
+
+  it('Explain button is enabled when expression is non-empty', () => {
+    renderShell({ expression: 'source("email")' });
+    const btn = screen.getByTestId('chain-shell-ai-explain');
+    expect(btn).not.toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'Explain this expression using AI');
+  });
+
+  it('AE-02: shows explanation panel with text on success', async () => {
+    const explainRule = vi.fn().mockResolvedValue({
+      explanation: 'Maps the email field from the source.',
+    } satisfies ExplainRuleResult);
+    renderShell({ expression: 'source("email")' }, { explainRule });
+
+    fireEvent.click(screen.getByTestId('chain-shell-ai-explain'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
+      'Maps the email field from the source.',
+    );
+  });
+
+  it('shows error state with Try again button', async () => {
+    const explainRule = vi.fn().mockRejectedValue(
+      new Error('Not available in offline mode'),
+    );
+    renderShell({ expression: 'source("email")' }, { explainRule });
+
+    fireEvent.click(screen.getByTestId('chain-shell-ai-explain'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
+      'Explain is not available in offline mode',
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('dismiss closes the panel', async () => {
+    const explainRule = vi.fn().mockResolvedValue({
+      explanation: 'Some explanation.',
+    } satisfies ExplainRuleResult);
+    renderShell({ expression: 'source("email")' }, { explainRule });
+
+    fireEvent.click(screen.getByTestId('chain-shell-ai-explain'));
+    await waitFor(() => {
+      expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss explanation' }));
+    expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
+  });
+
+  it('explanation panel disappears when targetPath changes', async () => {
+    const explainRule = vi.fn().mockResolvedValue({
+      explanation: 'Some explanation.',
+    } satisfies ExplainRuleResult);
+    const { rerender } = renderShell({ expression: 'source("email")' }, { explainRule });
+
+    fireEvent.click(screen.getByTestId('chain-shell-ai-explain'));
+    await waitFor(() => {
+      expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+    });
+
+    rerender(
+      <ChainBuilderShell
+        {...DEFAULT_PROPS}
+        targetPath="customer.name"
+        expression='source("name")'
+      />,
+    );
+
+    expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
   });
 });

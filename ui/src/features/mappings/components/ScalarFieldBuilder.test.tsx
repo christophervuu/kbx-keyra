@@ -7,7 +7,9 @@ import type { ScalarFieldBuilderProps } from './ScalarFieldBuilder';
 import { PreviewProvider } from '../context/preview-context';
 import { usePreviewSetters } from '../context/preview-context';
 
-import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
+import { AdapterProvider } from '@/lib/api/adapter-provider';
+import type { ApiAdapter } from '@/lib/api/types';
+import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -74,8 +76,33 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   ...makeDraftApi(),
 };
 
-function renderBuilder(overrides: Partial<ScalarFieldBuilderProps> = {}) {
-  return render(<ScalarFieldBuilder {...DEFAULT_PROPS} {...overrides} />);
+// Default mock adapter used by renderBuilder when no adapter override is provided
+function makeDefaultAdapter(): Partial<ApiAdapter> {
+  return {
+    explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' } satisfies ExplainRuleResult),
+  };
+}
+
+function renderBuilder(
+  overrides: Partial<ScalarFieldBuilderProps> = {},
+  adapter?: Partial<ApiAdapter>,
+) {
+  const mockAdapter = adapter ?? makeDefaultAdapter();
+  const props = { ...DEFAULT_PROPS, ...overrides };
+  const result = render(
+    <AdapterProvider adapter={mockAdapter as ApiAdapter}>
+      <ScalarFieldBuilder {...props} />
+    </AdapterProvider>,
+  );
+  // Provide a wrapped rerender so callers don't lose the AdapterProvider
+  const rerender = (element: React.ReactElement) => {
+    result.rerender(
+      <AdapterProvider adapter={mockAdapter as ApiAdapter}>
+        {element}
+      </AdapterProvider>,
+    );
+  };
+  return { ...result, rerender };
 }
 
 // ---------------------------------------------------------------------------
@@ -175,9 +202,11 @@ describe('ScalarFieldBuilder', () => {
       'title',
       'AI-powered expression suggestions \u2014 available in a future release',
     );
+    // Explain button tooltip depends on expression state:
+    // empty expression → "No expression to explain"
     expect(screen.getByTestId('ai-explain-btn')).toHaveAttribute(
       'title',
-      'AI-powered explanation \u2014 available in a future release',
+      'No expression to explain',
     );
     expect(screen.getByTestId('ai-fix-btn')).toHaveAttribute(
       'title',
@@ -734,12 +763,17 @@ describe('ScalarFieldBuilder', () => {
       sourceData: unknown | null = null,
     ) {
       const props = { ...DEFAULT_PROPS, ...overrides };
+      const mockAdapter: Partial<ApiAdapter> = {
+        explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' } satisfies ExplainRuleResult),
+      };
       return render(
-        <PreviewProvider>
-          <WithSourceData sourceData={sourceData}>
-            <ScalarFieldBuilder {...props} />
-          </WithSourceData>
-        </PreviewProvider>,
+        <AdapterProvider adapter={mockAdapter as ApiAdapter}>
+          <PreviewProvider>
+            <WithSourceData sourceData={sourceData}>
+              <ScalarFieldBuilder {...props} />
+            </WithSourceData>
+          </PreviewProvider>
+        </AdapterProvider>,
       );
     }
 
@@ -872,6 +906,160 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('unsaved-diff-content')).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('revert-to-saved-btn'));
       expect(screen.queryByTestId('unsaved-diff-content')).not.toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FS-041: Explain Rule integration
+  // ---------------------------------------------------------------------------
+
+  describe('Explain Rule (FS-041)', () => {
+    it('AE-03: Explain button is disabled when expression is empty', () => {
+      renderBuilder({ currentExpression: '' });
+      const btn = screen.getByTestId('ai-explain-btn');
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute('title', 'No expression to explain');
+    });
+
+    it('Explain button is enabled when expression is non-empty', async () => {
+      renderBuilder({
+        currentExpression: 'source("firstName")',
+        // Use no-op updateDraft so chain state effect doesn't overwrite expression via draft
+        updateDraft: vi.fn(),
+        getDraftExpression: vi.fn().mockReturnValue(null),
+      });
+      // Switch to editor mode so expression state is driven by raw DSL
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+      const btn = screen.getByTestId('ai-explain-btn');
+      expect(btn).not.toBeDisabled();
+      expect(btn).toHaveAttribute('title', 'Explain this expression using AI');
+    });
+
+    it('AE-01: shows explanation panel with text on success', async () => {
+      const explainRule = vi.fn().mockResolvedValue({
+        explanation: 'Maps the first name from the source.',
+      } satisfies ExplainRuleResult);
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft: vi.fn(),
+          getDraftExpression: vi.fn().mockReturnValue(null),
+        },
+        { explainRule },
+      );
+      // Switch to editor mode so expression state is driven by raw DSL
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
+        'Maps the first name from the source.',
+      );
+    });
+
+    it('AE-04: shows offline error message', async () => {
+      const explainRule = vi.fn().mockRejectedValue(
+        new Error('Not available in offline mode'),
+      );
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft: vi.fn(),
+          getDraftExpression: vi.fn().mockReturnValue(null),
+        },
+        { explainRule },
+      );
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
+        'Explain is not available in offline mode',
+      );
+    });
+
+    it('AE-05: shows network error message and Try again button', async () => {
+      const netMsg = 'Could not reach the Explain service. Check your connection and try again.';
+      const explainRule = vi.fn().mockRejectedValue(new Error(netMsg));
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft: vi.fn(),
+          getDraftExpression: vi.fn().mockReturnValue(null),
+        },
+        { explainRule },
+      );
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('explanation-panel')).toHaveTextContent(netMsg);
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    });
+
+    it('AE-08: dismiss closes the panel', async () => {
+      const explainRule = vi.fn().mockResolvedValue({
+        explanation: 'Some explanation.',
+      } satisfies ExplainRuleResult);
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft: vi.fn(),
+          getDraftExpression: vi.fn().mockReturnValue(null),
+        },
+        { explainRule },
+      );
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss explanation' }));
+      expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
+    });
+
+    it('AE-09: explanation panel disappears when selectedTargetPath changes', async () => {
+      const explainRule = vi.fn().mockResolvedValue({
+        explanation: 'Some explanation.',
+      } satisfies ExplainRuleResult);
+      const { rerender } = renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft: vi.fn(),
+          getDraftExpression: vi.fn().mockReturnValue(null),
+        },
+        { explainRule },
+      );
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toBeInTheDocument();
+      });
+
+      // Simulate navigating to a different field
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          selectedTargetPath="patient.lastName"
+          currentExpression='source("lastName")'
+          updateDraft={vi.fn()}
+          getDraftExpression={vi.fn().mockReturnValue(null)}
+        />,
+      );
+
+      expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
     });
   });
 });

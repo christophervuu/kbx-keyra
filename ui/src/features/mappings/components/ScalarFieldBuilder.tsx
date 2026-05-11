@@ -22,7 +22,7 @@
  * moved to header overflow menu (⋮), AI tooltips updated.
  */
 
-import { Lightbulb, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench } from 'lucide-react';
+import { Lightbulb, Loader2, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { RawDslEditor } from './RawDslEditor';
@@ -35,11 +35,13 @@ import { StaticValueInput } from './StaticValueInput';
 import { LogicStepList } from './LogicStepList';
 import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { UnsavedDiffPanel } from './UnsavedDiffPanel';
+import { ExplanationPanel } from './ExplanationPanel';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { useBuilderValidation } from '../hooks/use-builder-validation';
 import { useUnsavedDiff } from '../hooks/use-unsaved-diff';
+import { useExplainRule } from '../hooks/use-explain-rule';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 import { PreviewContext } from '../context/preview-context';
@@ -151,7 +153,7 @@ const STATUS_LABELS: Record<TargetFieldStatus, string> = {
 };
 
 const AI_SUGGEST_TOOLTIP = 'AI-powered expression suggestions \u2014 available in a future release';
-const AI_EXPLAIN_TOOLTIP = 'AI-powered explanation \u2014 available in a future release';
+const AI_EXPLAIN_TOOLTIP = 'Explain this expression using AI';
 const AI_FIX_TOOLTIP = 'AI-powered fix suggestions \u2014 available in a future release';
 
 /** Regex for a trivial bare source reference — no confirmation needed on reset */
@@ -355,6 +357,15 @@ export function ScalarFieldBuilder({
 
   // FS-040 T-05: Unsaved diff panel expanded state
   const [isDiffExpanded, setIsDiffExpanded] = useState(false);
+
+  // FS-041: Explain Rule hook
+  const { state: explainState, explain, dismiss: dismissExplain } = useExplainRule();
+
+  // Reset explanation when the selected field changes (AE-09)
+  useEffect(() => {
+    dismissExplain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargetPath]);
 
   // Keep callbacks in refs to avoid stale closure issues
   const onExpressionChangeRef = useRef(onExpressionChange);
@@ -856,15 +867,30 @@ export function ScalarFieldBuilder({
           </button>
           <button
             type="button"
-            disabled
-            aria-disabled="true"
-            title={AI_EXPLAIN_TOOLTIP}
-            aria-label={`Explain — ${AI_EXPLAIN_TOOLTIP}`}
+            disabled={!expression.trim() || explainState.status === 'loading'}
+            aria-disabled={!expression.trim() || explainState.status === 'loading'}
+            title={expression.trim() ? AI_EXPLAIN_TOOLTIP : 'No expression to explain'}
+            aria-label={expression.trim() ? `Explain — ${AI_EXPLAIN_TOOLTIP}` : 'Explain — No expression to explain'}
             data-testid="ai-explain-btn"
-            className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
+            onClick={() => {
+              if (expression.trim()) {
+                explain({ targetPath: selectedTargetPath, expression });
+              }
+            }}
+            className={[
+              'flex items-center gap-1 rounded border px-2 py-1 text-xs transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+              !expression.trim() || explainState.status === 'loading'
+                ? 'cursor-not-allowed border-slate-700 text-slate-600 opacity-50'
+                : 'cursor-pointer border-slate-600 text-slate-400 hover:border-blue-500/60 hover:text-blue-300',
+            ].join(' ')}
           >
-            <Lightbulb size={12} aria-hidden="true" />
-            Explain
+            {explainState.status === 'loading' ? (
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Lightbulb size={12} aria-hidden="true" />
+            )}
+            {explainState.status === 'loading' ? 'Explaining…' : 'Explain'}
           </button>
           <button
             type="button"
@@ -911,6 +937,21 @@ export function ScalarFieldBuilder({
           )}
         </div>
       </div>
+
+      {/* FS-041: Inline explanation panel */}
+      {(explainState.status === 'success' || explainState.status === 'error') && (
+        <div className="px-4 pb-3">
+          <ExplanationPanel
+            state={explainState}
+            onDismiss={dismissExplain}
+            onRetry={() => {
+              if (expression.trim()) {
+                explain({ targetPath: selectedTargetPath, expression });
+              }
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

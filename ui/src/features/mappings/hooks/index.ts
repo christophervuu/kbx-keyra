@@ -43,4 +43,6 @@ export { useBatchExecution } from './use-batch-execution';
 export type { UseBatchExecutionOptions, UseBatchExecutionResult, BatchProgress } from './use-batch-execution';
 export { useLinkedDebugSelection } from './use-linked-debug-selection';
 export type { UseLinkedDebugSelectionResult } from './use-linked-debug-selection';
+export { useExplainRule } from './use-explain-rule';
+export type { ExplainRuleState, UseExplainRuleReturn } from './use-explain-rule';
 

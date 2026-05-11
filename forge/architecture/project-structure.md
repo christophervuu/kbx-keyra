@@ -311,6 +311,7 @@ ui/
           BuilderFeedbackArea.test.tsx FS-040 component tests for BuilderFeedbackArea (T-02)
           UnsavedDiffPanel.tsx         FS-040 T-05 collapsible per-field diff panel: trigger button with unsaved badge, expanded view shows last-saved vs current draft (syntax-highlighted), status badge (no-mapping/new/modified/removed/unchanged), "Revert to saved" action for modified/removed states
           UnsavedDiffPanel.test.tsx    FS-040 T-05 component tests (trigger, expand/collapse, status badges, revert button visibility, ARIA)
+          ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
           ObjectTemplateBuilder.tsx  Key-value pair editor for map() object template: add/remove pairs, key text inputs, ArgumentSlot value slots in array context (T-07)
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
@@ -407,6 +408,8 @@ ui/
           use-linked-debug-selection.test.ts  Hook unit tests (select, clear, isPathSelected, isRuleSelected, auto-clear on executing, multiple runs)
           use-server-preview.ts          Server-side preview hook (FS-037 T-02): wraps adapter.previewOnServer() with 10s timeout, Phase 0 offline detection (isAvailable), stable execute callback via ref pattern
           use-server-preview.test.ts     Hook unit tests (idle state, success, timeout, Phase 0 offline error, sticky isAvailable=false, generic error, sequential calls, adapter call args)
+          use-explain-rule.ts            FS-041 Explain Rule hook: manages async lifecycle for adapter.explainRule(); idle/loading/success/error state; AbortController cleanup on unmount + re-invocation; user-friendly error mapping (offline, rate-limit, network, unexpected-response, generic)
+          use-explain-rule.test.ts       FS-041 hook unit tests (idle state, loading, success, error, dismiss, re-explain, abort on re-invocation, offline error, cleanup on unmount)
           use-deployment-context.ts      Deployment context hook (FS-037 T-03): loads DeploymentContext via adapter, derives per-environment status map, isModeAvailable() gates comparison modes by deploy status, refresh(), Phase 0 error → all env modes unavailable
           use-deployment-context.test.ts Hook unit tests (load success, environmentStatus map, isModeAvailable per mode, Phase 0 error handling, current-vs-saved always available, refresh, all-deployed)
           use-environment-comparison.ts  Comparison orchestration hook (FS-037 T-04): two-sided parallel execution via Promise.allSettled, client-side (working/saved config) and server-side (direct adapter call with 10s timeout), stale-run cancellation via runId ref, diff via computeDiff(), canRun gating
@@ -467,7 +470,13 @@ ui/
         index.ts          Barrel export
     hooks/                Shared React hooks
     lib/
-      api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter
+      api/                ApiAdapter interface + LocalStorageAdapter + HybridAdapter + AI API client
+                          types.ts              ApiAdapter contract
+                          local-storage-adapter.ts  Phase 0 localStorage implementation
+                          hybrid-adapter.ts     FS-041 HybridAdapter: extends LocalStorageAdapter, overrides explainRule() to call backend via HTTP
+                          ai-api-client.ts      FS-041 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) → ExplainRuleResult; 15s timeout, envelope parsing, error mapping
+                          adapter-provider.tsx  AdapterProvider + useAdapter() React context
+                          bootstrap.ts          createAdapter(): returns HybridAdapter when VITE_API_URL set, LocalStorageAdapter otherwise
       data/               Shared static data consumed cross-feature
         dsl-functions.ts  DSL_FUNCTION_CATALOG: all registered functions with categories, params, descriptions (T-01)
         dsl-functions.test.ts  Catalog tests (5 tests: coverage, required fields, valid categories, no duplicates)
