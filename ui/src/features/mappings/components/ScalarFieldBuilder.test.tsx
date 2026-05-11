@@ -9,7 +9,7 @@ import { usePreviewSetters } from '../context/preview-context';
 
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
-import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
+import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode, SuggestExpressionResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -80,6 +80,10 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
 function makeDefaultAdapter(): Partial<ApiAdapter> {
   return {
     explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' } satisfies ExplainRuleResult),
+    suggestExpression: vi.fn().mockResolvedValue({
+      expression: 'source("firstName")',
+      explanation: 'Maps first name.',
+    } satisfies SuggestExpressionResult),
   };
 }
 
@@ -181,9 +185,9 @@ describe('ScalarFieldBuilder', () => {
   });
 
   // AI buttons
-  it('renders AI Suggest button as disabled', () => {
+  it('renders AI Suggest button as enabled (FS-042)', () => {
     renderBuilder();
-    expect(screen.getByTestId('ai-suggest-btn')).toBeDisabled();
+    expect(screen.getByTestId('ai-suggest-btn')).not.toBeDisabled();
   });
 
   it('renders AI Explain button as disabled', () => {
@@ -200,7 +204,7 @@ describe('ScalarFieldBuilder', () => {
     renderBuilder();
     expect(screen.getByTestId('ai-suggest-btn')).toHaveAttribute(
       'title',
-      'AI-powered expression suggestions \u2014 available in a future release',
+      'Generate a DSL expression from natural language',
     );
     // Explain button tooltip depends on expression state:
     // empty expression → "No expression to explain"
@@ -1060,6 +1064,72 @@ describe('ScalarFieldBuilder', () => {
       );
 
       expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FS-042: Suggest Expression integration
+  // ---------------------------------------------------------------------------
+
+  describe('Suggest Expression (FS-042)', () => {
+    it('clicking Suggest button opens the inline input area', () => {
+      renderBuilder();
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      expect(screen.getByTestId('suggest-expression-inline')).toBeInTheDocument();
+      expect(
+        screen.getByRole('textbox', { name: /natural language instruction/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('SuggestExpressionInline is not rendered when suggest state is idle', () => {
+      renderBuilder();
+      expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+    });
+
+    it('Accept calls updateDraft with target path and expression', async () => {
+      const updateDraft = vi.fn();
+      const suggestExpression = vi.fn().mockResolvedValue({
+        expression: 'source("firstName")',
+        explanation: 'Maps first name.',
+      } satisfies SuggestExpressionResult);
+      renderBuilder({ updateDraft }, { suggestExpression });
+
+      // Open suggest panel
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+
+      // Type instruction and generate
+      const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+      fireEvent.change(textarea, { target: { value: 'map first name' } });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      // Wait for success state
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+      // Panel should close after accept
+      expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+    });
+
+    it('suggest panel resets when selectedTargetPath changes', async () => {
+      const { rerender } = renderBuilder();
+
+      // Open suggest panel
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      expect(screen.getByTestId('suggest-expression-inline')).toBeInTheDocument();
+
+      // Navigate to a different field
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          selectedTargetPath="patient.lastName"
+          currentExpression=""
+        />,
+      );
+
+      expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
     });
   });
 });

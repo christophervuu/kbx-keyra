@@ -28,8 +28,12 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 
 import { ExplanationPanel } from './ExplanationPanel';
+import { SuggestExpressionInline } from './SuggestExpressionInline';
 import { useExplainRule } from '../hooks/use-explain-rule';
 import type { ExplainRuleState } from '../hooks/use-explain-rule';
+import { useSuggestExpression } from '../hooks/use-suggest-expression';
+
+import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +64,16 @@ export interface ChainBuilderShellProps {
   readonly onClearMapping: () => void;
   /** Fires when the user clicks the expression to switch to Editor mode. */
   readonly onExpressionClick: () => void;
+  /**
+   * Optional: parsed source schema for suggest-expression source context.
+   * When provided, enables the Suggest button to include source field context.
+   */
+  readonly parsedSourceSchema?: ParsedSchema | null;
+  /**
+   * Optional: called when the user accepts a suggested expression.
+   * When not provided, the Suggest button is still shown but Accept is a no-op.
+   */
+  readonly onExpressionAccept?: (expression: string) => void;
   /** Builder content rendered in the scrollable content area. */
   readonly children: ReactNode;
 }
@@ -163,12 +177,16 @@ function AiActionBar({
   expression,
   explainState,
   onExplain,
+  onSuggestClick,
+  isSuggestActive,
 }: {
   isMapped: boolean;
   onClearMapping: () => void;
   expression: string;
   explainState: ExplainRuleState;
   onExplain: () => void;
+  onSuggestClick: () => void;
+  isSuggestActive: boolean;
 }) {
   const isExplainDisabled = !expression.trim() || explainState.status === 'loading';
   return (
@@ -176,13 +194,19 @@ function AiActionBar({
       className="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-800"
       data-testid="chain-shell-ai-bar"
     >
-      {/* AI buttons — Suggest/Fix disabled placeholders */}
+      {/* AI buttons — Suggest enabled, Fix disabled placeholder */}
       <button
         type="button"
-        disabled
-        title="AI-powered expression suggestion — available in a future release"
-        aria-label="Suggest expression (coming soon)"
-        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-600 bg-zinc-800 cursor-not-allowed select-none"
+        onClick={onSuggestClick}
+        title="Generate a DSL expression from natural language"
+        aria-label="Suggest expression"
+        className={[
+          'inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+          isSuggestActive
+            ? 'text-blue-300 bg-zinc-700 cursor-pointer'
+            : 'text-zinc-400 bg-zinc-800 hover:text-blue-300 hover:bg-zinc-700 cursor-pointer',
+        ].join(' ')}
         data-testid="chain-shell-ai-suggest"
       >
         <Wand2 className="h-3 w-3" aria-hidden="true" />
@@ -244,6 +268,27 @@ function AiActionBar({
 }
 
 // ---------------------------------------------------------------------------
+// Source context formatting (for SuggestExpression)
+// ---------------------------------------------------------------------------
+
+function formatSourceContext(parsedSourceSchema: ParsedSchema | null | undefined): string {
+  if (!parsedSourceSchema?.nodes) return '';
+  const lines: string[] = [];
+  function walk(nodes: SchemaTreeNode[]) {
+    for (const node of nodes) {
+      if (lines.length >= 200) return;
+      if (node.children && node.children.length > 0) {
+        walk(node.children);
+      } else {
+        lines.push(`- ${node.path} (${node.type})`);
+      }
+    }
+  }
+  walk(parsedSourceSchema.nodes);
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -268,6 +313,8 @@ export function ChainBuilderShell({
   onToggleMode,
   onClearMapping,
   onExpressionClick,
+  parsedSourceSchema,
+  onExpressionAccept,
   children,
 }: ChainBuilderShellProps) {
   const { state: explainState, explain, dismiss: dismissExplain } = useExplainRule();
@@ -283,6 +330,21 @@ export function ChainBuilderShell({
       explain({ targetPath, expression });
     }
   };
+
+  // FS-042: Suggest Expression hook
+  const {
+    state: suggestState,
+    openInput: openSuggestInput,
+    generate: generateSuggestion,
+    dismiss: dismissSuggest,
+    reset: resetSuggest,
+  } = useSuggestExpression();
+
+  // Reset suggestion panel when the target field changes
+  useEffect(() => {
+    resetSuggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetPath]);
 
   return (
     <div
@@ -313,6 +375,8 @@ export function ChainBuilderShell({
         expression={expression}
         explainState={explainState}
         onExplain={handleExplain}
+        onSuggestClick={openSuggestInput}
+        isSuggestActive={suggestState.status === 'inputting' || suggestState.status === 'loading'}
       />
 
       {/* ── Inline explanation panel ────────────────────────────────────── */}
@@ -322,6 +386,30 @@ export function ChainBuilderShell({
             state={explainState}
             onDismiss={dismissExplain}
             onRetry={handleExplain}
+          />
+        </div>
+      )}
+
+      {/* ── Inline suggest expression panel (FS-042) ────────────────────── */}
+      {suggestState.status !== 'idle' && (
+        <div className="px-3 pb-2">
+          <SuggestExpressionInline
+            state={suggestState}
+            targetPath={targetPath}
+            targetType={targetType}
+            onGenerate={(instruction) => {
+              generateSuggestion({
+                instruction,
+                targetPath,
+                targetType,
+                sourceContext: formatSourceContext(parsedSourceSchema),
+              });
+            }}
+            onAccept={(expr) => {
+              onExpressionAccept?.(expr);
+              dismissSuggest();
+            }}
+            onDismiss={dismissSuggest}
           />
         </div>
       )}

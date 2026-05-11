@@ -11,7 +11,7 @@ import type { ChainBuilderShellProps } from './ChainBuilderShell';
 
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
-import type { ExplainRuleResult } from '@/lib/types';
+import type { ExplainRuleResult, SuggestExpressionResult } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -36,6 +36,10 @@ const DEFAULT_PROPS: ChainBuilderShellProps = {
 function makeDefaultAdapter(): Partial<ApiAdapter> {
   return {
     explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' } satisfies ExplainRuleResult),
+    suggestExpression: vi.fn().mockResolvedValue({
+      expression: 'source("email")',
+      explanation: 'Maps email.',
+    } satisfies SuggestExpressionResult),
   };
 }
 
@@ -146,9 +150,9 @@ describe('ChainBuilderShell — AI action bar', () => {
     expect(screen.getByTestId('chain-shell-ai-bar')).toBeInTheDocument();
   });
 
-  it('renders Suggest button as disabled', () => {
+  it('renders Suggest button as enabled (FS-042)', () => {
     renderShell();
-    expect(screen.getByTestId('chain-shell-ai-suggest')).toBeDisabled();
+    expect(screen.getByTestId('chain-shell-ai-suggest')).not.toBeDisabled();
   });
 
   it('renders Explain button as disabled', () => {
@@ -161,27 +165,28 @@ describe('ChainBuilderShell — AI action bar', () => {
     expect(screen.getByTestId('chain-shell-ai-fix')).toBeDisabled();
   });
 
-  it('Suggest button has correct tooltip', () => {
+  it('Suggest button has correct tooltip (FS-042)', () => {
     renderShell();
     expect(screen.getByTestId('chain-shell-ai-suggest')).toHaveAttribute(
       'title',
-      'AI-powered expression suggestion — available in a future release',
+      'Generate a DSL expression from natural language',
     );
   });
 
-  it('Suggest button has aria-label', () => {
+  it('Suggest button has aria-label (FS-042)', () => {
     renderShell();
     expect(screen.getByTestId('chain-shell-ai-suggest')).toHaveAttribute(
       'aria-label',
-      'Suggest expression (coming soon)',
+      'Suggest expression',
     );
   });
 
   it('Explain button has aria-label', () => {
     renderShell();
+    // Empty expression → "No expression to explain" variant
     expect(screen.getByTestId('chain-shell-ai-explain')).toHaveAttribute(
       'aria-label',
-      'Explain expression (coming soon)',
+      'Explain — No expression to explain',
     );
   });
 
@@ -405,5 +410,71 @@ describe('ChainBuilderShell — Explain Rule (FS-041)', () => {
     );
 
     expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-042: Suggest Expression integration
+// ---------------------------------------------------------------------------
+
+describe('ChainBuilderShell — Suggest Expression (FS-042)', () => {
+  it('clicking Suggest button opens the inline input area', () => {
+    renderShell();
+    fireEvent.click(screen.getByTestId('chain-shell-ai-suggest'));
+    expect(screen.getByTestId('suggest-expression-inline')).toBeInTheDocument();
+    expect(
+      screen.getByRole('textbox', { name: /natural language instruction/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('SuggestExpressionInline is not rendered when suggest state is idle', () => {
+    renderShell();
+    expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+  });
+
+  it('suggest panel resets when targetPath changes', async () => {
+    const { rerender } = renderShell();
+
+    // Open suggest panel
+    fireEvent.click(screen.getByTestId('chain-shell-ai-suggest'));
+    expect(screen.getByTestId('suggest-expression-inline')).toBeInTheDocument();
+
+    // Navigate to a different field
+    rerender(
+      <ChainBuilderShell
+        {...DEFAULT_PROPS}
+        targetPath="customer.name"
+        expression=""
+      />,
+    );
+
+    expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+  });
+
+  it('Accept calls onExpressionAccept with the suggested expression', async () => {
+    const onExpressionAccept = vi.fn();
+    const suggestExpression = vi.fn().mockResolvedValue({
+      expression: 'source("email")',
+      explanation: 'Maps email.',
+    } satisfies SuggestExpressionResult);
+    renderShell({ onExpressionAccept }, { suggestExpression });
+
+    // Open suggest panel
+    fireEvent.click(screen.getByTestId('chain-shell-ai-suggest'));
+
+    // Type instruction and generate
+    const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+    fireEvent.change(textarea, { target: { value: 'map email field' } });
+    fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+    // Wait for success state
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /accept/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+    expect(onExpressionAccept).toHaveBeenCalledWith('source("email")');
+    // Panel should close after accept
+    expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
   });
 });

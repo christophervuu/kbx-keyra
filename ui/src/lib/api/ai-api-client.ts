@@ -1,7 +1,14 @@
-import type { ExplainRuleInput, ExplainRuleResult } from '@/lib/types';
+import type {
+  ExplainRuleInput,
+  ExplainRuleResult,
+  SuggestExpressionInput,
+  SuggestExpressionResult,
+} from '@/lib/types';
 
-const NETWORK_ERROR_MESSAGE =
+const EXPLAIN_NETWORK_ERROR_MESSAGE =
   'Could not reach the Explain service. Check your connection and try again.';
+const SUGGEST_NETWORK_ERROR_MESSAGE =
+  'Could not reach the Suggest service. Check your connection and try again.';
 const MALFORMED_RESPONSE_MESSAGE = 'Received an unexpected response from the server.';
 
 function mapHttpStatusToMessage(status: number): string {
@@ -42,6 +49,42 @@ function isExplainRuleResult(value: unknown): value is ExplainRuleResult {
     value !== null &&
     'explanation' in value &&
     typeof (value as { explanation?: unknown }).explanation === 'string'
+  );
+}
+
+function mapSuggestHttpStatusToMessage(status: number): string {
+  if (status === 400) {
+    return 'Invalid request — check the instruction and try again.';
+  }
+
+  if (status === 429) {
+    return 'The AI service is temporarily busy. Please try again in a moment.';
+  }
+
+  return 'The Suggest service encountered an error. Please try again.';
+}
+
+function mapSuggestErrorCodeToMessage(code: unknown): string {
+  if (code === 'VALIDATION_ERROR') {
+    return mapSuggestHttpStatusToMessage(400);
+  }
+
+  if (code === 'MODEL_RATE_LIMITED') {
+    return mapSuggestHttpStatusToMessage(429);
+  }
+
+  return mapSuggestHttpStatusToMessage(500);
+}
+
+function isSuggestExpressionResult(value: unknown): value is SuggestExpressionResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'expression' in value &&
+    typeof (value as { expression?: unknown }).expression === 'string' &&
+    (!('explanation' in value) ||
+      typeof (value as { explanation?: unknown }).explanation === 'string' ||
+      typeof (value as { explanation?: unknown }).explanation === 'undefined')
   );
 }
 
@@ -122,12 +165,95 @@ export async function explainRuleHttp(
       'name' in error &&
       (error as { name?: unknown }).name === 'AbortError'
     ) {
-      throw new Error(NETWORK_ERROR_MESSAGE);
+      throw new Error(EXPLAIN_NETWORK_ERROR_MESSAGE);
     }
 
     if (error instanceof Error) {
       if (error instanceof TypeError) {
-        throw new Error(NETWORK_ERROR_MESSAGE);
+        throw new Error(EXPLAIN_NETWORK_ERROR_MESSAGE);
+      }
+
+      throw error;
+    }
+
+    throw new Error(MALFORMED_RESPONSE_MESSAGE);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function suggestExpressionHttp(
+  apiUrl: string,
+  input: SuggestExpressionInput,
+): Promise<SuggestExpressionResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
+  const body: Record<string, unknown> = {
+    instruction: input.instruction,
+    targetPath: input.targetPath,
+  };
+
+  if (input.targetType !== undefined && input.targetType !== null) {
+    body.targetType = input.targetType;
+  }
+
+  if (input.targetDescription !== undefined && input.targetDescription !== null) {
+    body.targetDescription = input.targetDescription;
+  }
+
+  if (input.sourceContext !== undefined && input.sourceContext !== null) {
+    body.sourceContext = input.sourceContext;
+  }
+
+  try {
+    const response = await fetch(`${trimTrailingSlash(apiUrl)}/ai/suggest-expression`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(mapSuggestHttpStatusToMessage(response.status));
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch {
+      throw new Error(MALFORMED_RESPONSE_MESSAGE);
+    }
+
+    if (!isAIEnvelope(parsed)) {
+      throw new Error(MALFORMED_RESPONSE_MESSAGE);
+    }
+
+    if (parsed.success === false) {
+      throw new Error(mapSuggestErrorCodeToMessage(parsed.error?.code));
+    }
+
+    if (!isSuggestExpressionResult(parsed.data)) {
+      throw new Error(MALFORMED_RESPONSE_MESSAGE);
+    }
+
+    return {
+      expression: parsed.data.expression,
+      explanation: parsed.data.explanation,
+    };
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'name' in error &&
+      (error as { name?: unknown }).name === 'AbortError'
+    ) {
+      throw new Error(SUGGEST_NETWORK_ERROR_MESSAGE);
+    }
+
+    if (error instanceof Error) {
+      if (error instanceof TypeError) {
+        throw new Error(SUGGEST_NETWORK_ERROR_MESSAGE);
       }
 
       throw error;

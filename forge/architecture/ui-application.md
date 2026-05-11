@@ -96,7 +96,8 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions), AI placeholder buttons with descriptive tooltips (FS-040 T-04); savedRules prop drives per-field diff (FS-040 T-05)
+        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest AI vertical slices wired (FS-041/FS-042) with inline `ExplanationPanel` / `SuggestExpressionInline`; savedRules prop drives per-field diff (FS-040 T-05)
+        SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
@@ -168,6 +169,7 @@ ui/src/
         use-deployment-context.ts  Deployment context loader + per-mode availability derivation for comparison workflows
         use-environment-comparison.ts Two-sided comparison orchestration (parallel side execution, progressive state, diff computation)
         use-comparison-snapshots.ts Comparison snapshot CRUD hook (`keyra:comparison-snapshots:{mappingId}`), linked by `testCaseId`
+        use-suggest-expression.ts  FS-042 suggest-expression async lifecycle hook (`idle|inputting|loading|success|error`) with abort-on-reinvoke/unmount/reset semantics and user-friendly error mapping
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
       lib/
@@ -195,8 +197,8 @@ ui/src/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
-      hybrid-adapter.ts       HybridAdapter: LocalStorageAdapter + HTTP AI overrides (FS-041)
-      ai-api-client.ts        HTTP client functions for AI endpoints (explainRuleHttp) (FS-041)
+      hybrid-adapter.ts       HybridAdapter: LocalStorageAdapter + HTTP AI overrides (`explainRule`, `suggestExpression`) (FS-041, FS-042)
+      ai-api-client.ts        HTTP client functions for AI endpoints (`explainRuleHttp`, `suggestExpressionHttp`) (FS-041, FS-042)
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL
     engine/
@@ -221,7 +223,7 @@ ui/src/
 ### Implementations
 
 - **Current (Phase 0):** `LocalStorageAdapter` — all operations use localStorage
-- **Current (Showcase/Phase 0.5):** `HybridAdapter` — extends `LocalStorageAdapter`; overrides AI methods to call backend via HTTP; all CRUD operations remain localStorage-backed (introduced in FS-041)
+- **Current (Showcase/Phase 0.5):** `HybridAdapter` — extends `LocalStorageAdapter`; overrides `explainRule()` and `suggestExpression()` to call backend HTTP endpoints; all CRUD operations remain localStorage-backed (introduced in FS-041, extended in FS-042)
 - **Future (Phase 1+):** `HttpAdapter` — all operations via HTTP (intentionally not implemented)
 
 ### Bootstrap
@@ -239,8 +241,10 @@ Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced
 `ui/src/lib/api/ai-api-client.ts` provides focused HTTP client functions for individual AI endpoints:
 
 - **Purpose:** Thin HTTP wrappers consumed by `HybridAdapter` (and potentially future `HttpAdapter`)
-- **Current exports:** `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
-- **Pattern:** One exported function per AI endpoint; each handles fetch + 15s timeout + response envelope parsing + error mapping to user-friendly messages
+- **Current exports:**
+  - `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
+  - `suggestExpressionHttp(apiUrl, input)` → `Promise<SuggestExpressionResult>`
+- **Pattern:** One exported function per AI endpoint; each handles fetch + endpoint-specific timeout + response envelope parsing + user-friendly error mapping
 - **Not an adapter** — does not implement `ApiAdapter`; consumed by adapter implementations
 
 ### Dependency Injection
@@ -249,7 +253,30 @@ Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides the AI methods to call the backend instead.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides only implemented AI showcase slices (`explainRule`, `suggestExpression`) to call the backend; unimplemented AI methods (for example `smartFix`, `autoMap`) continue to throw offline-mode errors via inheritance.
+
+### Showcase AI Integration Pattern (FS-041 / FS-042)
+
+AI features are integrated as thin vertical slices with a stable layering pattern:
+
+1. **Type contract** in `ui/src/lib/types/domain.ts`
+2. **HTTP function** in `ui/src/lib/api/ai-api-client.ts`
+3. **`HybridAdapter` override** to route the method to HTTP when `VITE_API_URL` is set
+4. **Feature hook** for async lifecycle + abort semantics
+5. **Inline UI component** for user interaction and result presentation
+
+Current slices:
+- **Explain Rule (FS-041):** `explainRuleHttp` → `HybridAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
+- **Suggest Expression (FS-042):** `suggestExpressionHttp` → `HybridAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
+
+### Suggest Source Context and RAG Compatibility (FS-042)
+
+`SuggestExpressionInput.sourceContext` is a **showcase/local-first** context mechanism, not a long-term retrieval architecture dependency.
+
+- **Today (showcase):** UI derives source context from `ParsedSchema` leaf fields and sends a pre-formatted text block (max 200 lines), format: `- {path} ({type})`.
+- **Transition path:** backend RAG retrieval (OpenSearch + structural enrichment) can ignore `sourceContext` and fetch context server-side.
+- **Compatibility model:** API supports both paths simultaneously; `sourceContext` remains optional/compatible during migration.
+- **UI impact:** no UI surface/API-layer redesign is required when backend transitions to RAG.
 
 ---
 

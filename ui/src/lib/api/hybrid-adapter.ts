@@ -1,7 +1,12 @@
-import { explainRuleHttp } from './ai-api-client';
+import { explainRuleHttp, suggestExpressionHttp } from './ai-api-client';
 import { LocalStorageAdapter } from './local-storage-adapter';
 
-import type { ExplainRuleInput, ExplainRuleResult } from '@/lib/types';
+import type {
+  ExplainRuleInput,
+  ExplainRuleResult,
+  SuggestExpressionInput,
+  SuggestExpressionResult,
+} from '@/lib/types';
 
 export class HybridAdapter extends LocalStorageAdapter {
   private readonly apiUrl: string;
@@ -13,5 +18,11 @@ export class HybridAdapter extends LocalStorageAdapter {
 
   override async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
     return explainRuleHttp(this.apiUrl, input);
+  }
+
+  override async suggestExpression(
+    input: SuggestExpressionInput,
+  ): Promise<SuggestExpressionResult> {
+    return suggestExpressionHttp(this.apiUrl, input);
   }
 }

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { explainRuleHttp } from '../ai-api-client';
+import { explainRuleHttp, suggestExpressionHttp } from '../ai-api-client';
 import { HybridAdapter } from '../hybrid-adapter';
 import { LocalStorageAdapter } from '../local-storage-adapter';
 
 vi.mock('../ai-api-client', () => ({
   explainRuleHttp: vi.fn(),
+  suggestExpressionHttp: vi.fn(),
 }));
 
 interface StorageLike {
@@ -58,6 +59,28 @@ describe('HybridAdapter', () => {
     expect(explainRuleHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
   });
 
+  it('routes suggestExpression to suggestExpressionHttp with apiUrl and input', async () => {
+    const adapter = new HybridAdapter('https://example.com/sandbox');
+    const input = {
+      instruction: 'default to USD if source currency is missing',
+      targetPath: 'Order.Header.Currency',
+      targetType: 'string',
+      targetDescription: 'ISO currency code',
+      sourceContext: '- Invoice.Amount (number)\n- Invoice.CurrencyCode (string)',
+    };
+
+    vi.mocked(suggestExpressionHttp).mockResolvedValue({
+      expression: 'default(source("Invoice.CurrencyCode"), "USD")',
+      explanation: 'Uses source currency and falls back to USD.',
+    });
+
+    await expect(adapter.suggestExpression(input)).resolves.toEqual({
+      expression: 'default(source("Invoice.CurrencyCode"), "USD")',
+      explanation: 'Uses source currency and falls back to USD.',
+    });
+    expect(suggestExpressionHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
+  });
+
   it('delegates CRUD methods to LocalStorageAdapter behavior', async () => {
     const adapter = new HybridAdapter('https://example.com/sandbox');
 
@@ -71,15 +94,12 @@ describe('HybridAdapter', () => {
     await expect(adapter.listSchemas()).resolves.toHaveLength(1);
   });
 
-  it('keeps other AI methods in offline-mode behavior', async () => {
+  it('keeps other non-overridden AI methods in offline-mode behavior', async () => {
     const adapter = new HybridAdapter('https://example.com/sandbox');
 
     await expect(adapter.autoMap({ projectId: 'p', mappingId: 'm' })).rejects.toThrow(
       'Not available in offline mode',
     );
-    await expect(
-      adapter.suggestExpression({ instruction: 'x', targetPath: 't' }),
-    ).rejects.toThrow('Not available in offline mode');
     await expect(adapter.smartFix({ mappingId: 'm', diagnostics: [] })).rejects.toThrow(
       'Not available in offline mode',
     );

@@ -18,6 +18,8 @@ This file must be kept current. When an architecture document is created or mean
 | [e2e-testing.md](./e2e-testing.md)             | E2E test infrastructure — Playwright configuration, page object conventions, fixture patterns, storage helpers, selector strategy, performance budget, and CI integration.                                                  | 2026-05-02   |
 | [ai-runtime.md](./ai-runtime.md)               | Shared AI runtime — prompt loading, DSL asset resolution, prompt rendering, GitHub Models invocation, structured output parsing, orchestration entry point, adapter pattern for local testing, Lambda handler conventions.   | 2026-05-11   |
 
+**Recent update note (2026-05-11):** `ui-application.md` was updated for FS-042 Suggest Expression showcase architecture (HybridAdapter/AI client extension, `useSuggestExpression`, `SuggestExpressionInline`, sourceContext→RAG transition compatibility).
+
 ---
 
 ## Maintenance Rules

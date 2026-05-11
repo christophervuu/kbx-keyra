@@ -36,12 +36,14 @@ import { LogicStepList } from './LogicStepList';
 import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { UnsavedDiffPanel } from './UnsavedDiffPanel';
 import { ExplanationPanel } from './ExplanationPanel';
+import { SuggestExpressionInline } from './SuggestExpressionInline';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { useBuilderValidation } from '../hooks/use-builder-validation';
 import { useUnsavedDiff } from '../hooks/use-unsaved-diff';
 import { useExplainRule } from '../hooks/use-explain-rule';
+import { useSuggestExpression } from '../hooks/use-suggest-expression';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 import { PreviewContext } from '../context/preview-context';
@@ -62,7 +64,7 @@ import { decomposeToChainState } from '../lib/chain-decomposer';
 import type { LogicKind } from './AddLogicPicker';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 
-import type { ParsedSchema, MappingRule } from '@/lib/types/domain';
+import type { ParsedSchema, MappingRule, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -152,7 +154,6 @@ const STATUS_LABELS: Record<TargetFieldStatus, string> = {
   error: 'Error',
 };
 
-const AI_SUGGEST_TOOLTIP = 'AI-powered expression suggestions \u2014 available in a future release';
 const AI_EXPLAIN_TOOLTIP = 'Explain this expression using AI';
 const AI_FIX_TOOLTIP = 'AI-powered fix suggestions \u2014 available in a future release';
 
@@ -323,6 +324,32 @@ function HeaderOverflowMenu({
 }
 
 // ---------------------------------------------------------------------------
+// Source context formatting (for SuggestExpression)
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a ParsedSchema tree into a newline-separated text block of leaf
+ * field paths and types, capped at 200 entries.
+ * Format: "- {path} ({type})"
+ */
+function formatSourceContext(parsedSourceSchema: ParsedSchema | null): string {
+  if (!parsedSourceSchema?.nodes) return '';
+  const lines: string[] = [];
+  function walk(nodes: SchemaTreeNode[]) {
+    for (const node of nodes) {
+      if (lines.length >= 200) return;
+      if (node.children && node.children.length > 0) {
+        walk(node.children);
+      } else {
+        lines.push(`- ${node.path} (${node.type})`);
+      }
+    }
+  }
+  walk(parsedSourceSchema.nodes);
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -364,6 +391,21 @@ export function ScalarFieldBuilder({
   // Reset explanation when the selected field changes (AE-09)
   useEffect(() => {
     dismissExplain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargetPath]);
+
+  // FS-042: Suggest Expression hook
+  const {
+    state: suggestState,
+    openInput: openSuggestInput,
+    generate: generateSuggestion,
+    dismiss: dismissSuggest,
+    reset: resetSuggest,
+  } = useSuggestExpression();
+
+  // Reset suggestion panel when the selected field changes
+  useEffect(() => {
+    resetSuggest();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath]);
 
@@ -769,6 +811,10 @@ export function ScalarFieldBuilder({
               onToggleMode={() => { setMode('editor'); }}
               onClearMapping={() => { onClearMapping?.(selectedTargetPath); }}
               onExpressionClick={() => { setMode('editor'); }}
+              parsedSourceSchema={parsedSourceSchema}
+              onExpressionAccept={(expr) => {
+                updateDraft(selectedTargetPath, expr);
+              }}
             >
               {/* Entry point selector */}
               <EntryPointSelector
@@ -855,12 +901,17 @@ export function ScalarFieldBuilder({
           {/* AI action buttons — placeholders with descriptive tooltips */}
           <button
             type="button"
-            disabled
-            aria-disabled="true"
-            title={AI_SUGGEST_TOOLTIP}
-            aria-label={`Suggest — ${AI_SUGGEST_TOOLTIP}`}
+            onClick={() => { openSuggestInput(); }}
+            title="Generate a DSL expression from natural language"
+            aria-label="Suggest expression"
             data-testid="ai-suggest-btn"
-            className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
+            className={[
+              'flex items-center gap-1 rounded border px-2 py-1 text-xs transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+              suggestState.status === 'inputting' || suggestState.status === 'loading'
+                ? 'cursor-pointer border-blue-500/60 text-blue-300'
+                : 'cursor-pointer border-slate-600 text-slate-400 hover:border-blue-500/60 hover:text-blue-300',
+            ].join(' ')}
           >
             <Sparkles size={12} aria-hidden="true" />
             Suggest
@@ -949,6 +1000,30 @@ export function ScalarFieldBuilder({
                 explain({ targetPath: selectedTargetPath, expression });
               }
             }}
+          />
+        </div>
+      )}
+
+      {/* FS-042: Inline suggest expression panel */}
+      {suggestState.status !== 'idle' && (
+        <div className="px-4 pb-3">
+          <SuggestExpressionInline
+            state={suggestState}
+            targetPath={selectedTargetPath}
+            targetType={selectedTargetType}
+            onGenerate={(instruction) => {
+              generateSuggestion({
+                instruction,
+                targetPath: selectedTargetPath,
+                targetType: selectedTargetType,
+                sourceContext: formatSourceContext(parsedSourceSchema),
+              });
+            }}
+            onAccept={(expr) => {
+              updateDraft(selectedTargetPath, expr);
+              dismissSuggest();
+            }}
+            onDismiss={dismissSuggest}
           />
         </div>
       )}

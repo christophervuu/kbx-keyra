@@ -328,6 +328,18 @@ export interface AutoMapResult {
 export interface SuggestExpressionInput {
   readonly instruction: string;
   readonly targetPath: string;
+  readonly targetType?: string;
+  readonly targetDescription?: string;
+  /**
+   * Pre-formatted text block of available source fields for the showcase/local slice.
+   * Format: one line per field, e.g., "- Invoice.Amount (number)\n- Invoice.CurrencyCode (string)"
+   * This is a temporary substitute for RAG retrieval and will become optional/ignored
+   * once the backend implements its own context retrieval.
+   */
+  readonly sourceContext?: string;
+  /**
+   * @deprecated Use `sourceContext` instead. Retained for backward compatibility.
+   */
   readonly context?: Readonly<Record<string, unknown>>;
 }
 

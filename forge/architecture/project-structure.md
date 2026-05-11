@@ -312,6 +312,8 @@ ui/
           UnsavedDiffPanel.tsx         FS-040 T-05 collapsible per-field diff panel: trigger button with unsaved badge, expanded view shows last-saved vs current draft (syntax-highlighted), status badge (no-mapping/new/modified/removed/unchanged), "Revert to saved" action for modified/removed states
           UnsavedDiffPanel.test.tsx    FS-040 T-05 component tests (trigger, expand/collapse, status badges, revert button visibility, ARIA)
           ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
+          SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
+          SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
           ObjectTemplateBuilder.tsx  Key-value pair editor for map() object template: add/remove pairs, key text inputs, ArgumentSlot value slots in array context (T-07)
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
@@ -410,6 +412,8 @@ ui/
           use-server-preview.test.ts     Hook unit tests (idle state, success, timeout, Phase 0 offline error, sticky isAvailable=false, generic error, sequential calls, adapter call args)
           use-explain-rule.ts            FS-041 Explain Rule hook: manages async lifecycle for adapter.explainRule(); idle/loading/success/error state; AbortController cleanup on unmount + re-invocation; user-friendly error mapping (offline, rate-limit, network, unexpected-response, generic)
           use-explain-rule.test.ts       FS-041 hook unit tests (idle state, loading, success, error, dismiss, re-explain, abort on re-invocation, offline error, cleanup on unmount)
+          use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping
+          use-suggest-expression.test.ts FS-042 hook unit tests (state transitions, offline/network/rate-limit mapping, abort semantics, unmount cleanup)
           use-deployment-context.ts      Deployment context hook (FS-037 T-03): loads DeploymentContext via adapter, derives per-environment status map, isModeAvailable() gates comparison modes by deploy status, refresh(), Phase 0 error → all env modes unavailable
           use-deployment-context.test.ts Hook unit tests (load success, environmentStatus map, isModeAvailable per mode, Phase 0 error handling, current-vs-saved always available, refresh, all-deployed)
           use-environment-comparison.ts  Comparison orchestration hook (FS-037 T-04): two-sided parallel execution via Promise.allSettled, client-side (working/saved config) and server-side (direct adapter call with 10s timeout), stale-run cancellation via runId ref, diff via computeDiff(), canRun gating
@@ -473,8 +477,8 @@ ui/
       api/                ApiAdapter interface + LocalStorageAdapter + HybridAdapter + AI API client
                           types.ts              ApiAdapter contract
                           local-storage-adapter.ts  Phase 0 localStorage implementation
-                          hybrid-adapter.ts     FS-041 HybridAdapter: extends LocalStorageAdapter, overrides explainRule() to call backend via HTTP
-                          ai-api-client.ts      FS-041 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) → ExplainRuleResult; 15s timeout, envelope parsing, error mapping
+                          hybrid-adapter.ts     FS-041/FS-042 HybridAdapter: extends LocalStorageAdapter, overrides explainRule() and suggestExpression() to call backend via HTTP
+                          ai-api-client.ts      FS-041/FS-042 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) + suggestExpressionHttp(apiUrl, input); endpoint-specific timeout, envelope parsing, error mapping
                           adapter-provider.tsx  AdapterProvider + useAdapter() React context
                           bootstrap.ts          createAdapter(): returns HybridAdapter when VITE_API_URL set, LocalStorageAdapter otherwise
       data/               Shared static data consumed cross-feature

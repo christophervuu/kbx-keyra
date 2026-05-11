@@ -45,4 +45,9 @@ export { useLinkedDebugSelection } from './use-linked-debug-selection';
 export type { UseLinkedDebugSelectionResult } from './use-linked-debug-selection';
 export { useExplainRule } from './use-explain-rule';
 export type { ExplainRuleState, UseExplainRuleReturn } from './use-explain-rule';
+export { useSuggestExpression } from './use-suggest-expression';
+export type {
+  SuggestExpressionState,
+  UseSuggestExpressionReturn,
+} from './use-suggest-expression';
 
