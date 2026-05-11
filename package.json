@@ -19,9 +19,16 @@
   "scripts": {
     "build": "tsup",
     "engine:run": "tsx scripts/run-engine.ts",
+    "explain-rule:run": "tsx scripts/run-explain-rule.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.922.0",
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@aws-sdk/lib-dynamodb": "^3.922.0",
+    "openai": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.26.0",

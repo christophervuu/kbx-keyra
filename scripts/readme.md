@@ -2,6 +2,65 @@
 
 This folder contains scripts for running and testing the mapping engine against data-driven fixtures.
 
+## Explain Rule Local Runner (`run-explain-rule.ts`)
+
+A terminal-based runner for executing `explain-rule` Lambda request fixtures locally.
+
+### Prerequisites
+- Node.js (v18+ recommended)
+- Dependencies installed (`npm install`)
+- Environment variables configured for local AI runtime:
+  - `AI_RUNTIME_MODE=local`
+  - `PROMPT_REGISTRY_LOCAL_DIR=./tests/lib/ai/fixtures/local-runtime`
+  - `DSL_ASSET_LOCAL_PATH=./tests/lib/ai/fixtures/local-runtime/dsl-reference.md`
+  - `GITHUB_TOKEN=<your GitHub Models token>`
+
+### Usage
+
+#### Show environment setup help
+```
+npm run explain-rule:run -- --env
+```
+
+#### List available request fixtures
+```
+npm run explain-rule:run -- --list
+```
+
+#### Print request examples from fixtures
+```
+npm run explain-rule:run -- --examples
+```
+
+#### Run all explain-rule fixtures
+```
+npm run explain-rule:run
+```
+Or:
+```
+npm run explain-rule:run -- --all
+```
+
+#### Run a specific explain-rule fixture
+```
+npm run explain-rule:run -- <fixture-name>
+```
+Example:
+```
+npm run explain-rule:run -- valid-direct-source
+```
+
+### Fixture Structure
+Each fixture is a directory under `tests/lambda/ai/fixtures/` and includes:
+- `description.md` — Human-readable summary
+- `request.json` — Request body passed to the Lambda handler
+- `assertions.json` (optional) — Runtime assertions:
+  - `requiresModel` (boolean)
+  - `expectedStatusCode` (number)
+  - `expectedBodyContains` (string[])
+
+Fixtures marked with `requiresModel: true` are skipped if `GITHUB_TOKEN` is not set.
+
 ## Mapping Engine Test Runner (`run-engine.ts`)
 
 A terminal-based runner for executing mapping engine test fixtures and viewing detailed output, diagnostics, and traces.

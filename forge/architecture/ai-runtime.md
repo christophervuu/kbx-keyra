@@ -207,8 +207,11 @@ GitHub Models via the OpenAI SDK (`openai` npm package).
 
 ```typescript
 const client = new OpenAI({
-  baseURL: process.env.GITHUB_MODELS_ENDPOINT || 'https://models.inference.ai.azure.com',
-  apiKey: process.env.GITHUB_TOKEN,
+  baseURL: config.githubModelsEndpoint,
+  apiKey: config.githubToken,
+  defaultQuery: {
+    'api-version': '2024-08-01-preview',
+  },
 });
 ```
 
@@ -236,6 +239,12 @@ const response = await client.chat.completions.create({
 ### Error Handling
 
 Model errors (rate limits, invalid requests, network failures) are caught and normalized into `AIError` with appropriate error codes.
+
+Implemented error mapping:
+- `429` → `MODEL_RATE_LIMITED`
+- `401` / `403` → `MODEL_ERROR` (authentication context)
+- `400` → `MODEL_ERROR` (request validation context)
+- Other/network failures → `MODEL_ERROR`
 
 ---
 
@@ -280,6 +289,8 @@ When not provided, the function uses the default adapters configured by `config.
 - Lambda handlers to call `invokeAI(promptId, vars)` with zero configuration
 - Tests to call `invokeAI(promptId, vars, { promptRegistry: mockRegistry })` with full control
 
+The default prompt registry adapter, DSL asset loader, and model client are lazily initialized as module-level singletons so cache state can be reused across warm Lambda invocations.
+
 ---
 
 ## Lambda Handler Pattern
@@ -291,17 +302,28 @@ All AI Lambdas follow this structure:
 import { invokeAI } from '../../lib/ai/index.js';
 
 export async function handler(event: APIGatewayProxyEvent) {
+  // validate JSON body and required fields before invokeAI
   const body = JSON.parse(event.body ?? '{}');
   const result = await invokeAI('explain-rule', {
     targetPath: body.targetPath,
     expression: body.expression,
   });
   return {
-    statusCode: result.success ? 200 : 500,
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    },
     body: JSON.stringify(result),
   };
 }
 ```
+
+Implemented status mapping in `explain-rule` handler:
+- `PROMPT_NOT_FOUND` → `404`
+- `MODEL_RATE_LIMITED` → `429`
+- `VALIDATION_ERROR` → `400`
+- all other runtime errors → `500`
 
 Lambda handlers do not:
 - Read from DynamoDB directly

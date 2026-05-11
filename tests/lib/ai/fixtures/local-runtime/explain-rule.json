@@ -1,0 +1,12 @@
+{
+  "promptId": "explain-rule",
+  "version": 5,
+  "systemMessage": "You are DSL expert.\n{{dslReference}}",
+  "userMessageTemplate": "Explain target={{targetPath}} expr={{expression}}",
+  "model": "openai/gpt-4.1-mini",
+  "temperature": 0,
+  "responseSchema": "{\"type\":\"object\",\"properties\":{\"explanation\":{\"type\":\"string\"}},\"required\":[\"explanation\"]}",
+  "maxTokens": 500,
+  "updatedAt": "2026-05-11T00:00:00.000Z",
+  "updatedBy": "integration-test"
+}

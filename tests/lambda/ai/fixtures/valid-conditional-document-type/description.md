@@ -1,0 +1,1 @@
+Valid request example with conditional logic to describe invoice vs credit memo mapping intent.

@@ -37,8 +37,19 @@ src/
     deploy/           Deployment lambdas (deployMapping, promoteDeploy, rollbackDeploy)
     github/           GitHub API lambdas (listCdmFiles, publishSchema, syncSchema)
     ai/               AI lambdas (aiAutoMap, aiSuggestExpression, aiSmartFix, etc.)
+      explain-rule.ts AI explain-rule lambda handler consuming shared runtime
     preview/          Preview lambda (previewMapping)
   lib/                Shared utilities used across lambdas
+    ai/               Shared AI runtime modules (types, config, adapters, orchestration)
+      index.ts          AI runtime public barrel exports
+      types.ts          AI runtime shared types and adapter interfaces
+      config.ts         AI runtime configuration loader from environment
+      prompt-registry.ts Prompt registry adapters (DynamoDB + local) with caching
+      dsl-asset-loader.ts DSL reference asset loaders (S3 + local) with caching
+      prompt-renderer.ts Prompt template placeholder renderer
+      model-client.ts   GitHub Models client wrapper (OpenAI SDK)
+      output-parser.ts  Model output JSON parsing into AIResponse shape
+      invoke-ai.ts      AI runtime orchestration entry point
   types/              Shared types across backend
 ```
 
@@ -46,6 +57,7 @@ src/
 - The engine (`src/engine/`) has zero imports from `src/lambda/`, `ui/`, or any cloud SDK. It is a pure library.
 - Lambda handlers import from `src/engine/` and `src/lib/` only — not from each other.
 - Types shared between engine and UI are defined in `src/engine/types/` and imported by both.
+- `src/lib/ai/` is backend-only and must not import from `src/engine/` or `ui/`.
 
 ---
 
@@ -499,6 +511,27 @@ tests/
     execute/          Engine execution tests with fixture mapping configs
     validate/         Engine validation tests
   lambda/             Lambda handler tests
+    ai/               AI lambda handler tests
+      explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
+      fixtures/       Local runner fixtures for explain-rule handler requests and assertions
+        valid-direct-source/ Fixture for source("id") example request
+        valid-conditional-document-type/ Fixture for conditional expression example request
+        invalid-missing-expression/ Fixture for request validation example (400)
+  lib/                Shared backend utility tests
+    ai/               AI runtime module tests
+      types.test.ts    AI runtime type exports/importability tests
+      config.test.ts   AI runtime configuration parsing/defaults tests
+      prompt-registry.test.ts Prompt registry adapter unit tests
+      dsl-asset-loader.test.ts DSL asset loader adapter unit tests
+      prompt-renderer.test.ts Prompt rendering placeholder replacement tests
+      model-client.test.ts Model client wrapper request/error handling tests
+      output-parser.test.ts Output parser JSON/error normalization tests
+      invoke-ai.test.ts invokeAI orchestration unit tests (mocked adapters)
+      integration.test.ts AI runtime integration test with local adapters + mocked model
+      fixtures/       AI runtime test fixtures (local prompt JSON and DSL reference files)
+        local-runtime/ Local-mode fixture files for integration test
+          explain-rule.json Prompt fixture for explain-rule pipeline
+          dsl-reference.md  DSL reference fixture content
   ui/                 UI component and integration tests
     features/         Tests mirroring ui/src/features/ structure
     components/       Tests for shared components

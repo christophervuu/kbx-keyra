@@ -1,0 +1,4 @@
+{
+  "targetPath": "Order.Header.DocumentType",
+  "expression": "if(lt(source(\"InvoiceAmount\"), 0), \"CreditMemo\", \"Invoice\")"
+}
