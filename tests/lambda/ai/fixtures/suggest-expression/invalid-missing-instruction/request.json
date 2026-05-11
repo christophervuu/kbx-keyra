@@ -1,0 +1,5 @@
+{
+  "targetPath": "Order.Header.CurrencyCode",
+  "targetType": "string",
+  "sourceContext": "- InvoiceCurrency (string)"
+}

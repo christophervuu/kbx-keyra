@@ -1,0 +1,6 @@
+{
+  "expectedStatusCode": 400,
+  "expectedBodyContains": [
+    "Missing required field: instruction"
+  ]
+}

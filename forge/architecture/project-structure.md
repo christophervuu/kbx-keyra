@@ -38,6 +38,7 @@ src/
     github/           GitHub API lambdas (listCdmFiles, publishSchema, syncSchema)
     ai/               AI lambdas (aiAutoMap, aiSuggestExpression, aiSmartFix, etc.)
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
+      suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
     preview/          Preview lambda (previewMapping)
   lib/                Shared utilities used across lambdas
     ai/               Shared AI runtime modules (types, config, adapters, orchestration)
@@ -307,8 +308,23 @@ ui/
           LiveExpressionDisplay.tsx    FS-023 always-visible generated DSL expression with syntax highlighting; click-to-edit fires onSwitchToEditor; empty placeholder when no expression (T-07). No longer rendered inside UnifiedExpressionBuilder or ChainBuilderShell — superseded by BuilderFeedbackArea (FS-040 T-02)
           LiveResultDisplay.tsx        FS-023 evaluated expression result display; "Load test data" prompt when sourceData null (AE-08); uses useExpressionPreview (T-07). No longer rendered inside UnifiedExpressionBuilder or ChainBuilderShell — superseded by BuilderFeedbackArea (FS-040 T-02)
           LiveExpressionDisplay.test.tsx  FS-023 component tests (22 tests: LiveExpressionDisplay, LiveResultDisplay, ScalarFieldBuilder integration AE-07/08/09/10/11/16, decomposer integration)
-          BuilderFeedbackArea.tsx      FS-040 pinned feedback panel: Expression row (syntax-highlighted, incomplete label), Result row (useExpressionPreview), Validation row (Structure + Output Type badges); always visible in ScalarFieldBuilder regardless of mode (T-02)
+          BuilderFeedbackArea.tsx      FS-040 pinned feedback panel: Expression row (syntax-highlighted, incomplete label), Result row (useExpressionPreview), Validation row (Structure + Output Type badges); always visible in ScalarFieldBuilder regardless of mode (T-02); FS-043 T-13: optional `resultSlot` prop replaces default ResultRow — used by ArrayBuilder to inject ArrayResultPreview
           BuilderFeedbackArea.test.tsx FS-040 component tests for BuilderFeedbackArea (T-02)
+          ArrayBuilder.tsx             FS-043 T-04/T-10/T-12/T-13 new right-panel component for array-type target fields; two-layer builder shell; renders ArrayModeSelector + CollectionEditorSlot + ItemTemplateEditor; T-10: nested focused panel (NestedArrayPanel) replaces outer content when activeNestedPath is set; breadcrumb + "Back to parent" navigation; depth limit enforced at nestingDepth >= 2; T-12: CollectionEditorSlot renders CustomExpressionEditor for customExpression mode; T-13: passes ArrayResultPreview as resultSlot to BuilderFeedbackArea
+          ArrayModeSelector.tsx        FS-043 T-04 mode picker: 5 mode cards (map/filterMap/buildFromValues/mergeArrayBranches/customExpression) with icon + label + description; Custom Expression visually separated as Advanced; role=radiogroup; keyboard navigable
+          MapCollectionEditor.tsx      FS-043 T-04 source array picker for Map/FilterMap modes; lists array-type fields from parsed source schema; compact summary after selection (collapsible); role=listbox; keyboard navigable
+          FilterMapCollectionEditor.tsx FS-043 T-05 collection editor for Filter+Map mode; wraps MapCollectionEditor + collapsible FilterPredicateEditor; shows predicate summary when collapsed
+          FilterPredicateEditor.tsx    FS-043 T-05 simplified boolean-focused filter predicate builder; 8 operators (eq/neq/gt/gte/lt/lte/isNull/isNotNull); raw DSL fallback toggle; generates boolean DSL expression
+          BuildFromValuesEditor.tsx    FS-043 T-05 multi-entry builder for Build from Values mode; ordered entry list with drag-and-drop + keyboard up/down reorder; add/remove entries; null filtering toggle
+          ValueEntryEditor.tsx         FS-043 T-05 single value entry editor; renders object (per-field) or primitive inputs; each field supports sourceField/static/expression/empty kinds
+          MergeBranchEditor.tsx        FS-043 T-06 single branch editor for Merge Array Branches mode; source array picker + item template placeholder; expand/collapse with summary; remove button (disabled at min 2)
+          MergeBranchesEditor.tsx      FS-043 T-06 branch list manager; vertical list of MergeBranchEditor instances; add branch button (disabled at max 10); cap message at 10; generates merge(map(...), ...) pattern
+          ItemFieldRow.tsx             FS-043 T-07/T-09 single item field row; logic type selector (Item field/Root source/Static/Cross-array Lookup); field picker per scope; CrossArrayLookupEditor integration; expression preview; accordion expand/collapse
+          ItemTemplateEditor.tsx       FS-043 T-07/T-10 item template layer; derives item fields from target array node children; accordion single-expansion; mapped/total count badge; nested array entry point (NestedArrayRow with "Configure nested array" button); depth-limit enforcement at nestingDepth >= 2
+          ModeSwitchConfirmDialog.tsx  FS-043 T-08 confirmation dialog for incompatible mode switches; shows kept/discarded items; Confirm/Cancel/Restore previous draft buttons; focus trap
+          CrossArrayLookupEditor.tsx   FS-043 T-09 guided 5-step cross-array lookup form; lookup array picker (root-level arrays from source schema); match field + return field pickers (filtered to lookup array item fields); compare-against scope toggle (parent/item) + field picker; optional fallback input; expression preview; compact summary via summarizeLookup()
+          CustomExpressionEditor.tsx   FS-043 T-12 raw DSL editor surface for Custom Expression mode; wraps RawDslEditor with parse status badge (valid/invalid/empty), unrecognized-expression banner (AE-12), "Reset to structured mode" action, "Restore previous draft" action (AE-13); autocomplete via useDslAutocomplete; error list from useDslValidation
+          ArrayResultPreview.tsx       FS-043 T-13 array-specific result preview; handles null/empty/array/non-array result states; item count badge; first 10 items as formatted JSON with expand toggle; "Showing N of M items" truncation summary; merge branch contribution summary (real sub-evaluation + positional heuristic fallback marked "(estimated)"); mode-specific contextual hints for null/empty states
           UnsavedDiffPanel.tsx         FS-040 T-05 collapsible per-field diff panel: trigger button with unsaved badge, expanded view shows last-saved vs current draft (syntax-highlighted), status badge (no-mapping/new/modified/removed/unchanged), "Revert to saved" action for modified/removed states
           UnsavedDiffPanel.test.tsx    FS-040 T-05 component tests (trigger, expand/collapse, status badges, revert button visibility, ARIA)
           ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
@@ -394,6 +410,7 @@ ui/
           use-unsaved-diff.test.ts       FS-040 T-05 unit tests (all 5 status branches, whitespace trimming, currentExpression passthrough, empty savedRules)
           use-mapping-editor.ts          Orchestration hook: load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection, applyRule(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02)
           use-mapping-editor.test.tsx    Hook unit tests (26 tests: loading, save, unsaved detection, keyboard, beforeunload, actions)
+          use-array-builder-state.ts     FS-043 T-04/T-10/T-11/T-12 array builder state hook: manages ArrayBuilderState, hydrates from expression, exposes all actions through T-08 + T-10 nested navigation + T-11 validationState (deriveArrayValidation computed from state+schema) + T-12 setCustomExpression + isFromUnrecognized flag; accepts optional parsedSourceSchema + targetArrayNode for validation
           use-preview-execution.ts       Preview execution lifecycle hook: manual run(), auto-run (500ms debounce), 2s timeout guard, trace toggle, publishes to PreviewContext (FS-012 T-04)
           use-preview-execution.test.ts  Hook unit tests (idle state, guards, success, error, trace flag, auto-run debounce, timeout)
           use-resizable-layout.ts        Resizable panel layout hook: pixel-based column widths, bottom height, collapse states, drag logic, localStorage persistence under keyra:editor-layout (FS-022 T-02)
@@ -430,6 +447,13 @@ ui/
           expression-generator.test.ts Unit tests (14 tests: direct copy, static types, concat, nested functions, escaping)
           expression-builder-state.ts  FS-023 expression-builder state model types (Value/Conditional/ValueMap modes); FS-029 Source Card builder types (SourceCardValueModeState, ArgumentSlot, InlineTransform, ArgumentFormNode, DirectCopyState, SourceWithTransformState, FunctionCallState, PendingConnectorState) with type guards and factory functions
           expression-builder-state.test.ts  FS-029 unit tests for Source Card state model (factory functions, type guards, slot helpers, AE-01/02/03/04/06/07 coverage)
+          array-decomposer.ts            FS-043 T-03 array expression decomposer: decomposeArrayExpression(string)→DecomposeArrayResult; pattern detection order: merge→filterMap→map→buildFromValues→customFallback; delegates leaf field decomposition to decomposeToChain(); detects cross-array lookup (default/get/find pattern); detects nested map() as nested arrays; graceful fallback to success:false with rawExpression for unrecognized patterns; pure function
+          array-decomposer.test.ts       FS-043 T-03 unit tests: all four structured patterns, cross-array lookup (item/parent scope, with/without fallback), nested map() detection, unrecognized patterns (success:false), edge cases (empty/parse error/scalar), round-trip fidelity for all supported patterns
+          array-expression-generator.ts  FS-043 T-02 array DSL expression generator: generateArrayExpression(ArrayBuilderState)→string for all five modes (map/filterMap/buildFromValues/mergeArrayBranches/customExpression); generateFilterPredicate (structured boolean + raw fallback); generateCrossArrayLookup (default/get/find pattern); generateObjectTemplate; generateValueEntry; generateMergeBranchExpression; delegates leaf chains to generateChainExpression(); legacy shim: generateLegacyArrayExpression + ArrayBuilderState/ArrayPattern/FieldMapping types for backward compat with use-array-builder.ts + ArrayMappingBuilder.tsx (deprecated, replaced in T-04+)
+          array-expression-generator.test.ts  FS-043 T-02 unit tests: all five modes, filter predicate operators (all 8), cross-array lookup (item/parent scope, with/without fallback), build-from-values (object/primitive entries, null filtering), merge branches, incomplete/empty state returns empty string, parse verification via engine parse() for canonical AE patterns
+          array-builder-state.ts       FS-043 T-01 array builder state model: ArrayBuilderState (mode + collectionState + itemTemplate + completionStatus), CollectionState discriminated union (MapCollectionState/FilterMapCollectionState/BuildFromValuesCollectionState/MergeBranchesCollectionState/CustomExpressionCollectionState), FilterPredicateState (structured boolean-focused + raw fallback), ValueEntry (object/primitive, reorderable), MergeBranch (max 10), ItemTemplateState with nestedArrays map, ItemFieldMapping (chain/crossArrayLookup/empty), CrossArrayLookupState, CompletionStatus, deriveCompletionStatus(), isCompatibleModeSwitch(), getModePreservationRules(), factory functions, type guards
+          array-builder-state.test.ts  FS-043 T-01 unit tests: deriveCompletionStatus (all 4 status values), isCompatibleModeSwitch (all 20 directional mode pairs), getModePreservationRules (all transitions), factory functions, type guards
+          array-validation.ts          FS-043 T-11 multi-level array validation: ArrayValidationState, ArrayValidationEntry (level/fieldPath/message/severity), deriveArrayValidation(state, expression, sourceSchema, targetArrayNode)→ArrayValidationState; collection-level (source type, filter predicate completeness, merge branch source types), item-level (required field coverage), leaf-level (type compatibility), final-output (expression empty check); incomplete≠invalid distinction (AE-10); getFieldValidationEntries() helper
           builder-validation-types.ts  FS-040 builder validation model types: BuilderValidationState, BuilderValidationIssue, OutputTypeMismatch — two-level validation (structural + output type) for the Builder panel
           chain-builder-state.ts       FS-038 chain-based builder state model (ChainBuilderState, LogicStep union, TransformLogicStep, ConditionLogicStep, ValueMapLogicStep, ChainBranch, ConditionOperand, factory functions, completeness checks, step summaries, type guards); FS-039 unified chain model types (ChainState, ChainSource field/static/none, ChainStep union, FS039ConditionStep with required elseBranch, FS039ValueMapStep with required defaultValue, OperandValue with currentValue/field/static/expression kinds, Predicate, ConditionClause, DraftRulesMap, DraftFieldState, DraftValidationState) with factory functions and type guards
           chain-builder-state.test.ts  FS-038 unit tests for chain builder state (factory functions, completeness, summaries, type guards); FS-039 type-level and runtime tests (ChainSource variants, OperandValue all 4 kinds, FS039ConditionStep non-optional elseBranch, FS039ValueMapStep non-optional defaultValue, ChainState structural composition, post-condition/post-valueMap steps, DraftFieldState, DraftRulesMap)
@@ -526,10 +550,16 @@ tests/
   lambda/             Lambda handler tests
     ai/               AI lambda handler tests
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
+      suggest-expression.test.ts Tests for ai suggest-expression lambda request validation, mapping, and status handling
       fixtures/       Local runner fixtures for explain-rule handler requests and assertions
         valid-direct-source/ Fixture for source("id") example request
         valid-conditional-document-type/ Fixture for conditional expression example request
         invalid-missing-expression/ Fixture for request validation example (400)
+        suggest-expression/ Fixture set for suggest-expression handler request/assertion pairs
+          valid-default-currency/ Valid NL→rule request fixture with targetDescription
+          valid-concat-fields/ Valid NL→rule request fixture for concat use case
+          invalid-missing-instruction/ Invalid request fixture missing instruction (400)
+          invalid-empty-source-context/ Invalid request fixture with empty sourceContext (400)
   lib/                Shared backend utility tests
     ai/               AI runtime module tests
       types.test.ts    AI runtime type exports/importability tests
@@ -544,6 +574,7 @@ tests/
       fixtures/       AI runtime test fixtures (local prompt JSON and DSL reference files)
         local-runtime/ Local-mode fixture files for integration test
           explain-rule.json Prompt fixture for explain-rule pipeline
+          nl-to-rule.json   Prompt fixture for nl-to-rule pipeline
           dsl-reference.md  DSL reference fixture content
   ui/                 UI component and integration tests
     features/         Tests mirroring ui/src/features/ structure

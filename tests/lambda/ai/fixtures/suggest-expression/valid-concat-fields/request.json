@@ -1,0 +1,6 @@
+{
+  "instruction": "combine first name and last name with a space",
+  "targetPath": "Contact.FullName",
+  "targetType": "string",
+  "sourceContext": "- FirstName (string)\n- LastName (string)"
+}

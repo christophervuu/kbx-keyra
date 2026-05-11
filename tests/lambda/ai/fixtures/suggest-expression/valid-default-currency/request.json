@@ -1,0 +1,7 @@
+{
+  "instruction": "default currency to USD if missing",
+  "targetPath": "Order.Header.CurrencyCode",
+  "targetType": "string",
+  "targetDescription": "ISO currency code for the document",
+  "sourceContext": "- InvoiceCurrency (string)\n- Header.Currency (string)\n- Billing.CurrencyCode (string)"
+}

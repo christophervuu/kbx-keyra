@@ -73,8 +73,19 @@ export type { PipelineDecompositionResult } from './pipeline-decomposer';
 export { truncateExpression } from './truncate-expression';
 export { suggestSourceFields } from './suggest-source-fields';
 export type { SuggestedField, MatchKind } from './suggest-source-fields';
-export { generateArrayExpression } from './array-expression-generator';
-export type { ArrayBuilderState, ArrayPattern, FieldMapping } from './array-expression-generator';
+export {
+  generateArrayExpression,
+  generateFilterPredicate,
+  generateCrossArrayLookup,
+  generateValueEntry,
+  generateMergeBranchExpression,
+  generateLegacyArrayExpression,
+} from './array-expression-generator';
+export type {
+  // Legacy types — deprecated, will be removed when ArrayMappingBuilder + use-array-builder are replaced
+  ArrayPattern,
+  FieldMapping,
+} from './array-expression-generator';
 // FS-030 transform chain utilities
 export {
   getChainOutputType,
@@ -146,6 +157,64 @@ export type {
   DraftValidationState,
   DraftFieldState,
 } from './chain-builder-state';
+// FS-043 array builder state model
+export {
+  isCompatibleModeSwitch,
+  getModePreservationRules,
+  deriveCompletionStatus,
+  createEmptyItemTemplate,
+  createEmptyItemFieldMapping,
+  createEmptyFilterPredicate,
+  createEmptyObjectValueEntry,
+  createEmptyPrimitiveValueEntry,
+  createEmptyMergeBranch,
+  createEmptyCrossArrayLookup,
+  createCollectionStateForMode,
+  createEmptyArrayBuilderState,
+  createInitialArrayBuilderState,
+  isMapCollectionState,
+  isFilterMapCollectionState,
+  isBuildFromValuesCollectionState,
+  isMergeBranchesCollectionState,
+  isCustomExpressionCollectionState,
+  isStructuredFilterPredicate,
+  isRawFilterPredicate,
+  isChainFieldMapping,
+  isCrossArrayLookupMapping,
+  isEmptyFieldMapping,
+  isObjectValueEntry,
+  isPrimitiveValueEntry,
+} from './array-builder-state';
+export type {
+  ArrayBuilderMode,
+  ArrayBuilderState,
+  CollectionState,
+  MapCollectionState,
+  FilterMapCollectionState,
+  BuildFromValuesCollectionState,
+  MergeBranchesCollectionState,
+  CustomExpressionCollectionState,
+  FilterPredicateState,
+  StructuredFilterPredicate,
+  RawFilterPredicate,
+  FilterOperator,
+  FilterLeftOperand,
+  FilterRightOperand,
+  ValueEntry,
+  ValueEntryFieldValue,
+  MergeBranch,
+  ItemTemplateState,
+  ItemFieldMapping,
+  CrossArrayLookupState,
+  CompletionStatus,
+  ModeSwitchPreservationRules,
+} from './array-builder-state';
+// FS-043 array expression decomposer
+export { decomposeArrayExpression } from './array-decomposer';
+export type { DecomposeArrayResult } from './array-decomposer';
+// FS-043 T-11 array validation
+export { deriveArrayValidation, getFieldValidationEntries } from './array-validation';
+export type { ArrayValidationState, ArrayValidationEntry, ValidationSeverity, ValidationLevel } from './array-validation';
 // FS-038 chain expression generator
 export { generateExpressionFromChain, generateChainExpression } from './chain-expression-generator';
 // FS-038 chain decomposer

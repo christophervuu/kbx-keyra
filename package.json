@@ -20,6 +20,7 @@
     "build": "tsup",
     "engine:run": "tsx scripts/run-engine.ts",
     "explain-rule:run": "tsx scripts/run-explain-rule.ts",
+    "suggest-expression:run": "tsx scripts/run-suggest-expression.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests"

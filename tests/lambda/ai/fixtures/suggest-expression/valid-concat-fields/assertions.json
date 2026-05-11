@@ -1,0 +1,8 @@
+{
+  "requiresModel": true,
+  "expectedStatusCode": 200,
+  "expectedBodyContains": [
+    "\"success\":true",
+    "\"promptId\":\"nl-to-rule\""
+  ]
+}

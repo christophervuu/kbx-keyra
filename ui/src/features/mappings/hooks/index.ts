@@ -27,6 +27,9 @@ export { useTargetStatus } from './use-target-status';
 export type { UseTargetStatusResult, CoverageEntry } from './use-target-status';
 export { useArrayBuilder } from './use-array-builder';
 export type { UseArrayBuilderResult, ArrayBuilderStep } from './use-array-builder';
+// FS-043 array builder state hook
+export { useArrayBuilderState } from './use-array-builder-state';
+export type { UseArrayBuilderStateOptions, UseArrayBuilderStateResult } from './use-array-builder-state';
 export { useDragSource } from './use-drag-source';
 export type { UseDragSourceResult, DragHandlers } from './use-drag-source';
 export { useDropZone } from './use-drop-zone';

@@ -99,7 +99,18 @@ ui/src/
         ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest AI vertical slices wired (FS-041/FS-042) with inline `ExplanationPanel` / `SuggestExpressionInline`; savedRules prop drives per-field diff (FS-040 T-05)
         SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
-        ArrayMappingBuilder.tsx Right panel: 4-step array mapping wizard
+        ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (collection layer + item template layer); mode selector, mode-specific collection editors, nested focused panel, custom expression fallback, validation summary, and array preview integration (FS-043)
+        ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches / customExpression (advanced section)
+        MapCollectionEditor.tsx Collection editor for map mode (source array selection)
+        FilterMapCollectionEditor.tsx Collection editor for filter+map mode (source selection + filter predicate)
+        BuildFromValuesEditor.tsx Collection editor for build-from-values mode (ordered entries + null filtering)
+        MergeBranchesEditor.tsx Collection editor for merge-array-branches mode (branch list, capped structured UI)
+        CustomExpressionEditor.tsx Raw DSL custom mode surface (parse status, unrecognized-pattern banner, reset/restore actions)
+        ItemTemplateEditor.tsx Item-layer editor for mapped objects; per-field rows + nested array entry points
+        ItemFieldRow.tsx      Leaf mapping row: item/root/static/cross-array lookup logic types
+        CrossArrayLookupEditor.tsx Guided cross-array lookup helper (`find` + `get` + optional `default`)
+        ModeSwitchConfirmDialog.tsx Confirmation dialog for incompatible mode switches with preserve/discard guidance
+        ArrayResultPreview.tsx Array-specific result rendering for BuilderFeedbackArea (truncation, null/empty hints, merge branch summary)
         BottomArea.tsx        Full-width tabbed container (Preview/Diagnostics/Trace/Test Cases) retained for Rules View; includes test case selector in tab bar for source-data loading parity (FS-022)
         InlinePreviewStrip.tsx Collapsed bar + expanded strip; auto-preview triggered by draft expression stabilization (300ms debounce in ConnectedInlinePreviewStrip); test case selector; output flash animation; Run disabled when sourceData empty (FS-022); lastApplyTimestamp prop deprecated (optional, backward compat only)
         ConnectedInlinePreviewStrip.tsx Owns usePreviewExecution + local state; renders inside PreviewProvider; used as bottomContent in MappingEditor (FS-021 T-05); FS-039 T-13: replaced lastApplyTimestamp with selectedTargetPath+getDraftExpression; debounced auto-preview watches draft expression (300ms)
@@ -156,7 +167,7 @@ ui/src/
         use-dsl-autocomplete.ts    Context-aware DSL autocomplete state hook
         use-dsl-validation.ts      Inline parse diagnostics + editor error decorations
         use-target-status.ts       Status/coverage derivation from rules + validation
-        use-array-builder.ts       Array mapping wizard state (4-step)
+        use-array-builder-state.ts FS-043 array builder state orchestration hook (hydration/decomposition, mode transitions, draft output, nested context, validation)
         use-drag-source.ts         HTML5 drag state for a single source field
         use-drop-zone.ts           HTML5 drop zone state (isDragOver + handlers)
         use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04)
@@ -190,7 +201,10 @@ ui/src/
         autocomplete-utils.ts Context detection + suggestion filtering utilities
         suggest-source-fields.ts  Heuristic source field suggestions (exact/case/contains + type)
         truncate-expression.ts    Expression display truncation utility (max 60 chars)
-        array-expression-generator.ts  Array pattern -> DSL expression generator
+        array-builder-state.ts   FS-043 state model types + factories + completion derivation + mode compatibility rules
+        array-expression-generator.ts  FS-043 array builder state -> DSL generator (all five modes; delegates leaf chains to chain generator)
+        array-decomposer.ts      FS-043 DSL -> structured ArrayBuilderState decomposition with custom-expression fallback
+        array-validation.ts      FS-043 multi-level array validation derivation (collection/item/leaf/final output)
         execution-result-utils.ts  Pass/fail verdict derivation (deriveExecutionVerdict: idle/executing/pass/fail/error) + diff summary label formatting (formatDiffSummary) (FS-035 T-03, T-04)
 
   lib/
@@ -495,7 +509,15 @@ MappingEditorPage
 │   ├── BuilderEmptyState      (no selection)
 │   ├── ScalarFieldBuilder     (scalar leaf node)
 │   ├── ObjectSummaryPanel     (object node)
-│   ├── ArrayMappingBuilder    (array node)
+│   ├── ArrayBuilder           (array node)
+│   │   ├── ArrayModeSelector
+│   │   ├── MapCollectionEditor / FilterMapCollectionEditor / BuildFromValuesEditor / MergeBranchesEditor / CustomExpressionEditor
+│   │   ├── ItemTemplateEditor
+│   │   │   ├── ItemFieldRow[]
+│   │   │   ├── CrossArrayLookupEditor
+│   │   │   └── Nested ArrayBuilder (focused recursive panel)
+│   │   ├── ModeSwitchConfirmDialog
+│   │   └── ArrayResultPreview (via BuilderFeedbackArea resultSlot)
 │   └── ExpressionBuilderPanel (rules view)
 └── Bottom content (by view)
     ├── ConnectedInlinePreviewStrip
@@ -534,9 +556,48 @@ When a target field is selected in Target View, the right panel renders based on
 | none selected | `BuilderEmptyState` |
 | `string`, `number`, `boolean`, `integer`, `null` | `ScalarFieldBuilder` |
 | `object` | `ObjectSummaryPanel` |
-| `array` | `ArrayMappingBuilder` |
+| `array` | `ArrayBuilder` |
 
 `ScalarFieldBuilder` renders within the expression-panel context — it owns its own UnifiedExpressionBuilder/RawDslEditor mode toggle and drop zone, rather than relying on a standalone Panel 4 slot.
+
+### Array Builder Architecture Model (FS-043)
+
+FS-043 replaces the legacy 4-step array wizard with a chain-aligned **two-layer builder model**:
+
+- **Collection layer:** chooses and configures array production strategy (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`, `customExpression`)
+- **Item layer:** maps item fields using leaf-level chain-compatible expressions plus guided helpers
+
+Alignment with scalar chain architecture:
+- Leaf field generation reuses chain generator/decomposer contracts (rather than introducing a separate array-only transform model)
+- Builder interactions follow progressive disclosure and summary/expand patterns consistent with scalar builder surfaces
+
+Array scope model (v1):
+- **Root source:** `source()`
+- **Current item:** `item()`
+- **Parent item:** `parent()` (one level)
+- **Static value:** literal/static input
+
+Cross-array lookup:
+- Guided helper composes `find` + `get` (+ optional `default`) for lookup-style item mappings
+
+Nested arrays:
+- Nested array fields open a **focused recursive ArrayBuilder panel** with explicit "Back to parent" navigation
+- Nested context preserves parent draft state and exposes one-level parent scope
+
+Mode switching + compatibility model:
+- Compatible switches preserve relevant state where possible
+- Incompatible switches use explicit confirmation via `ModeSwitchConfirmDialog`
+- Custom expression mode acts as escape hatch; recognized expressions can round-trip back into structured modes via decomposition
+
+Validation model summary:
+- Validation is represented across collection/item/leaf/final-output levels
+- Incomplete drafting state is distinct from invalid/error state
+- UI surfaces include BuilderFeedbackArea + array validation summary + per-field indicators
+
+Preview model summary:
+- Array result preview renders array-shaped results with truncation and expand behavior
+- Empty/null states provide contextual hints
+- Merge branch contribution summary is best-effort and may be estimated when exact derivation is impractical
 
 ### Drag-and-Drop Pattern (HTML5 API)
 
@@ -618,27 +679,74 @@ Derivation logic:
 3. Paths with rule diagnostics (warning/error severity) become `'warning'` or `'error'`
 4. Object/array nodes derive coverage from their **recursive leaf descendants** (not direct children); an object node's coverage ratio is `leafDescendantsMapped / leafDescendantsTotal` (FS-027 T-12)
 
-### `useArrayBuilder` Hook Contract
+### `useArrayBuilderState` Hook Contract
 
-Location: `ui/src/features/mappings/hooks/use-array-builder.ts`
+Location: `ui/src/features/mappings/hooks/use-array-builder-state.ts`
 
-Manages the 4-step array mapping wizard state for `ArrayMappingBuilder`.
+Manages the FS-043 chain-aligned array builder state for `ArrayBuilder` using a two-layer model:
 
-Inputs:
-- `targetArrayPath: string`
-- `parsedSourceSchema: ParsedSchema | null`
-- `parsedTargetSchema: ParsedSchema | null`
+1. **Collection layer** — how the array is produced (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`, `customExpression`)
+2. **Item layer** — how each mapped item field is produced (`itemTemplate` with leaf mappings + nested arrays)
 
-Outputs:
-- `step: ArrayBuilderStep` (1–4)
-- `pattern: ArrayPattern | null`
-- `sourceArrayPath: string | null`
-- `fieldMappings: FieldMapping[]`
-- `generatedExpression: string`
-- Navigation actions: `goToStep`, `nextStep`, `prevStep`
-- Field mapping actions: `setSourceArrayPath`, `setPattern`, `addFieldMapping`, `removeFieldMapping`, `updateFieldMapping`
+Primary inputs:
+- `targetPath: string`
+- `getDraftExpression(targetPath): string | null`
+- `currentExpression?: string`
+- `updateDraft(targetPath, expression): void`
+- `onExpressionChange?(expression): void`
+- `parsedSourceSchema?: ParsedSchema | null`
+- `targetArrayNode?: SchemaTreeNode | null`
 
-Patterns: `1:1 map`, `filter-then-map`, `merge-arrays`, `build-from-scalars`, `advanced` (bypasses Step 3, opens raw DSL).
+Primary outputs:
+- `state: ArrayBuilderState`
+- `expression: string` (generated from state)
+- Collection actions:
+  - `switchMode`, `selectMode`, `confirmModeSwitch`, `cancelModeSwitch`
+  - `setSourceArrayPath`, `setFilterPredicate`
+  - `setBuildFromValuesState`, `addValueEntry`, `removeValueEntry`, `updateValueEntry`, `reorderValueEntry`, `setNullFiltering`
+  - `setMergeBranchesState`, `addBranch`, `removeBranch`, `updateBranch`
+  - `setCustomExpression`
+- Item actions:
+  - `setFieldMapping`, `removeFieldMapping`
+  - nested context actions: `enterNestedArray`, `exitNestedArray`, `setNestedFieldMapping`, `setNestedArrayBuilderState`
+- Transition/restore state:
+  - `pendingModeSwitch`, `canRestorePreviousDraft`, `restorePreviousDraft`, `isFromUnrecognized`
+- Validation state:
+  - `validationState: ArrayValidationState`
+
+State model summary:
+- **`ArrayBuilderState`**
+  - `mode: ArrayBuilderMode`
+  - `collectionState: CollectionState` (discriminated by mode)
+  - `itemTemplate: ItemTemplateState`
+  - `completionStatus: CompletionStatus`
+  - optional `previousStructuredDraft` (used when switching to custom expression)
+- **`CollectionState`**
+  - `MapCollectionState`
+  - `FilterMapCollectionState`
+  - `BuildFromValuesCollectionState`
+  - `MergeBranchesCollectionState`
+  - `CustomExpressionCollectionState`
+- **`ItemTemplateState`**
+  - `fields` (leaf mappings)
+  - `nestedArrays` (recursive nested `ArrayBuilderState` map)
+- **`CompletionStatus`**
+  - `notStarted | inProgress | complete | hasErrors`
+
+Mode-switch behavior (architecture level):
+- Compatible transitions (for example `map ↔ filterMap`) preserve source selection and item template where possible
+- Incompatible transitions stage `pendingModeSwitch` and require explicit confirmation
+- Structured → `customExpression` stores `previousStructuredDraft` and generates best-effort DSL
+- `customExpression` → structured attempts decomposition first; if not recognized, reset/restore flow applies
+
+Draft integration:
+- The hook auto-generates expression output on state changes and writes through `updateDraft(targetPath, expression)`
+- Hydration precedence is draft-first (`getDraftExpression`) then saved expression (`currentExpression`)
+
+Completion + validation derivation:
+- `completionStatus` derives from structural state readiness
+- `validationState` derives multi-level checks (collection, item, leaf, final-output compatibility)
+- Incomplete drafting state is tracked distinctly from explicit validation errors
 
 ### Empty/First-Run State
 

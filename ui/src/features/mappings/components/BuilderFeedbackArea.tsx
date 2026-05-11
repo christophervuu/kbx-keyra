@@ -11,6 +11,7 @@
  */
 
 import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { tokenizeDsl } from '../lib/dsl-tokenizer';
 import type { DslTokenType } from '../lib/dsl-tokenizer';
@@ -30,6 +31,12 @@ export interface BuilderFeedbackAreaProps {
   readonly validationState: BuilderValidationState;
   /** Current authoring mode — affects Structure badge visibility. */
   readonly mode: 'builder' | 'editor';
+  /**
+   * Optional replacement for the default ResultRow.
+   * When provided, this node is rendered in place of the standard scalar result row.
+   * Used by ArrayBuilder (T-13) to inject ArrayResultPreview.
+   */
+  readonly resultSlot?: React.ReactNode;
   readonly className?: string;
 }
 
@@ -255,6 +262,7 @@ export function BuilderFeedbackArea({
   sourceData,
   validationState,
   mode,
+  resultSlot,
   className = '',
 }: BuilderFeedbackAreaProps) {
   return (
@@ -274,7 +282,20 @@ export function BuilderFeedbackArea({
         structureValid={validationState.structureValid}
         mode={mode}
       />
-      <ResultRow expression={expression} sourceData={sourceData} />
+      {resultSlot !== undefined ? (
+        <div className="space-y-1" data-testid="feedback-result">
+          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Result</span>
+          <div
+            aria-live="polite"
+            aria-label="Evaluation result"
+            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs leading-relaxed"
+          >
+            {resultSlot}
+          </div>
+        </div>
+      ) : (
+        <ResultRow expression={expression} sourceData={sourceData} />
+      )}
       <ValidationRow validationState={validationState} mode={mode} />
     </section>
   );

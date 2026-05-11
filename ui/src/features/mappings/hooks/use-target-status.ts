@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import type { Diagnostic, ValidationResult } from '@/lib/engine';
 import type { MappingRule, SchemaTreeNode } from '@/lib/types/domain';
 import type { TargetFieldStatus } from '../components/TargetFieldRow';
+import type { CompletionStatus } from '../lib/array-builder-state';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -134,25 +135,45 @@ function buildDiagnosticStatusMap(
 // ---------------------------------------------------------------------------
 
 /**
+ * T-11: Maps an ArrayBuilderState CompletionStatus to a TargetFieldStatus.
+ * Returns null when no override is needed.
+ */
+function completionStatusToTargetStatus(
+  completionStatus: CompletionStatus,
+): TargetFieldStatus | null {
+  switch (completionStatus) {
+    case 'notStarted': return 'unmapped';
+    case 'inProgress': return 'warning';
+    case 'complete': return 'mapped';
+    case 'hasErrors': return 'error';
+    default: return null;
+  }
+}
+
+/**
  * Derives per-field mapping status and section coverage from rules + validation.
  *
  * Status derivation:
  *   1. Build a Set of rule target paths (mapped paths).
  *   2. Overlay validation diagnostics: warning / error overrides "mapped".
  *   3. Any path not in the rule set is "unmapped".
+ *   4. T-11: Array nodes with a known completionStatus override their status.
  *
  * Coverage derivation:
  *   For each object/array node, count how many direct children are mapped
  *   (status !== 'unmapped').
  *
- * @param rules            Current mapping rules array.
- * @param validationResult Engine validation result (or null if not yet validated).
- * @param nodes            Flat list of SchemaTreeNode from the parsed target schema.
+ * @param rules                Current mapping rules array.
+ * @param validationResult     Engine validation result (or null if not yet validated).
+ * @param nodes                Flat list of SchemaTreeNode from the parsed target schema.
+ * @param arrayCompletionMap   T-11: Optional map from array target path → CompletionStatus.
+ *                             When provided, overrides the status for array nodes.
  */
 export function useTargetStatus(
   rules: readonly MappingRule[],
   validationResult: ValidationResult | null,
   nodes: readonly SchemaTreeNode[],
+  arrayCompletionMap?: ReadonlyMap<string, CompletionStatus>,
 ): UseTargetStatusResult {
   return useMemo(() => {
     const statusMap = new Map<string, TargetFieldStatus>();
@@ -219,6 +240,16 @@ export function useTargetStatus(
       }
     }
 
+    // Step 3c: T-11 — override array node status from arrayCompletionMap
+    if (arrayCompletionMap && arrayCompletionMap.size > 0) {
+      for (const [arrayPath, completionStatus] of arrayCompletionMap) {
+        const overrideStatus = completionStatusToTargetStatus(completionStatus);
+        if (overrideStatus !== null) {
+          statusMap.set(arrayPath, overrideStatus);
+        }
+      }
+    }
+
     // Step 4: compute coverage for object/array nodes using leaf descendants
     for (const node of allNodes) {
       if (node.childCount > 0 && node.children.length > 0) {
@@ -236,5 +267,5 @@ export function useTargetStatus(
     }
 
     return { statusMap, coverageMap };
-  }, [rules, validationResult, nodes]);
+  }, [rules, validationResult, nodes, arrayCompletionMap]);
 }

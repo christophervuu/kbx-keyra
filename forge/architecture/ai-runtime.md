@@ -37,6 +37,7 @@ src/
   lambda/
     ai/
       explain-rule.ts       First consumer Lambda — thin handler shell
+      suggest-expression.ts Second consumer Lambda — NL to rule handler
 ```
 
 ---
@@ -295,6 +296,8 @@ The default prompt registry adapter, DSL asset loader, and model client are lazi
 
 ## Lambda Handler Pattern
 
+Both `src/lambda/ai/explain-rule.ts` and `src/lambda/ai/suggest-expression.ts` follow the same thin-handler pattern: parse and validate request input, call `invokeAI(promptId, variables)`, and return standardized JSON/CORS responses.
+
 All AI Lambdas follow this structure:
 
 ```typescript
@@ -319,11 +322,13 @@ export async function handler(event: APIGatewayProxyEvent) {
 }
 ```
 
-Implemented status mapping in `explain-rule` handler:
+Implemented status mapping in `explain-rule` and `suggest-expression` handlers:
 - `PROMPT_NOT_FOUND` → `404`
 - `MODEL_RATE_LIMITED` → `429`
 - `VALIDATION_ERROR` → `400`
 - all other runtime errors → `500`
+
+The `suggest-expression` handler keeps the same response/error mapping conventions while validating a different required-field set (`instruction`, `targetPath`, `targetType`, `sourceContext`) and invoking promptId `nl-to-rule`.
 
 Lambda handlers do not:
 - Read from DynamoDB directly

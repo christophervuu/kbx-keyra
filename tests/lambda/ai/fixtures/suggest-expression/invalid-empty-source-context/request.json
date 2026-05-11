@@ -1,0 +1,6 @@
+{
+  "instruction": "default currency to USD",
+  "targetPath": "Order.Header.CurrencyCode",
+  "targetType": "string",
+  "sourceContext": ""
+}

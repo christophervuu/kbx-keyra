@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-import { generateArrayExpression } from '../lib/array-expression-generator';
+import { generateLegacyArrayExpression } from '../lib/array-expression-generator';
 import type { ArrayBuilderState, ArrayPattern, FieldMapping } from '../lib/array-expression-generator';
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ export function useArrayBuilder(): UseArrayBuilderResult {
   const [currentStep, setCurrentStep] = useState<ArrayBuilderStep>(1);
   const [state, setState] = useState<ArrayBuilderState>(INITIAL_STATE);
 
-  const generatedExpression = generateArrayExpression(state);
+  const generatedExpression = generateLegacyArrayExpression(state);
 
   // Step 2 is skipped (goes straight to Step 4) when pattern === 'advanced'
   const effectiveNextStep = useCallback(

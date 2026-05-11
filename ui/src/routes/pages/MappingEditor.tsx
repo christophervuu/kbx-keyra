@@ -5,6 +5,7 @@ import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-do
 import { Button } from '@/components';
 import { ConfirmDialog } from '@/features/mappings/components';
 import {
+  ArrayBuilder,
   ArrayMappingBuilder,
   BuilderEmptyState,
   ConfigurationModal,
@@ -458,20 +459,17 @@ export default function MappingEditor() {
         );
       })()
     ) : selectedNode.type === 'array' ? (
-      <ArrayMappingBuilder
-        targetArrayPath={selectedNode.path}
+      <ArrayBuilder
+        key={selectedNode.path}
+        selectedTargetPath={selectedNode.path}
+        selectedTargetRequired={selectedNode.isRequired}
+        currentStatus={selectedNodeStatus}
+        currentExpression={selectedNodeExpression}
         parsedSourceSchema={editor.parsedSourceSchema}
-        parsedTargetSchema={editor.parsedTargetSchema}
-        isNestedArray={selectedNode.parentPath !== null && (() => {
-          const parent = findNodeByPath(
-            editor.parsedTargetSchema?.nodes ?? [],
-            selectedNode.parentPath,
-          );
-          return parent?.type === 'array';
-        })()}
-        parentArrayPath={selectedNode.parentPath ?? undefined}
-        onSave={handleApplyExpression}
-        onSelectParentArray={(path) => setSelectedTargetPath(path)}
+        parsedTargetSchema={editor.parsedTargetSchema ?? null}
+        updateDraft={editor.actions.updateDraft}
+        getDraftExpression={editor.actions.getDraftExpression}
+        savedRules={editor.savedRules}
         className="h-full"
       />
     ) : (

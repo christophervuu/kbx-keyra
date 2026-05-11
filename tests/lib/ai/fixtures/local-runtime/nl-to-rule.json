@@ -1,0 +1,12 @@
+{
+  "promptId": "nl-to-rule",
+  "version": 1,
+  "systemMessage": "You are a DSL expression generator.\n{{dslReference}}",
+  "userMessageTemplate": "Generate a DSL expression for target={{targetPath}} (type={{targetType}}, description={{targetDescription}}).\nInstruction: {{instruction}}\nAvailable source fields:\n{{sourceFields}}",
+  "model": "openai/gpt-4.1-mini",
+  "temperature": 0,
+  "responseSchema": "{\"type\":\"object\",\"properties\":{\"expression\":{\"type\":\"string\"},\"explanation\":{\"type\":\"string\"},\"confidence\":{\"type\":\"string\"},\"assumptions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"expression\",\"explanation\",\"confidence\",\"assumptions\"],\"additionalProperties\":false}",
+  "maxTokens": 500,
+  "updatedAt": "2026-05-11T00:00:00.000Z",
+  "updatedBy": "fixture"
+}

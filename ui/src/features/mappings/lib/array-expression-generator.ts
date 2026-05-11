@@ -1,16 +1,404 @@
 /**
- * array-expression-generator.ts
+ * array-expression-generator.ts — FS-043 T-02
  *
- * Converts ArrayBuilder state into a valid KeyRa DSL expression.
+ * Pure function that generates a DSL expression string from ArrayBuilderState.
  *
- * Supported patterns:
- *   - '1:1 map'          → map(source("path"), { "field": item("field"), ... })
- *   - 'filter-then-map'  → map(filter(source("path"), item("field")), { ... })
- *   - 'merge-arrays'     → concat(source("arr1"), source("arr2"))
- *   - 'build-from-scalars' → array(source("f1"), source("f2"), ...)
- *   - 'advanced'         → raw DSL passthrough
+ * Replaces the legacy generator (FS-028 wizard model) with a new implementation
+ * aligned with the chain-based Array Builder state model (FS-043).
+ *
+ * Supported modes and generated DSL patterns:
+ *   map             → map(source("path"), { "field": <chainExpr>, ... })
+ *   filterMap       → map(filter(source("path"), <predicate>), { "field": <chainExpr>, ... })
+ *   buildFromValues → array({...}, {...}, ...) or filter(array(...), not(isNull(item("field"))))
+ *   mergeArrayBranches → merge(map(source("a"), {...}), map(source("b"), {...}), ...)
+ *   customExpression   → raw DSL passthrough
+ *
+ * Leaf field expressions are delegated to generateChainExpression() from the
+ * scalar chain builder. Cross-array lookup expressions are generated inline.
+ * Nested arrays are handled recursively.
+ *
+ * @pure — no side effects, no hooks, no DOM access. Deterministic output.
  */
 
+import { generateChainExpression } from './chain-expression-generator';
+import type {
+  ArrayBuilderState,
+  CollectionState,
+  MapCollectionState,
+  FilterMapCollectionState,
+  BuildFromValuesCollectionState,
+  MergeBranchesCollectionState,
+  ItemTemplateState,
+  ItemFieldMapping,
+  FilterPredicateState,
+  ValueEntry,
+  ValueEntryFieldValue,
+  CrossArrayLookupState,
+  MergeBranch,
+  StaticValueBranch,
+} from './array-builder-state';
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Escapes and double-quotes a string for DSL output.
+ */
+function quoteString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Converts a StaticValueBranch to its DSL literal representation.
+ */
+function staticValueToDsl(value: StaticValueBranch): string {
+  switch (value.type) {
+    case 'string':
+      return quoteString(value.value);
+    case 'number':
+      return String(value.value);
+    case 'boolean':
+      return value.value ? 'true' : 'false';
+    case 'null':
+      return 'null';
+  }
+}
+
+/**
+ * Converts a raw literal string to its DSL representation using heuristic
+ * type detection (matches the engine's literal parsing behaviour).
+ */
+function literalToDsl(value: string): string {
+  if (value === 'true' || value === 'false') return value;
+  if (value === 'null') return 'null';
+  const trimmed = value.trim();
+  const asNumber = Number(trimmed);
+  if (trimmed !== '' && isFinite(asNumber)) return String(asNumber);
+  return quoteString(value);
+}
+
+// ---------------------------------------------------------------------------
+// Filter predicate generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates a DSL boolean expression from a FilterPredicateState.
+ * Returns empty string if the predicate is incomplete.
+ */
+function generateFilterPredicate(predicate: FilterPredicateState): string {
+  if (predicate.kind === 'raw') {
+    return predicate.dsl.trim();
+  }
+
+  // Structured predicate
+  const { left, operator, right } = predicate;
+
+  // Generate left operand expression
+  let leftExpr: string;
+  if (left.kind === 'itemField') {
+    if (!left.fieldPath.trim()) return '';
+    leftExpr = `item(${quoteString(left.fieldPath)})`;
+  } else {
+    // expression fallback
+    leftExpr = left.dsl.trim();
+    if (!leftExpr) return '';
+  }
+
+  // Unary operators — no right operand needed
+  switch (operator) {
+    case 'isNull':
+      return `isNull(${leftExpr})`;
+    case 'isNotNull':
+      return `not(isNull(${leftExpr}))`;
+  }
+
+  // Binary operators — need right operand
+  let rightExpr: string;
+  switch (right.kind) {
+    case 'static':
+      rightExpr = literalToDsl(right.value);
+      break;
+    case 'sourceField':
+      if (!right.path.trim()) return '';
+      rightExpr = `source(${quoteString(right.path)})`;
+      break;
+    case 'itemField':
+      if (!right.fieldPath.trim()) return '';
+      rightExpr = `item(${quoteString(right.fieldPath)})`;
+      break;
+    case 'none':
+      return '';
+  }
+
+  return `${operator}(${leftExpr}, ${rightExpr})`;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-array lookup generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates the DSL expression for a cross-array lookup.
+ *
+ * Pattern:
+ *   default(get(find(source("lookupArray"), eq(item("matchField"), <compareExpr>)), "returnField"), fallback)
+ *
+ * When no fallback is set, omits the default() wrapper:
+ *   get(find(source("lookupArray"), eq(item("matchField"), <compareExpr>)), "returnField")
+ */
+function generateCrossArrayLookup(lookup: CrossArrayLookupState): string {
+  const { lookupArrayPath, matchField, compareScope, compareField, returnField, fallback } = lookup;
+
+  if (!lookupArrayPath.trim() || !matchField.trim() || !compareField.trim() || !returnField.trim()) {
+    return '';
+  }
+
+  const compareExpr =
+    compareScope === 'parent'
+      ? `parent(${quoteString(compareField)})`
+      : `item(${quoteString(compareField)})`;
+
+  const findExpr = `find(source(${quoteString(lookupArrayPath)}), eq(item(${quoteString(matchField)}), ${compareExpr}))`;
+  const getExpr = `get(${findExpr}, ${quoteString(returnField)})`;
+
+  if (fallback !== undefined) {
+    return `default(${getExpr}, ${staticValueToDsl(fallback)})`;
+  }
+
+  return getExpr;
+}
+
+// ---------------------------------------------------------------------------
+// Item field expression generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates the DSL expression for a single ItemFieldMapping.
+ * Returns empty string for unmapped ('empty') fields.
+ */
+function generateItemFieldExpression(mapping: ItemFieldMapping): string {
+  switch (mapping.kind) {
+    case 'empty':
+      return '';
+    case 'chain':
+      return generateChainExpression(mapping.chainState);
+    case 'crossArrayLookup':
+      return generateCrossArrayLookup(mapping.lookupState);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Object template generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates the DSL object template from an item template's fields.
+ *
+ * Only includes fields that have a non-empty generated expression.
+ * Returns '{}' when no fields are mapped.
+ *
+ * Pattern: { "targetField": <expr>, ... }
+ */
+function generateObjectTemplate(template: ItemTemplateState): string {
+  const pairs: string[] = [];
+
+  for (const field of template.fields) {
+    const expr = generateItemFieldExpression(field);
+    if (expr) {
+      pairs.push(`${quoteString(field.targetFieldPath)}: ${expr}`);
+    }
+  }
+
+  if (pairs.length === 0) return '{}';
+  return `{${pairs.join(', ')}}`;
+}
+
+// ---------------------------------------------------------------------------
+// ValueEntry generation (Build from Values mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates the DSL expression for a single ValueEntryFieldValue.
+ */
+function generateValueEntryFieldValue(value: ValueEntryFieldValue): string {
+  switch (value.kind) {
+    case 'empty':
+      return '';
+    case 'sourceField':
+      return value.path.trim() ? `source(${quoteString(value.path)})` : '';
+    case 'static':
+      return staticValueToDsl(value.value);
+    case 'expression':
+      return value.dsl.trim();
+  }
+}
+
+/**
+ * Generates the DSL expression for a single ValueEntry.
+ *
+ * Object entries produce an object template: { "field": <expr>, ... }
+ * Primitive entries produce a single expression.
+ */
+function generateValueEntry(entry: ValueEntry): string {
+  if (entry.kind === 'primitive') {
+    return generateValueEntryFieldValue(entry.value);
+  }
+
+  // Object entry
+  const pairs: string[] = [];
+  for (const [fieldName, fieldValue] of Object.entries(entry.fields)) {
+    const expr = generateValueEntryFieldValue(fieldValue);
+    if (expr) {
+      pairs.push(`${quoteString(fieldName)}: ${expr}`);
+    }
+  }
+
+  if (pairs.length === 0) return '';
+  return `{${pairs.join(', ')}}`;
+}
+
+// ---------------------------------------------------------------------------
+// Mode-specific generators
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates DSL for Map mode.
+ * Pattern: map(source("path"), { "field": <chain>, ... })
+ */
+function generateMapExpression(
+  collection: MapCollectionState,
+  template: ItemTemplateState,
+): string {
+  if (!collection.sourceArrayPath.trim()) return '';
+  const objectTemplate = generateObjectTemplate(template);
+  return `map(source(${quoteString(collection.sourceArrayPath)}), ${objectTemplate})`;
+}
+
+/**
+ * Generates DSL for Filter + Map mode.
+ * Pattern: map(filter(source("path"), <predicate>), { "field": <chain>, ... })
+ */
+function generateFilterMapExpression(
+  collection: FilterMapCollectionState,
+  template: ItemTemplateState,
+): string {
+  if (!collection.sourceArrayPath.trim()) return '';
+
+  const predicate = generateFilterPredicate(collection.filterPredicate);
+  if (!predicate) return '';
+
+  const objectTemplate = generateObjectTemplate(template);
+  return `map(filter(source(${quoteString(collection.sourceArrayPath)}), ${predicate}), ${objectTemplate})`;
+}
+
+/**
+ * Generates DSL for Build from Values mode.
+ *
+ * Without null filtering: array({...}, {...}, ...)
+ * With null filtering:    filter(array({...}, {...}, ...), not(isNull(item("field"))))
+ */
+function generateBuildFromValuesExpression(collection: BuildFromValuesCollectionState): string {
+  if (collection.entries.length === 0) return '';
+
+  const entryExprs = collection.entries
+    .map(generateValueEntry)
+    .filter((e) => e.length > 0);
+
+  if (entryExprs.length === 0) return '';
+
+  const arrayExpr = `array(${entryExprs.join(', ')})`;
+
+  if (collection.nullFilteringEnabled && collection.nullFilterField) {
+    const fieldRef = `item(${quoteString(collection.nullFilterField)})`;
+    return `filter(${arrayExpr}, not(isNull(${fieldRef})))`;
+  }
+
+  return arrayExpr;
+}
+
+/**
+ * Generates DSL for a single merge branch.
+ * Pattern: map(source("path"), { "field": <chain>, ... })
+ */
+function generateMergeBranchExpression(branch: MergeBranch): string {
+  if (!branch.sourceArrayPath.trim()) return '';
+  const objectTemplate = generateObjectTemplate(branch.itemTemplate);
+  return `map(source(${quoteString(branch.sourceArrayPath)}), ${objectTemplate})`;
+}
+
+/**
+ * Generates DSL for Merge Array Branches mode.
+ * Pattern: merge(map(source("a"), {...}), map(source("b"), {...}), ...)
+ */
+function generateMergeBranchesExpression(collection: MergeBranchesCollectionState): string {
+  if (collection.branches.length < 2) return '';
+
+  const branchExprs = collection.branches
+    .map(generateMergeBranchExpression)
+    .filter((e) => e.length > 0);
+
+  if (branchExprs.length < 2) return '';
+
+  return `merge(${branchExprs.join(', ')})`;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates a DSL expression string from an ArrayBuilderState.
+ *
+ * Returns an empty string for:
+ *   - Incomplete states (no source configured, no entries, etc.)
+ *   - States with structural errors that prevent generation
+ *
+ * Delegates leaf field generation to generateChainExpression() (FS-039).
+ * Handles nested arrays recursively via the item template's nestedArrays map.
+ *
+ * @pure — no side effects, deterministic output for a given input.
+ */
+export function generateArrayExpression(state: ArrayBuilderState): string {
+  const { mode, collectionState, itemTemplate } = state;
+
+  switch (mode) {
+    case 'map':
+      return generateMapExpression(collectionState as MapCollectionState, itemTemplate);
+
+    case 'filterMap':
+      return generateFilterMapExpression(
+        collectionState as FilterMapCollectionState,
+        itemTemplate,
+      );
+
+    case 'buildFromValues':
+      return generateBuildFromValuesExpression(
+        collectionState as BuildFromValuesCollectionState,
+      );
+
+    case 'mergeArrayBranches':
+      return generateMergeBranchesExpression(collectionState as MergeBranchesCollectionState);
+
+    case 'customExpression': {
+      const cs = collectionState as { mode: 'customExpression'; rawExpression: string };
+      return cs.rawExpression;
+    }
+
+    default:
+      return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy type compatibility shim
+//
+// The following types are re-exported for backward compatibility with
+// ArrayMappingBuilder.tsx and use-array-builder.ts, which will be replaced
+// in FS-043 T-04+. Do not use these types in new code.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use ArrayBuilderState from array-builder-state.ts (FS-043) */
 export type ArrayPattern =
   | '1:1 map'
   | 'filter-then-map'
@@ -18,86 +406,88 @@ export type ArrayPattern =
   | 'build-from-scalars'
   | 'advanced';
 
+/** @deprecated Use ItemFieldMapping from array-builder-state.ts (FS-043) */
 export interface FieldMapping {
-  /** Target item field name (e.g. "sku") */
   targetField: string;
-  /** Source item field name (e.g. "productCode") */
   sourceField: string;
 }
 
-export interface ArrayBuilderState {
-  /** Source array path (e.g. "order.items") */
+/**
+ * @deprecated Use ArrayBuilderState from array-builder-state.ts (FS-043).
+ * This is the legacy wizard-model state shape retained for backward compatibility.
+ */
+export interface LegacyArrayBuilderState {
   sourceArrayPath: string;
-  /** Selected mapping pattern */
   pattern: ArrayPattern;
-  /** Field-to-field mappings for Step 3 */
   fieldMappings: FieldMapping[];
-  /** Raw DSL expression (used when pattern === 'advanced') */
   rawExpression: string;
-  /** Additional source arrays for merge-arrays pattern */
   additionalSourcePaths: string[];
 }
 
+/**
+ * @deprecated Alias for LegacyArrayBuilderState. Use ArrayBuilderState from
+ * array-builder-state.ts (FS-043) for new code.
+ */
+export type { LegacyArrayBuilderState as ArrayBuilderState };
+
 // ---------------------------------------------------------------------------
-// Helpers
+// Legacy generator (backward compatibility)
 // ---------------------------------------------------------------------------
 
-function escapeString(s: string): string {
+function legacyEscapeString(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function buildObjectTemplate(fieldMappings: FieldMapping[]): string {
+function legacyBuildObjectTemplate(fieldMappings: FieldMapping[]): string {
   if (fieldMappings.length === 0) return '{}';
   const pairs = fieldMappings
-    .map((m) => `"${escapeString(m.targetField)}": item("${escapeString(m.sourceField)}")`)
+    .map((m) => `"${legacyEscapeString(m.targetField)}": item("${legacyEscapeString(m.sourceField)}")`)
     .join(', ');
   return `{${pairs}}`;
 }
 
-// ---------------------------------------------------------------------------
-// Generator
-// ---------------------------------------------------------------------------
-
 /**
- * Generates a DSL expression from the array builder state.
- * Returns an empty string if the state is incomplete.
+ * @deprecated Use generateArrayExpression() with the new ArrayBuilderState from
+ * array-builder-state.ts (FS-043). This function is retained for backward
+ * compatibility with use-array-builder.ts and ArrayMappingBuilder.tsx, which
+ * will be replaced in FS-043 T-04+.
  */
-export function generateArrayExpression(state: ArrayBuilderState): string {
+export function generateLegacyArrayExpression(state: LegacyArrayBuilderState): string {
   const { sourceArrayPath, pattern, fieldMappings, rawExpression, additionalSourcePaths } = state;
 
   if (!sourceArrayPath && pattern !== 'advanced') return '';
 
   switch (pattern) {
     case '1:1 map': {
-      const template = buildObjectTemplate(fieldMappings);
-      return `map(source("${escapeString(sourceArrayPath)}"), ${template})`;
+      const template = legacyBuildObjectTemplate(fieldMappings);
+      return `map(source("${legacyEscapeString(sourceArrayPath)}"), ${template})`;
     }
-
     case 'filter-then-map': {
-      // Generates: map(filter(source("path"), item("")), { ... })
-      // The filter condition is a placeholder — user can refine in raw DSL
-      const template = buildObjectTemplate(fieldMappings);
-      return `map(filter(source("${escapeString(sourceArrayPath)}"), item("")), ${template})`;
+      const template = legacyBuildObjectTemplate(fieldMappings);
+      return `map(filter(source("${legacyEscapeString(sourceArrayPath)}"), item("")), ${template})`;
     }
-
     case 'merge-arrays': {
       const allPaths = [sourceArrayPath, ...additionalSourcePaths].filter(Boolean);
       if (allPaths.length === 0) return '';
-      if (allPaths.length === 1) return `source("${escapeString(allPaths[0])}")`;
-      const args = allPaths.map((p) => `source("${escapeString(p)}")`).join(', ');
+      if (allPaths.length === 1) return `source("${legacyEscapeString(allPaths[0])}")`;
+      const args = allPaths.map((p) => `source("${legacyEscapeString(p)}")`).join(', ');
       return `concat(${args})`;
     }
-
     case 'build-from-scalars': {
-      // Build array from individual scalar source fields
-      const args = fieldMappings.map((m) => `source("${escapeString(m.sourceField)}")`).join(', ');
+      const args = fieldMappings.map((m) => `source("${legacyEscapeString(m.sourceField)}")`).join(', ');
       return args ? `array(${args})` : '';
     }
-
     case 'advanced':
       return rawExpression;
-
     default:
       return '';
   }
 }
+
+export {
+  generateFilterPredicate,
+  generateCrossArrayLookup,
+  generateObjectTemplate,
+  generateValueEntry,
+  generateMergeBranchExpression,
+};
