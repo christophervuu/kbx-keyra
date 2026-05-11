@@ -476,6 +476,25 @@ describe('ScalarFieldBuilder', () => {
       // No draft → builder mode with saved expression decomposed
       expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     });
+
+    it('applies stagedSourcePath to source selection in builder mode', async () => {
+      const { rerender } = renderBuilder({
+        stagedSourcePath: null,
+        currentExpression: '',
+      });
+
+      rerender(
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          stagedSourcePath="lastName"
+          currentExpression=""
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('chain-source-card-path')).toHaveTextContent('lastName');
+      });
+    });
   });
 
   // ---------------------------------------------------------------------------

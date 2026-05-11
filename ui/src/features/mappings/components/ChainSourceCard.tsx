@@ -17,6 +17,8 @@
  */
 
 import { Database, Plus } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDropZone } from '../hooks/use-drop-zone';
 
 // ---------------------------------------------------------------------------
@@ -26,6 +28,8 @@ import { useDropZone } from '../hooks/use-drop-zone';
 export interface ChainSourceCardProps {
   /** Currently selected source field path. Undefined when no source is selected. */
   readonly sourcePath: string | undefined;
+  /** Available source field options for typed dropdown selection. */
+  readonly sourceOptions?: readonly string[];
   /** Number of logic steps currently in the chain (for display). */
   readonly logicStepCount: number;
   /** Fires when a source field is selected (click or drop). */
@@ -49,14 +53,70 @@ export interface ChainSourceCardProps {
  */
 export function ChainSourceCard({
   sourcePath,
+  sourceOptions = [],
   logicStepCount,
   onSourceSelect,
   onAddLogic,
   className,
 }: ChainSourceCardProps) {
   const { isDragOver, dropHandlers } = useDropZone({ onDrop: onSourceSelect });
+  const sourceInputId = 'chain-source-card-input';
+  const [sourceInputValue, setSourceInputValue] = useState('');
+  const [showSourceMenu, setShowSourceMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const hasSource = typeof sourcePath === 'string' && sourcePath.trim().length > 0;
+  const normalizedQuery = sourceInputValue.trim().toLowerCase();
+
+  const filteredSourceOptions = useMemo(
+    () => sourceOptions.filter((path) => path.toLowerCase().includes(normalizedQuery)),
+    [sourceOptions, normalizedQuery],
+  );
+
+  const maxVisibleOptions = 60;
+  const visibleSourceOptions = filteredSourceOptions.slice(0, maxVisibleOptions);
+
+  useEffect(() => {
+    if (!showSourceMenu) return;
+
+    const updatePosition = () => {
+      const input = inputRef.current;
+      if (!input) return;
+      const rect = input.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [showSourceMenu]);
+
+  useEffect(() => {
+    if (!showSourceMenu) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (inputRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setShowSourceMenu(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [showSourceMenu]);
 
   return (
     <div
@@ -125,6 +185,74 @@ export function ChainSourceCard({
           <p className="text-xs text-zinc-500" data-testid="chain-source-card-guidance">
             Select a source field from the panel or drag one here
           </p>
+
+          <div className="relative mt-1 w-full max-w-md text-left">
+            <label htmlFor={sourceInputId} className="sr-only">
+              Source field
+            </label>
+            <input
+              ref={inputRef}
+              id={sourceInputId}
+              type="text"
+              placeholder="Type or select source field"
+              autoComplete="off"
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              data-testid="chain-source-card-input"
+              value={sourceInputValue}
+              onFocus={() => { setShowSourceMenu(true); }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                const value = event.currentTarget.value.trim();
+                if (!value) return;
+                onSourceSelect(value);
+                setShowSourceMenu(false);
+              }}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setSourceInputValue(value);
+                setShowSourceMenu(true);
+              }}
+            />
+
+            {showSourceMenu
+              && visibleSourceOptions.length > 0
+              && menuPosition !== null
+              && createPortal(
+                <div
+                  ref={menuRef}
+                  className="fixed z-[1000] max-h-48 overflow-y-auto rounded border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+                  data-testid="chain-source-card-dropdown"
+                  role="listbox"
+                  aria-label="Source field options"
+                  style={{
+                    top: `${menuPosition.top}px`,
+                    left: `${menuPosition.left}px`,
+                    width: `${menuPosition.width}px`,
+                  }}
+                >
+                  {visibleSourceOptions.map((path) => (
+                    <button
+                      key={path}
+                      type="button"
+                      role="option"
+                      className="block w-full truncate px-2 py-1.5 text-left font-mono text-xs text-zinc-200 transition-colors hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none"
+                      data-testid={`chain-source-card-option-${path}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                      }}
+                      onClick={() => {
+                        setSourceInputValue(path);
+                        onSourceSelect(path);
+                        setShowSourceMenu(false);
+                      }}
+                    >
+                      {path}
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
+          </div>
         </div>
       )}
     </div>

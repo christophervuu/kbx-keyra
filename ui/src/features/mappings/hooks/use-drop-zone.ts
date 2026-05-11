@@ -45,7 +45,9 @@ export function useDropZone({ onDrop }: UseDropZoneOptions): UseDropZoneResult {
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
   }, []);
 
   const onDragEnter = useCallback((e: React.DragEvent) => {

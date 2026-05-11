@@ -83,6 +83,11 @@ export interface ScalarFieldBuilderProps {
   /** Parsed source schema for suggestions and field picker */
   parsedSourceSchema: ParsedSchema | null;
   /**
+   * Source field path staged from SourceSchemaPanel click-to-select.
+   * When provided, the builder inserts/selects this source path.
+   */
+  stagedSourcePath?: string | null;
+  /**
    * Called on every expression change to persist an in-memory draft.
    * Replaces the old onApply model — no explicit Apply needed.
    */
@@ -326,6 +331,7 @@ export function ScalarFieldBuilder({
   currentStatus,
   currentExpression = '',
   parsedSourceSchema,
+  stagedSourcePath = null,
   updateDraft,
   revertDraft,
   getDraftExpression,
@@ -494,6 +500,11 @@ export function ScalarFieldBuilder({
     },
     [mode],
   );
+
+  useEffect(() => {
+    if (stagedSourcePath === null || stagedSourcePath.trim().length === 0) return;
+    handleInsertSourceField(stagedSourcePath);
+  }, [stagedSourcePath, handleInsertSourceField]);
 
   const { isDragOver, dropHandlers } = useDropZone({ onDrop: handleInsertSourceField });
 
@@ -759,6 +770,7 @@ export function ScalarFieldBuilder({
               {chainState.entryType === 'source' && (
                 <ChainSourceCard
                   sourcePath={chainState.sourcePath}
+                  sourceOptions={sourceOptions.map((option) => option.path)}
                   logicStepCount={chainState.logicSteps.length}
                   onSourceSelect={handleSourceSelect}
                   onAddLogic={() => { setAddLogicPickerOpen(true); }}

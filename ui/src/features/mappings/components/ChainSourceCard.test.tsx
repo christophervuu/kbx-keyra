@@ -119,7 +119,13 @@ describe('ChainSourceCard — drag-and-drop', () => {
   it('shows drag-over visual state when dragging over empty zone', () => {
     renderCard({ sourcePath: undefined });
     const dropZone = screen.getByTestId('chain-source-card-empty');
-    fireEvent.dragEnter(dropZone);
+    fireEvent.dragEnter(dropZone, {
+      dataTransfer: {
+        dropEffect: 'copy',
+        getData: () => '',
+        setData: () => undefined,
+      },
+    });
     // The isDragOver class change is applied — verify the element is still present
     expect(dropZone).toBeInTheDocument();
   });
@@ -143,5 +149,66 @@ describe('ChainSourceCard — keyboard accessibility', () => {
       'aria-label',
       'Add logic step',
     );
+  });
+
+  it('renders source text input dropdown in empty state', () => {
+    renderCard({ sourcePath: undefined, sourceOptions: ['order.status', 'order.id'] });
+    expect(screen.getByTestId('chain-source-card-input')).toBeInTheDocument();
+    expect(screen.getByTestId('chain-source-card-input')).toHaveAttribute('autocomplete', 'off');
+    expect(screen.queryByRole('listbox', { name: 'Source field options' })).not.toBeInTheDocument();
+  });
+
+  it('shows a custom dropdown list below input on focus and calls onSourceSelect on click', () => {
+    const onSourceSelect = vi.fn();
+    renderCard({
+      sourcePath: undefined,
+      sourceOptions: ['order.status', 'order.id'],
+      onSourceSelect,
+    });
+
+    const input = screen.getByTestId('chain-source-card-input');
+    fireEvent.focus(input);
+
+    const listbox = screen.getByRole('listbox', { name: 'Source field options' });
+    expect(listbox).toBeInTheDocument();
+    expect(document.body).toContainElement(listbox);
+    expect(listbox).toHaveClass('fixed');
+    expect(listbox).toHaveClass('max-h-48');
+    expect(listbox).toHaveClass('overflow-y-auto');
+
+    fireEvent.click(screen.getByTestId('chain-source-card-option-order.status'));
+
+    expect(onSourceSelect).toHaveBeenCalledWith('order.status');
+  });
+
+  it('filters dropdown options as user types', () => {
+    renderCard({
+      sourcePath: undefined,
+      sourceOptions: ['order.status', 'order.id', 'customer.email'],
+      onSourceSelect: vi.fn(),
+    });
+
+    const input = screen.getByTestId('chain-source-card-input');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'order.' } });
+
+    expect(screen.getByTestId('chain-source-card-option-order.status')).toBeInTheDocument();
+    expect(screen.getByTestId('chain-source-card-option-order.id')).toBeInTheDocument();
+    expect(screen.queryByTestId('chain-source-card-option-customer.email')).not.toBeInTheDocument();
+  });
+
+  it('calls onSourceSelect when pressing Enter with a typed source path', () => {
+    const onSourceSelect = vi.fn();
+    renderCard({
+      sourcePath: undefined,
+      sourceOptions: ['order.status', 'order.id'],
+      onSourceSelect,
+    });
+
+    const input = screen.getByTestId('chain-source-card-input');
+    fireEvent.change(input, { target: { value: 'order.customer.email' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onSourceSelect).toHaveBeenCalledWith('order.customer.email');
   });
 });

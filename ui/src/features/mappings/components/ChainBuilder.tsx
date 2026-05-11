@@ -585,6 +585,7 @@ export function ChainBuilder({
       {!isStaticEntry && (
         <ChainSourceCard
           sourcePath={sourcePath}
+          sourceOptions={sourceOptions}
           logicStepCount={chain.steps.length}
           onSourceSelect={handleSourceSelect}
           onAddLogic={() => { setStepPickerOpen(true); }}

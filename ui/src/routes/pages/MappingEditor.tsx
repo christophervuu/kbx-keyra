@@ -184,6 +184,7 @@ export default function MappingEditor() {
   // Rules View selection state
   // ---------------------------------------------------------------------------
   const [selectedRuleIndex, setSelectedRuleIndex] = useState<number | null>(null);
+  const [stagedSourcePath, setStagedSourcePath] = useState<string | null>(null);
 
   // Expression builder for Rules View (existing pattern)
   const builderResult = useExpressionBuilder({
@@ -236,6 +237,7 @@ export default function MappingEditor() {
           editor.actions.commitDraft(selectedTargetPath, currentDraft);
         }
       }
+      setStagedSourcePath(null);
       setSelectedTargetPath(path);
     },
     [selectedTargetPath, editor.actions],
@@ -365,7 +367,11 @@ export default function MappingEditor() {
     <SourceSchemaPanel
       parsedSourceSchema={editor.parsedSourceSchema}
       onStageField={(path) => {
-        expressionBuilderRef.current?.insertSourceField(path);
+        if (view === 'rules') {
+          expressionBuilderRef.current?.insertSourceField(path);
+          return;
+        }
+        setStagedSourcePath(path);
       }}
       className="h-full"
     />
@@ -470,12 +476,14 @@ export default function MappingEditor() {
       />
     ) : (
       <ScalarFieldBuilder
+        key={selectedNode.path}
         selectedTargetPath={selectedNode.path}
         selectedTargetType={toTargetFieldType(selectedNode.type)}
         selectedTargetRequired={selectedNode.isRequired}
         currentStatus={selectedNodeStatus}
         currentExpression={selectedNodeExpression}
         parsedSourceSchema={editor.parsedSourceSchema}
+        stagedSourcePath={stagedSourcePath}
         updateDraft={editor.actions.updateDraft}
         revertDraft={editor.actions.revertDraft}
         getDraftExpression={editor.actions.getDraftExpression}
