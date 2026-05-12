@@ -157,39 +157,47 @@ ui/
             parse-xsd.ts
             parse-inferred-schema.ts
         schemas.test.ts   Feature-level unit tests
-      home/               Home Dashboard (FS-014)
+      home/               Home Dashboard (FS-014, FS-049)
         index.ts          Feature barrel (re-exports types, hooks, components)
-        types.ts          Feature-local types (DashboardMetrics, ProjectListItem, DashboardLoadState, ViewMode, SortField, SortDirection, StatusFilter)
+        types.ts          Feature-local types (DashboardMetrics, ProjectListItem, DashboardLoadState, ViewMode, SortField, SortDirection, StatusFilter, RecentActivityEntry)
         components/
           index.ts        Components barrel
-          MetricsBar.tsx  Summary metric cards: Projects/Mappings/Schemas counts, status breakdown (Ready/Draft/Has Errors), deployments; loading skeleton (FS-014 T-03)
-          ProjectCard.tsx     Grid card: name, description (line-clamp-2), mapping count, worst-status badge, DEV/QA/PROD deploy badges, date; full-card click (FS-014 T-05)
+          MetricsBar.tsx  Summary metric cards: Projects/Mappings/Schemas counts, status breakdown (Ready/Draft/Has Errors) with red tint when hasErrors > 0; 4 cards total (Deployed removed); loading skeleton (FS-014 T-03, FS-049 T-04)
+          NeedsAttention.tsx  Compact attention summary: "Mappings with errors" (real data), "Stale deployments"/"Unsynced schemas" (scaffold placeholders); positive "Nothing needs attention" state; disabled <button> rows for future click-through (FS-049 T-02)
+          ContinueWhereYouLeftOff.tsx  Recent activity section: up to 3 compact cards (project/mapping), relative timestamps, onItemClick callback; returns null when empty (FS-049 T-03)
+          ActivityPlaceholder.tsx  Right-rail placeholder: "Recent Activity" heading, Activity icon, placeholder text; data-testid="activity-placeholder" (FS-049 T-07)
+          ProjectCard.tsx     Grid card: name, description (line-clamp-2), mapping count, worst-status badge (filled bg for ready/has-errors), condensed "Not deployed" footer when all envs not-deployed, left-border error accent for has-errors; full-card click (FS-014 T-05, FS-049 T-06)
           ProjectCardGrid.tsx Grid container: responsive 1/2/3-column CSS grid of ProjectCard (FS-014 T-05) — co-located in ProjectCard.tsx
-          ProjectTable.tsx    Semantic table: 8-column thead (Name/Desc/Mappings/Status/DEV/QA/PROD/Last Modified), clickable/keyboard-navigable rows, worst-status badge, StatusBadge per env (FS-014 T-06)
+          ProjectTable.tsx    Semantic table: 8-column thead; condensed "Not deployed" colSpan=3 when all envs not-deployed; filled badge backgrounds for ready/has-errors (FS-014 T-06, FS-049 T-06)
           ProjectList.tsx     Search/sort/filter/view-toggle container; delegates to ProjectCardGrid or ProjectTable; "Showing X of Y" count; localStorage view-mode persistence (FS-014 T-04)
           DashboardEmptyState.tsx  Centered empty state: FolderOpen icon, "No projects yet" heading, subtext, "Create Your First Project" primary button → /projects/new (FS-014 T-08)
-          DashboardSkeleton.tsx    Animated pulse skeleton: 5 metrics-bar card shapes + 6 project-card grid shapes; role=status + sr-only text (FS-014 T-09)
+          DashboardSkeleton.tsx    Two-column animated pulse skeleton: main column (metrics 4-card + NeedsAttention + ContinueWhereYouLeftOff + 6 project cards) + right rail; role=status + sr-only text (FS-014 T-09, FS-049 T-05)
           DashboardErrorBanner.tsx Alert banner: role=alert, AlertTriangle icon, message prop (default "Failed to load dashboard data"), Retry button → onRetry (FS-014 T-09)
-          DashboardTabs.tsx   Three-tab shell: Projects (renders children), Deployments (placeholder), Activity (placeholder); ARIA tablist/tab/tabpanel; useState local (FS-014 T-10)
-          HomeDashboardPage.tsx  Final assembled page: PageHeader + DashboardTabs + MetricsBar + ProjectList + SchemaLibraryCard; wires useDashboardData + useViewMode; loading/error/empty/loaded states; data-testid="page-home-dashboard" (FS-014 T-11)
+          DashboardTabs.tsx   RETIRED (FS-049 T-01) — safe to delete
+          HomeDashboardPage.tsx  Two-column layout (lg:grid-cols-[1fr_300px]): main column (MetricsBar → NeedsAttention → ContinueWhereYouLeftOff → ProjectList) + right rail (ActivityPlaceholder); wires useDashboardData + useRecentActivity; loading/error/empty/loaded states; data-testid="page-home-dashboard" (FS-014 T-11, FS-049 T-01, T-05)
           ViewToggle.tsx      Grid/table toggle button group: aria-label + aria-pressed, active highlight, Lucide icons (FS-014 T-07)
           __tests__/
-            MetricsBar.test.tsx  Component tests (9 tests: skeleton variants, counts, status breakdown, zero metrics)
-            ProjectCard.test.tsx  Component tests (16 tests: name, description, mapping count singular/plural, worst-status badges, no-badge for no-mappings, DEV/QA/PROD labels, click, keyboard Enter/Space, empty description, tabIndex; grid renders all cards, empty grid, onClick delegation)
-            ProjectTable.test.tsx Component tests (14 tests: all 8 column headers, row-per-project, description, mapping count, has-errors/ready/draft badges, no-mappings dash, 3× Not-deployed badges, click/Enter/Space row activation, tabIndex, empty tbody)
+            MetricsBar.test.tsx  Component tests (11 tests: skeleton variants, counts, status breakdown, no Deployed card, error emphasis styling, no emphasis when zero errors, zero metrics) (FS-014 T-03, FS-049 T-04)
+            NeedsAttention.test.tsx  Component tests (10 tests: root testid, positive state, no items when zero errors, errors row, scaffold items, placeholder dashes, count display, heading, disabled buttons, no positive state when errors) (FS-049 T-02)
+            ContinueWhereYouLeftOff.test.tsx  Component tests (10 tests: null when empty, root testid, max 3 items from 5, item names, onItemClick with correct entry, relative timestamps, "just now", heading, button element, mapping testid format) (FS-049 T-03)
+            ActivityPlaceholder.test.tsx  Component tests (3 tests: root testid, heading, placeholder text) (FS-049 T-07)
+            ProjectCard.test.tsx  Component tests (22 tests: name, description, mapping count singular/plural, worst-status badges, no-badge for no-mappings, condensed "Not deployed", individual badges when any non-default, error accent border, badge filled backgrounds, click, keyboard Enter/Space, empty description, tabIndex; grid renders all cards, empty grid, onClick delegation) (FS-014 T-05, FS-049 T-06)
+            ProjectTable.test.tsx Component tests (15 tests: all 8 column headers, row-per-project, description, mapping count, has-errors/ready/draft badges, no-mappings dash, condensed "Not deployed" cell, individual badges when non-default, click/Enter/Space row activation, tabIndex, empty tbody) (FS-014 T-06, FS-049 T-06)
             ProjectList.test.tsx  Component tests (13 tests: render all, search input, filter by query, Showing X of Y, empty state, status filter, sort direction toggle, table view switch, grid view switch, localStorage persist, localStorage read, card click)
             DashboardEmptyState.test.tsx  Component tests (5 tests: heading, subtext, button, navigate to /projects/new, centered layout)
-            DashboardStateComponents.test.tsx  Component tests (9 tests: skeleton status role, sr-only text, 6 card blocks, metrics blocks; error banner default message, custom message, role=alert, retry button, onRetry callback)
-            DashboardTabs.test.tsx  Component tests (10 tests: tablist role, 3 tabs rendered, Projects active by default, children shown, aria-labelledby, Deployments/Activity placeholder messages, aria-selected toggling, Projects restoration, aria-controls)
-            HomeDashboardPage.test.tsx  Integration tests (8 tests: data-testid, skeleton while loading, error banner, empty state, full dashboard, PageHeader, Schema Library card, retry re-fetch)
+            DashboardStateComponents.test.tsx  Component tests (9 tests: skeleton status role, sr-only text, 6 card blocks, 3 metrics count blocks; error banner default message, custom message, role=alert, retry button, onRetry callback) (FS-014 T-09, FS-049 T-05)
+            DashboardTabs.test.tsx  RETIRED (FS-049 T-01) — safe to delete
+            HomeDashboardPage.test.tsx  Integration tests (17 tests: data-testid, skeleton, error banner, empty state, full dashboard, PageHeader, no tablist, no Schema Library card, MetricsBar loaded/empty, retry re-fetch, NeedsAttention loaded/empty, ActivityPlaceholder loaded/error/empty, no ContinueWhereYouLeftOff when empty localStorage) (FS-014 T-11, FS-049 T-01, T-05, T-08)
             ViewToggle.test.tsx   Component tests (6 tests: button rendering, aria-pressed active/inactive, onChange grid/table/re-click)
         hooks/
           index.ts        Hooks barrel
-          use-dashboard-data.ts  Loads projects/schemas/mappings, computes DashboardMetrics, builds ProjectListItem[], retry support (FS-014 T-02)
+          use-dashboard-data.ts  Loads projects/schemas/mappings, computes DashboardMetrics (no deployedCount), builds ProjectListItem[], retry support (FS-014 T-02, FS-049 T-04)
           use-view-mode.ts       localStorage-persisted ViewMode hook; invalid value defaults to grid (FS-014 T-07)
+          use-recent-activity.ts localStorage-backed recent activity hook; key=keyra:recent-activity; max 10 entries; dedup by type+id; getRecentItems()/recordActivity() (FS-049 T-03)
           __tests__/
-            use-dashboard-data.test.ts  Hook unit tests (13 tests: loading state, metrics aggregation, worst-status derivation, empty projects, error state, retry, parallel loading)
+            use-dashboard-data.test.ts  Hook unit tests (15 tests: loading state, metrics aggregation, worst-status derivation, empty projects, error state, retry, parallel loading) (FS-014 T-02, FS-049 T-04)
             use-view-mode.test.ts       Hook unit tests (7 tests: default grid, read grid/table, invalid value, setViewMode state+persist, switch back)
+            use-recent-activity.test.ts Hook unit tests (11 tests: empty storage, record+read, dedup timestamp update, max 10 eviction, sort descending, corrupted JSON, non-array JSON, malformed entries, setItem throws, projectId stored, storage key) (FS-049 T-03)
         lib/
           index.ts        Lib barrel
           filter-sort.ts  Pure filterProjects() and sortProjects() functions (FS-014 T-04)

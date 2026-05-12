@@ -69,11 +69,26 @@ describe('ProjectCard', () => {
     expect(screen.queryByText('No Mappings')).not.toBeInTheDocument();
   });
 
-  it('renders DEV/QA/PROD environment labels', () => {
+  it('renders condensed "Not deployed" when all environments are not-deployed', () => {
     render(<ProjectCard project={makeProject()} onClick={vi.fn()} />);
+    expect(screen.getByTestId('deploy-condensed')).toBeInTheDocument();
+    expect(screen.getByText('Not deployed')).toBeInTheDocument();
+    expect(screen.queryByText('DEV')).not.toBeInTheDocument();
+    expect(screen.queryByText('QA')).not.toBeInTheDocument();
+    expect(screen.queryByText('PROD')).not.toBeInTheDocument();
+  });
+
+  it('renders DEV/QA/PROD environment labels when any deploy status is non-default', () => {
+    render(
+      <ProjectCard
+        project={makeProject({ devDeploy: 'deployed', qaDeploy: 'not-deployed', prodDeploy: 'not-deployed' })}
+        onClick={vi.fn()}
+      />,
+    );
     expect(screen.getByText('DEV')).toBeInTheDocument();
     expect(screen.getByText('QA')).toBeInTheDocument();
     expect(screen.getByText('PROD')).toBeInTheDocument();
+    expect(screen.queryByTestId('deploy-condensed')).not.toBeInTheDocument();
   });
 
   it('calls onClick with project ID when clicked', () => {
@@ -105,6 +120,30 @@ describe('ProjectCard', () => {
   it('card is keyboard focusable (has tabIndex)', () => {
     render(<ProjectCard project={makeProject()} onClick={vi.fn()} />);
     expect(screen.getByRole('article')).toHaveAttribute('tabindex', '0');
+  });
+
+  it('applies error accent border when worstStatus is has-errors', () => {
+    render(<ProjectCard project={makeProject({ worstStatus: 'has-errors' })} onClick={vi.fn()} />);
+    const card = screen.getByRole('article');
+    expect(card.className).toMatch(/border-l-red-500/);
+  });
+
+  it('does not apply error accent border when worstStatus is ready', () => {
+    render(<ProjectCard project={makeProject({ worstStatus: 'ready' })} onClick={vi.fn()} />);
+    const card = screen.getByRole('article');
+    expect(card.className).not.toMatch(/border-l-red-500/);
+  });
+
+  it('ready badge uses green filled background', () => {
+    render(<ProjectCard project={makeProject({ worstStatus: 'ready' })} onClick={vi.fn()} />);
+    const badge = screen.getByText('Ready').closest('span');
+    expect(badge?.className).toMatch(/bg-green-500\/15/);
+  });
+
+  it('has-errors badge uses red filled background', () => {
+    render(<ProjectCard project={makeProject({ worstStatus: 'has-errors' })} onClick={vi.fn()} />);
+    const badge = screen.getByText('Has Errors').closest('span');
+    expect(badge?.className).toMatch(/bg-red-500\/15/);
   });
 });
 

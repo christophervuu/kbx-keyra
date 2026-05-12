@@ -21,7 +21,12 @@ export { DashboardSkeleton } from './DashboardSkeleton';
 export { DashboardErrorBanner } from './DashboardErrorBanner';
 export type { DashboardErrorBannerProps } from './DashboardErrorBanner';
 
-export { DashboardTabs } from './DashboardTabs';
-export type { DashboardTabsProps } from './DashboardTabs';
+export { NeedsAttention } from './NeedsAttention';
+export type { NeedsAttentionProps } from './NeedsAttention';
+
+export { ContinueWhereYouLeftOff } from './ContinueWhereYouLeftOff';
+export type { ContinueWhereYouLeftOffProps } from './ContinueWhereYouLeftOff';
+
+export { ActivityPlaceholder } from './ActivityPlaceholder';
 
 export { HomeDashboardPage } from './HomeDashboardPage';

@@ -26,7 +26,7 @@ All tasks are UI-surface work except the state/persistence infrastructure task a
 
 ## Status
 
-draft
+completed
 
 ---
 

@@ -1,5 +1,5 @@
-// ProjectTable — Semantic table view for the project list (FS-014 T-06)
-// Replaces the minimal stub created by T-04.
+// ProjectTable — Semantic table view for the project list (FS-014 T-06, FS-049 T-06)
+// FS-049 T-06: condensed deploy columns when all environments are 'not-deployed'
 
 import { StatusBadge } from '@/components/StatusBadge';
 
@@ -32,11 +32,11 @@ function formatDate(iso: string): string {
 
 const STATUS_CONFIG: Record<
   ProjectWorstStatus,
-  { label: string; dotClass: string; textClass: string } | null
+  { label: string; dotClass: string; textClass: string; bgClass: string } | null
 > = {
-  ready: { label: 'Ready', dotClass: 'bg-green-500', textClass: 'text-green-400' },
-  draft: { label: 'Draft', dotClass: 'bg-slate-400', textClass: 'text-slate-300' },
-  'has-errors': { label: 'Has Errors', dotClass: 'bg-red-500', textClass: 'text-red-400' },
+  ready: { label: 'Ready', dotClass: 'bg-green-500', textClass: 'text-green-400', bgClass: 'bg-green-500/15' },
+  draft: { label: 'Draft', dotClass: 'bg-slate-400', textClass: 'text-slate-300', bgClass: 'bg-slate-800' },
+  'has-errors': { label: 'Has Errors', dotClass: 'bg-red-500', textClass: 'text-red-400', bgClass: 'bg-red-500/15' },
   'no-mappings': null,
 };
 
@@ -52,7 +52,7 @@ function WorstStatusBadge({ status }: WorstStatusBadgeProps) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium ${config.textClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${config.textClass} ${config.bgClass}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${config.dotClass}`} aria-hidden="true" />
       {config.label}
@@ -102,7 +102,13 @@ export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800">
-          {projects.map((project) => (
+          {projects.map((project) => {
+            const allNotDeployed =
+              project.devDeploy === 'not-deployed' &&
+              project.qaDeploy === 'not-deployed' &&
+              project.prodDeploy === 'not-deployed';
+
+            return (
             <tr
               key={project.projectId}
               onClick={() => onProjectClick(project.projectId)}
@@ -126,20 +132,29 @@ export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
               <td className="px-4 py-3">
                 <WorstStatusBadge status={project.worstStatus} />
               </td>
-              <td className="px-4 py-3">
-                <StatusBadge status={project.devDeploy} />
-              </td>
-              <td className="px-4 py-3">
-                <StatusBadge status={project.qaDeploy} />
-              </td>
-              <td className="px-4 py-3">
-                <StatusBadge status={project.prodDeploy} />
-              </td>
+              {allNotDeployed ? (
+                <td colSpan={3} className="px-4 py-3 text-xs text-slate-500" data-testid={`deploy-condensed-${project.projectId}`}>
+                  Not deployed
+                </td>
+              ) : (
+                <>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={project.devDeploy} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={project.qaDeploy} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={project.prodDeploy} />
+                  </td>
+                </>
+              )}
               <td className="whitespace-nowrap px-4 py-3 text-slate-400">
                 {formatDate(project.updatedAt)}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

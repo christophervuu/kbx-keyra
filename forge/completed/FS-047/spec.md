@@ -26,7 +26,7 @@ Cross-cutting: backend Lambda changes are `task`; frontend hook and UI trigger c
 
 ## Status
 
-draft
+completed
 
 ---
 

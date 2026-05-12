@@ -14,7 +14,6 @@ const METRICS: DashboardMetrics = {
   totalMappings: 6,
   totalSchemas: 5,
   statusBreakdown: { ready: 2, draft: 3, hasErrors: 1 },
-  deployedCount: 0,
 };
 
 const ZERO_METRICS: DashboardMetrics = {
@@ -22,7 +21,6 @@ const ZERO_METRICS: DashboardMetrics = {
   totalMappings: 0,
   totalSchemas: 0,
   statusBreakdown: { ready: 0, draft: 0, hasErrors: 0 },
-  deployedCount: 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -70,16 +68,30 @@ describe('MetricsBar', () => {
     expect(screen.getByText(/1\s+Has Errors/i)).toBeInTheDocument();
   });
 
-  it('shows deployments card with 0 value', () => {
+  it('does not render a "Deployed" card', () => {
     render(<MetricsBar metrics={METRICS} loading={false} />);
-    expect(screen.getByText('Deployed')).toBeInTheDocument();
+    expect(screen.queryByText('Deployed')).not.toBeInTheDocument();
+  });
+
+  it('applies error emphasis styling on status card when hasErrors > 0', () => {
+    render(<MetricsBar metrics={METRICS} loading={false} />);
+    const statusCard = screen.getByTestId('metrics-status-card');
+    expect(statusCard.className).toMatch(/bg-red-500\/10/);
+    expect(statusCard.className).toMatch(/border-red-500\/30/);
+  });
+
+  it('does not apply error emphasis styling when hasErrors is 0', () => {
+    render(<MetricsBar metrics={ZERO_METRICS} loading={false} />);
+    const statusCard = screen.getByTestId('metrics-status-card');
+    expect(statusCard.className).not.toMatch(/bg-red-500\/10/);
+    expect(statusCard.className).toMatch(/border-slate-700/);
   });
 
   it('renders zero metrics gracefully — all counts show 0', () => {
     render(<MetricsBar metrics={ZERO_METRICS} loading={false} />);
+    // totalProjects(0), totalMappings(0), totalSchemas(0)
     const zeros = screen.getAllByText('0');
-    // totalProjects(0), totalMappings(0), totalSchemas(0), deployedCount(0)
-    expect(zeros.length).toBeGreaterThanOrEqual(4);
+    expect(zeros.length).toBeGreaterThanOrEqual(3);
     expect(screen.getByText(/0\s+Ready/i)).toBeInTheDocument();
     expect(screen.getByText(/0\s+Draft/i)).toBeInTheDocument();
     expect(screen.getByText(/0\s+Has Errors/i)).toBeInTheDocument();

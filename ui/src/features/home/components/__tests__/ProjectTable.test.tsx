@@ -81,10 +81,23 @@ describe('ProjectTable', () => {
     expect(screen.getByText('—')).toBeInTheDocument();
   });
 
-  it('renders three "Not deployed" deploy badge cells', () => {
+  it('renders condensed "Not deployed" cell when all environments are not-deployed', () => {
     render(<ProjectTable projects={[makeProject()]} onProjectClick={vi.fn()} />);
+    expect(screen.getByTestId('deploy-condensed-p-1')).toBeInTheDocument();
+    expect(screen.getByText('Not deployed')).toBeInTheDocument();
+  });
+
+  it('renders individual DEV/QA/PROD StatusBadge cells when any deploy status is non-default', () => {
+    render(
+      <ProjectTable
+        projects={[makeProject({ devDeploy: 'deployed', qaDeploy: 'not-deployed', prodDeploy: 'not-deployed' })]}
+        onProjectClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('deploy-condensed-p-1')).not.toBeInTheDocument();
+    // Individual StatusBadge cells render — "Not deployed" appears twice (QA + PROD)
     const notDeployedBadges = screen.getAllByText('Not deployed');
-    expect(notDeployedBadges).toHaveLength(3);
+    expect(notDeployedBadges.length).toBeGreaterThanOrEqual(2);
   });
 
   it('calls onProjectClick with project ID when row is clicked', () => {

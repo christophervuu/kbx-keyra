@@ -32,6 +32,7 @@ import { useMappingEditor, useVersionHistory, useTargetStatus, useAutoMapWorkspa
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
+import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -146,6 +147,15 @@ export default function MappingEditor() {
     }).catch(() => { /* silently fall back to 'Project' */ });
     return () => { cancelled = true; };
   }, [adapter, projectId]);
+
+  // Record recent activity when the mapping loads successfully (FS-049 T-03)
+  const { recordActivity } = useRecentActivity();
+  useEffect(() => {
+    if (editor.loadState === 'loaded' && editor.mappingName) {
+      recordActivity({ type: 'mapping', id: mappingId, projectId, name: editor.mappingName });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on successful load
+  }, [editor.loadState]);
 
   // ---------------------------------------------------------------------------
   // History drawer state

@@ -1,5 +1,5 @@
-// DashboardSkeleton — Animated pulse placeholder for the Home Dashboard (FS-014 T-09)
-// Mimics the metrics bar (5 cards) + project card grid (6 cards) layout.
+// DashboardSkeleton — Animated pulse placeholder for the Home Dashboard (FS-049 T-05)
+// Mimics the two-column layout: main column (metrics + cards) + right rail.
 
 // ---------------------------------------------------------------------------
 // Shared pulse block primitive
@@ -10,14 +10,14 @@ function PulseBlock({ className }: { className: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Metrics bar skeleton — 5 compact card shapes
+// Metrics bar skeleton — 3 single-stat cards + 1 status card (4 total)
 // ---------------------------------------------------------------------------
 
 function MetricsBarSkeleton() {
   return (
     <div className="flex flex-wrap gap-3" aria-hidden="true">
-      {/* 4 single-stat cards */}
-      {Array.from({ length: 4 }).map((_, i) => (
+      {/* 3 single-stat cards */}
+      {Array.from({ length: 3 }).map((_, i) => (
         <div
           key={i}
           className="flex animate-pulse flex-col gap-2 rounded-lg border border-slate-700 bg-slate-900 px-5 py-4 shadow-sm"
@@ -34,6 +34,25 @@ function MetricsBarSkeleton() {
           <PulseBlock className="h-4 w-16 bg-slate-700" />
           <PulseBlock className="h-4 w-20 bg-slate-700" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generic card skeleton (used for NeedsAttention, ContinueWhereYouLeftOff, rail)
+// ---------------------------------------------------------------------------
+
+function CardSkeleton({ className = '' }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-lg border border-slate-700 bg-slate-900 px-5 py-4 shadow-sm ${className}`}
+      aria-hidden="true"
+    >
+      <PulseBlock className="mb-3 h-3 w-24 bg-slate-700" />
+      <div className="flex flex-col gap-2">
+        <PulseBlock className="h-4 w-full bg-slate-700" />
+        <PulseBlock className="h-4 w-3/4 bg-slate-700" />
       </div>
     </div>
   );
@@ -71,17 +90,29 @@ function ProjectCardSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Main skeleton
+// Main skeleton — two-column layout
 // ---------------------------------------------------------------------------
 
 export function DashboardSkeleton() {
   return (
     <div role="status" aria-label="Loading dashboard" className="flex flex-col gap-6">
-      <MetricsBarSkeleton />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <ProjectCardSkeleton key={i} />
-        ))}
+      {/* Two-column layout skeleton */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
+        {/* Main column */}
+        <div className="flex flex-col gap-4" aria-hidden="true">
+          <MetricsBarSkeleton />
+          <CardSkeleton /> {/* NeedsAttention placeholder */}
+          <CardSkeleton /> {/* ContinueWhereYouLeftOff placeholder */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <ProjectCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+        {/* Right rail */}
+        <div className="flex flex-col gap-4" aria-hidden="true">
+          <CardSkeleton className="min-h-[200px]" />
+        </div>
       </div>
       <span className="sr-only">Loading dashboard data…</span>
     </div>

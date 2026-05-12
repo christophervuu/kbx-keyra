@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { ArrowLeft, CheckCircle2, ArrowUpRight, RotateCcw } from 'lucide-react';
 
+import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
+
 import {
   DiagnosticsDisplay,
   DiffDisplay,
@@ -191,6 +193,15 @@ function PanelLoadingState() {
 function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   const editor = useMappingEditor(mappingId);
   const navigate = useNavigate();
+
+  // Record recent activity when the mapping loads successfully (FS-049 T-03)
+  const { recordActivity } = useRecentActivity();
+  useEffect(() => {
+    if (editor.loadState === 'loaded' && editor.mappingName) {
+      recordActivity({ type: 'mapping', id: mappingId, projectId, name: editor.mappingName });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on successful load
+  }, [editor.loadState]);
 
   const [sourceDataRaw, setSourceDataRaw] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);

@@ -15,7 +15,6 @@ export interface DashboardMetrics {
     readonly draft: number;
     readonly hasErrors: number;
   };
-  readonly deployedCount: number; // always 0 in Phase 0
 }
 
 // ---------------------------------------------------------------------------
@@ -48,3 +47,20 @@ export type SortField = 'name' | 'updatedAt' | 'mappingCount';
 export type SortDirection = 'asc' | 'desc';
 
 export type StatusFilter = MappingStatus | 'all' | 'no-mappings';
+
+// ---------------------------------------------------------------------------
+// Recent activity (FS-049 T-03)
+// ---------------------------------------------------------------------------
+
+export interface RecentActivityEntry {
+  /** Whether this entry refers to a project or a mapping. */
+  readonly type: 'project' | 'mapping';
+  /** Entity ID (projectId or mappingId). */
+  readonly id: string;
+  /** Parent projectId — required for mappings, optional for projects. */
+  readonly projectId?: string;
+  /** Display name of the entity. */
+  readonly name: string;
+  /** ISO 8601 timestamp of the last visit. */
+  readonly timestamp: string;
+}

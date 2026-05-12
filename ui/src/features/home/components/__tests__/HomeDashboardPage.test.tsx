@@ -1,4 +1,4 @@
-// HomeDashboardPage.test.tsx — Integration test for the assembled dashboard page (FS-014 T-11)
+// HomeDashboardPage.test.tsx — Integration test for the assembled dashboard page (FS-014 T-11, FS-049 T-08)
 
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -181,19 +181,7 @@ describe('HomeDashboardPage', () => {
     });
   });
 
-  it('renders Schema Library card with schema count', async () => {
-    const adapter = createMockAdapter({
-      listProjects: vi.fn().mockResolvedValue([makeProject()]),
-      listSchemas: vi.fn().mockResolvedValue([makeSchema('s-1'), makeSchema('s-2')]),
-      listMappings: vi.fn().mockResolvedValue([]),
-    });
-    renderPage(adapter);
-    await waitFor(() => {
-      expect(screen.getByText(/2 schemas/i)).toBeInTheDocument();
-    });
-  });
-
-  it('renders DashboardTabs when projects are loaded', async () => {
+  it('does not render a tab bar (DashboardTabs removed in FS-049)', async () => {
     const adapter = createMockAdapter({
       listProjects: vi.fn().mockResolvedValue([makeProject()]),
       listSchemas: vi.fn().mockResolvedValue([]),
@@ -201,8 +189,46 @@ describe('HomeDashboardPage', () => {
     });
     renderPage(adapter);
     await waitFor(() => {
-      expect(screen.getByRole('tablist', { name: /dashboard sections/i })).toBeInTheDocument();
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument();
     });
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+  });
+
+  it('does not render a Schema Library card (removed in FS-049)', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([makeSchema('s-1'), makeSchema('s-2')]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/schema library/i)).not.toBeInTheDocument();
+  });
+
+  it('renders MetricsBar directly in the loaded state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([makeSchema('s-1')]),
+      listMappings: vi.fn().mockResolvedValue([makeMapping()]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: /dashboard metrics/i })).toBeInTheDocument();
+    });
+  });
+
+  it('renders MetricsBar in the empty state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByText(/no projects yet/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('region', { name: /dashboard metrics/i })).toBeInTheDocument();
   });
 
   it('retry button triggers a re-fetch on error', async () => {
@@ -219,5 +245,77 @@ describe('HomeDashboardPage', () => {
     await waitFor(() => {
       expect(listProjects).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('renders NeedsAttention section in the loaded state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([makeMapping()]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByTestId('needs-attention')).toBeInTheDocument();
+    });
+  });
+
+  it('renders NeedsAttention section in the empty state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByText(/no projects yet/i)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('needs-attention')).toBeInTheDocument();
+  });
+
+  it('renders ActivityPlaceholder in the right rail for loaded state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-placeholder')).toBeInTheDocument();
+    });
+  });
+
+  it('renders ActivityPlaceholder in the right rail for error state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockRejectedValue(new Error('fail')),
+      listSchemas: vi.fn().mockRejectedValue(new Error('fail')),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByTestId('activity-placeholder')).toBeInTheDocument();
+    });
+  });
+
+  it('renders ActivityPlaceholder in the right rail for empty state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByText(/no projects yet/i)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('activity-placeholder')).toBeInTheDocument();
+  });
+
+  it('does not render ContinueWhereYouLeftOff when no recent items (empty localStorage)', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+    await waitFor(() => {
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('continue-where-you-left-off')).not.toBeInTheDocument();
   });
 });

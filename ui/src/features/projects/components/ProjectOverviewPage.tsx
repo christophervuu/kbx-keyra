@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { PageHeader } from '@/components/PageHeader';
+import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { PATHS } from '@/routes/paths';
 
 import { useProjectOverview } from '../hooks/use-project-overview';
@@ -21,6 +22,7 @@ import { ProjectNotFoundState } from './ProjectNotFoundState';
 function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const { recordActivity } = useRecentActivity();
 
   const {
     loadState,
@@ -39,6 +41,14 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     retry,
     schemasReferencingMapping,
   } = useProjectOverview(projectId);
+
+  // Record recent activity when the project loads successfully (FS-049 T-03)
+  useEffect(() => {
+    if (loadState === 'loaded' && project) {
+      recordActivity({ type: 'project', id: projectId, name: project.name });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on successful load
+  }, [loadState]);
 
   // -------------------------------------------------------------------------
   // Loading

@@ -193,7 +193,6 @@ describe('useDashboardData', () => {
       totalMappings: 2,
       totalSchemas: 2,
       statusBreakdown: { ready: 1, draft: 1, hasErrors: 0 },
-      deployedCount: 0,
     });
     expect(result.current.schemaCount).toBe(2);
     expect(result.current.projects).toHaveLength(1);
@@ -218,7 +217,6 @@ describe('useDashboardData', () => {
       totalMappings: 0,
       totalSchemas: 0,
       statusBreakdown: { ready: 0, draft: 0, hasErrors: 0 },
-      deployedCount: 0,
     });
     expect(result.current.projects).toEqual([]);
   });
@@ -364,7 +362,6 @@ describe('useDashboardData', () => {
       totalMappings: 5,
       totalSchemas: 1,
       statusBreakdown: { ready: 3, draft: 1, hasErrors: 1 },
-      deployedCount: 0,
     });
   });
 

@@ -29,10 +29,10 @@ describe('DashboardSkeleton', () => {
 
   it('renders metrics bar skeleton blocks', () => {
     const { container } = render(<DashboardSkeleton />);
-    // 4 single-stat cards + 1 status card = 5 top-level flex columns in the metrics row
+    // 3 single-stat cards (Projects, Mappings, Schemas) + 1 status card
     // Each single-stat card has an h-8 block (count placeholder)
     const countBlocks = container.querySelectorAll('.h-8.w-16');
-    expect(countBlocks).toHaveLength(4);
+    expect(countBlocks).toHaveLength(3);
   });
 });
 

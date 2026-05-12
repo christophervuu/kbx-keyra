@@ -6,6 +6,7 @@ export type {
   DashboardMetrics,
   ProjectListItem,
   ProjectWorstStatus,
+  RecentActivityEntry,
   SortDirection,
   SortField,
   StatusFilter,

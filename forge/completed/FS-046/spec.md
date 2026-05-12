@@ -26,7 +26,7 @@ Cross-cutting: type definitions and API client work are `task`; all UI component
 
 ## Status
 
-draft
+completed
 
 ---
 

@@ -58,7 +58,6 @@ function computeMetrics(
       draft: flat.filter((m) => m.status === 'draft').length,
       hasErrors: flat.filter((m) => m.status === 'has-errors').length,
     },
-    deployedCount: 0, // Phase 0 — always 0
   };
 }
 
