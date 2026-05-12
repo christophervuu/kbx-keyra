@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SourceSchemaPanel } from './SourceSchemaPanel';
@@ -73,6 +73,29 @@ const NESTED_SCHEMA: ParsedSchema = {
 // ---------------------------------------------------------------------------
 
 describe('SourceSchemaPanel', () => {
+  it('renders SRC badge and source schema name in header', () => {
+    render(
+      <SourceSchemaPanel
+        parsedSourceSchema={FLAT_SCHEMA}
+        sourceSchemaName="Customer Source"
+        onStageField={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('source-header-badge')).toHaveTextContent('SRC');
+    expect(screen.getByTestId('source-header-name')).toHaveTextContent('Customer Source');
+  });
+
+  it('renders fallback source header name when schema name is missing', () => {
+    render(
+      <SourceSchemaPanel
+        parsedSourceSchema={FLAT_SCHEMA}
+        sourceSchemaName={null}
+        onStageField={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('source-header-name')).toHaveTextContent('No source schema');
+  });
+
   it('renders empty state when schema is null', () => {
     render(
       <SourceSchemaPanel parsedSourceSchema={null} onStageField={vi.fn()} />,
@@ -187,23 +210,29 @@ describe('SourceSchemaPanel', () => {
     expect(screen.getByTestId('source-search')).toBeInTheDocument();
   });
 
-  it('filters fields by typing in the search input', () => {
+  it('filters fields by typing in the search input', async () => {
     render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
     fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
-    expect(screen.getByTestId('source-field-name')).toBeInTheDocument();
-    expect(screen.queryByTestId('source-field-email')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('source-field-name')).toBeInTheDocument();
+      expect(screen.queryByTestId('source-field-email')).not.toBeInTheDocument();
+    });
   });
 
-  it('shows no-results state when search matches nothing', () => {
+  it('shows no-results state when search matches nothing', async () => {
     render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
     fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'zzznomatch' } });
-    expect(screen.getByTestId('source-search-no-results')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('source-search-no-results')).toBeInTheDocument();
+    });
   });
 
-  it('shows result count when search has matches', () => {
+  it('shows result count when search has matches', async () => {
     render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
     fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
-    expect(screen.getByTestId('source-search-count')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('source-search-count')).toBeInTheDocument();
+    });
   });
 
   it('shows clear button when search has a value', () => {
@@ -213,12 +242,16 @@ describe('SourceSchemaPanel', () => {
     expect(screen.getByTestId('source-search-clear')).toBeInTheDocument();
   });
 
-  it('clear button resets search and shows all fields', () => {
+  it('clear button resets search and shows all fields', async () => {
     render(<SourceSchemaPanel parsedSourceSchema={FLAT_SCHEMA} onStageField={vi.fn()} />);
     fireEvent.change(screen.getByTestId('source-search'), { target: { value: 'name' } });
-    expect(screen.queryByTestId('source-field-email')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId('source-field-email')).not.toBeInTheDocument();
+    });
     fireEvent.click(screen.getByTestId('source-search-clear'));
-    expect(screen.getByTestId('source-field-email')).toBeInTheDocument();
-    expect(screen.queryByTestId('source-search-clear')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('source-field-email')).toBeInTheDocument();
+      expect(screen.queryByTestId('source-search-clear')).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,7 +1,9 @@
-import { explainRuleHttp, suggestExpressionHttp } from './ai-api-client';
+import { autoMapSectionHttp, explainRuleHttp, suggestExpressionHttp } from './ai-api-client';
 import { LocalStorageAdapter } from './local-storage-adapter';
 
 import type {
+  AutoMapSectionInput,
+  AutoMapSectionResult,
   ExplainRuleInput,
   ExplainRuleResult,
   SuggestExpressionInput,
@@ -24,5 +26,9 @@ export class HybridAdapter extends LocalStorageAdapter {
     input: SuggestExpressionInput,
   ): Promise<SuggestExpressionResult> {
     return suggestExpressionHttp(this.apiUrl, input);
+  }
+
+  override async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
+    return autoMapSectionHttp(this.apiUrl, input);
   }
 }

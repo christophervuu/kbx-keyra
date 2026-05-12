@@ -114,3 +114,11 @@ export type {
 
 // FS-039 draft types (from types.ts)
 export type { UnsavedChangeSummary, UnsavedChangeType } from './types';
+export type {
+  SuggestionLifecycleStatus,
+  PersistedSuggestionItem,
+  PersistedSectionSuggestions,
+  PersistedSectionInfo,
+  AutoMapWorkspaceSummary,
+  SuggestionWorkspaceItem,
+} from './types';

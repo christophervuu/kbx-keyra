@@ -94,10 +94,17 @@ ui/src/
       components/
         MappingEditorPage.tsx Three-column editor shell with draggable resize handles, persistent pixel widths, source expand strip, and bottom collapse/resize behavior (FS-022)
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
-        TargetWorklist.tsx    Center column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
-        BuilderEmptyState.tsx Right panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Right panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest AI vertical slices wired (FS-041/FS-042) with inline `ExplanationPanel` / `SuggestExpressionInline`; savedRules prop drives per-field diff (FS-040 T-05)
+        TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
+        BuilderEmptyState.tsx Center panel: no-selection guidance + CTAs
+        ScalarFieldBuilder.tsx Center panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest AI vertical slices wired (FS-041/FS-042) with inline `ExplanationPanel` / `SuggestExpressionInline`; savedRules prop drives per-field diff (FS-040 T-05)
         SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
+        AutoMapWorkspace.tsx        FS-048 center-panel Auto-Map review workspace shell: sticky header, toolbar slot, refresh confirmation slot, no-source-data slot, loading/error/empty/list states, completion banner
+        WorkspaceHeader.tsx         FS-048 workspace header (section path, summary counts, last refreshed metadata, Back to Editor)
+        WorkspaceSuggestionCard.tsx FS-048 suggestion card with lifecycle badges, expand/collapse, diagnostics, stale indicator, per-item actions (Accept/Edit/Dismiss/Undo)
+        WorkspaceToolbar.tsx        FS-048 filter chips + bulk actions (Accept All Valid, Refresh Unmapped/Stale/All)
+        WorkspaceSuggestionPreview.tsx FS-048 optional per-suggestion preview section (current vs suggested output) + no-source-data callout
+        AutoMapReviewDrawer.tsx     FS-046 legacy drawer component retained for compatibility; no longer composed in MappingEditor (retired by FS-048)
+        SuggestionReviewCard.tsx    FS-046 legacy drawer card retained for compatibility; superseded by WorkspaceSuggestionCard in FS-048
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (collection layer + item template layer); mode selector, mode-specific collection editors, nested focused panel, custom expression fallback, validation summary, and array preview integration (FS-043)
         ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches / customExpression (advanced section)
@@ -181,6 +188,9 @@ ui/src/
         use-environment-comparison.ts Two-sided comparison orchestration (parallel side execution, progressive state, diff computation)
         use-comparison-snapshots.ts Comparison snapshot CRUD hook (`keyra:comparison-snapshots:{mappingId}`), linked by `testCaseId`
         use-suggest-expression.ts  FS-042 suggest-expression async lifecycle hook (`idle|inputting|loading|success|error`) with abort-on-reinvoke/unmount/reset semantics and user-friendly error mapping
+        use-auto-map-workspace.ts  FS-048 Auto-Map workspace lifecycle hook: section-triggered generation + persistence hydration, lifecycle transitions (suggested/accepted/edited/dismissed/stale), refresh merge strategy, filtering, and bulk actions
+        use-suggestion-preview.ts  FS-048 lazy per-expression preview hook for workspace cards (debounced evaluateExpression with source-data dependency)
+        use-auto-map-review.ts     FS-046 legacy drawer hook retained for compatibility; no longer used by MappingEditor composition
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
       lib/
@@ -206,6 +216,8 @@ ui/src/
         array-decomposer.ts      FS-043 DSL -> structured ArrayBuilderState decomposition with custom-expression fallback
         array-validation.ts      FS-043 multi-level array validation derivation (collection/item/leaf/final output)
         execution-result-utils.ts  Pass/fail verdict derivation (deriveExecutionVerdict: idle/executing/pass/fail/error) + diff summary label formatting (formatDiffSummary) (FS-035 T-03, T-04)
+        auto-map-persistence.ts  FS-048 sessionStorage persistence utilities for workspace suggestions (`keyra:automap-suggestions:{mappingId}`), hydration, corruption recovery, and per-section metadata
+        auto-map-staleness.ts    FS-048 stale-suggestion detection utilities (rule drift + manual-rule-add detection) used on hydration/re-entry
 
   lib/
     api/
@@ -237,7 +249,7 @@ ui/src/
 ### Implementations
 
 - **Current (Phase 0):** `LocalStorageAdapter` — all operations use localStorage
-- **Current (Showcase/Phase 0.5):** `HybridAdapter` — extends `LocalStorageAdapter`; overrides `explainRule()` and `suggestExpression()` to call backend HTTP endpoints; all CRUD operations remain localStorage-backed (introduced in FS-041, extended in FS-042)
+- **Current (Showcase/Phase 0.5):** `HybridAdapter` — extends `LocalStorageAdapter`; overrides `explainRule()`, `suggestExpression()`, and `autoMapSection()` to call backend HTTP endpoints; all CRUD operations remain localStorage-backed (introduced in FS-041, extended in FS-042, FS-046)
 - **Future (Phase 1+):** `HttpAdapter` — all operations via HTTP (intentionally not implemented)
 
 ### Bootstrap
@@ -258,6 +270,7 @@ Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced
 - **Current exports:**
   - `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
   - `suggestExpressionHttp(apiUrl, input)` → `Promise<SuggestExpressionResult>`
+  - `autoMapSectionHttp(apiUrl, input)` → `Promise<AutoMapSectionResult>`
 - **Pattern:** One exported function per AI endpoint; each handles fetch + endpoint-specific timeout + response envelope parsing + user-friendly error mapping
 - **Not an adapter** — does not implement `ApiAdapter`; consumed by adapter implementations
 
@@ -267,7 +280,7 @@ Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides only implemented AI showcase slices (`explainRule`, `suggestExpression`) to call the backend; unimplemented AI methods (for example `smartFix`, `autoMap`) continue to throw offline-mode errors via inheritance.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides only implemented AI showcase slices (`explainRule`, `suggestExpression`, `autoMapSection`) to call the backend; unimplemented AI methods (for example `smartFix`) continue to throw offline-mode errors via inheritance.
 
 ### Showcase AI Integration Pattern (FS-041 / FS-042)
 
@@ -282,6 +295,9 @@ AI features are integrated as thin vertical slices with a stable layering patter
 Current slices:
 - **Explain Rule (FS-041):** `explainRuleHttp` → `HybridAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
 - **Suggest Expression (FS-042):** `suggestExpressionHttp` → `HybridAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
+- **Auto-Map Review Workspace (FS-046 → FS-048):** `autoMapSectionHttp` → `HybridAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+
+The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion, section-level review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
 
 ### Suggest Source Context and RAG Compatibility (FS-042)
 
@@ -466,7 +482,7 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ## Mapping Editor Architecture
 
-FS-020 redesigns the Mapping Editor from an 8-panel grid into a **target-driven three-column layout** with a collapsible bottom area. FS-021 adds the two-row top context model and inline preview strip. FS-022 consolidates toolbar controls into panel-local surfaces, removes Focus/Breadcrumb drill-down mode, introduces persistent resizable panel layout, adds Rules View search, and makes inline preview auto-run on Apply unconditional when source data is present.
+FS-020 redesigns the Mapping Editor from an 8-panel grid into a **three-column focused-authoring layout** with a collapsible bottom area. FS-021 adds the two-row top context model and inline preview strip. FS-022 consolidates toolbar controls into panel-local surfaces, removes Focus/Breadcrumb drill-down mode, introduces persistent resizable panel layout, adds Rules View search, and makes inline preview auto-run on Apply unconditional when source data is present. FS-048 introduces an Auto-Map review workspace mode in the center authoring panel.
 
 ### Three-Column + Resizable Layout (FS-022)
 
@@ -475,11 +491,11 @@ FS-020 redesigns the Mapping Editor from an 8-panel grid into a **target-driven 
 │ Row 1: NavBar (global navigation)                                                 │
 │ Row 2: EditorTopBar (mapping context + save/deploy + Auto-map placeholder)       │
 ├──────────────────────┬┬──────────────────────────────┬┬───────────────────────────┤
-│ Source Panel         ││ Target Panel                ││ Builder Panel             │
-│ SourceSchemaPanel    ││ TargetWorklist (target)     ││ Node-type-specific panel  │
-│                      ││ RuleList (rules view)        ││ / ExpressionBuilderPanel  │
-│                      ││ Toolbar contains Sort +      ││                           │
-│                      ││ View Toggle + Search/Filters ││                           │
+│ Source Panel         ││ Builder / Workspace Panel    ││ Target Panel              │
+│ SourceSchemaPanel    ││ Node-type builder (target)   ││ TargetWorklist (target)   │
+│                      ││ ExpressionBuilder (rules)    ││ RuleList (rules view)     │
+│                      ││ AutoMapWorkspace (automap)   ││ Toolbar: Sort + View +    │
+│                      ││                               ││ Search/Filters            │
 ├──────────────────────┴┴──────────────────────────────┴┴───────────────────────────┤
 │ Bottom resize handle                                                               │
 ├────────────────────────────────────────────────────────────────────────────────────┤
@@ -491,8 +507,8 @@ Legend: vertical `││` separators are draggable resize handles between panels
 
 **Slot props on `MappingEditorPage`:**
 - `sourceContent` — `SourceSchemaPanel` (left panel, internal search)
-- `targetWorklistContent` — `TargetWorklist` (target view) or `RuleList` (rules view)
-- `builderContent` — node-type-specific right panel (see below)
+- `builderContent` — center authoring panel (`BuilderEmptyState`/`ScalarFieldBuilder`/`ObjectSummaryPanel`/`ArrayBuilder`/`ExpressionBuilderPanel`/`AutoMapWorkspace`)
+- `targetWorklistContent` — right panel (`TargetWorklist` in target view, `RuleList` in rules view)
 - `bottomContent` — `ConnectedInlinePreviewStrip` (Target View) or `BottomArea` (Rules View)
 
 `toolbarContent` was removed in FS-022; sort and view toggle controls are now internal to `TargetWorklist`.
@@ -502,35 +518,38 @@ Legend: vertical `││` separators are draggable resize handles between panels
 ```
 MappingEditorPage
 ├── SourceSchemaPanel          (left panel; internal search)
-├── TargetWorklist             (center panel, target view)
-│   └── TargetFieldRow[]       (recursive tree)
-├── RuleList                   (center panel, rules view)
-├── Right panel (conditional on selected node type)
+├── Center panel (conditional)
 │   ├── BuilderEmptyState      (no selection)
 │   ├── ScalarFieldBuilder     (scalar leaf node)
 │   ├── ObjectSummaryPanel     (object node)
 │   ├── ArrayBuilder           (array node)
-│   │   ├── ArrayModeSelector
-│   │   ├── MapCollectionEditor / FilterMapCollectionEditor / BuildFromValuesEditor / MergeBranchesEditor / CustomExpressionEditor
-│   │   ├── ItemTemplateEditor
-│   │   │   ├── ItemFieldRow[]
-│   │   │   ├── CrossArrayLookupEditor
-│   │   │   └── Nested ArrayBuilder (focused recursive panel)
-│   │   ├── ModeSwitchConfirmDialog
-│   │   └── ArrayResultPreview (via BuilderFeedbackArea resultSlot)
-│   └── ExpressionBuilderPanel (rules view)
-└── Bottom content (by view)
-    ├── ConnectedInlinePreviewStrip
-    │   └── InlinePreviewStrip
-    └── BottomArea
+│   ├── ExpressionBuilderPanel (rules view)
+│   └── AutoMapWorkspace       (automap workspace view)
+│       ├── WorkspaceHeader
+│       ├── WorkspaceToolbar
+│       ├── WorkspaceSuggestionCard[]
+│       ├── WorkspaceSuggestionPreview (inside card preview slots)
+│       └── RefreshConfirmBanner
+├── Right panel (worklist/rule list)
+│   ├── TargetWorklist         (target view)
+│   │   └── TargetFieldRow[]   (recursive tree)
+│   └── RuleList               (rules view)
+├── Bottom content (by view)
+│   ├── ConnectedInlinePreviewStrip
+│   │   └── InlinePreviewStrip
+│   └── BottomArea
+└── (route page level, outside grid)
+    ├── VersionHistoryDrawer
+    └── UnsavedChangesOverlay
 ```
 
 ### View Toggle Pattern
 
-The **Target View / Rules View** segmented toggle (`EditorView = 'target' | 'rules'`) is now rendered in the `TargetWorklist` toolbar row (not in a global toolbar).
+The **Target View / Rules View** segmented toggle is rendered in the `TargetWorklist` toolbar row (not in a global toolbar). `EditorView` is now `target | rules | automap`, where `automap` is entered by explicit Auto-Map triggers (not via the toggle).
 
-- **Target View (default):** center column = `TargetWorklist`; right panel = node-type-specific builder
-- **Rules View:** center column = `RuleList`; right panel = `ExpressionBuilderPanel` (existing expression editing UX)
+- **Target View (default):** center column = node-type-specific builder; right panel = `TargetWorklist`
+- **Rules View:** center column = `ExpressionBuilderPanel`; right panel = `RuleList`
+- **Auto-Map Workspace View:** center column = `AutoMapWorkspace`; right panel stays visible for context
 
 **Selection persistence across view toggles:**
 - Target → Rules: find the rule whose `targetPath` matches `selectedTargetPath`; set `selectedRuleIndex`
@@ -549,7 +568,7 @@ State is managed at the composition level (`MappingEditor.tsx`):
 
 ### Node-Type-Specific Right Panel Pattern
 
-When a target field is selected in Target View, the right panel renders based on the node's type:
+When a target field is selected in Target View, the center builder panel renders based on the node's type:
 
 | Node type | Right panel component |
 |---|---|
@@ -598,6 +617,133 @@ Preview model summary:
 - Array result preview renders array-shaped results with truncation and expand behavior
 - Empty/null states provide contextual hints
 - Merge branch contribution summary is best-effort and may be estimated when exact derivation is impractical
+
+### Auto-Map Review Workspace Architecture (FS-046 → FS-048)
+
+FS-048 replaces the FS-046 right-side drawer with a dedicated **center-panel workspace mode** for section-level AI suggestion review.
+
+#### Workspace Mode Switch Pattern
+
+- `EditorView` extends to `target | rules | automap`
+- Entry to `automap` is explicit (`enterAutoMapWorkspace(sectionPath)`), not available from the target/rules segmented toggle
+- In `automap` mode, center panel renders `AutoMapWorkspace`
+- Right panel remains mounted but visually secondary (`opacity-60`, `pointer-events-none`) so review focus stays on the center workspace
+- Exit action (`Back to Editor`) returns to `target` while preserving section context and selected target path
+
+#### Trigger + Re-entry Entry Points
+
+Primary trigger:
+- `ObjectSummaryPanel` "Auto-Map This Section" button
+- Button label changes to **"Review Auto-Map Suggestions"** when persisted suggestions exist for the section
+- Pending indicator text shows `N suggestions pending review`
+
+Persistent re-entry affordance:
+- `EditorTopBar` renders subtle pill (`Auto-Map: N pending`) when pending suggestions exist
+- Clicking the pill re-enters workspace for the persisted section path
+
+#### `useAutoMapWorkspace` Hook Contract
+
+`useAutoMapWorkspace` is now the canonical orchestration surface:
+
+- Lifecycle state: `idle | loading | success | error`
+- Core actions: `triggerAutoMap`, `acceptSuggestion`, `editSuggestion`, `dismissSuggestion`, `undoDismiss`, `bulkAcceptAllValid`
+- Refresh actions: `refreshAll`, `refreshUnmapped`, `refreshStale`
+- Filtering: `activeFilters`, `toggleFilter`, `clearFilters`, `filteredItems`
+- Persistence + metadata: `sectionPath`, `generatedAt`, `previousSuggestionsAvailable`, `restorePreviousSuggestions`, `hasPersistedSuggestions`
+- Draft-model integration: acceptance/edit actions call `updateDraft(targetPath, expression)` so AI suggestions remain suggestion-only and flow through unsaved-change tracking
+
+#### Suggestion Persistence Model
+
+Persistence is session-scoped and section-scoped:
+
+- Storage medium: `sessionStorage`
+- Key pattern: `keyra:automap-suggestions:{mappingId}`
+- Value model: record keyed by `sectionPath`, each with `items[]`, `generatedAt`, and optional `sourceContext`
+- Hydration behavior: `triggerAutoMap(sectionPath)` first attempts restore from persistence; only fetches when no persisted suggestions exist
+- Corruption recovery: malformed payloads are discarded safely and treated as empty state
+
+This model preserves review context across intra-session navigation without introducing backend persistence coupling.
+
+#### Extended Lifecycle State Machine
+
+```ts
+type SuggestionLifecycleStatus =
+  | 'suggested'
+  | 'accepted'
+  | 'edited'
+  | 'dismissed'
+  | 'stale';
+```
+
+Transition model:
+
+| From | Event | To | Side effect |
+|---|---|---|---|
+| suggested | accept | accepted | `updateDraft(targetPath, suggestedExpression)` |
+| suggested | edit | edited | `updateDraft(...)`, navigate to target, exit workspace |
+| suggested | dismiss | dismissed | none |
+| dismissed | undoDismiss | suggested | none |
+| suggested/dismissed | stale-detected | stale | none |
+| stale | accept | accepted | `updateDraft(...)` |
+| stale | dismiss | dismissed | none |
+| stale | refresh | suggested | replaced by refreshed suggestion |
+
+`accepted` and `edited` are terminal review outcomes in the workspace model.
+
+#### Staleness Detection Strategy
+
+`auto-map-staleness.ts` detects stale suggestions on hydration/re-entry by comparing generation-time baseline to current rule/draft state:
+
+- rule expression changed since generation for same target
+- rule added for a target that was previously unmapped (`isNew` at generation)
+
+Stale markers are advisory UX signals, not hard blockers.
+
+#### Refresh / Regenerate Merge Strategy
+
+Refresh operations use full-section generation with client-side merge behavior:
+
+- Refresh All: regenerate unresolved suggestions
+- Refresh Unmapped: focus refresh on unmapped subset
+- Refresh Stale: focus refresh on stale subset
+
+Merge rules:
+- preserve `accepted` and `edited`
+- replace unresolved suggestions with refreshed results
+- keep workspace continuity (summary, filters, section context)
+
+#### Preview Integration Pattern
+
+Preview in workspace cards is optional/progressive:
+
+- `WorkspaceSuggestionPreview` renders current vs suggested outputs
+- `useSuggestionPreview` evaluates lazily with lightweight debounce (150ms)
+- Preview renders only when source data exists in `PreviewContext`; otherwise workspace-level no-source callout is shown
+- Preview failure is isolated per card and does not block review actions
+
+#### Filter + Bulk Action Model
+
+Toolbar filter chips support status/state slices (`all`, `unmapped`, `replacing`, `valid`, `invalid`, `lowConfidence`, `accepted`, `dismissed`, `stale`).
+
+Bulk actions:
+- Accept All Valid
+- Refresh Unmapped
+- Refresh Stale
+- Refresh All (with inline confirmation banner)
+
+All actions are state-derived and disable safely when not applicable.
+
+#### Showcase vs RAG-Ready Design Decisions
+
+The workspace remains backend-strategy agnostic:
+
+- Current showcase mode passes optional source-context text to AI generation
+- Future RAG backend can ignore client context and retrieve server-side context
+- UI contracts (`autoMapSection`, workspace persistence, lifecycle model) stay stable across backend evolution
+
+#### Drawer Retirement Note
+
+`AutoMapReviewDrawer` and `useAutoMapReview` remain in the codebase for compatibility/history but are no longer composed by `MappingEditor.tsx`. The active architecture is workspace mode (`useAutoMapWorkspace` + `AutoMapWorkspace`).
 
 ### Drag-and-Drop Pattern (HTML5 API)
 

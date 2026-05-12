@@ -1160,6 +1160,16 @@ function decomposeCallNodeToChainState(
 
     const fn = current;
 
+    // source()/static() are valid chain bases; stop peeling and resolve base in Phase 2.
+    if (isSourceCall(fn)) {
+      current = fn;
+      break;
+    }
+    if (fn.name === 'static' && fn.arguments.length === 1) {
+      current = fn;
+      break;
+    }
+
     if (fn.name === 'if' && fn.arguments.length === 3) {
       stepsOuterFirst.push({ node: fn, innerAccumulator: '' });
       // For if(), we cannot peel further through the predicate.

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { explainRuleHttp, suggestExpressionHttp } from '../ai-api-client';
+import { autoMapSectionHttp, explainRuleHttp, suggestExpressionHttp } from '../ai-api-client';
 
 describe('explainRuleHttp', () => {
   const apiUrl = 'https://example.execute-api.us-east-1.amazonaws.com/sandbox';
@@ -424,5 +424,193 @@ describe('suggestExpressionHttp', () => {
     const requestInit = fetchMock.mock.calls[0][1] as globalThis.RequestInit;
     const parsedBody = JSON.parse(String(requestInit.body));
     expect(parsedBody).not.toHaveProperty('targetDescription');
+  });
+});
+
+describe('autoMapSectionHttp', () => {
+  const apiUrl = 'https://example.execute-api.us-east-1.amazonaws.com/sandbox';
+  const input = {
+    projectId: 'project-1',
+    mappingId: 'mapping-1',
+    sectionPath: 'Order.Header',
+    sourceContext: '- Invoice.InvoiceAmount (number)\n- Invoice.CurrencyCode (string)',
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('returns AutoMapSectionResult on success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          suggestions: [
+            {
+              target: 'Order.Header.Currency',
+              expression: 'default(source("Invoice.CurrencyCode"), "USD")',
+              explanation: 'Uses source currency and falls back to USD.',
+              confidence: 'high',
+              validation: {
+                valid: true,
+                diagnostics: [],
+              },
+            },
+          ],
+        },
+      }),
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(autoMapSectionHttp(apiUrl, input)).resolves.toEqual({
+      suggestions: [
+        {
+          target: 'Order.Header.Currency',
+          expression: 'default(source("Invoice.CurrencyCode"), "USD")',
+          explanation: 'Uses source currency and falls back to USD.',
+          confidence: 'high',
+          validation: {
+            valid: true,
+            diagnostics: [],
+          },
+        },
+      ],
+      diagnostics: undefined,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/auto-map`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: input.projectId,
+        mappingId: input.mappingId,
+        sectionPath: input.sectionPath,
+        sourceContext: input.sourceContext,
+      }),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('sends targetSection in request body when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const inputWithTarget = {
+      projectId: 'project-1',
+      mappingId: 'mapping-1',
+      sectionPath: 'Order.Header',
+      targetSection: '- Order.Header.Currency (string)\n- Order.Header.DocumentType (string)',
+      sourceContext: '- Invoice.CurrencyCode (string)',
+    };
+
+    await autoMapSectionHttp(apiUrl, inputWithTarget);
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(calledBody.targetSection).toBe(inputWithTarget.targetSection);
+  });
+
+  it('omits targetSection from request body when undefined', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await autoMapSectionHttp(apiUrl, input);
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(calledBody).not.toHaveProperty('targetSection');
+  });
+
+  it('omits sectionPath from request body when undefined (header mode)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const headerModeInput = {
+      projectId: 'project-1',
+      mappingId: 'mapping-1',
+      targetSection: '- Order.Header.Currency (string)',
+    };
+
+    await autoMapSectionHttp(apiUrl, headerModeInput);
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(calledBody).not.toHaveProperty('sectionPath');
+    expect(calledBody.targetSection).toBe(headerModeInput.targetSection);
+  });
+
+  it('maps HTTP 429 to temporarily busy message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+      }),
+    );
+
+    await expect(autoMapSectionHttp(apiUrl, input)).rejects.toThrow(
+      'The AI service is temporarily busy. Please try again in a moment.',
+    );
+  });
+
+  it('maps network TypeError to connection message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(autoMapSectionHttp(apiUrl, input)).rejects.toThrow(
+      'Could not reach the Auto-Map service. Check your connection and try again.',
+    );
+  });
+
+  it('aborts after 60 seconds and maps timeout to connection message', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: globalThis.RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = autoMapSectionHttp(apiUrl, input);
+    const assertion = expect(promise).rejects.toThrow(
+      'Could not reach the Auto-Map service. Check your connection and try again.',
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
+  it('throws malformed response error when suggestions field is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {},
+        }),
+      }),
+    );
+
+    await expect(autoMapSectionHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
   });
 });

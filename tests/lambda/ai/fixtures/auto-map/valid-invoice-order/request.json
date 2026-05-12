@@ -1,0 +1,5 @@
+{
+  "targetSection": "- Order.Header.DocumentType (string)\n- Order.Header.DocumentDate (string)\n- Order.Header.CurrencyCode (string)",
+  "sourceContext": "- InvoiceAmount (number)\n- InvDate (string, MM/DD/YYYY)\n- InvoiceCurrency (string)\n- Header.Currency (string)",
+  "businessContext": "This mapping converts AP invoice data into the ShipmentOrder target model."
+}

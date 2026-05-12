@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { explainRuleHttp, suggestExpressionHttp } from '../ai-api-client';
+import { autoMapSectionHttp, explainRuleHttp, suggestExpressionHttp } from '../ai-api-client';
 import { HybridAdapter } from '../hybrid-adapter';
 import { LocalStorageAdapter } from '../local-storage-adapter';
 
 vi.mock('../ai-api-client', () => ({
+  autoMapSectionHttp: vi.fn(),
   explainRuleHttp: vi.fn(),
   suggestExpressionHttp: vi.fn(),
 }));
@@ -79,6 +80,21 @@ describe('HybridAdapter', () => {
       explanation: 'Uses source currency and falls back to USD.',
     });
     expect(suggestExpressionHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
+  });
+
+  it('routes autoMapSection to autoMapSectionHttp with apiUrl and input', async () => {
+    const adapter = new HybridAdapter('https://example.com/sandbox');
+    const input = {
+      projectId: 'project-1',
+      mappingId: 'mapping-1',
+      sectionPath: 'Order.Header',
+      sourceContext: '- Invoice.InvoiceAmount (number)',
+    };
+
+    vi.mocked(autoMapSectionHttp).mockResolvedValue({ suggestions: [] });
+
+    await expect(adapter.autoMapSection(input)).resolves.toEqual({ suggestions: [] });
+    expect(autoMapSectionHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
   });
 
   it('delegates CRUD methods to LocalStorageAdapter behavior', async () => {

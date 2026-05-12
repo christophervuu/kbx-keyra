@@ -39,6 +39,7 @@ src/
     ai/               AI lambdas (aiAutoMap, aiSuggestExpression, aiSmartFix, etc.)
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
+      auto-map.ts     AI auto-map lambda handler consuming shared runtime
     preview/          Preview lambda (previewMapping)
   lib/                Shared utilities used across lambdas
     ai/               Shared AI runtime modules (types, config, adapters, orchestration)
@@ -330,11 +331,27 @@ ui/
           ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
           SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
           SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
+          AutoMapWorkspace.tsx         FS-048 center-panel Auto-Map workspace shell with loading/error/empty/success states, sticky header integration, toolbar/confirmation/no-source slots, and completion banner
+          WorkspaceHeader.tsx          FS-048 workspace header (section path, summary counters, relative refresh timestamp, Back to Editor)
+          WorkspaceSuggestionCard.tsx  FS-048 enriched suggestion card: lifecycle badges (`suggested|accepted|edited|dismissed|stale`), expand/collapse, diagnostics, stale warning, per-item actions
+          WorkspaceSuggestionCard.test.tsx  FS-048 component tests for suggestion card state variants and actions
+          WorkspaceToolbar.tsx         FS-048 filter + bulk-action toolbar (Accept All Valid, Refresh Unmapped/Stale/All) with count badges and refresh-disable handling
+          WorkspaceToolbar.test.tsx    FS-048 component tests for filter chips, counts, and bulk-action states
+          WorkspaceSuggestionPreview.tsx FS-048 per-suggestion preview surface (current vs suggested output) plus no-source-data callout component
+          WorkspaceSuggestionPreview.test.tsx FS-048 component tests for preview rendering, no-data, and error/fallback states
+          RefreshConfirmBanner.tsx     FS-048 inline confirmation banner for Refresh All with countdown auto-dismiss
+          RefreshConfirmBanner.test.tsx FS-048 component tests for countdown, confirm/cancel, and alertdialog semantics
+          AutoMapWorkspace.test.tsx    FS-048 component tests for workspace shell states, slot rendering, and completion behavior
+          AutoMapReviewDrawer.tsx      FS-046 legacy right-side review drawer retained but no longer composed by MappingEditor (retired in FS-048)
+          AutoMapReviewDrawer.test.tsx FS-046 component tests (all drawer states, bulk actions visibility, completion banner, summary badges, close/retry callbacks)
+          AutoMapReviewDrawer.integration.test.tsx FS-046 integration tests (TestHarness composing hook + drawer + cards; accept/dismiss/undo/bulk-accept flows; 16 tests)
+          SuggestionReviewCard.tsx     FS-046 individual suggestion card: target path, new/replace badge, expression comparison, confidence/validation badges, Accept/Edit/Dismiss actions, Undo dismiss
+          SuggestionReviewCard.test.tsx FS-046 component tests (badge variants, action callbacks, undo dismiss, accessibility)
           ObjectTemplateBuilder.tsx  Key-value pair editor for map() object template: add/remove pairs, key text inputs, ArgumentSlot value slots in array context (T-07)
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
           RawDslEditor.test.tsx      Component tests (25 tests: rendering, token colors, placeholder, readOnly, onChange, onCursorChange, bracket matching, ref API, error decoration overlay, aria-invalid, tooltip)
-          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01, updated FS-022 T-01, T-02): Source panel (pixel-width, collapsible with expand strip), Target Worklist (pixel-width, never collapses), Builder/Editor (flex-1), full-width bottom area; slots: sourceContent, targetWorklistContent, builderContent, bottomContent; drag handles between columns and above bottom; layout managed by useResizableLayout hook (FS-022 T-02)
+          MappingEditorPage.tsx      Three-column + bottom-area layout shell (FS-020 T-01, updated FS-022, FS-048): Source panel (pixel-width, collapsible with expand strip), Builder/Editor center panel (pixel-width, never collapses), Target Worklist right panel (flex-1), full-width bottom area; slots: sourceContent, targetWorklistContent, builderContent, bottomContent; drag handles between columns and above bottom; layout managed by useResizableLayout hook (FS-022 T-02); `isAutoMapMode` tags center panel for workspace state (FS-048)
           MappingEditorPage.test.tsx Component tests (22 tests: top bar, panels, slots, routing)
           NestedFunctionBuilder.tsx  Inline mini builder for nested function arguments: TransformPicker + ArgumentConfigurator, accordion-style, limited to nestingLevel < 2 (T-06)
           NestedFunctionBuilder.test.tsx Component tests (7 tests: initial state, function selection, args change, clear/reset)
@@ -431,6 +448,12 @@ ui/
           use-explain-rule.test.ts       FS-041 hook unit tests (idle state, loading, success, error, dismiss, re-explain, abort on re-invocation, offline error, cleanup on unmount)
           use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping
           use-suggest-expression.test.ts FS-042 hook unit tests (state transitions, offline/network/rate-limit mapping, abort semantics, unmount cleanup)
+          use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, and metadata
+          use-auto-map-workspace.test.ts FS-048 hook unit tests for generation, hydration, lifecycle actions, refresh paths, filtering, and summary derivation
+          use-suggestion-preview.ts      FS-048 lazy per-expression preview hook (debounced evaluateExpression, source-data guard, error isolation)
+          use-suggestion-preview.test.ts FS-048 hook unit tests for debounce, source-data absence, successful evaluation, and error fallback
+          use-auto-map-review.ts         FS-046 legacy drawer review hook retained for compatibility; no longer used by MappingEditor composition
+          use-auto-map-review.test.ts    FS-046 legacy hook tests retained
           use-deployment-context.ts      Deployment context hook (FS-037 T-03): loads DeploymentContext via adapter, derives per-environment status map, isModeAvailable() gates comparison modes by deploy status, refresh(), Phase 0 error → all env modes unavailable
           use-deployment-context.test.ts Hook unit tests (load success, environmentStatus map, isModeAvailable per mode, Phase 0 error handling, current-vs-saved always available, refresh, all-deployed)
           use-environment-comparison.ts  Comparison orchestration hook (FS-037 T-04): two-sided parallel execution via Promise.allSettled, client-side (working/saved config) and server-side (direct adapter call with 10s timeout), stale-run cancellation via runId ref, diff via computeDiff(), canRun gating
@@ -453,6 +476,8 @@ ui/
           array-expression-generator.test.ts  FS-043 T-02 unit tests: all five modes, filter predicate operators (all 8), cross-array lookup (item/parent scope, with/without fallback), build-from-values (object/primitive entries, null filtering), merge branches, incomplete/empty state returns empty string, parse verification via engine parse() for canonical AE patterns
           array-builder-state.ts       FS-043 T-01 array builder state model: ArrayBuilderState (mode + collectionState + itemTemplate + completionStatus), CollectionState discriminated union (MapCollectionState/FilterMapCollectionState/BuildFromValuesCollectionState/MergeBranchesCollectionState/CustomExpressionCollectionState), FilterPredicateState (structured boolean-focused + raw fallback), ValueEntry (object/primitive, reorderable), MergeBranch (max 10), ItemTemplateState with nestedArrays map, ItemFieldMapping (chain/crossArrayLookup/empty), CrossArrayLookupState, CompletionStatus, deriveCompletionStatus(), isCompatibleModeSwitch(), getModePreservationRules(), factory functions, type guards
           array-builder-state.test.ts  FS-043 T-01 unit tests: deriveCompletionStatus (all 4 status values), isCompatibleModeSwitch (all 20 directional mode pairs), getModePreservationRules (all transitions), factory functions, type guards
+          derive-eligible-targets.ts   FS-047 T-03 pure utility: deriveEligibleTargets(schema, sectionPath?) → formatted "- {path} ({type})" listing of non-object nodes; section prefix filter; 200-line cap; used as {{targetSection}} in auto-map AI prompt
+          derive-eligible-targets.test.ts  FS-047 T-03 unit tests: object exclusion, array inclusion, section prefix filter, header mode (no sectionPath), 200-line cap, empty result, null/undefined schema
           array-validation.ts          FS-043 T-11 multi-level array validation: ArrayValidationState, ArrayValidationEntry (level/fieldPath/message/severity), deriveArrayValidation(state, expression, sourceSchema, targetArrayNode)→ArrayValidationState; collection-level (source type, filter predicate completeness, merge branch source types), item-level (required field coverage), leaf-level (type compatibility), final-output (expression empty check); incomplete≠invalid distinction (AE-10); getFieldValidationEntries() helper
           builder-validation-types.ts  FS-040 builder validation model types: BuilderValidationState, BuilderValidationIssue, OutputTypeMismatch — two-level validation (structural + output type) for the Builder panel
           chain-builder-state.ts       FS-038 chain-based builder state model (ChainBuilderState, LogicStep union, TransformLogicStep, ConditionLogicStep, ValueMapLogicStep, ChainBranch, ConditionOperand, factory functions, completeness checks, step summaries, type guards); FS-039 unified chain model types (ChainState, ChainSource field/static/none, ChainStep union, FS039ConditionStep with required elseBranch, FS039ValueMapStep with required defaultValue, OperandValue with currentValue/field/static/expression kinds, Predicate, ConditionClause, DraftRulesMap, DraftFieldState, DraftValidationState) with factory functions and type guards
@@ -478,6 +503,10 @@ ui/
           infer-rule-type.ts         Maps outermost expression function name to display label
           infer-rule-type.test.ts    Unit tests (14 tests: all rule type patterns)
           execution-result-utils.ts  deriveExecutionVerdict (idle/executing/pass/fail/error from PreviewExecutionState + optional DiffResult) + formatDiffSummary (human-readable diff summary label) (FS-035 T-03, T-04)
+          auto-map-persistence.ts    FS-048 Auto-Map workspace persistence helpers: sessionStorage-backed save/load/clear/list per mapping + section, sourceContextHash generation, corruption recovery, and quota-safe writes
+          auto-map-persistence.test.ts FS-048 unit tests for persistence keying, serialization, corruption recovery, and clear/list behavior
+          auto-map-staleness.ts      FS-048 stale suggestion detection utilities (rule drift and newly-mapped targets compared to generation baseline)
+          auto-map-staleness.test.ts FS-048 unit tests for stale detection scenarios and no-change guards
           failure-explainer.ts       explainDiagnostic() — pattern-matches Diagnostic + optional TraceEntry to produce FailureExplanation (summary + suggestion); 5 patterns: null+source, type mismatch, missing path, unknown function, general null (FS-036 T-08)
           failure-explainer.test.ts  Unit tests for all 5 patterns + no-match case + edge cases
       deployments/        Deployment Page (mapping-level and project-level)
@@ -551,7 +580,10 @@ tests/
     ai/               AI lambda handler tests
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
       suggest-expression.test.ts Tests for ai suggest-expression lambda request validation, mapping, and status handling
-      fixtures/       Local runner fixtures for explain-rule handler requests and assertions
+      auto-map.test.ts      Tests for ai auto-map lambda request validation, AI status mapping, and parse-level rule validation enrichment
+      fixtures/       Local runner fixtures for AI handler requests and assertions
+        auto-map-event.json Single-event API Gateway fixture for local auto-map invocation
+        auto-map-event.md   Local invocation instructions + required environment variables for auto-map fixture
         valid-direct-source/ Fixture for source("id") example request
         valid-conditional-document-type/ Fixture for conditional expression example request
         invalid-missing-expression/ Fixture for request validation example (400)

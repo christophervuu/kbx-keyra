@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, Info, Play, X, XCircle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, Info, Play, XCircle } from 'lucide-react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -106,34 +106,30 @@ function deriveStatusBarState(
   return 'success';
 }
 
-interface StatusBarProps {
+interface RunInfoInlineProps {
   sourceData: string;
   isRunning: boolean;
   status: { errors: number; warnings: number } | null;
   ruleCount?: number;
   durationMs?: number | null;
-  diagnostics?: readonly PreviewDiagnostic[];
-  testingPageUrl: string;
 }
 
-function StatusBar({
+function RunInfoInline({
   sourceData,
   isRunning,
   status,
   ruleCount = 0,
   durationMs,
-  testingPageUrl,
-}: StatusBarProps) {
+}: RunInfoInlineProps) {
   const state = deriveStatusBarState(sourceData, isRunning, status);
 
-  const baseClass =
-    'flex h-7 shrink-0 items-center gap-1.5 border-b border-slate-800 bg-slate-950 px-3 text-xs';
+  const baseClass = 'inline-flex min-w-0 items-center gap-1.5 rounded border border-slate-800 bg-slate-900 px-2 py-0.5 text-xs';
 
   if (state === 'idle') {
     return (
       <div className={`${baseClass} text-slate-500`} data-testid="strip-status-bar">
         <span aria-hidden="true">●</span>
-        <span>Paste source JSON and click Run</span>
+        <span className="truncate">Paste source JSON and click Run</span>
       </div>
     );
   }
@@ -142,7 +138,7 @@ function StatusBar({
     return (
       <div className={`${baseClass} text-slate-500`} data-testid="strip-status-bar">
         <span aria-hidden="true">●</span>
-        <span>Ready — click Run or enable Auto-run</span>
+        <span className="truncate">Ready — click Run or enable Auto-run</span>
       </div>
     );
   }
@@ -155,7 +151,7 @@ function StatusBar({
           aria-label="Running"
           className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent"
         />
-        <span>Evaluating {ruleCount} rule{ruleCount !== 1 ? 's' : ''}…</span>
+        <span className="truncate">Evaluating {ruleCount} rule{ruleCount !== 1 ? 's' : ''}…</span>
       </div>
     );
   }
@@ -167,7 +163,7 @@ function StatusBar({
     return (
       <div className={`${baseClass} text-green-400`} data-testid="strip-status-bar">
         <span aria-hidden="true">✓</span>
-        <span>
+        <span className="truncate">
           {ruleCount} rule{ruleCount !== 1 ? 's' : ''} evaluated · {errors} error
           {errors !== 1 ? 's' : ''} · {warnings} warning{warnings !== 1 ? 's' : ''}
           {duration ? ` ${duration}` : ''}
@@ -183,7 +179,7 @@ function StatusBar({
     return (
       <div className={`${baseClass} text-amber-400`} data-testid="strip-status-bar">
         <span aria-hidden="true">⚠</span>
-        <span>
+        <span className="truncate">
           {ruleCount} rule{ruleCount !== 1 ? 's' : ''} evaluated · {errors} error
           {errors !== 1 ? 's' : ''} · {warnings} warning{warnings !== 1 ? 's' : ''}
           {duration ? ` ${duration}` : ''}
@@ -198,17 +194,9 @@ function StatusBar({
   return (
     <div className={`${baseClass} text-red-400`} data-testid="strip-status-bar">
       <span aria-hidden="true">✗</span>
-      <span>
+      <span className="truncate">
         {errors} error{errors !== 1 ? 's' : ''} · {warnings} warning{warnings !== 1 ? 's' : ''}
       </span>
-      <span aria-hidden="true">·</span>
-      <Link
-        to={testingPageUrl}
-        data-testid="strip-status-bar-test-lab-link"
-        className="text-red-400 underline hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-      >
-        Open Test Lab →
-      </Link>
     </div>
   );
 }
@@ -686,62 +674,6 @@ export function InlinePreviewStrip({
           Preview
         </span>
 
-        {/* Test case selector */}
-        <TestCaseSelector testCases={testCases} onLoadTestCase={onLoadTestCase} />
-
-        {/* Clear button */}
-        <button
-          type="button"
-          onClick={onClearSource}
-          aria-label="Clear source data"
-          data-testid="strip-clear-button"
-          className="flex items-center rounded p-0.5 text-slate-500 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-        >
-          <X size={12} aria-hidden="true" />
-        </button>
-
-        {/* Save as test case button */}
-        <button
-          type="button"
-          onClick={() => {
-            setSaveError(null);
-            setSaveModalOpen(true);
-          }}
-          disabled={!canSave}
-          aria-disabled={!canSave}
-          aria-label="Save as test case"
-          data-testid="strip-save-testcase-button"
-          className={[
-            'flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors',
-            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-            canSave
-              ? 'text-slate-400 hover:text-slate-200'
-              : 'cursor-not-allowed text-slate-600',
-          ].join(' ')}
-        >
-          {savedFeedback ? 'Saved ✓' : '⊕ Save'}
-        </button>
-
-        {/* Auto-run toggle */}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={autoRun}
-          aria-label={autoRun ? 'Auto-run enabled' : 'Auto-run disabled'}
-          data-testid="strip-autorun-toggle"
-          onClick={() => onAutoRunChange?.(!autoRun)}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-        >
-          <span
-            className={[
-              'inline-block h-2 w-2 rounded-full',
-              autoRun ? 'bg-green-400' : 'bg-slate-600',
-            ].join(' ')}
-            aria-hidden="true"
-          />
-          <span className={autoRun ? 'text-slate-300' : 'text-slate-500'}>Auto</span>
-        </button>
-
         {/* Run button */}
         <button
           type="button"
@@ -769,7 +701,63 @@ export function InlinePreviewStrip({
           Run
         </button>
 
+        {/* Auto-run toggle */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoRun}
+          aria-label={autoRun ? 'Auto-run enabled' : 'Auto-run disabled'}
+          data-testid="strip-autorun-toggle"
+          onClick={() => onAutoRunChange?.(!autoRun)}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          <span
+            className={[
+              'inline-block h-2 w-2 rounded-full',
+              autoRun ? 'bg-green-400' : 'bg-slate-600',
+            ].join(' ')}
+            aria-hidden="true"
+          />
+          <span className={autoRun ? 'text-slate-300' : 'text-slate-500'}>Auto</span>
+        </button>
+
+        {/* Test case selector */}
+        <TestCaseSelector testCases={testCases} onLoadTestCase={onLoadTestCase} />
+
+        {/* Save as test case button */}
+        <button
+          type="button"
+          onClick={() => {
+            setSaveError(null);
+            setSaveModalOpen(true);
+          }}
+          disabled={!canSave}
+          aria-disabled={!canSave}
+          aria-label="Save as test case"
+          data-testid="strip-save-testcase-button"
+          className={[
+            'flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+            canSave
+              ? 'text-slate-400 hover:text-slate-200'
+              : 'cursor-not-allowed text-slate-600',
+          ].join(' ')}
+        >
+          {savedFeedback ? 'Saved ✓' : '⊕ Save'}
+        </button>
+
+        {/* Run info */}
+        <RunInfoInline
+          sourceData={sourceData}
+          isRunning={isRunning}
+          status={status}
+          ruleCount={ruleCount}
+          durationMs={durationMs}
+        />
+
         <span className="flex-1" aria-hidden="true" />
+
+        <span className="text-slate-600" aria-hidden="true">|</span>
 
         {/* Open Test Lab link */}
         <Link
@@ -791,17 +779,6 @@ export function InlinePreviewStrip({
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       </div>
-
-      {/* Status bar */}
-      <StatusBar
-        sourceData={sourceData}
-        isRunning={isRunning}
-        status={status}
-        ruleCount={ruleCount}
-        durationMs={durationMs}
-        diagnostics={diagnostics}
-        testingPageUrl={testingPageUrl}
-      />
 
       {/* Three-pane content area */}
       <div className="flex min-h-0 flex-1 divide-x divide-slate-800">

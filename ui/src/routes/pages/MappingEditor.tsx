@@ -6,25 +6,29 @@ import { Button } from '@/components';
 import { ConfirmDialog } from '@/features/mappings/components';
 import {
   ArrayBuilder,
-  ArrayMappingBuilder,
+  AutoMapWorkspace,
   BuilderEmptyState,
   ConfigurationModal,
   ConfigurationPanel,
   ConnectedInlinePreviewStrip,
   ExpressionBuilderPanel,
   ObjectSummaryPanel,
+  RefreshConfirmBanner,
   ScalarFieldBuilder,
   SourceSchemaPanel,
   TargetWorklist,
   UnsavedChangesOverlay,
   VersionDiffView,
   VersionHistoryDrawer,
+  WorkspaceToolbar,
+  WorkspaceNoSourceDataCallout,
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
-import { useMappingEditor, useVersionHistory, useTargetStatus } from '@/features/mappings/hooks';
+import { usePreviewContext } from '@/features/mappings/context/preview-context';
+import { useMappingEditor, useVersionHistory, useTargetStatus, useAutoMapWorkspace } from '@/features/mappings/hooks';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
@@ -44,6 +48,11 @@ function collectTargetSchemaPaths(nodes: readonly SchemaTreeNode[]): string[] {
   }
   walk(nodes);
   return paths;
+}
+
+function WorkspaceNoSourceDataSlot() {
+  const { sourceData } = usePreviewContext();
+  return sourceData === null ? <WorkspaceNoSourceDataCallout /> : null;
 }
 
 function findNodeByPath(
@@ -146,6 +155,66 @@ export default function MappingEditor() {
   const [isChangesOverlayOpen, setIsChangesOverlayOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
+  // Auto-Map workspace hook (FS-048 T-10) — replaces useAutoMapReview (FS-046)
+  // ---------------------------------------------------------------------------
+  const autoMapWorkspace = useAutoMapWorkspace({
+    adapter,
+    mappingId,
+    projectId,
+    rules: editor.rules,
+    updateDraft: editor.actions.updateDraft,
+    setSelectedTargetPath: (path: string) => setSelectedTargetPath(path),
+    exitWorkspace: () => setView('target'),
+    parsedSourceSchema: editor.parsedSourceSchema,
+    parsedTargetSchema: editor.parsedTargetSchema,
+  });
+
+  // ---------------------------------------------------------------------------
+  // View state (must be before handleAutoMapTrigger)
+  // ---------------------------------------------------------------------------
+  const [view, setView] = useState<EditorView>('target');
+
+  // ---------------------------------------------------------------------------
+  // Auto-Map workspace mode state (FS-048 T-02)
+  // ---------------------------------------------------------------------------
+  /** The section path currently loaded in the Auto-Map workspace (preserved across exits). */
+  const [autoMapSectionPath, setAutoMapSectionPath] = useState<string | null>(null);
+
+  /** Enter the Auto-Map workspace for a given section path. */
+  const enterAutoMapWorkspace = useCallback((sectionPath: string) => {
+    setAutoMapSectionPath(sectionPath);
+    setView('automap');
+  }, []);
+
+  /** Exit the Auto-Map workspace and return to Target view. Preserves selectedTargetPath and autoMapSectionPath. */
+  const exitAutoMapWorkspace = useCallback(() => {
+    setView('target');
+    // selectedTargetPath is intentionally preserved (spec AE-06)
+    // autoMapSectionPath is intentionally preserved for re-entry (spec note)
+  }, []);
+
+  // Mutual exclusion: close history drawer when auto-map workspace opens
+  const handleOpenHistory = useCallback(() => {
+    setIsHistoryOpen(true);
+  }, []);
+
+  const handleAutoMapTrigger = useCallback(
+    (sectionPath: string) => {
+      setIsHistoryOpen(false);
+      enterAutoMapWorkspace(sectionPath);
+      autoMapWorkspace.triggerAutoMap(sectionPath);
+    },
+    [enterAutoMapWorkspace, autoMapWorkspace],
+  );
+
+  const handleAutoMapAll = useCallback(() => {
+    setIsHistoryOpen(false);
+    // T-10: header-level "Auto-map" triggers workspace for the root section
+    enterAutoMapWorkspace('');
+    void autoMapWorkspace.triggerAutoMap('');
+  }, [enterAutoMapWorkspace, autoMapWorkspace]);
+
+  // ---------------------------------------------------------------------------
   // Restore handler
   // ---------------------------------------------------------------------------
   const handleRestore = useCallback(
@@ -160,10 +229,8 @@ export default function MappingEditor() {
     [history, editor.actions],
   );
 
-  // ---------------------------------------------------------------------------
-  // View state
-  // ---------------------------------------------------------------------------
-  const [view, setView] = useState<EditorView>('target');
+  /** Whether the Refresh All confirmation banner is showing */
+  const [showRefreshAllConfirm, setShowRefreshAllConfirm] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Target View selection state
@@ -202,6 +269,8 @@ export default function MappingEditor() {
   const handleViewToggle = useCallback(
     (nextView: EditorView) => {
       if (nextView === view) return;
+      // 'automap' is entered via enterAutoMapWorkspace only — not via the toggle
+      if (nextView === 'automap') return;
 
       if (nextView === 'rules') {
         // Target → Rules: find rule matching selected target path
@@ -298,16 +367,6 @@ export default function MappingEditor() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Apply expression — used by ArrayMappingBuilder (scalar fields use auto-draft)
-  // ---------------------------------------------------------------------------
-  const handleApplyExpression = useCallback(
-    (targetPath: string, expression: string) => {
-      editor.actions.applyRule(targetPath, expression);
-    },
-    [editor.actions],
-  );
-
-  // ---------------------------------------------------------------------------
   // Derived: selected node info (for right panel)
   // ---------------------------------------------------------------------------
   const selectedNode = useMemo(() => {
@@ -367,6 +426,7 @@ export default function MappingEditor() {
   const sourceContent = editor.parsedSourceSchema ? (
     <SourceSchemaPanel
       parsedSourceSchema={editor.parsedSourceSchema}
+      sourceSchemaName={editor.sourceSchemaName}
       onStageField={(path) => {
         if (view === 'rules') {
           expressionBuilderRef.current?.insertSourceField(path);
@@ -378,7 +438,7 @@ export default function MappingEditor() {
     />
   ) : undefined;
 
-  // Center column: Target Worklist (target view) or RuleList (rules view)
+  // Right column: Target Worklist (target view) or RuleList (rules view)
   const targetWorklistContent =
     view === 'rules' ? (
       <RuleList
@@ -410,12 +470,70 @@ export default function MappingEditor() {
         onSelectNode={handleSelectTargetNode}
         view={view}
         onViewToggle={handleViewToggle}
+        targetSchemaName={editor.targetSchemaName}
         className="h-full"
       />
     );
 
-  // Right panel: node-type-specific builder (target view) or expression builder (rules view)
-  const builderContent =
+  const autoMapWorkspaceContent = (
+    <AutoMapWorkspace
+      status={autoMapWorkspace.status}
+      error={autoMapWorkspace.error}
+      items={autoMapWorkspace.items}
+      filteredItems={autoMapWorkspace.filteredItems}
+      summary={autoMapWorkspace.summary}
+      sectionPath={autoMapSectionPath}
+      onRetry={() => {
+        if (autoMapSectionPath !== null) {
+          autoMapWorkspace.triggerAutoMap(autoMapSectionPath);
+        }
+      }}
+      onRefreshAll={autoMapWorkspace.refreshAll}
+      onRefreshUnmapped={autoMapWorkspace.refreshUnmapped}
+      onAcceptAllValid={autoMapWorkspace.bulkAcceptAllValid}
+      onExitWorkspace={exitAutoMapWorkspace}
+      onAccept={autoMapWorkspace.acceptSuggestion}
+      onEdit={autoMapWorkspace.editSuggestion}
+      onDismiss={autoMapWorkspace.dismissSuggestion}
+      onUndoDismiss={autoMapWorkspace.undoDismiss}
+      previousSuggestionsAvailable={autoMapWorkspace.previousSuggestionsAvailable}
+      onRestorePrevious={autoMapWorkspace.restorePreviousSuggestions}
+      generatedAt={autoMapWorkspace.generatedAt}
+      className="h-full"
+      toolbarSlot={() => (
+        <WorkspaceToolbar
+          activeFilters={autoMapWorkspace.activeFilters}
+          onToggleFilter={autoMapWorkspace.toggleFilter}
+          onClearFilters={autoMapWorkspace.clearFilters}
+          summary={autoMapWorkspace.summary}
+          items={autoMapWorkspace.items}
+          onRefreshStale={autoMapWorkspace.refreshStale}
+          isRefreshing={autoMapWorkspace.status === 'loading'}
+        />
+      )}
+      confirmationSlot={
+        showRefreshAllConfirm ? (
+          <RefreshConfirmBanner
+            refreshCount={autoMapWorkspace.items.length}
+            preservedCount={
+              autoMapWorkspace.items.filter(
+                (i) => i.status === 'accepted' || i.status === 'edited',
+              ).length
+            }
+            onConfirm={() => {
+              setShowRefreshAllConfirm(false);
+              autoMapWorkspace.refreshAll();
+            }}
+            onCancel={() => setShowRefreshAllConfirm(false)}
+          />
+        ) : null
+      }
+      noSourceDataSlot={<WorkspaceNoSourceDataSlot />}
+    />
+  );
+
+  // Center panel: node-type-specific builder (target view) or expression builder (rules view)
+  const builderContentInner =
     view === 'rules' ? (
       <div
         className="h-full"
@@ -451,6 +569,10 @@ export default function MappingEditor() {
             objectPath={selectedNode.path}
             childFields={children}
             coverage={leafCoverage}
+            onAutoMapSection={handleAutoMapTrigger}
+            isAutoMapLoading={autoMapWorkspace.status === 'loading'}
+            hasPersistedSuggestions={autoMapWorkspace.hasPersistedSuggestions}
+            pendingSuggestionCount={autoMapWorkspace.summary.pending}
             onFilterRequired={(path: string) => setSelectedTargetPath(path)}
             onValidateSection={() => {/* no-op placeholder */}}
             onNavigateToChild={(path) => setSelectedTargetPath(path)}
@@ -485,11 +607,15 @@ export default function MappingEditor() {
         updateDraft={editor.actions.updateDraft}
         revertDraft={editor.actions.revertDraft}
         getDraftExpression={editor.actions.getDraftExpression}
+        unsavedChangeCount={editor.unsavedChangeCount}
+        onViewUnsavedChanges={() => { setIsChangesOverlayOpen(true); }}
         onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
         savedRules={editor.savedRules}
         className="h-full"
       />
     );
+
+  const builderContent = view === 'automap' ? autoMapWorkspaceContent : builderContentInner;
 
   // Bottom area: connected inline preview strip (renders inside PreviewProvider)
   const bottomContent = (
@@ -519,7 +645,6 @@ export default function MappingEditor() {
         saveStatus={editor.saveStatus}
         deployStatus={null}
         unsavedChangeCount={editor.unsavedChangeCount}
-        onViewUnsavedChanges={() => { setIsChangesOverlayOpen(true); }}
         onSave={editor.actions.save}
         sourceSchemaName={editor.sourceSchemaName}
         targetSchemaName={editor.targetSchemaName}
@@ -528,7 +653,17 @@ export default function MappingEditor() {
         builderContent={builderContent}
         bottomContent={bottomContent}
         onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
-        onHistoryToggle={() => setIsHistoryOpen((prev) => !prev)}
+        onHistoryToggle={handleOpenHistory}
+        onAutoMap={handleAutoMapAll}
+        isAutoMapLoading={autoMapWorkspace.status === 'loading'}
+        isAutoMapMode={view === 'automap'}
+        autoMapPendingCount={autoMapWorkspace.summary.pending}
+        autoMapSectionPath={autoMapWorkspace.sectionPath}
+        onReturnToAutoMap={() => {
+          if (autoMapWorkspace.sectionPath !== null) {
+            enterAutoMapWorkspace(autoMapWorkspace.sectionPath);
+          }
+        }}
       />
 
       <ConfigurationModal
@@ -573,6 +708,9 @@ export default function MappingEditor() {
           onClose={() => { setIsChangesOverlayOpen(false); }}
         />
       )}
+
+      {/* Auto-Map review drawer (FS-046) — unwired in T-10; component kept for reference */}
+      {/* <AutoMapReviewDrawer ... /> */}
 
       {/* Route-level unsaved-changes guard dialog */}
       <ConfirmDialog

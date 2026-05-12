@@ -146,7 +146,24 @@ describe('TargetWorklist', () => {
     );
     // Expand the name node
     fireEvent.click(screen.getByTestId('expand-toggle-name'));
-    expect(screen.getByTestId('coverage-text')).toHaveTextContent('1/2 mapped');
+    expect(screen.getByTestId('coverage-text')).toHaveTextContent('1/2');
+  });
+
+  it('renders target panel header title', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.getByTestId('target-header-badge')).toHaveTextContent('TGT');
+    expect(screen.getByTestId('target-header-name')).toHaveTextContent('No target schema');
+  });
+
+  it('renders target schema name in header when provided', () => {
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        targetSchemaName="Order Target"
+      />,
+    );
+    expect(screen.getByTestId('target-header-name')).toHaveTextContent('Order Target');
   });
 
   it('shows children after expanding an object node', () => {
@@ -207,31 +224,42 @@ describe('TargetWorklist', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Filter chips
+  // Filter dropdown
   // ---------------------------------------------------------------------------
 
-  it('renders all four filter chips', () => {
+  it('renders filter button beside search input', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.getByTestId('target-filter-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-filter-menu')).not.toBeInTheDocument();
+  });
+
+  it('opens filter dropdown with all four options', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
+    expect(screen.getByTestId('target-filter-menu')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-unmapped')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-warnings')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-required')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-arrays')).toBeInTheDocument();
   });
 
-  it('filter chips start inactive (aria-pressed=false)', () => {
+  it('filter options start inactive (aria-pressed=false)', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     expect(screen.getByTestId('target-filter-unmapped')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('clicking a filter chip activates it (aria-pressed=true)', () => {
+  it('clicking a filter option activates it (aria-pressed=true)', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
     expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('clicking an active filter chip deactivates it', () => {
+  it('clicking an active filter option deactivates it', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
     expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByTestId('target-filter-required'));
@@ -240,6 +268,7 @@ describe('TargetWorklist', () => {
 
   it('Required filter shows only required fields', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
@@ -249,6 +278,7 @@ describe('TargetWorklist', () => {
   it('Unmapped filter shows only unmapped fields', () => {
     const rules = [makeRule('firstName')];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-unmapped'));
     expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
     expect(screen.getByTestId('target-field-row-lastName')).toBeInTheDocument();
@@ -259,6 +289,7 @@ describe('TargetWorklist', () => {
     // firstName is required but mapped; lastName is not required; age is not required
     const rules = [makeRule('firstName')];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
     fireEvent.click(screen.getByTestId('target-filter-unmapped'));
     // firstName is required but mapped — fails unmapped filter
@@ -272,6 +303,7 @@ describe('TargetWorklist', () => {
       makeNode('tags', 'tags', 'array', 0, false),
     ];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodesWithArray} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-arrays'));
     expect(screen.getByTestId('target-field-row-tags')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
@@ -285,6 +317,7 @@ describe('TargetWorklist', () => {
     render(
       <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} validationResult={validation} />,
     );
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-warnings'));
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
@@ -338,10 +371,10 @@ describe('TargetWorklist', () => {
     expect(rows[0]).toHaveAttribute('data-testid', 'target-field-row-age');
   });
 
-  it('shows expression summary on mapped field rows', () => {
+  it('does not show expression summary on mapped field rows', () => {
     const rules = [makeRule('firstName')];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
-    expect(screen.getByTestId('expression-summary')).toBeInTheDocument();
+    expect(screen.queryByTestId('expression-summary')).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -350,8 +383,14 @@ describe('TargetWorklist', () => {
 
   it('renders view toggle buttons', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    expect(screen.getByTestId('toolbar-view-target')).toBeInTheDocument();
-    expect(screen.getByTestId('toolbar-view-rules')).toBeInTheDocument();
+    const targetButton = screen.getByTestId('toolbar-view-target');
+    const rulesButton = screen.getByTestId('toolbar-view-rules');
+    expect(targetButton).toBeInTheDocument();
+    expect(rulesButton).toBeInTheDocument();
+    expect(targetButton).toHaveAccessibleName('Target view');
+    expect(rulesButton).toHaveAccessibleName('Rules view');
+    expect(targetButton).toHaveTextContent(/^\s*$/);
+    expect(rulesButton).toHaveTextContent(/^\s*$/);
   });
 
   it('active view button has aria-pressed=true', () => {

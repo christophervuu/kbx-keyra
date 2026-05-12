@@ -61,11 +61,6 @@ describe('InlinePreviewStrip', () => {
     expect(screen.getByTestId('strip-collapse-toggle')).toBeInTheDocument();
   });
 
-  it('renders Clear button in toolbar', () => {
-    renderStrip();
-    expect(screen.getByTestId('strip-clear-button')).toBeInTheDocument();
-  });
-
   it('renders Auto-run toggle in toolbar', () => {
     renderStrip();
     expect(screen.getByTestId('strip-autorun-toggle')).toBeInTheDocument();
@@ -78,11 +73,21 @@ describe('InlinePreviewStrip', () => {
     expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test-lab');
   });
 
-  it('Clear button calls onClearSource when clicked', () => {
-    const onClearSource = vi.fn();
-    renderStrip({ onClearSource });
-    fireEvent.click(screen.getByTestId('strip-clear-button'));
-    expect(onClearSource).toHaveBeenCalledTimes(1);
+  it('renders condensed controls in requested order', () => {
+    renderStrip({ sourceData: '{"a":1}' });
+
+    const run = screen.getByTestId('strip-run-button');
+    const auto = screen.getByTestId('strip-autorun-toggle');
+    const picker = screen.getByTestId('strip-test-case-selector');
+    const save = screen.getByTestId('strip-save-testcase-button');
+    const runInfo = screen.getByTestId('strip-status-bar');
+    const testLab = screen.getByTestId('strip-test-lab-link');
+
+    expect(run.compareDocumentPosition(auto) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(auto.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(picker.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(save.compareDocumentPosition(runInfo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(runInfo.compareDocumentPosition(testLab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // ---------------------------------------------------------------------------
@@ -293,7 +298,7 @@ describe('InlinePreviewStrip', () => {
     expect(bar).toHaveTextContent('3 warnings');
   });
 
-  it('status bar shows Error state with Test Lab link', () => {
+  it('status bar shows Error state text', () => {
     renderStrip({
       sourceData: '{"a":1}',
       isRunning: false,
@@ -303,9 +308,6 @@ describe('InlinePreviewStrip', () => {
     const bar = screen.getByTestId('strip-status-bar');
     expect(bar).toHaveTextContent('2 errors');
     expect(bar).toHaveTextContent('1 warning');
-    const link = screen.getByTestId('strip-status-bar-test-lab-link');
-    expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', '/projects/p1/mappings/m1/test-lab');
   });
 
   // ---------------------------------------------------------------------------

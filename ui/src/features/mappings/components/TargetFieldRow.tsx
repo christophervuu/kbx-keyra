@@ -2,8 +2,6 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, XCircle
 import { memo } from 'react';
 import type { CSSProperties } from 'react';
 
-import { truncateExpression } from '../lib/truncate-expression';
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -30,8 +28,6 @@ export interface TargetFieldRowProps {
   required: boolean;
   /** Current mapping status */
   status: TargetFieldStatus;
-  /** Optional truncated DSL expression summary */
-  expressionSummary?: string;
   /** Whether this row is currently selected */
   isSelected: boolean;
   /** Indentation depth (0 = root) */
@@ -40,8 +36,8 @@ export interface TargetFieldRowProps {
   isExpandable: boolean;
   /** Whether the node is currently expanded */
   isExpanded: boolean;
-  /** Coverage text for object/array nodes, e.g. "3/5 mapped" */
-  coverageText?: string;
+  /** Coverage for object/array nodes */
+  coverage?: { mapped: number; total: number };
   /** Fired when the row body is clicked */
   onClick: () => void;
   /** Fired when the expand/collapse chevron is clicked */
@@ -60,6 +56,16 @@ const TYPE_BADGE_CLASSES: Record<TargetFieldType, string> = {
   object: 'bg-slate-700/80 text-slate-300',
   array: 'bg-amber-900/60 text-amber-300',
   null: 'bg-slate-800/60 text-slate-500',
+};
+
+const TYPE_ABBREV: Record<TargetFieldType, string> = {
+  string: 'str',
+  number: 'num',
+  integer: 'int',
+  boolean: 'boo',
+  object: 'obj',
+  array: 'arr',
+  null: 'nul',
 };
 
 // ---------------------------------------------------------------------------
@@ -130,19 +136,18 @@ export const TargetFieldRow = memo(function TargetFieldRow({
   fieldType,
   required,
   status,
-  expressionSummary,
   isSelected,
   depth,
   isExpandable,
   isExpanded,
-  coverageText,
+  coverage,
   onClick,
   onToggleExpand,
 }: TargetFieldRowProps) {
   const indentStyle = { paddingLeft: depth * INDENT_PX } as CSSProperties;
-  const displaySummary = expressionSummary ? truncateExpression(expressionSummary) : undefined;
-  const isTruncated =
-    expressionSummary !== undefined && displaySummary !== expressionSummary;
+  const coverageRatio = coverage && coverage.total > 0
+    ? Math.min(1, Math.max(0, coverage.mapped / coverage.total))
+    : 0;
 
   return (
     <div
@@ -204,28 +209,23 @@ export const TargetFieldRow = memo(function TargetFieldRow({
         )}
       </span>
 
-      {/* Coverage text for object/array nodes */}
-      {coverageText && (
-        <span
-          className="shrink-0 text-[10px] text-slate-500"
-          data-testid="coverage-text"
-        >
-          {coverageText}
-        </span>
-      )}
-
       {/* Spacer */}
       <span className="flex-1" />
 
-      {/* Expression summary */}
-      {displaySummary && (
-        <span
-          className="min-w-0 max-w-[160px] truncate font-mono text-[10px] text-slate-500"
-          title={isTruncated ? expressionSummary : undefined}
-          data-testid="expression-summary"
-        >
-          {displaySummary}
-        </span>
+      {/* Coverage bar for object/array rows */}
+      {coverage && (
+        <div className="flex min-w-[92px] max-w-[120px] flex-col gap-1" data-testid="coverage-progress">
+          <div className="h-1.5 w-full overflow-hidden rounded bg-slate-800" aria-hidden="true">
+            <div
+              className="h-full bg-emerald-500/80"
+              style={{ width: `${coverageRatio * 100}%` }}
+              data-testid="coverage-progress-fill"
+            />
+          </div>
+          <span className="text-right text-[10px] text-slate-400" data-testid="coverage-text">
+            {coverage.mapped}/{coverage.total}
+          </span>
+        </div>
       )}
 
       {/* Type badge */}
@@ -233,7 +233,7 @@ export const TargetFieldRow = memo(function TargetFieldRow({
         className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[fieldType]}`}
         data-testid="type-badge"
       >
-        {fieldType}
+        {TYPE_ABBREV[fieldType]}
       </span>
 
       {/* Status icon */}

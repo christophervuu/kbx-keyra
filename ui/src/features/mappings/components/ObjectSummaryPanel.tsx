@@ -35,6 +35,14 @@ export interface ObjectSummaryPanelProps {
   childFields: ChildFieldInfo[];
   /** Coverage data for this object node (leaf-field counts) */
   coverage: { mapped: number; total: number };
+  /** Fired when "Auto-Map This Section" is clicked (FS-046) */
+  onAutoMapSection?: (sectionPath: string) => void;
+  /** True while an Auto-Map request is in flight — shows spinner on button */
+  isAutoMapLoading?: boolean;
+  /** True when persisted suggestions exist for this section (FS-048) */
+  hasPersistedSuggestions?: boolean;
+  /** Number of pending (unreviewed) suggestions for this section (FS-048) */
+  pendingSuggestionCount?: number;
   /** Fired when "Auto-map section" is clicked (currently disabled — placeholder) */
   onAutoMap?: (objectPath: string) => void;
   /** Fired when "Map required fields first" is clicked */
@@ -91,6 +99,10 @@ export function ObjectSummaryPanel({
   objectPath,
   childFields,
   coverage,
+  onAutoMapSection,
+  isAutoMapLoading = false,
+  hasPersistedSuggestions = false,
+  pendingSuggestionCount = 0,
   onFilterRequired,
   onValidateSection,
   onNavigateToChild,
@@ -201,18 +213,54 @@ export function ObjectSummaryPanel({
           Section Actions
         </span>
         <div className="flex flex-col gap-2">
-          {/* Auto-map — disabled placeholder */}
-          <button
-            type="button"
-            disabled
-            aria-disabled="true"
-            title={AUTO_MAP_TOOLTIP}
-            data-testid="automap-btn"
-            className="flex cursor-not-allowed items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-600 opacity-50"
-          >
-            <Sparkles size={12} aria-hidden="true" />
-            Auto-map section
-          </button>
+          {/* Auto-Map This Section (FS-046/FS-048) — live when onAutoMapSection provided */}
+          {onAutoMapSection ? (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                disabled={isAutoMapLoading}
+                data-testid="automap-btn"
+                onClick={() => onAutoMapSection(objectPath)}
+                className={[
+                  'flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                  isAutoMapLoading
+                    ? 'cursor-not-allowed border-slate-700 text-slate-500 opacity-60'
+                    : 'border-blue-600/60 text-blue-300 hover:border-blue-500 hover:bg-blue-900/20 hover:text-blue-200',
+                ].join(' ')}
+              >
+                {isAutoMapLoading ? (
+                  <span
+                    className="h-3 w-3 animate-spin rounded-full border border-blue-400 border-t-transparent"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Sparkles size={12} aria-hidden="true" />
+                )}
+                {hasPersistedSuggestions ? 'Review Auto-Map Suggestions' : 'Auto-Map This Section'}
+              </button>
+              {hasPersistedSuggestions && pendingSuggestionCount > 0 && (
+                <p
+                  className="text-[10px] text-violet-400"
+                  data-testid="automap-pending-indicator"
+                >
+                  {pendingSuggestionCount} suggestion{pendingSuggestionCount !== 1 ? 's' : ''} pending review
+                </p>
+              )}
+            </div>
+          ) : (
+            /* Disabled placeholder — shown when feature not yet wired */
+            <button
+              type="button"
+              disabled
+              aria-disabled="true"
+              title={AUTO_MAP_TOOLTIP}
+              data-testid="automap-btn"
+              className="flex cursor-not-allowed items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-600 opacity-50"
+            >
+              <Sparkles size={12} aria-hidden="true" />
+              Auto-map section
+            </button>
+          )}
 
           {/* Map required fields first */}
           <button

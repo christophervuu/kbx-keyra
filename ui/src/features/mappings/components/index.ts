@@ -188,3 +188,27 @@ export type { ChainBuilderProps } from './ChainBuilder';
 // FS-039 unsaved changes overlay
 export { UnsavedChangesOverlay } from './UnsavedChangesOverlay';
 export type { UnsavedChangesOverlayProps } from './UnsavedChangesOverlay';
+// FS-046 auto-map review drawer
+export { AutoMapReviewDrawer } from './AutoMapReviewDrawer';
+export type { AutoMapReviewDrawerProps } from './AutoMapReviewDrawer';
+// FS-046 suggestion review card
+export { SuggestionReviewCard } from './SuggestionReviewCard';
+export type { SuggestionReviewCardProps } from './SuggestionReviewCard';
+// FS-048 auto-map workspace shell
+export { AutoMapWorkspace } from './AutoMapWorkspace';
+export type { AutoMapWorkspaceProps } from './AutoMapWorkspace';
+// FS-048 workspace header
+export { WorkspaceHeader } from './WorkspaceHeader';
+export type { WorkspaceHeaderProps } from './WorkspaceHeader';
+// FS-048 suggestion card
+export { WorkspaceSuggestionCard } from './WorkspaceSuggestionCard';
+export type { WorkspaceSuggestionCardProps } from './WorkspaceSuggestionCard';
+// FS-048 toolbar
+export { WorkspaceToolbar } from './WorkspaceToolbar';
+export type { WorkspaceToolbarProps } from './WorkspaceToolbar';
+// FS-048 refresh confirmation banner
+export { RefreshConfirmBanner } from './RefreshConfirmBanner';
+export type { RefreshConfirmBannerProps } from './RefreshConfirmBanner';
+// FS-048 suggestion preview
+export { WorkspaceSuggestionPreview, WorkspaceNoSourceDataCallout } from './WorkspaceSuggestionPreview';
+export type { WorkspaceSuggestionPreviewProps } from './WorkspaceSuggestionPreview';

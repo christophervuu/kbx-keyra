@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Eye, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
@@ -51,7 +51,7 @@ export interface EditorTopBarProps {
    * Callback fired when the user clicks "View changes".
    * Parent is responsible for opening the UnsavedChangesOverlay.
    */
-  onViewUnsavedChanges: () => void;
+  onViewUnsavedChanges?: () => void;
   /** Callback for the Save button. T-02 wires the actual save action. */
   onSave: () => void;
   /** Source schema display name (shown in schema context strip) */
@@ -62,6 +62,20 @@ export interface EditorTopBarProps {
   onConfigToggle?: () => void;
   /** Optional callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
+  /** Optional callback fired when the user clicks the "Auto-map" button (header mode). */
+  onAutoMap?: () => void;
+  /** True while a header-level auto-map request is in flight — disables button and shows spinner. */
+  isAutoMapLoading?: boolean;
+  /**
+   * Number of pending (unreviewed) auto-map suggestions across all sections (FS-048).
+   * When > 0, a subtle re-entry affordance is shown in the top bar.
+   * When 0, the affordance is hidden.
+   */
+  autoMapPendingCount?: number;
+  /** Section path with pending suggestions — used for display context */
+  autoMapSectionPath?: string | null;
+  /** Called when the re-entry affordance is clicked — enters workspace mode */
+  onReturnToAutoMap?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,11 +151,17 @@ export function EditorTopBar({
   targetSchemaName,
   onConfigToggle,
   onHistoryToggle,
+  onAutoMap,
+  isAutoMapLoading = false,
+  autoMapPendingCount = 0,
+  autoMapSectionPath = null,
+  onReturnToAutoMap,
 }: EditorTopBarProps) {
   const saveConfig = saveStatusConfig[saveStatus];
   const saveLabel = saveConfig.label(unsavedChangeCount);
   const isSaving = saveStatus === 'saving';
   const hasChanges = unsavedChangeCount > 0;
+  const canViewChanges = hasChanges && onViewUnsavedChanges !== undefined;
 
   const deployPath = PATHS.MAPPING_DEPLOYMENT.replace(':projectId', projectId).replace(
     ':mappingId',
@@ -202,19 +222,6 @@ export function EditorTopBar({
         </div>
       )}
 
-      {/* Auto-map placeholder button */}
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        title="AI-powered auto-mapping — coming soon"
-        data-testid="automap-button"
-        className="inline-flex cursor-not-allowed items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-slate-500 opacity-50"
-      >
-        <Sparkles size={12} aria-hidden="true" />
-        Auto-map
-      </button>
-
       {/* Save state indicator */}
       <span
         className={`text-xs font-medium ${saveConfig.className}`}
@@ -226,7 +233,7 @@ export function EditorTopBar({
       </span>
 
       {/* View changes button — visible when there are unsaved changes */}
-      {hasChanges && (
+      {canViewChanges && (
         <button
           type="button"
           onClick={onViewUnsavedChanges}
@@ -234,7 +241,6 @@ export function EditorTopBar({
           data-testid="view-changes-button"
           aria-label={`View ${unsavedChangeCount} unsaved ${unsavedChangeCount === 1 ? 'change' : 'changes'}`}
         >
-          <Eye size={12} aria-hidden="true" />
           View changes
           <span
             className="inline-flex items-center justify-center rounded-full bg-amber-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100 min-w-[1.25rem]"
@@ -246,18 +252,65 @@ export function EditorTopBar({
         </button>
       )}
 
-      {/* Save button */}
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={!hasChanges || isSaving}
-        className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
-        data-testid="save-button"
-        aria-label="Save mapping"
-      >
-        <Save size={12} aria-hidden="true" />
-        Save
-      </button>
+      {/* Auto-Map re-entry affordance (FS-048) — shown when pending suggestions exist */}
+      {autoMapPendingCount > 0 && onReturnToAutoMap && (
+        <button
+          type="button"
+          data-testid="automap-reentry-pill"
+          onClick={onReturnToAutoMap}
+          aria-label={`Return to Auto-Map review — ${autoMapPendingCount} pending${autoMapSectionPath ? ` for ${autoMapSectionPath}` : ''}`}
+          className={[
+            'inline-flex items-center gap-1.5 rounded-full border border-violet-700/50 bg-violet-900/20',
+            'px-2.5 py-0.5 text-[10px] font-medium text-violet-300 transition-colors',
+            'hover:border-violet-600 hover:bg-violet-900/40 hover:text-violet-200',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-500',
+          ].join(' ')}
+        >
+          <Sparkles size={10} aria-hidden="true" />
+          Auto-Map: {autoMapPendingCount} pending
+        </button>
+      )}
+
+      <span className="text-slate-600" aria-hidden="true">|</span>
+
+      {/* Auto-map button — live when onAutoMap provided, placeholder otherwise */}
+      {onAutoMap ? (
+        <button
+          type="button"
+          onClick={onAutoMap}
+          disabled={isAutoMapLoading}
+          data-testid="automap-button"
+          aria-label="Auto-map all eligible fields"
+          className={[
+            'inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+            isAutoMapLoading
+              ? 'cursor-not-allowed text-slate-500 opacity-60'
+              : 'text-blue-400 hover:bg-slate-800 hover:text-blue-300',
+          ].join(' ')}
+        >
+          {isAutoMapLoading ? (
+            <span
+              className="h-3 w-3 animate-spin rounded-full border border-blue-400 border-t-transparent"
+              aria-hidden="true"
+            />
+          ) : (
+            <Sparkles size={12} aria-hidden="true" />
+          )}
+          Auto-map
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          title="AI-powered auto-mapping — coming soon"
+          data-testid="automap-button"
+          className="inline-flex cursor-not-allowed items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-slate-500 opacity-50"
+        >
+          <Sparkles size={12} aria-hidden="true" />
+          Auto-map
+        </button>
+      )}
 
       {/* Config toggle button */}
       {onConfigToggle && (
@@ -296,6 +349,19 @@ export function EditorTopBar({
         Deploy
         <ExternalLink size={12} aria-hidden="true" />
       </Link>
+
+      {/* Save button */}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={!hasChanges || isSaving}
+        className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+        data-testid="save-button"
+        aria-label="Save mapping"
+      >
+        <Save size={12} aria-hidden="true" />
+        Save
+      </button>
     </header>
   );
 }

@@ -51,7 +51,7 @@
  */
 
 import { useCallback, useContext, useMemo } from 'react';
-import { ArrowLeft, Layers, AlertCircle, AlertTriangle, Circle } from 'lucide-react';
+import { ArrowLeft, Layers, AlertCircle, AlertTriangle, CheckCircle2, Circle, XCircle } from 'lucide-react';
 
 import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { ArrayModeSelector } from './ArrayModeSelector';
@@ -138,12 +138,19 @@ const STATUS_CLASSES: Record<TargetFieldStatus, string> = {
   error: 'text-red-400',
 };
 
-const STATUS_LABELS: Record<TargetFieldStatus, string> = {
-  unmapped: 'Unmapped',
-  mapped: 'Mapped',
-  warning: 'Warning',
-  error: 'Error',
-};
+function MappingStatusIcon({ status }: { status: TargetFieldStatus }) {
+  switch (status) {
+    case 'mapped':
+      return <CheckCircle2 size={14} className="text-green-400" aria-hidden="true" />;
+    case 'warning':
+      return <AlertTriangle size={14} className="text-amber-400" aria-hidden="true" />;
+    case 'error':
+      return <XCircle size={14} className="text-red-400" aria-hidden="true" />;
+    case 'unmapped':
+    default:
+      return <Circle size={14} className="text-slate-600" aria-hidden="true" />;
+  }
+}
 
 const COMPLETION_STATUS_LABELS: Record<string, string> = {
   notStarted: 'Not started',
@@ -663,6 +670,11 @@ export function ArrayBuilder({
       {/* ------------------------------------------------------------------ */}
       <div className="shrink-0 border-b border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2">
+          {/* Mapping status icon */}
+          <span className={STATUS_CLASSES[currentStatus]} data-testid="header-status-icon">
+            <MappingStatusIcon status={currentStatus} />
+          </span>
+
           {/* Type badge */}
           <span
             className="shrink-0 rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
@@ -682,21 +694,15 @@ export function ArrayBuilder({
         </div>
 
         <div className="mt-1 flex items-center gap-3">
-          {/* Required / Optional */}
-          <span
-            className={`text-xs ${selectedTargetRequired ? 'text-red-400' : 'text-slate-500'}`}
-            data-testid="header-required-label"
-          >
-            {selectedTargetRequired ? 'Required' : 'Optional'}
-          </span>
-
-          {/* Mapping status */}
-          <span
-            className={`text-xs ${STATUS_CLASSES[currentStatus]}`}
-            data-testid="header-status"
-          >
-            {STATUS_LABELS[currentStatus]}
-          </span>
+          {/* Required */}
+          {selectedTargetRequired && (
+            <span
+              className="text-xs text-red-400"
+              data-testid="header-required-label"
+            >
+              Required
+            </span>
+          )}
 
           {/* Completion status */}
           <span
@@ -716,6 +722,10 @@ export function ArrayBuilder({
         sourceData={sourceData}
         validationState={builderValidationState}
         mode="builder"
+        compact={true}
+        collapsible={true}
+        defaultCollapsed={true}
+        hideValidation={true}
         resultSlot={
           <ArrayResultPreview
             result={arrayPreview.result}

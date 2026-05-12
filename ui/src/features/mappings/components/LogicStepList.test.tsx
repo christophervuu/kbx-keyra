@@ -131,6 +131,19 @@ describe('LogicStepList — add logic picker', () => {
     expect(onAddStep).toHaveBeenCalledWith('transform');
     expect(screen.queryByTestId('logic-step-list-picker')).not.toBeInTheDocument();
   });
+
+  it('shows picker immediately when forcePickerOpen is true', () => {
+    renderList({ forcePickerOpen: true });
+    expect(screen.getByTestId('logic-step-list-picker')).toBeInTheDocument();
+    expect(screen.queryByTestId('logic-step-list-add-logic')).not.toBeInTheDocument();
+  });
+
+  it('notifies onPickerOpenChange(false) when picker is dismissed', () => {
+    const onPickerOpenChange = vi.fn();
+    renderList({ forcePickerOpen: true, onPickerOpenChange });
+    fireEvent.pointerDown(document.body);
+    expect(onPickerOpenChange).toHaveBeenCalledWith(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

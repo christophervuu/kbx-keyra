@@ -10,8 +10,9 @@
  * The Expression row is read-only (no click-to-edit — use the mode toggle instead).
  */
 
-import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, XCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 
 import { tokenizeDsl } from '../lib/dsl-tokenizer';
 import type { DslTokenType } from '../lib/dsl-tokenizer';
@@ -37,6 +38,14 @@ export interface BuilderFeedbackAreaProps {
    * Used by ArrayBuilder (T-13) to inject ArrayResultPreview.
    */
   readonly resultSlot?: React.ReactNode;
+  /** Condensed single-line summary mode. */
+  readonly compact?: boolean;
+  /** Whether the panel can be collapsed. */
+  readonly collapsible?: boolean;
+  /** Initial collapsed state when collapsible is enabled. */
+  readonly defaultCollapsed?: boolean;
+  /** Hides Structure/Output Type validation badges row. */
+  readonly hideValidation?: boolean;
   readonly className?: string;
 }
 
@@ -263,8 +272,34 @@ export function BuilderFeedbackArea({
   validationState,
   mode,
   resultSlot,
+  compact = false,
+  collapsible = false,
+  defaultCollapsed = false,
+  hideValidation = false,
   className = '',
 }: BuilderFeedbackAreaProps) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
+  const preview = useExpressionPreview({
+    expression,
+    sourceData,
+  });
+
+  const compactResult = useMemo(() => {
+    if (sourceData === null || sourceData === undefined) return 'no test data';
+    if (preview.isEvaluating) return 'evaluating...';
+    if (preview.error) return preview.error;
+    if (preview.result === null || preview.result === undefined) return 'null';
+    const text = formatResult(preview.result);
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+  }, [preview.error, preview.isEvaluating, preview.result, sourceData]);
+
+  const compactExpression = useMemo(() => {
+    const value = expression.trim();
+    if (!value) return '(empty)';
+    return value.length > 72 ? `${value.slice(0, 69)}...` : value;
+  }, [expression]);
+
   return (
     <section
       role="region"
@@ -277,6 +312,29 @@ export function BuilderFeedbackArea({
         .filter(Boolean)
         .join(' ')}
     >
+      {compact && (
+        <div className="flex items-center gap-2" data-testid="feedback-compact-row">
+          {collapsible && (
+            <button
+              type="button"
+              onClick={() => { setCollapsed((prev) => !prev); }}
+              className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              aria-label={collapsed ? 'Expand feedback details' : 'Collapse feedback details'}
+              data-testid="feedback-collapse-toggle"
+            >
+              {collapsed ? <ChevronRight size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+            </button>
+          )}
+          <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" data-testid="feedback-compact-summary">
+            <span className="text-zinc-400">Expression:</span> {compactExpression}
+            <span className="mx-2 text-zinc-600">|</span>
+            <span className="text-zinc-400">Result:</span> {compactResult}
+          </p>
+        </div>
+      )}
+
+      {compact && collapsible && collapsed ? null : (
+        <>
       <ExpressionRow
         expression={expression}
         structureValid={validationState.structureValid}
@@ -296,7 +354,9 @@ export function BuilderFeedbackArea({
       ) : (
         <ResultRow expression={expression} sourceData={sourceData} />
       )}
-      <ValidationRow validationState={validationState} mode={mode} />
+      {!hideValidation && <ValidationRow validationState={validationState} mode={mode} />}
+        </>
+      )}
     </section>
   );
 }

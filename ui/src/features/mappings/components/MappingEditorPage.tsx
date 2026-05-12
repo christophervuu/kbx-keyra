@@ -1,6 +1,5 @@
-import type { ReactNode } from 'react';
-
 import { ChevronRight } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { EditorTopBar } from './EditorTopBar';
 import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
@@ -52,6 +51,24 @@ export interface MappingEditorPageProps {
   onHistoryToggle?: () => void;
   /** Callback to toggle the configuration modal */
   onConfigToggle?: () => void;
+  /** Callback fired when the user clicks the "Auto-map" button (header mode). */
+  onAutoMap?: () => void;
+  /** True while a header-level auto-map request is in flight. */
+  isAutoMapLoading?: boolean;
+  /**
+   * True when the editor is in Auto-Map workspace mode (FS-048).
+   * When true the center panel renders the workspace slot and the view toggle is hidden.
+   */
+  isAutoMapMode?: boolean;
+  /**
+   * Number of pending (unreviewed) auto-map suggestions across all sections (FS-048).
+   * When > 0, a re-entry affordance pill is shown in the top bar.
+   */
+  autoMapPendingCount?: number;
+  /** Section path with pending suggestions — passed through to EditorTopBar */
+  autoMapSectionPath?: string | null;
+  /** Called when the re-entry affordance pill is clicked */
+  onReturnToAutoMap?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +116,7 @@ export function MappingEditorPage({
   saveStatus = 'saved',
   deployStatus = null,
   unsavedChangeCount = 0,
-  onViewUnsavedChanges = () => undefined,
+  onViewUnsavedChanges,
   onSave = () => undefined,
   sourceSchemaName = null,
   targetSchemaName = null,
@@ -109,6 +126,12 @@ export function MappingEditorPage({
   bottomContent,
   onHistoryToggle,
   onConfigToggle,
+  onAutoMap,
+  isAutoMapLoading,
+  isAutoMapMode = false,
+  autoMapPendingCount = 0,
+  autoMapSectionPath = null,
+  onReturnToAutoMap,
 }: MappingEditorPageProps) {
   const {
     layout,
@@ -142,6 +165,11 @@ export function MappingEditorPage({
         targetSchemaName={targetSchemaName}
         onConfigToggle={onConfigToggle}
         onHistoryToggle={onHistoryToggle}
+        onAutoMap={onAutoMap}
+        isAutoMapLoading={isAutoMapLoading}
+        autoMapPendingCount={autoMapPendingCount}
+        autoMapSectionPath={autoMapSectionPath}
+        onReturnToAutoMap={onReturnToAutoMap}
       />
 
       {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}
@@ -196,18 +224,17 @@ export function MappingEditorPage({
               className="w-1.5 shrink-0 cursor-col-resize bg-slate-800 hover:bg-blue-500/20 active:bg-blue-500/30"
             />
 
-            {/* Center column: Target Worklist — never collapses */}
+            {/* Center column: Builder / Editor — never collapses */}
             <div
-              data-testid="target-worklist"
+              data-testid="builder-panel"
+              data-automap-mode={isAutoMapMode ? 'true' : undefined}
               className={[
                 'shrink-0 overflow-auto bg-slate-950',
                 isDragging ? '' : 'transition-[width] duration-200 ease-in-out',
               ].join(' ')}
               style={{ width: `${targetWidth}px` }}
             >
-              {targetWorklistContent ?? (
-                <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
-              )}
+              {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
             </div>
 
             {/* Drag handle: Target / Builder */}
@@ -221,12 +248,14 @@ export function MappingEditorPage({
               className="w-1.5 shrink-0 cursor-col-resize bg-slate-800 hover:bg-blue-500/20 active:bg-blue-500/30"
             />
 
-            {/* Right column: Builder / Editor — fills remaining space */}
+            {/* Right column: Target Worklist — fills remaining space */}
             <div
               className="min-w-0 flex-1 overflow-auto bg-slate-950"
-              data-testid="builder-panel"
+              data-testid="target-worklist"
             >
-              {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
+              {targetWorklistContent ?? (
+                <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+              )}
             </div>
           </div>
 

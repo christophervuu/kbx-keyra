@@ -182,3 +182,51 @@ describe('ObjectSummaryPanel — clickable child rows (AE-06)', () => {
     expect(row.querySelector('[aria-label="Unmapped"]')).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// FS-046: Auto-Map This Section button
+// ---------------------------------------------------------------------------
+
+describe('ObjectSummaryPanel — Auto-Map This Section (FS-046)', () => {
+  it('shows live "Auto-Map This Section" button when onAutoMapSection is provided', () => {
+    render(
+      <ObjectSummaryPanel
+        {...DEFAULT_PROPS}
+        onAutoMapSection={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('automap-btn')).toHaveTextContent('Auto-Map This Section');
+    expect(screen.getByTestId('automap-btn')).not.toBeDisabled();
+  });
+
+  it('clicking "Auto-Map This Section" calls onAutoMapSection with objectPath', () => {
+    const onAutoMapSection = vi.fn();
+    render(
+      <ObjectSummaryPanel
+        {...DEFAULT_PROPS}
+        onAutoMapSection={onAutoMapSection}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('automap-btn'));
+    expect(onAutoMapSection).toHaveBeenCalledWith('patient');
+  });
+
+  it('button is disabled and shows spinner when isAutoMapLoading is true', () => {
+    render(
+      <ObjectSummaryPanel
+        {...DEFAULT_PROPS}
+        onAutoMapSection={vi.fn()}
+        isAutoMapLoading={true}
+      />,
+    );
+    expect(screen.getByTestId('automap-btn')).toBeDisabled();
+    // Spinner element present
+    expect(screen.getByTestId('automap-btn').querySelector('.animate-spin')).toBeInTheDocument();
+  });
+
+  it('shows disabled placeholder when onAutoMapSection is not provided', () => {
+    render(<ObjectSummaryPanel {...DEFAULT_PROPS} />);
+    expect(screen.getByTestId('automap-btn')).toBeDisabled();
+    expect(screen.getByTestId('automap-btn')).toHaveTextContent('Auto-map section');
+  });
+});

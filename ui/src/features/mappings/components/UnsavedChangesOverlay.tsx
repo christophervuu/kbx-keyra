@@ -179,7 +179,7 @@ export function UnsavedChangesOverlay({
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-50 flex items-start justify-end"
+      className="fixed inset-0 z-50 flex items-center justify-center"
       data-testid="unsaved-changes-overlay"
     >
       {/* Clickable backdrop */}
@@ -196,7 +196,7 @@ export function UnsavedChangesOverlay({
         role="dialog"
         aria-modal="true"
         aria-label="Unsaved changes"
-        className="relative z-10 flex flex-col w-full max-w-md h-full bg-zinc-950 border-l border-zinc-800 shadow-2xl"
+        className="relative z-10 flex max-h-[80vh] w-[min(880px,94vw)] flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
         data-testid="unsaved-changes-panel"
       >
         {/* Header */}

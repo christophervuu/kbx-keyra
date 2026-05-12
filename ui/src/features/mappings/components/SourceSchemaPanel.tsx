@@ -26,6 +26,8 @@ import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 export interface SourceSchemaPanelProps {
   /** Parsed source schema (or null when not yet loaded) */
   parsedSourceSchema: ParsedSchema | null;
+  /** Optional source schema display name shown in the panel header */
+  sourceSchemaName?: string | null;
   /**
    * Fired when a source field is clicked (click-to-stage) or dropped.
    * Receives the full dot-path of the field.
@@ -40,16 +42,16 @@ export interface SourceSchemaPanelProps {
 // ---------------------------------------------------------------------------
 
 const TYPE_COLORS: Record<string, string> = {
-  string: 'text-blue-400',
-  number: 'text-green-400',
-  integer: 'text-green-400',
-  boolean: 'text-purple-400',
-  object: 'text-slate-400',
-  array: 'text-amber-400',
-  null: 'text-slate-500',
-  enum: 'text-blue-400',
-  any: 'text-slate-400',
-  union: 'text-slate-400',
+  string: 'bg-blue-900/60 text-blue-300',
+  number: 'bg-green-900/60 text-green-300',
+  integer: 'bg-green-900/60 text-green-300',
+  boolean: 'bg-purple-900/60 text-purple-300',
+  object: 'bg-slate-700/80 text-slate-300',
+  array: 'bg-amber-900/60 text-amber-300',
+  null: 'bg-slate-800/60 text-slate-500',
+  enum: 'bg-blue-900/60 text-blue-300',
+  any: 'bg-slate-700/80 text-slate-300',
+  union: 'bg-slate-700/80 text-slate-300',
 };
 
 const TYPE_ABBREV: Record<string, string> = {
@@ -58,7 +60,7 @@ const TYPE_ABBREV: Record<string, string> = {
   integer: 'int',
   boolean: 'bool',
   object: 'obj',
-  array: '[]',
+  array: 'arr',
   null: 'null',
   enum: 'enum',
   any: 'any',
@@ -100,7 +102,7 @@ const LeafFieldRow = memo(function LeafFieldRow({
       aria-label={`Stage source field ${node.path}`}
       style={{ paddingLeft: node.depth * 16 + 8 }}
       className={[
-        'group flex cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-xs',
+        'group flex min-h-[32px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isDragging ? 'opacity-50' : '',
@@ -117,13 +119,13 @@ const LeafFieldRow = memo(function LeafFieldRow({
       />
 
       {/* Field name */}
-      <span className="min-w-0 flex-1 truncate font-mono text-slate-300" title={node.path}>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200" title={node.path}>
         {node.fieldName}
       </span>
 
       {/* Type badge */}
       <span
-        className={`shrink-0 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'text-slate-400'}`}
+        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
         aria-label={`type: ${node.type}`}
       >
         {TYPE_ABBREV[node.type] ?? node.type}
@@ -157,7 +159,7 @@ function ContainerNodeRow({
       aria-expanded={isExpanded}
       style={{ paddingLeft: node.depth * 16 + 4 }}
       className={[
-        'flex w-full items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-xs',
+        'flex min-h-[32px] w-full items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-left text-sm',
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isHighlighted ? 'bg-blue-950/30' : '',
@@ -170,11 +172,11 @@ function ContainerNodeRow({
       ) : (
         <ChevronRight size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
       )}
-      <span className="min-w-0 flex-1 truncate font-mono text-slate-400" title={node.path}>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200" title={node.path}>
         {node.fieldName}
       </span>
       <span
-        className={`shrink-0 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'text-slate-400'}`}
+        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
         aria-label={`type: ${node.type}`}
       >
         {TYPE_ABBREV[node.type] ?? node.type}
@@ -259,6 +261,7 @@ function renderNode({
  */
 export function SourceSchemaPanel({
   parsedSourceSchema,
+  sourceSchemaName = null,
   onStageField,
   className = '',
 }: SourceSchemaPanelProps) {
@@ -309,6 +312,25 @@ export function SourceSchemaPanel({
       className={`flex flex-col overflow-hidden ${className}`}
       aria-label="Source schema fields"
     >
+      {/* Panel header */}
+      <div className="shrink-0 border-b border-slate-800 px-2 h-8">
+        <div className="flex h-full items-center gap-2">
+          <span
+            data-testid="source-header-badge"
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-sky-900/50 text-sky-300"
+          >
+            SRC
+          </span>
+          <h2
+            className="min-w-0 truncate text-xs font-semibold text-slate-300"
+            data-testid="source-header-name"
+            title={sourceSchemaName ?? 'No source schema'}
+          >
+            {sourceSchemaName ?? 'No source schema'}
+          </h2>
+        </div>
+      </div>
+
       {/* Search header */}
       <div className="shrink-0 border-b border-slate-800 px-2 py-1.5">
         <div className="relative flex items-center">

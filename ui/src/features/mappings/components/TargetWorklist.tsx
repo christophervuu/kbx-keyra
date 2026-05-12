@@ -1,4 +1,4 @@
-import { Filter, List, Search, X } from 'lucide-react';
+import { Crosshair, Filter, List, Search, X } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -40,6 +40,8 @@ export interface TargetWorklistProps {
   view: EditorView;
   /** Fired when view toggle is clicked */
   onViewToggle: (view: EditorView) => void;
+  /** Optional target schema display name shown in the panel header */
+  targetSchemaName?: string | null;
   /** Optional className for the outer container */
   className?: string;
 }
@@ -178,7 +180,6 @@ interface RenderNodeProps {
   activeFilters: Set<TargetFilter>;
   onSelectNode: (path: string, nodeType: SchemaTreeNode['type']) => void;
   onToggleExpand: (path: string) => void;
-  rules: readonly MappingRule[];
 }
 
 function renderNode({
@@ -191,7 +192,6 @@ function renderNode({
   activeFilters,
   onSelectNode,
   onToggleExpand,
-  rules,
 }: RenderNodeProps): ReactNode[] {
   // Filter by search query
   if (searchQuery && !nodeMatchesSearch(node, searchQuery)) {
@@ -212,11 +212,7 @@ function renderNode({
   const isExpandable = node.childCount > 0;
   const isExpanded = expandedPaths.has(node.path);
   const coverage = coverageMap.get(node.path);
-  const coverageText = coverage ? `${coverage.mapped}/${coverage.total} mapped` : undefined;
-
-  // Find expression summary for this node
-  const rule = rules.find((r) => r.target === node.path);
-  const expressionSummary = rule?.expression ?? undefined;
+  const coverageValue = coverage ? { mapped: coverage.mapped, total: coverage.total } : undefined;
 
   const rows: ReactNode[] = [
     <TargetFieldRow
@@ -226,12 +222,11 @@ function renderNode({
       fieldType={toFieldType(node.type)}
       required={node.isRequired}
       status={status}
-      expressionSummary={expressionSummary}
       isSelected={selectedPath === node.path}
       depth={node.depth}
       isExpandable={isExpandable}
       isExpanded={isExpanded}
-      coverageText={coverageText}
+      coverage={coverageValue}
       onClick={() => onSelectNode(node.path, node.type)}
       onToggleExpand={isExpandable ? () => onToggleExpand(node.path) : undefined}
     />,
@@ -251,7 +246,6 @@ function renderNode({
           activeFilters,
           onSelectNode,
           onToggleExpand,
-          rules,
         }),
       );
     }
@@ -277,17 +271,20 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
+      role="menuitemcheckbox"
       aria-pressed={active}
+      aria-checked={active}
       data-testid={`target-filter-${label.toLowerCase()}`}
       className={[
-        'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
+        'flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] font-medium transition-colors',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
         active
           ? 'bg-blue-600/30 text-blue-300 ring-1 ring-blue-500/50'
-          : 'border border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200',
+          : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100',
       ].join(' ')}
     >
       {label}
+      {active ? <span aria-hidden="true">✓</span> : null}
     </button>
   );
 }
@@ -316,11 +313,13 @@ export function TargetWorklist({
   onSelectNode,
   view,
   onViewToggle,
+  targetSchemaName = null,
   className = '',
 }: TargetWorklistProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<TargetFilter>>(new Set());
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
 
   const { statusMap, coverageMap } = useTargetStatus(rules, validationResult, nodes);
 
@@ -377,106 +376,151 @@ export function TargetWorklist({
       activeFilters,
       onSelectNode,
       onToggleExpand: handleToggleExpand,
-      rules,
     }),
   );
 
   const isFiltering = searchQuery.trim().length > 0 || activeFilters.size > 0;
+  const activeFilterCount = activeFilters.size;
 
   return (
     <div
       className={`flex flex-col overflow-hidden ${className}`}
       data-testid="target-worklist-container"
     >
-      {/* Search + filter toolbar — hidden in rules view */}
-      {view !== 'rules' && (
-        <div className="shrink-0 border-b border-slate-800 px-2 py-1.5 space-y-1.5">
-          {/* Search input */}
-          <div className="relative flex items-center">
-            <Search
-              size={12}
-              className="pointer-events-none absolute left-2 text-slate-500"
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              role="searchbox"
-              aria-label="Search target fields"
-              data-testid="target-search"
-              placeholder="Search fields…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Clear search"
-                data-testid="target-search-clear"
-                className="absolute right-1.5 text-slate-500 hover:text-slate-300"
-              >
-                <X size={11} aria-hidden="true" />
-              </button>
-            )}
+      {/* Panel header */}
+      <div className="shrink-0 border-b border-slate-800 px-2 h-8">
+        <div className="flex h-full items-center">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              data-testid="target-header-badge"
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-indigo-900/50 text-indigo-300"
+            >
+              TGT
+            </span>
+            <h2
+              className="min-w-0 truncate text-xs font-semibold text-slate-300"
+              data-testid="target-header-name"
+              title={targetSchemaName ?? 'No target schema'}
+            >
+              {targetSchemaName ?? 'No target schema'}
+            </h2>
           </div>
 
-          {/* Filter chips */}
           <div
-            className="flex flex-wrap items-center gap-1"
             role="group"
-            aria-label="Filter target fields"
-            data-testid="target-filter-chips"
+            aria-label="Editor view"
+            className="ml-auto flex rounded border border-slate-700 bg-slate-800"
           >
-            <Filter size={11} className="text-slate-600 shrink-0" aria-hidden="true" />
-            {FILTER_CHIPS.map(({ value: v, label }) => (
-              <FilterChip
-                key={v}
-                label={label}
-                active={activeFilters.has(v)}
-                onClick={() => handleFilterToggle(v)}
-              />
-            ))}
-
-            <span className="flex-1" aria-hidden="true" />
-
-            <div
-              role="group"
-              aria-label="Editor view"
-              className="flex rounded border border-slate-700 bg-slate-800"
+            <button
+              type="button"
+              data-testid="toolbar-view-target"
+              aria-label="Target view"
+              aria-pressed={view === 'target'}
+              onClick={() => view !== 'target' && onViewToggle('target')}
+              className={[
+                'flex items-center justify-center rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                view === 'target'
+                  ? 'bg-slate-700 text-slate-100'
+                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+              ].join(' ')}
             >
+              <Crosshair size={11} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              data-testid="toolbar-view-rules"
+              aria-label="Rules view"
+              aria-pressed={view === 'rules'}
+              onClick={() => view !== 'rules' && onViewToggle('rules')}
+              className={[
+                'flex items-center justify-center rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                view === 'rules'
+                  ? 'bg-slate-700 text-slate-100'
+                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
+              ].join(' ')}
+            >
+              <List size={11} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Search + filter toolbar — hidden in rules view */}
+      {view !== 'rules' && (
+        <div className="shrink-0 border-b border-slate-800 px-2 py-1.5">
+          {/* Search input */}
+          <div className="flex items-center gap-1.5">
+            <div className="relative flex flex-1 items-center">
+              <Search
+                size={12}
+                className="pointer-events-none absolute left-2 text-slate-500"
+                aria-hidden="true"
+              />
+              <input
+                type="search"
+                role="searchbox"
+                aria-label="Search target fields"
+                data-testid="target-search"
+                placeholder="Search fields…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                  data-testid="target-search-clear"
+                  className="absolute right-1.5 text-slate-500 hover:text-slate-300"
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            <div className="relative">
               <button
                 type="button"
-                data-testid="toolbar-view-target"
-                aria-pressed={view === 'target'}
-                onClick={() => view !== 'target' && onViewToggle('target')}
-                className={[
-                  'flex items-center gap-1 rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-                  view === 'target'
-                    ? 'bg-slate-700 text-slate-100'
-                    : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
-                ].join(' ')}
+                data-testid="target-filter-button"
+                aria-haspopup="menu"
+                aria-expanded={isFilterMenuOpen}
+                aria-label="Filter target fields"
+                onClick={() => setIsFilterMenuOpen((prev) => !prev)}
+                className="inline-flex h-6 items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-300 transition-colors hover:bg-slate-700/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
               >
                 <Filter size={11} aria-hidden="true" />
-                Target
+                Filters
+                {activeFilterCount > 0 && (
+                  <span
+                    className="inline-flex min-w-[1rem] items-center justify-center rounded-full bg-blue-600/40 px-1 text-[10px] font-semibold text-blue-200"
+                    data-testid="target-filter-count"
+                    aria-hidden="true"
+                  >
+                    {activeFilterCount}
+                  </span>
+                )}
               </button>
-              <button
-                type="button"
-                data-testid="toolbar-view-rules"
-                aria-pressed={view === 'rules'}
-                onClick={() => view !== 'rules' && onViewToggle('rules')}
-                className={[
-                  'flex items-center gap-1 rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-                  view === 'rules'
-                    ? 'bg-slate-700 text-slate-100'
-                    : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
-                ].join(' ')}
-              >
-                <List size={11} aria-hidden="true" />
-                Rules
-              </button>
+
+              {isFilterMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Filter target fields"
+                  data-testid="target-filter-menu"
+                  className="absolute right-0 z-20 mt-1 w-44 rounded border border-slate-700 bg-slate-900 p-1 shadow-lg"
+                >
+                  {FILTER_CHIPS.map(({ value: v, label }) => (
+                    <FilterChip
+                      key={v}
+                      label={label}
+                      active={activeFilters.has(v)}
+                      onClick={() => handleFilterToggle(v)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

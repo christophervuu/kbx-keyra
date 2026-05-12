@@ -2,6 +2,8 @@ import type {
   ActivityEntry,
   AutoMapInput,
   AutoMapResult,
+  AutoMapSectionInput,
+  AutoMapSectionResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -97,6 +99,7 @@ export interface ApiAdapter {
 
   // AI
   autoMap(input: AutoMapInput): Promise<AutoMapResult>;
+  autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult>;
   suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult>;
   explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult>;
   smartFix(input: SmartFixInput): Promise<SmartFixResult>;

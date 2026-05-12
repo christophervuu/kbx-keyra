@@ -220,3 +220,16 @@ export { generateExpressionFromChain, generateChainExpression } from './chain-ex
 // FS-038 chain decomposer
 export { decomposeToChainState, decomposeToChain } from './chain-decomposer';
 export type { DecomposeChainResult, DecomposeChainResult039 } from './chain-decomposer';
+// FS-047 eligible target derivation
+export { deriveEligibleTargets } from './derive-eligible-targets';
+// FS-048 T-01 auto-map workspace persistence
+export {
+  saveAutoMapSuggestions,
+  loadAutoMapSuggestions,
+  clearAutoMapSuggestions,
+  hasPersistedSuggestions,
+  listPersistedSections,
+} from './auto-map-persistence';
+// FS-048 T-04 auto-map staleness detection
+export { detectStaleSuggestions } from './auto-map-staleness';
+export type { GetDraftExpression } from './auto-map-staleness';

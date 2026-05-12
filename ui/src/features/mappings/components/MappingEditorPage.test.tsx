@@ -175,6 +175,78 @@ describe('EditorTopBar', () => {
       'AI-powered auto-mapping \u2014 coming soon',
     );
   });
+
+  it('renders live Auto-map button when onAutoMap is provided', () => {
+    const onAutoMap = vi.fn();
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={onAutoMap} />);
+    const btn = screen.getByTestId('automap-button');
+    expect(btn).not.toBeDisabled();
+    expect(btn).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('calls onAutoMap when live Auto-map button is clicked', () => {
+    const onAutoMap = vi.fn();
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={onAutoMap} />);
+    fireEvent.click(screen.getByTestId('automap-button'));
+    expect(onAutoMap).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables live Auto-map button and shows spinner when isAutoMapLoading is true', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={vi.fn()} isAutoMapLoading={true} />,
+    );
+    const btn = screen.getByTestId('automap-button');
+    expect(btn).toBeDisabled();
+    // Spinner element is present (animate-spin class)
+    expect(btn.querySelector('.animate-spin')).toBeInTheDocument();
+  });
+
+  it('renders top header controls in requested order', () => {
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        saveStatus="unsaved"
+        unsavedChangeCount={2}
+        onConfigToggle={vi.fn()}
+        onHistoryToggle={vi.fn()}
+      />,
+    );
+
+    const breadcrumb = screen.getByTestId('editor-breadcrumb');
+    const version = screen.getByTestId('version-badge');
+    const deployBadge = screen.getByTestId('deploy-badge');
+    const saveStatus = screen.getByTestId('save-status');
+    const autoMap = screen.getByTestId('automap-button');
+    const config = screen.getByTestId('config-toggle-button');
+    const history = screen.getByTestId('history-toggle-button');
+    const deploy = screen.getByTestId('deploy-page-link');
+    const save = screen.getByTestId('save-button');
+
+    expect(breadcrumb.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(version.compareDocumentPosition(deployBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deployBadge.compareDocumentPosition(saveStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(saveStatus.compareDocumentPosition(autoMap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(autoMap.compareDocumentPosition(config) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(config.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(history.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(deploy.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('renders separator to the right of unsaved changes section', () => {
+    const { container } = renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        saveStatus="unsaved"
+        unsavedChangeCount={2}
+      />,
+    );
+
+    const saveStatus = screen.getByTestId('save-status');
+    const separator = Array.from(container.querySelectorAll('span')).find((el) => el.textContent?.trim() === '|');
+
+    expect(separator).toBeDefined();
+    expect(saveStatus.compareDocumentPosition(separator as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -300,9 +372,9 @@ describe('MappingEditorPage', () => {
     expect(worklist.className).not.toContain('hidden');
   });
 
-  it('builder panel uses flex-1 to fill remaining space', () => {
+  it('target panel uses flex-1 to fill remaining space', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('builder-panel').className).toContain('flex-1');
+    expect(screen.getByTestId('target-worklist').className).toContain('flex-1');
   });
 
   it('renders resize handle between source and target columns', () => {
@@ -328,9 +400,9 @@ describe('MappingEditorPage', () => {
     expect(parseInt(width)).toBeGreaterThan(0);
   });
 
-  it('target worklist has non-zero inline width by default', () => {
+  it('builder panel has non-zero inline width by default', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel = screen.getByTestId('target-worklist');
+    const panel = screen.getByTestId('builder-panel');
     const width = (panel as HTMLElement).style.width;
     expect(width).toBeTruthy();
     expect(parseInt(width)).toBeGreaterThan(0);

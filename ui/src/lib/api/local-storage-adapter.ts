@@ -4,6 +4,8 @@ import type {
   ActivityEntry,
   AutoMapInput,
   AutoMapResult,
+  AutoMapSectionInput,
+  AutoMapSectionResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -669,6 +671,11 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   // AI
   async autoMap(input: AutoMapInput): Promise<AutoMapResult> {
+    void input;
+    throw new Error(OFFLINE_MODE_MESSAGE);
+  }
+
+  async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
     void input;
     throw new Error(OFFLINE_MODE_MESSAGE);
   }

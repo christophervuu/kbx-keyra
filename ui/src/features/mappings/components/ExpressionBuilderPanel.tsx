@@ -28,7 +28,8 @@ import {
   isChainComplete,
 } from '../lib/chain-builder-state';
 import { generateExpressionFromChain } from '../lib/chain-expression-generator';
-import { decomposeToChainState } from '../lib/chain-decomposer';
+import { decomposeToChain } from '../lib/chain-decomposer';
+import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 
 // ---------------------------------------------------------------------------
@@ -181,9 +182,9 @@ export const ExpressionBuilderPanel = forwardRef<ExpressionBuilderPanelRef, Expr
       return;
     }
 
-    const result = decomposeToChainState(expr);
-    if (result.success) {
-      setChainState(result.state);
+    const result = decomposeToChain(expr);
+    if ('chain' in result) {
+      setChainState(toLegacyChainBuilderState(result.chain));
       lastHydratedExpressionRef.current = expr;
     } else {
       // Decomposition failed — chain state stays empty; editor mode handles it

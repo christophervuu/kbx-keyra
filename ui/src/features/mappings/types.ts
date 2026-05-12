@@ -2,7 +2,7 @@
 // Mappings feature — shared types
 // ---------------------------------------------------------------------------
 
-import type { ComparisonMode, Environment } from '@/lib/types';
+import type { AutoMapReviewSummary, ComparisonMode, Diagnostic, Environment, ISODateString } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Draft rules (FS-039)
@@ -85,8 +85,87 @@ export type TargetSort = 'schema' | 'unmapped-first' | 'required-first';
 
 /**
  * View mode for the center column of the Mapping Editor.
+ *
+ * - 'target'  — Target Worklist (default)
+ * - 'rules'   — Rule List (flat rule table)
+ * - 'automap' — Auto-Map Review Workspace (entered via trigger only, not via toggle)
  */
-export type EditorView = 'target' | 'rules';
+export type EditorView = 'target' | 'rules' | 'automap';
+
+// ---------------------------------------------------------------------------
+// Auto-Map workspace persistence types (FS-048 T-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle state for persisted Auto-Map workspace suggestions.
+ */
+export type SuggestionLifecycleStatus = 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale';
+
+/**
+ * Persisted shape for a single suggestion in Auto-Map workspace storage.
+ */
+export interface PersistedSuggestionItem {
+  readonly targetPath: string;
+  readonly suggestedExpression: string;
+  readonly explanation: string;
+  readonly confidence: number | 'high' | 'medium' | 'low';
+  readonly validation?: {
+    readonly valid: boolean;
+    readonly diagnostics: readonly Diagnostic[];
+  };
+  readonly status: SuggestionLifecycleStatus;
+  readonly isNew: boolean;
+  readonly existingExpressionAtGeneration: string | null;
+}
+
+/**
+ * Persisted shape for all suggestions in a target section.
+ */
+export interface PersistedSectionSuggestions {
+  readonly sectionPath: string;
+  readonly generatedAt: ISODateString;
+  readonly items: readonly PersistedSuggestionItem[];
+  readonly generationContext: {
+    readonly sourceContextHash?: string;
+  };
+}
+
+/**
+ * Lightweight listing shape for persisted Auto-Map sections.
+ */
+export interface PersistedSectionInfo {
+  readonly sectionPath: string;
+  readonly suggestionCount: number;
+  readonly generatedAt: ISODateString;
+}
+
+/**
+ * Workspace summary extends FS-046 review summary with stale count and generation metadata.
+ */
+export interface AutoMapWorkspaceSummary extends AutoMapReviewSummary {
+  readonly stale: number;
+  readonly generatedAt: ISODateString | null;
+  readonly lastRefreshedAt: ISODateString | null;
+}
+
+/**
+ * A single suggestion item as presented in the Auto-Map workspace.
+ * Extends the persisted shape with runtime-only display helpers.
+ * Defined here (not in the hook) to avoid circular imports with lib utilities.
+ */
+export interface SuggestionWorkspaceItem {
+  readonly targetPath: string;
+  readonly suggestedExpression: string;
+  readonly explanation: string;
+  readonly confidence: number | 'high' | 'medium' | 'low';
+  readonly validation?: {
+    readonly valid: boolean;
+    readonly diagnostics: readonly { severity: string; code: string; message: string }[];
+  };
+  readonly status: SuggestionLifecycleStatus;
+  readonly isNew: boolean;
+  readonly existingExpressionAtGeneration: string | null;
+}
 
 /**
  * Severity level for a preview diagnostic entry.

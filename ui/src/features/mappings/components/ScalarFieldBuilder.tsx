@@ -22,7 +22,7 @@
  * moved to header overflow menu (⋮), AI tooltips updated.
  */
 
-import { Lightbulb, Loader2, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Lightbulb, Loader2, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench, XCircle } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { RawDslEditor } from './RawDslEditor';
@@ -34,14 +34,12 @@ import { ChainSourceCard } from './ChainSourceCard';
 import { StaticValueInput } from './StaticValueInput';
 import { LogicStepList } from './LogicStepList';
 import { BuilderFeedbackArea } from './BuilderFeedbackArea';
-import { UnsavedDiffPanel } from './UnsavedDiffPanel';
 import { ExplanationPanel } from './ExplanationPanel';
 import { SuggestExpressionInline } from './SuggestExpressionInline';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { useBuilderValidation } from '../hooks/use-builder-validation';
-import { useUnsavedDiff } from '../hooks/use-unsaved-diff';
 import { useExplainRule } from '../hooks/use-explain-rule';
 import { useSuggestExpression } from '../hooks/use-suggest-expression';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
@@ -60,7 +58,8 @@ import {
   createEmptyValueMapStep,
 } from '../lib/chain-builder-state';
 import { generateExpressionFromChain } from '../lib/chain-expression-generator';
-import { decomposeToChainState } from '../lib/chain-decomposer';
+import { decomposeToChain } from '../lib/chain-decomposer';
+import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
 import type { LogicKind } from './AddLogicPicker';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 
@@ -124,6 +123,10 @@ export interface ScalarFieldBuilderProps {
   savedRules?: readonly MappingRule[];
   /** Optional className */
   className?: string;
+  /** Number of unsaved field-level draft changes for View changes button */
+  unsavedChangeCount?: number;
+  /** Opens the unsaved changes modal */
+  onViewUnsavedChanges?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,13 +148,6 @@ const STATUS_CLASSES: Record<TargetFieldStatus, string> = {
   mapped: 'text-green-400',
   warning: 'text-amber-400',
   error: 'text-red-400',
-};
-
-const STATUS_LABELS: Record<TargetFieldStatus, string> = {
-  unmapped: 'Unmapped',
-  mapped: 'Mapped',
-  warning: 'Warning',
-  error: 'Error',
 };
 
 const AI_EXPLAIN_TOOLTIP = 'Explain this expression using AI';
@@ -197,6 +193,20 @@ function ModeToggle({
       ))}
     </div>
   );
+}
+
+function MappingStatusIcon({ status }: { status: TargetFieldStatus }) {
+  switch (status) {
+    case 'mapped':
+      return <CheckCircle2 size={14} className="text-green-400" aria-hidden="true" />;
+    case 'warning':
+      return <AlertTriangle size={14} className="text-amber-400" aria-hidden="true" />;
+    case 'error':
+      return <XCircle size={14} className="text-red-400" aria-hidden="true" />;
+    case 'unmapped':
+    default:
+      return <Circle size={14} className="text-slate-600" aria-hidden="true" />;
+  }
 }
 
 /**
@@ -366,13 +376,20 @@ export function ScalarFieldBuilder({
   getDraftExpression,
   onExpressionChange,
   onClearMapping,
-  savedRules = [],
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
   const [mode, setMode] = useState<'builder' | 'editor'>('builder');
   const [decompositionWarning, setDecompositionWarning] = useState<string | null>(null);
   const prevHydratedTargetRef = useRef<string>(selectedTargetPath);
+  const hasHydratedTargetRef = useRef(false);
+  const skipNextBuilderEmissionRef = useRef(false);
+  const hydrationPathRef = useRef(selectedTargetPath);
+
+  if (hydrationPathRef.current !== selectedTargetPath) {
+    hydrationPathRef.current = selectedTargetPath;
+    hasHydratedTargetRef.current = false;
+  }
 
   // FS-038 T-12: Chain builder state
   const [chainState, setChainState] = useState<ChainBuilderState>(() => createEmptyChainState());
@@ -381,9 +398,6 @@ export function ScalarFieldBuilder({
 
   // FS-040 T-04: Reset draft confirmation state
   const [confirmingReset, setConfirmingReset] = useState(false);
-
-  // FS-040 T-05: Unsaved diff panel expanded state
-  const [isDiffExpanded, setIsDiffExpanded] = useState(false);
 
   // FS-041: Explain Rule hook
   const { state: explainState, explain, dismiss: dismissExplain } = useExplainRule();
@@ -430,11 +444,67 @@ export function ScalarFieldBuilder({
     onExpressionChangeRef.current?.(next);
   }, [expression, selectedTargetPath]);
 
+  const hydrateFromExpression = useCallback((expr: string, options?: { warningOnFailure?: boolean }) => {
+    const warningOnFailure = options?.warningOnFailure ?? false;
+    hasHydratedTargetRef.current = false;
+    skipNextBuilderEmissionRef.current = true;
+    setExpression(expr);
+
+    if (!expr) {
+      setDecompositionWarning(null);
+      setChainState(createEmptyChainState());
+      setMode('builder');
+      hasHydratedTargetRef.current = true;
+      return;
+    }
+
+    const chainResult = decomposeToChain(expr);
+    if ('chain' in chainResult) {
+      setChainState(toLegacyChainBuilderState(chainResult.chain));
+      setDecompositionWarning(null);
+      setMode('builder');
+      hasHydratedTargetRef.current = true;
+      return;
+    }
+
+    const result = decomposeExpressionNew(expr);
+    if (result.success) {
+      setDecompositionWarning(null);
+      setChainState(createEmptyChainState());
+      setMode('editor');
+      hasHydratedTargetRef.current = true;
+      return;
+    }
+
+    const sourceCardResult = decomposeToSourceCardState(expr);
+    if (sourceCardResult !== null) {
+      setDecompositionWarning(null);
+      setChainState(createEmptyChainState());
+      setMode('editor');
+      hasHydratedTargetRef.current = true;
+      return;
+    }
+
+    setChainState(createEmptyChainState());
+    setDecompositionWarning(
+      warningOnFailure ? (result.reason ?? 'Expression cannot be loaded into the guided builder.') : null,
+    );
+    setMode('editor');
+    hasHydratedTargetRef.current = true;
+  }, []);
+
   const rawDslRef = useRef<RawDslEditorRef>(null);
 
   // FS-038 T-12: Propagate chain expression whenever chain state changes
   useEffect(() => {
     if (mode !== 'builder') return;
+    if (!hasHydratedTargetRef.current) {
+      return;
+    }
+    if (skipNextBuilderEmissionRef.current) {
+      skipNextBuilderEmissionRef.current = false;
+      return;
+    }
     const generated = generateExpressionFromChain(chainState);
     handleExpressionChange(generated);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -445,45 +515,8 @@ export function ScalarFieldBuilder({
   useEffect(() => {
     const draftExpr = getDraftExpression(selectedTargetPath);
     const expr = draftExpr ?? currentExpression ?? '';
-    setExpression(expr);
     prevHydratedTargetRef.current = selectedTargetPath;
-
-    if (!expr) {
-      // Unmapped / empty → reset to default empty chain state
-      setDecompositionWarning(null);
-      setChainState(createEmptyChainState());
-      setMode('builder');
-      return;
-    }
-
-    // FS-038 T-12: Try chain decomposer first
-    const chainResult = decomposeToChainState(expr);
-    if (chainResult.success) {
-      setChainState(chainResult.state);
-      setDecompositionWarning(null);
-      setMode('builder');
-      return;
-    }
-
-    // Fall back to legacy decomposer for Rules View compatibility
-    const result = decomposeExpressionNew(expr);
-    if (result.success) {
-      setDecompositionWarning(null);
-      setChainState(createEmptyChainState());
-      setMode('builder');
-    } else {
-      const sourceCardResult = decomposeToSourceCardState(expr);
-      if (sourceCardResult !== null) {
-        setDecompositionWarning(null);
-        setChainState(createEmptyChainState());
-        setMode('builder');
-      } else {
-        // Decomposition failed → Editor mode with warning
-        setChainState(createEmptyChainState());
-        setDecompositionWarning(result.reason ?? 'Expression cannot be loaded into the guided builder.');
-        setMode('editor');
-      }
-    }
+    hydrateFromExpression(expr, { warningOnFailure: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath, currentExpression]);
 
@@ -506,37 +539,6 @@ export function ScalarFieldBuilder({
     parseResult: parseResult ?? null,
     isParseValid,
   });
-
-  // FS-040 T-05: Unsaved diff state
-  const diffState = useUnsavedDiff({
-    targetPath: selectedTargetPath,
-    currentExpression: expression,
-    savedRules,
-  });
-
-  // Revert to saved: restore the saved expression and re-decompose builder state
-  const handleRevertToSaved = useCallback(() => {
-    const expr = diffState.savedExpression ?? '';
-    revertDraft(selectedTargetPath);
-    setExpression(expr);
-    setIsDiffExpanded(false);
-    if (!expr) {
-      setDecompositionWarning(null);
-      setChainState(createEmptyChainState());
-      setMode('builder');
-      return;
-    }
-    const chainResult = decomposeToChainState(expr);
-    if (chainResult.success) {
-      setChainState(chainResult.state);
-      setDecompositionWarning(null);
-      setMode('builder');
-    } else {
-      setChainState(createEmptyChainState());
-      setDecompositionWarning('Expression cannot be loaded into the guided builder.');
-      setMode('editor');
-    }
-  }, [diffState.savedExpression, revertDraft, selectedTargetPath]);
 
   const handleInsertSourceField = useCallback(
     (path: string) => {
@@ -564,25 +566,8 @@ export function ScalarFieldBuilder({
   // Discard changes: revert draft and re-hydrate from saved expression
   const handleDiscard = useCallback(() => {
     revertDraft(selectedTargetPath);
-    const expr = currentExpression ?? '';
-    setExpression(expr);
-    if (!expr) {
-      setDecompositionWarning(null);
-      setChainState(createEmptyChainState());
-      setMode('builder');
-      return;
-    }
-    const chainResult = decomposeToChainState(expr);
-    if (chainResult.success) {
-      setChainState(chainResult.state);
-      setDecompositionWarning(null);
-      setMode('builder');
-    } else {
-      setChainState(createEmptyChainState());
-      setDecompositionWarning('Expression cannot be loaded into the guided builder.');
-      setMode('editor');
-    }
-  }, [revertDraft, selectedTargetPath, currentExpression]);
+    hydrateFromExpression(currentExpression ?? '', { warningOnFailure: true });
+  }, [revertDraft, selectedTargetPath, currentExpression, hydrateFromExpression]);
 
   // FS-040 T-04: Reset draft — clears expression and builder state.
   // Trivial expressions (empty or bare source ref) reset immediately.
@@ -688,6 +673,11 @@ export function ScalarFieldBuilder({
       {/* ------------------------------------------------------------------ */}
       <div className="shrink-0 border-b border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2">
+          {/* Mapping status icon */}
+          <span className={STATUS_CLASSES[currentStatus]} data-testid="header-status-icon">
+            <MappingStatusIcon status={currentStatus} />
+          </span>
+
           {/* Type badge */}
           <span
             className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[selectedTargetType]}`}
@@ -717,23 +707,16 @@ export function ScalarFieldBuilder({
           )}
         </div>
 
-        <div className="mt-1 flex items-center gap-3">
-          {/* Required / Optional */}
-          <span
-            className={`text-xs ${selectedTargetRequired ? 'text-red-400' : 'text-slate-500'}`}
-            data-testid="header-required-label"
-          >
-            {selectedTargetRequired ? 'Required' : 'Optional'}
-          </span>
-
-          {/* Mapping status */}
-          <span
-            className={`text-xs ${STATUS_CLASSES[currentStatus]}`}
-            data-testid="header-status"
-          >
-            {STATUS_LABELS[currentStatus]}
-          </span>
-        </div>
+        {selectedTargetRequired && (
+          <div className="mt-1 flex items-center gap-3">
+            <span
+              className="text-xs text-red-400"
+              data-testid="header-required-label"
+            >
+              Required
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ------------------------------------------------------------------ */}
@@ -745,17 +728,10 @@ export function ScalarFieldBuilder({
         sourceData={sourceData}
         validationState={validationState}
         mode={mode}
-      />
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Unsaved Diff Panel (FS-040 T-05)                                   */}
-      {/* ------------------------------------------------------------------ */}
-      <UnsavedDiffPanel
-        diffState={diffState}
-        targetPath={selectedTargetPath}
-        isExpanded={isDiffExpanded}
-        onToggle={() => { setIsDiffExpanded((prev) => !prev); }}
-        onRevert={handleRevertToSaved}
+        compact={true}
+        collapsible={true}
+        defaultCollapsed={true}
+        hideValidation={true}
       />
 
       <div
@@ -815,6 +791,7 @@ export function ScalarFieldBuilder({
               onExpressionAccept={(expr) => {
                 updateDraft(selectedTargetPath, expr);
               }}
+              showChrome={false}
             >
               {/* Entry point selector */}
               <EntryPointSelector
@@ -858,6 +835,8 @@ export function ScalarFieldBuilder({
                   onStepChange={handleStepChange}
                   onRemoveStep={handleRemoveStep}
                   onAddStep={handleAddStep}
+                  forcePickerOpen={addLogicPickerOpen}
+                  onPickerOpenChange={setAddLogicPickerOpen}
                   sourceOptions={sourceOptions}
                   currentValueLabel={currentValueLabel}
                 />
@@ -867,10 +846,36 @@ export function ScalarFieldBuilder({
         )}
       </div>
 
+      {/* FS-042: Inline suggest expression panel */}
+      {suggestState.status !== 'idle' && (
+        <div className="px-4 pb-3">
+          <SuggestExpressionInline
+            state={suggestState}
+            targetPath={selectedTargetPath}
+            targetType={selectedTargetType}
+            onGenerate={(instruction) => {
+              generateSuggestion({
+                instruction,
+                targetPath: selectedTargetPath,
+                targetType: selectedTargetType,
+                sourceContext: formatSourceContext(parsedSourceSchema),
+              });
+            }}
+            onAccept={(expr) => {
+              updateDraft(selectedTargetPath, expr);
+              onExpressionChangeRef.current?.(expr);
+              hydrateFromExpression(expr, { warningOnFailure: false });
+              dismissSuggest();
+            }}
+            onDismiss={dismissSuggest}
+          />
+        </div>
+      )}
+
       {/* ------------------------------------------------------------------ */}
       {/* AI Actions + Reset draft + Discard (FS-040 T-04)                  */}
       {/* ------------------------------------------------------------------ */}
-      <div className="shrink-0 border-t border-slate-700 px-4 py-3">
+      <div className="shrink-0 border-t border-slate-700 px-4 py-3" data-testid="builder-action-row">
         {/* Reset draft confirmation prompt — inline, shown above action row */}
         {confirmingReset && (
           <div
@@ -957,18 +962,17 @@ export function ScalarFieldBuilder({
           </button>
 
           {/* Reset draft button — clears expression; confirmation for non-trivial */}
-          {canResetDraft && (
-            <button
-              type="button"
-              data-testid="reset-draft-btn"
-              onClick={handleResetDraftRequest}
-              aria-label="Reset current draft expression"
-              className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-            >
-              <RotateCcw size={12} aria-hidden="true" />
-              Reset draft
-            </button>
-          )}
+          <button
+            type="button"
+            data-testid="reset-draft-btn"
+            onClick={handleResetDraftRequest}
+            disabled={!canResetDraft}
+            aria-label="Reset current draft expression"
+            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RotateCcw size={12} aria-hidden="true" />
+            Reset draft
+          </button>
 
           {/* Spacer */}
           <span className="flex-1" />
@@ -1004,29 +1008,6 @@ export function ScalarFieldBuilder({
         </div>
       )}
 
-      {/* FS-042: Inline suggest expression panel */}
-      {suggestState.status !== 'idle' && (
-        <div className="px-4 pb-3">
-          <SuggestExpressionInline
-            state={suggestState}
-            targetPath={selectedTargetPath}
-            targetType={selectedTargetType}
-            onGenerate={(instruction) => {
-              generateSuggestion({
-                instruction,
-                targetPath: selectedTargetPath,
-                targetType: selectedTargetType,
-                sourceContext: formatSourceContext(parsedSourceSchema),
-              });
-            }}
-            onAccept={(expr) => {
-              updateDraft(selectedTargetPath, expr);
-              dismissSuggest();
-            }}
-            onDismiss={dismissSuggest}
-          />
-        </div>
-      )}
     </div>
   );
 }

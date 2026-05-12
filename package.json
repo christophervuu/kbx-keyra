@@ -18,8 +18,12 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:auto-map": "npx esbuild src/lambda/ai/auto-map.ts --bundle --platform=node --target=node20 --format=cjs --outfile=build/auto-map/index.cjs",
+    "zip:auto-map": "sh -c 'cd build/auto-map && rm -f function.zip && zip -q -r function.zip index.cjs'",
+    "package:auto-map": "pnpm run build:auto-map && pnpm run zip:auto-map",
     "engine:run": "tsx scripts/run-engine.ts",
     "explain-rule:run": "tsx scripts/run-explain-rule.ts",
+    "auto-map:run": "tsx scripts/run-auto-map.ts",
     "suggest-expression:run": "tsx scripts/run-suggest-expression.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

@@ -717,6 +717,7 @@ describe('decomposeToChain — valueMap steps', () => {
     expect(step.mappings[0]!.outputChain.source).toEqual({ kind: 'field', path: 'labelA' });
     expect(step.defaultValue.source).toEqual({ kind: 'field', path: 'defaultLabel' });
   });
+
 });
 
 // ---------------------------------------------------------------------------

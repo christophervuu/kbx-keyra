@@ -44,7 +44,7 @@ describe('truncateExpression', () => {
     const expr = 'map(source("items"), {field: source("items[*].name"), other: source("items[*].id")})';
     const result = truncateExpression(expr);
     expect(result).toContain('map');
-    expect(result).toContain('{…}');
+    expect(result).toContain('…');
   });
 
   it('respects custom maxLen', () => {
@@ -87,7 +87,7 @@ describe('TargetFieldRow', () => {
 
   it('renders type badge', () => {
     render(<TargetFieldRow {...BASE_PROPS} />);
-    expect(screen.getByTestId('type-badge')).toHaveTextContent('string');
+    expect(screen.getByTestId('type-badge')).toHaveTextContent('str');
   });
 
   it('shows required indicator when required=true', () => {
@@ -120,35 +120,7 @@ describe('TargetFieldRow', () => {
     expect(screen.getByTestId('status-icon-error')).toBeInTheDocument();
   });
 
-  it('shows expression summary when provided and ≤ 60 chars', () => {
-    render(<TargetFieldRow {...BASE_PROPS} expressionSummary='source("firstName")' />);
-    expect(screen.getByTestId('expression-summary')).toHaveTextContent('source("firstName")');
-  });
-
-  it('truncates expression summary at 60 chars', () => {
-    const longExpr = 'concat(source("firstName"), source("lastName"), source("middleName"), source("suffix"))';
-    render(<TargetFieldRow {...BASE_PROPS} expressionSummary={longExpr} />);
-    const el = screen.getByTestId('expression-summary');
-    const text = el.textContent ?? '';
-    expect(text.length).toBeLessThanOrEqual(62);
-    expect(text).toContain('\u2026');
-  });
-
-  it('shows tooltip with full expression when truncated', () => {
-    const longExpr = 'concat(source("firstName"), source("lastName"), source("middleName"), source("suffix"))';
-    render(<TargetFieldRow {...BASE_PROPS} expressionSummary={longExpr} />);
-    const el = screen.getByTestId('expression-summary');
-    expect(el).toHaveAttribute('title', longExpr);
-  });
-
-  it('does not show tooltip when expression is not truncated', () => {
-    const shortExpr = 'source("firstName")';
-    render(<TargetFieldRow {...BASE_PROPS} expressionSummary={shortExpr} />);
-    const el = screen.getByTestId('expression-summary');
-    expect(el).not.toHaveAttribute('title');
-  });
-
-  it('does not render expression summary when not provided', () => {
+  it('does not render expression summary row', () => {
     render(<TargetFieldRow {...BASE_PROPS} />);
     expect(screen.queryByTestId('expression-summary')).not.toBeInTheDocument();
   });
@@ -215,10 +187,11 @@ describe('TargetFieldRow', () => {
         {...BASE_PROPS}
         fieldType="object"
         isExpandable={true}
-        coverageText="3/5 mapped"
+        coverage={{ mapped: 3, total: 5 }}
       />,
     );
-    expect(screen.getByTestId('coverage-text')).toHaveTextContent('3/5 mapped');
+    expect(screen.getByTestId('coverage-progress')).toBeInTheDocument();
+    expect(screen.getByTestId('coverage-text')).toHaveTextContent('3/5');
   });
 
   it('does not display coverage text when not provided', () => {

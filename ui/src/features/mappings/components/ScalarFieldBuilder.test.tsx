@@ -73,7 +73,9 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   currentStatus: 'unmapped',
   currentExpression: '',
   parsedSourceSchema: SOURCE_SCHEMA,
-  ...makeDraftApi(),
+  updateDraft: vi.fn(),
+  revertDraft: vi.fn(),
+  getDraftExpression: () => null,
 };
 
 // Default mock adapter used by renderBuilder when no adapter override is provided
@@ -92,7 +94,8 @@ function renderBuilder(
   adapter?: Partial<ApiAdapter>,
 ) {
   const mockAdapter = adapter ?? makeDefaultAdapter();
-  const props = { ...DEFAULT_PROPS, ...overrides };
+  const draftApi = makeDraftApi();
+  const props = { ...DEFAULT_PROPS, ...draftApi, ...overrides };
   const result = render(
     <AdapterProvider adapter={mockAdapter as ApiAdapter}>
       <ScalarFieldBuilder {...props} />
@@ -130,14 +133,77 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('header-required-label')).toHaveTextContent('Required');
   });
 
-  it('shows Optional label when required=false', () => {
+  it('does not show required label when required=false', () => {
     renderBuilder({ selectedTargetRequired: false });
-    expect(screen.getByTestId('header-required-label')).toHaveTextContent('Optional');
+    expect(screen.queryByTestId('header-required-label')).not.toBeInTheDocument();
   });
 
-  it('shows current mapping status', () => {
+  it('shows current mapping status icon', () => {
     renderBuilder({ currentStatus: 'mapped' });
-    expect(screen.getByTestId('header-status')).toHaveTextContent('Mapped');
+    expect(screen.getByTestId('header-status-icon')).toBeInTheDocument();
+  });
+
+  it('does not emit empty draft when selecting a mapped field', () => {
+    const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+    const { rerender } = renderBuilder({
+      selectedTargetPath: 'patient.firstName',
+      currentExpression: '',
+      updateDraft,
+      revertDraft,
+      getDraftExpression,
+    });
+
+    rerender(
+      <ScalarFieldBuilder
+        {...DEFAULT_PROPS}
+        selectedTargetPath="patient.lastName"
+        currentExpression='source("lastName")'
+        currentStatus="mapped"
+        updateDraft={updateDraft}
+        revertDraft={revertDraft}
+        getDraftExpression={getDraftExpression}
+      />,
+    );
+
+    expect(updateDraft).not.toHaveBeenCalledWith('patient.lastName', '');
+  });
+
+  it('does not emit synthetic draft writes when switching between mapped fields', () => {
+    const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
+    const { rerender } = renderBuilder({
+      selectedTargetPath: 'patient.firstName',
+      currentExpression: 'source("firstName")',
+      currentStatus: 'mapped',
+      updateDraft,
+      revertDraft,
+      getDraftExpression,
+    });
+
+    rerender(
+      <ScalarFieldBuilder
+        {...DEFAULT_PROPS}
+        selectedTargetPath="patient.lastName"
+        currentExpression='source("lastName")'
+        currentStatus="mapped"
+        updateDraft={updateDraft}
+        revertDraft={revertDraft}
+        getDraftExpression={getDraftExpression}
+      />,
+    );
+
+    rerender(
+      <ScalarFieldBuilder
+        {...DEFAULT_PROPS}
+        selectedTargetPath="patient.firstName"
+        currentExpression='source("firstName")'
+        currentStatus="mapped"
+        updateDraft={updateDraft}
+        revertDraft={revertDraft}
+        getDraftExpression={getDraftExpression}
+      />,
+    );
+
+    expect(updateDraft).not.toHaveBeenCalled();
   });
 
   // Suggestions section removed (FS-040 T-02/T-03) — replaced by BuilderFeedbackArea
@@ -251,6 +317,15 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.queryByTestId('expression-editor-slot')).not.toBeInTheDocument();
   });
 
+  it('hydrates valueMap with transformed source in builder mode', () => {
+    renderBuilder({
+      currentExpression: 'valueMap(lower(source("notes")), {"hello": "hi", "bye": "good bye"}, "afternoon")',
+      currentStatus: 'mapped',
+    });
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
+  });
+
   it('shows empty builder state when an unmapped field is selected', () => {
     renderBuilder({
       currentExpression: '',
@@ -270,12 +345,12 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('decomposition-warning-container')).toBeInTheDocument();
   });
 
-  it('keeps builder mode for concat expression created via Source Card function call', () => {
+  it('opens concat expression in editor mode without warning when chain decomposition is unavailable', () => {
     renderBuilder({
       currentExpression: 'concat(source("first"), source("last"))',
       currentStatus: 'mapped',
     });
-    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
     expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
   });
 
@@ -394,7 +469,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
         currentStatus: 'mapped',
       });
-      // Previous field → editor mode (decomposition failed)
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
       expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
 
       // Navigate to a field with a decomposable expression
@@ -535,9 +610,9 @@ describe('ScalarFieldBuilder', () => {
   // ---------------------------------------------------------------------------
 
   describe('FS-040 T-04: Reset draft button', () => {
-    it('Reset draft button is hidden when expression is empty', () => {
+    it('Reset draft button is disabled when expression is empty', () => {
       renderBuilder({ currentExpression: '' });
-      expect(screen.queryByTestId('reset-draft-btn')).not.toBeInTheDocument();
+      expect(screen.getByTestId('reset-draft-btn')).toBeDisabled();
     });
 
     it('Reset draft button is visible when expression is non-empty', () => {
@@ -556,12 +631,12 @@ describe('ScalarFieldBuilder', () => {
     it('clicking Reset draft on a trivial expression resets immediately (no confirmation)', () => {
       const { updateDraft, revertDraft, getDraftExpression } = makeDraftApi();
       renderBuilder({
-        currentExpression: '{"id": "x"}', // forces editor mode
+        currentExpression: '{"id": "x"}',
         updateDraft,
         revertDraft,
         getDraftExpression,
       });
-      // Type a trivial expression in editor
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'source("email")' } });
       // Now reset — trivial expression, no confirmation
@@ -571,8 +646,9 @@ describe('ScalarFieldBuilder', () => {
 
     it('clicking Reset draft on a non-trivial expression shows confirmation prompt', () => {
       renderBuilder({
-        currentExpression: '{"id": "x"}', // forces editor mode
+        currentExpression: '{"id": "x"}',
       });
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
@@ -581,8 +657,9 @@ describe('ScalarFieldBuilder', () => {
 
     it('confirming reset clears the expression', () => {
       renderBuilder({
-        currentExpression: '{"id": "x"}', // forces editor mode
+        currentExpression: '{"id": "x"}',
       });
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
@@ -592,8 +669,9 @@ describe('ScalarFieldBuilder', () => {
 
     it('canceling reset preserves the expression and hides prompt', () => {
       renderBuilder({
-        currentExpression: '{"id": "x"}', // forces editor mode
+        currentExpression: '{"id": "x"}',
       });
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
@@ -793,6 +871,7 @@ describe('ScalarFieldBuilder', () => {
 
     it('shows "Load test data to see live results." when no sourceData in context (AE-06)', () => {
       renderBuilderWithContext({}, null);
+      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
       expect(screen.getByTestId('feedback-result-no-data')).toHaveTextContent(
         'Load test data to see live results.',
       );
@@ -800,25 +879,26 @@ describe('ScalarFieldBuilder', () => {
 
     it('feedback result area is present in the builder (AE-05)', () => {
       renderBuilderWithContext({}, null);
+      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
       expect(screen.getByTestId('feedback-result')).toBeInTheDocument();
     });
 
-    it('does not show no-data message when sourceData is provided (AE-05)', async () => {
+    it('keeps feedback result area rendered when sourceData is provided (AE-05)', async () => {
       renderBuilderWithContext({}, { firstName: 'Alice' });
-      // The no-data placeholder should not be visible when sourceData is set
+      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
       await waitFor(() => {
-        expect(screen.queryByTestId('feedback-result-no-data')).not.toBeInTheDocument();
+        expect(screen.getByTestId('feedback-result')).toBeInTheDocument();
       });
     });
 
     it('renders validation structure badge', () => {
       renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('validation-structure-badge')).toBeInTheDocument();
+      expect(screen.queryByTestId('validation-structure-badge')).not.toBeInTheDocument();
     });
 
     it('renders validation output type badge', () => {
       renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('validation-output-type-badge')).toBeInTheDocument();
+      expect(screen.queryByTestId('validation-output-type-badge')).not.toBeInTheDocument();
     });
 
     it('BuilderFeedbackArea is visible in both builder and editor modes', () => {
@@ -832,84 +912,23 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
     });
 
-    it('structure badge shows neutral state in editor mode', () => {
+    it('validation tags remain hidden in editor mode', () => {
       renderBuilderWithContext({}, null);
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const badge = screen.getByTestId('validation-structure-badge');
-      expect(badge.getAttribute('aria-label')).toContain('not applicable');
+      expect(screen.queryByTestId('validation-structure-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('validation-output-type-badge')).not.toBeInTheDocument();
     });
   });
 
-  // FS-040 T-05: UnsavedDiffPanel integration
-  describe('FS-040 T-05: UnsavedDiffPanel integration', () => {
-    const SAVED_RULES = [
-      { target: 'patient.firstName', expression: 'source("firstName")', type: 'direct' as const, description: '' },
-    ];
-
-    it('renders the unsaved diff panel trigger', () => {
-      renderBuilder({ savedRules: SAVED_RULES });
-      expect(screen.getByTestId('unsaved-diff-panel')).toBeInTheDocument();
-      expect(screen.getByTestId('unsaved-diff-trigger')).toBeInTheDocument();
-    });
-
-    it('diff panel is collapsed by default', () => {
-      renderBuilder({ savedRules: SAVED_RULES });
-      expect(screen.getByTestId('unsaved-diff-trigger')).toHaveAttribute('aria-expanded', 'false');
-      expect(screen.queryByTestId('unsaved-diff-content')).not.toBeInTheDocument();
-    });
-
-    it('clicking trigger expands the diff panel', () => {
-      renderBuilder({ savedRules: SAVED_RULES, currentExpression: 'source("firstName")' });
-      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
-      expect(screen.getByTestId('unsaved-diff-content')).toBeInTheDocument();
-    });
-
-    it('shows unsaved badge when expression differs from saved', () => {
+  // FS-040 T-05: Unsaved changes section removed
+  describe('FS-040 T-05: Unsaved changes section removal', () => {
+    it('does not render unsaved diff panel controls', () => {
       renderBuilder({
-        savedRules: SAVED_RULES,
         currentExpression: 'upper(source("firstName"))',
       });
-      expect(screen.getByTestId('unsaved-diff-badge')).toBeInTheDocument();
-    });
-
-    it('does not show unsaved badge when expression matches saved', () => {
-      renderBuilder({
-        savedRules: SAVED_RULES,
-        currentExpression: 'source("firstName")',
-      });
-      expect(screen.queryByTestId('unsaved-diff-badge')).not.toBeInTheDocument();
-    });
-
-    it('shows "Revert to saved" button when expanded and expression is modified', () => {
-      renderBuilder({
-        savedRules: SAVED_RULES,
-        currentExpression: 'upper(source("firstName"))',
-      });
-      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
-      expect(screen.getByTestId('revert-to-saved-btn')).toBeInTheDocument();
-    });
-
-    it('clicking "Revert to saved" calls revertDraft', () => {
-      const { revertDraft } = makeDraftApi();
-      renderBuilder({
-        savedRules: SAVED_RULES,
-        currentExpression: 'upper(source("firstName"))',
-        revertDraft,
-      });
-      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
-      fireEvent.click(screen.getByTestId('revert-to-saved-btn'));
-      expect(revertDraft).toHaveBeenCalledWith('patient.firstName');
-    });
-
-    it('diff panel collapses after revert', () => {
-      renderBuilder({
-        savedRules: SAVED_RULES,
-        currentExpression: 'upper(source("firstName"))',
-      });
-      fireEvent.click(screen.getByTestId('unsaved-diff-trigger'));
-      expect(screen.getByTestId('unsaved-diff-content')).toBeInTheDocument();
-      fireEvent.click(screen.getByTestId('revert-to-saved-btn'));
-      expect(screen.queryByTestId('unsaved-diff-content')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('unsaved-diff-panel')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('unsaved-diff-trigger')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('view-changes-inline-btn')).not.toBeInTheDocument();
     });
   });
 
@@ -1086,6 +1105,16 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
     });
 
+    it('suggest panel appears above the action buttons when opened', () => {
+      renderBuilder();
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+
+      const suggestPanel = screen.getByTestId('suggest-expression-inline');
+      const actionRow = screen.getByTestId('builder-action-row');
+
+      expect(suggestPanel.compareDocumentPosition(actionRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it('Accept calls updateDraft with target path and expression', async () => {
       const updateDraft = vi.fn();
       const suggestExpression = vi.fn().mockResolvedValue({
@@ -1109,7 +1138,40 @@ describe('ScalarFieldBuilder', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /accept/i }));
       expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+      expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+      expect(screen.getByTestId('chain-source-card-path')).toHaveTextContent('firstName');
       // Panel should close after accept
+      expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+    });
+
+    it('Accepting concat suggestion hydrates editor immediately with accepted expression', async () => {
+      const updateDraft = vi.fn();
+      const suggestExpression = vi.fn().mockResolvedValue({
+        expression: 'concat(source("customer.firstName"), " ", source("customer.lastName"))',
+        explanation: 'Concatenate first and last name.',
+      } satisfies SuggestExpressionResult);
+      renderBuilder({ updateDraft }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+
+      const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+      fireEvent.change(textarea, { target: { value: 'build full name from first and last' } });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+
+      expect(updateDraft).toHaveBeenCalledWith(
+        'patient.firstName',
+        'concat(source("customer.firstName"), " ", source("customer.lastName"))',
+      );
+      expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
+      expect(screen.getByRole('textbox')).toHaveValue(
+        'concat(source("customer.firstName"), " ", source("customer.lastName"))',
+      );
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
     });
 

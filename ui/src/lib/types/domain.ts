@@ -325,6 +325,53 @@ export interface AutoMapResult {
   readonly diagnostics?: readonly Diagnostic[];
 }
 
+export interface AutoMapSectionInput {
+  readonly projectId: string;
+  readonly mappingId: string;
+  readonly sectionPath?: string;
+  readonly targetSection?: string;
+  readonly sourceContext?: string;
+}
+
+export interface AutoMapSuggestion {
+  readonly target: string;
+  readonly expression: string;
+  readonly explanation: string;
+  readonly confidence: 'high' | 'medium' | 'low';
+  readonly validation?: {
+    readonly valid: boolean;
+    readonly diagnostics: readonly Diagnostic[];
+  };
+}
+
+export interface AutoMapSectionResult {
+  readonly suggestions: readonly AutoMapSuggestion[];
+  readonly diagnostics?: readonly Diagnostic[];
+}
+
+export type SuggestionReviewStatus = 'pending' | 'accepted' | 'edited' | 'dismissed';
+
+export interface SuggestionReviewItem {
+  readonly suggestion: AutoMapSuggestion;
+  readonly currentExpression: string | null;
+  readonly reviewStatus: SuggestionReviewStatus;
+  readonly isNew: boolean;
+}
+
+export interface AutoMapReviewSummary {
+  readonly total: number;
+  readonly pending: number;
+  readonly accepted: number;
+  readonly edited: number;
+  readonly dismissed: number;
+  readonly validCount: number;
+  readonly warningCount: number;
+  readonly invalidCount: number;
+  readonly highConfidence: number;
+  readonly mediumConfidence: number;
+  readonly lowConfidence: number;
+}
+
 export interface SuggestExpressionInput {
   readonly instruction: string;
   readonly targetPath: string;

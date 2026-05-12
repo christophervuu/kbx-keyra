@@ -76,6 +76,8 @@ export interface ChainBuilderShellProps {
   readonly onExpressionAccept?: (expression: string) => void;
   /** Builder content rendered in the scrollable content area. */
   readonly children: ReactNode;
+  /** Whether to render header and AI bars inside shell. */
+  readonly showChrome?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +318,7 @@ export function ChainBuilderShell({
   parsedSourceSchema,
   onExpressionAccept,
   children,
+  showChrome = true,
 }: ChainBuilderShellProps) {
   const { state: explainState, explain, dismiss: dismissExplain } = useExplainRule();
 
@@ -351,67 +354,71 @@ export function ChainBuilderShell({
       className="flex flex-col h-full min-w-[300px] bg-zinc-900 text-zinc-100"
       data-testid="chain-builder-shell"
     >
-      {/* ── Header row ─────────────────────────────────────────────────── */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 flex-shrink-0"
-        data-testid="chain-shell-header"
-      >
-        <TypeBadge type={targetType} />
-        <span
-          className="flex-1 truncate font-mono text-xs text-zinc-200 min-w-0"
-          title={targetPath}
-          data-testid="chain-shell-target-path"
-        >
-          {targetPath}
-        </span>
-        <RequiredTag isRequired={isRequired} />
-        <ModeToggle isBuilderMode={isBuilderMode} onToggle={onToggleMode} />
-      </div>
+      {showChrome && (
+        <>
+          {/* ── Header row ─────────────────────────────────────────────────── */}
+          <div
+            className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 flex-shrink-0"
+            data-testid="chain-shell-header"
+          >
+            <TypeBadge type={targetType} />
+            <span
+              className="flex-1 truncate font-mono text-xs text-zinc-200 min-w-0"
+              title={targetPath}
+              data-testid="chain-shell-target-path"
+            >
+              {targetPath}
+            </span>
+            <RequiredTag isRequired={isRequired} />
+            <ModeToggle isBuilderMode={isBuilderMode} onToggle={onToggleMode} />
+          </div>
 
-      {/* ── AI action bar ──────────────────────────────────────────────── */}
-      <AiActionBar
-        isMapped={isMapped}
-        onClearMapping={onClearMapping}
-        expression={expression}
-        explainState={explainState}
-        onExplain={handleExplain}
-        onSuggestClick={openSuggestInput}
-        isSuggestActive={suggestState.status === 'inputting' || suggestState.status === 'loading'}
-      />
-
-      {/* ── Inline explanation panel ────────────────────────────────────── */}
-      {(explainState.status === 'success' || explainState.status === 'error') && (
-        <div className="px-3 pb-2">
-          <ExplanationPanel
-            state={explainState}
-            onDismiss={dismissExplain}
-            onRetry={handleExplain}
+          {/* ── AI action bar ──────────────────────────────────────────────── */}
+          <AiActionBar
+            isMapped={isMapped}
+            onClearMapping={onClearMapping}
+            expression={expression}
+            explainState={explainState}
+            onExplain={handleExplain}
+            onSuggestClick={openSuggestInput}
+            isSuggestActive={suggestState.status === 'inputting' || suggestState.status === 'loading'}
           />
-        </div>
-      )}
 
-      {/* ── Inline suggest expression panel (FS-042) ────────────────────── */}
-      {suggestState.status !== 'idle' && (
-        <div className="px-3 pb-2">
-          <SuggestExpressionInline
-            state={suggestState}
-            targetPath={targetPath}
-            targetType={targetType}
-            onGenerate={(instruction) => {
-              generateSuggestion({
-                instruction,
-                targetPath,
-                targetType,
-                sourceContext: formatSourceContext(parsedSourceSchema),
-              });
-            }}
-            onAccept={(expr) => {
-              onExpressionAccept?.(expr);
-              dismissSuggest();
-            }}
-            onDismiss={dismissSuggest}
-          />
-        </div>
+          {/* ── Inline explanation panel ────────────────────────────────────── */}
+          {(explainState.status === 'success' || explainState.status === 'error') && (
+            <div className="px-3 pb-2">
+              <ExplanationPanel
+                state={explainState}
+                onDismiss={dismissExplain}
+                onRetry={handleExplain}
+              />
+            </div>
+          )}
+
+          {/* ── Inline suggest expression panel (FS-042) ────────────────────── */}
+          {suggestState.status !== 'idle' && (
+            <div className="px-3 pb-2">
+              <SuggestExpressionInline
+                state={suggestState}
+                targetPath={targetPath}
+                targetType={targetType}
+                onGenerate={(instruction) => {
+                  generateSuggestion({
+                    instruction,
+                    targetPath,
+                    targetType,
+                    sourceContext: formatSourceContext(parsedSourceSchema),
+                  });
+                }}
+                onAccept={(expr) => {
+                  onExpressionAccept?.(expr);
+                  dismissSuggest();
+                }}
+                onDismiss={dismissSuggest}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {/* ── Scrollable content area ─────────────────────────────────────── */}
