@@ -17,8 +17,9 @@
  */
 
 import { Database, Plus } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useDropZone } from '../hooks/use-drop-zone';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,8 @@ export interface ChainSourceCardProps {
   readonly onSourceSelect: (path: string) => void;
   /** Fires when the user clicks "+ Add logic". */
   readonly onAddLogic: () => void;
+  /** Controls whether the inline "+ Add logic" button is shown. */
+  readonly showAddLogicButton?: boolean;
   /** Optional className for the root element. */
   readonly className?: string;
 }
@@ -57,6 +60,7 @@ export function ChainSourceCard({
   logicStepCount,
   onSourceSelect,
   onAddLogic,
+  showAddLogicButton = true,
   className,
 }: ChainSourceCardProps) {
   const { isDragOver, dropHandlers } = useDropZone({ onDrop: onSourceSelect });
@@ -126,7 +130,7 @@ export function ChainSourceCard({
       {hasSource ? (
         /* ── Source selected state ─────────────────────────────────────── */
         <div
-          className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-zinc-800 p-3"
+          className="flex flex-col gap-2 rounded-lg border border-blue-800/60 bg-transparent p-3"
           data-testid="chain-source-card-selected"
         >
           {/* Source chip row */}
@@ -153,16 +157,18 @@ export function ChainSourceCard({
             </span>
 
             {/* + Add logic button */}
-            <button
-              type="button"
-              onClick={onAddLogic}
-              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-400 hover:text-blue-300 hover:bg-zinc-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              aria-label="Add logic step"
-              data-testid="chain-source-card-add-logic"
-            >
-              <Plus className="h-3 w-3" aria-hidden="true" />
-              Add logic
-            </button>
+            {showAddLogicButton && (
+              <button
+                type="button"
+                onClick={onAddLogic}
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-400 hover:text-blue-300 hover:bg-zinc-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                aria-label="Add logic step"
+                data-testid="chain-source-card-add-logic"
+              >
+                <Plus className="h-3 w-3" aria-hidden="true" />
+                Add logic
+              </button>
+            )}
           </div>
         </div>
       ) : (

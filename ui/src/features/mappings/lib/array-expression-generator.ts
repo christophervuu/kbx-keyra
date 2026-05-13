@@ -20,10 +20,8 @@
  * @pure — no side effects, no hooks, no DOM access. Deterministic output.
  */
 
-import { generateChainExpression } from './chain-expression-generator';
 import type {
   ArrayBuilderState,
-  CollectionState,
   MapCollectionState,
   FilterMapCollectionState,
   BuildFromValuesCollectionState,
@@ -37,6 +35,7 @@ import type {
   MergeBranch,
   StaticValueBranch,
 } from './array-builder-state';
+import { generateChainExpression } from './chain-expression-generator';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -76,6 +75,33 @@ function literalToDsl(value: string): string {
   const asNumber = Number(trimmed);
   if (trimmed !== '' && isFinite(asNumber)) return String(asNumber);
   return quoteString(value);
+}
+
+/**
+ * Converts a full target field path to an item-template key.
+ *
+ * Examples:
+ *   lineItems.productCode -> productCode
+ *   invoice.lineItems.qty -> qty
+ */
+function toItemTemplateKey(targetFieldPath: string): string {
+  const trimmed = targetFieldPath.trim();
+  if (!trimmed) return '';
+  const lastDot = trimmed.lastIndexOf('.');
+  return lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
+}
+
+/**
+ * Rewrites internal scoped source placeholders to valid DSL accessors.
+ *
+ * Internal UI storage:
+ *   source("__item__:sku")    -> item("sku")
+ *   source("__source__:code") -> source("code")
+ */
+function normalizeScopedSourceCalls(expression: string): string {
+  return expression
+    .replace(/source\("__item__:(.*?)"\)/g, 'item("$1")')
+    .replace(/source\("__source__:(.*?)"\)/g, 'source("$1")');
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +207,10 @@ function generateItemFieldExpression(mapping: ItemFieldMapping): string {
   switch (mapping.kind) {
     case 'empty':
       return '';
+    case 'expression':
+      return mapping.dsl.trim();
     case 'chain':
-      return generateChainExpression(mapping.chainState);
+      return normalizeScopedSourceCalls(generateChainExpression(mapping.chainState));
     case 'crossArrayLookup':
       return generateCrossArrayLookup(mapping.lookupState);
   }
@@ -206,7 +234,10 @@ function generateObjectTemplate(template: ItemTemplateState): string {
   for (const field of template.fields) {
     const expr = generateItemFieldExpression(field);
     if (expr) {
-      pairs.push(`${quoteString(field.targetFieldPath)}: ${expr}`);
+      const key = toItemTemplateKey(field.targetFieldPath);
+      if (key) {
+        pairs.push(`${quoteString(key)}: ${expr}`);
+      }
     }
   }
 

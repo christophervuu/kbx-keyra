@@ -23,11 +23,11 @@ import type {
   ArrayBuilderState,
   ItemFieldMapping,
   ItemTemplateState,
-  FilterPredicateState,
   MergeBranch,
 } from './array-builder-state';
-import type { ParsedSchema, SchemaTreeNode, SchemaNodeType } from '@/lib/types/domain';
 import { flattenSchemaPaths } from './autocomplete-utils';
+
+import type { ParsedSchema, SchemaTreeNode, SchemaNodeType } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -243,6 +243,7 @@ function inferMappingOutputType(
   parsedSourceSchema: ParsedSchema | null,
 ): string | null {
   if (mapping.kind === 'empty') return null;
+  if (mapping.kind === 'expression') return null;
 
   if (mapping.kind === 'crossArrayLookup') {
     // Return field type from the lookup array — best-effort

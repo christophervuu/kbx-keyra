@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import React, { useEffect } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ScalarFieldBuilder } from './ScalarFieldBuilder';
 import type { ScalarFieldBuilderProps } from './ScalarFieldBuilder';
@@ -222,6 +223,52 @@ describe('ScalarFieldBuilder', () => {
     renderBuilder();
     expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     expect(screen.queryByTestId('expression-editor-slot')).not.toBeInTheDocument();
+  });
+
+  it('renders question-first Step 1 prompt in builder mode', () => {
+    renderBuilder();
+    expect(screen.getByTestId('scalar-entry-question')).toHaveTextContent('Where does this value come from?');
+    expect(screen.queryByText('Step 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Step 2')).not.toBeInTheDocument();
+  });
+
+  it('renders array-style scalar entry selector cards', () => {
+    renderBuilder();
+
+    expect(screen.getByTestId('scalar-entry-mode-source')).toHaveTextContent('Source field');
+    expect(screen.getByTestId('scalar-entry-mode-static')).toHaveTextContent('Static value');
+    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External');
+    expect(screen.getByTestId('scalar-entry-mode-external')).toBeDisabled();
+    expect(screen.getByTestId('scalar-source-field-section')).toBeInTheDocument();
+    expect(screen.getByTestId('scalar-source-field-heading')).toHaveTextContent('Source Field');
+  });
+
+  it('keeps Step 2 logic lane hidden until Step 1 source is selected', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+
+    expect(screen.queryByTestId('scalar-logic-lane')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('chain-source-card-input'));
+    await user.click(screen.getByTestId('chain-source-card-option-firstName'));
+
+    expect(screen.getByTestId('scalar-logic-lane')).toBeInTheDocument();
+    expect(screen.getByTestId('scalar-logic-heading')).toHaveTextContent('Logic');
+    expect(screen.getByTestId('logic-step-list-add-logic')).toBeInTheDocument();
+  });
+
+  it('shows Step 2 logic lane after Step 1 static value is provided', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+
+    expect(screen.queryByTestId('scalar-logic-lane')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('scalar-entry-mode-static'));
+    await user.type(screen.getByTestId('static-value-text-input'), 'hello');
+
+    expect(screen.getByTestId('scalar-logic-lane')).toBeInTheDocument();
+    expect(screen.getByTestId('scalar-logic-heading')).toHaveTextContent('Logic');
+    expect(screen.getByTestId('logic-step-list-add-logic')).toBeInTheDocument();
   });
 
   it('switches to editor mode when Editor toggle is clicked', () => {

@@ -22,13 +22,8 @@
  * @pure — no side effects, deterministic output for a given input.
  */
 
-import { parse, defaultRegistry } from '@/lib/engine';
-import type { AstNode } from '@/lib/engine';
-
-import { decomposeToChain } from './chain-decomposer';
 import {
   createEmptyItemTemplate,
-  createEmptyArrayBuilderState,
   deriveCompletionStatus,
 } from './array-builder-state';
 import type {
@@ -46,6 +41,11 @@ import type {
   ValueEntryFieldValue,
   StaticValueBranch,
 } from './array-builder-state';
+import { decomposeToChain } from './chain-decomposer';
+
+import { parse, defaultRegistry } from '@/lib/engine';
+import type { AstNode } from '@/lib/engine';
+
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -339,14 +339,52 @@ function decomposeItemTemplate(node: AstNode): ItemTemplateState {
       continue;
     }
 
+    // Direct scoped field references inside map templates.
+    if (isCall(valueNode, 'item') && valueNode.arguments.length === 1 && valueNode.arguments[0]?.type === 'StringLiteral') {
+      fields.push({
+        kind: 'chain',
+        targetFieldPath,
+        chainState: {
+          source: { kind: 'field', path: `__item__:${valueNode.arguments[0].value}` },
+          steps: [],
+        },
+      });
+      continue;
+    }
+
+    if (isSourceCall(valueNode)) {
+      fields.push({
+        kind: 'chain',
+        targetFieldPath,
+        chainState: {
+          source: { kind: 'field', path: `__source__:${extractSourcePath(valueNode)}` },
+          steps: [],
+        },
+      });
+      continue;
+    }
+
+    const staticValue = nodeToStaticValueBranch(valueNode);
+    if (staticValue !== null) {
+      fields.push({
+        kind: 'chain',
+        targetFieldPath,
+        chainState: {
+          source: { kind: 'static', value: staticValue },
+          steps: [],
+        },
+      });
+      continue;
+    }
+
     // Leaf field: delegate to decomposeToChain()
     const exprStr = astToString(valueNode);
     const chainResult = decomposeToChain(exprStr);
     if ('chain' in chainResult) {
       fields.push({ kind: 'chain', targetFieldPath, chainState: chainResult.chain });
     } else {
-      // Chain decomposition failed — store as empty (best-effort)
-      fields.push({ kind: 'empty', targetFieldPath });
+      // Preserve unrecognized leaf expressions as raw expression mappings.
+      fields.push({ kind: 'expression', targetFieldPath, dsl: exprStr });
     }
   }
 
@@ -408,7 +446,7 @@ function decomposeMapOrFilterMap(
  * Attempts to decompose a merge(...) node into Merge Array Branches mode.
  * Each argument must be a map(source(...), {...}) call.
  */
-function tryDecomposeMerge(node: AstNode, rawExpression: string): DecomposeArrayResult | null {
+function tryDecomposeMerge(node: AstNode): DecomposeArrayResult | null {
   if (!isCall(node, 'merge')) return null;
   if (node.arguments.length < 2) return null;
 
@@ -439,7 +477,7 @@ function tryDecomposeMerge(node: AstNode, rawExpression: string): DecomposeArray
  * Attempts to decompose an array(...) or filter(array(...), ...) node into
  * Build from Values mode.
  */
-function tryDecomposeBuildFromValues(node: AstNode, rawExpression: string): DecomposeArrayResult | null {
+function tryDecomposeBuildFromValues(node: AstNode): DecomposeArrayResult | null {
   let arrayNode: Extract<AstNode, { type: 'FunctionCall' }> | null = null;
   let nullFilteringEnabled = false;
   let nullFilterField: string | undefined;
@@ -584,7 +622,7 @@ export function decomposeArrayExpression(expression: string): DecomposeArrayResu
   const ast = parseResult.ast;
 
   // 1. Merge branches
-  const mergeResult = tryDecomposeMerge(ast, trimmed);
+  const mergeResult = tryDecomposeMerge(ast);
   if (mergeResult !== null) return mergeResult;
 
   // 2 & 3. Map / Filter+Map
@@ -600,7 +638,7 @@ export function decomposeArrayExpression(expression: string): DecomposeArrayResu
   }
 
   // 4. Build from Values
-  const bfvResult = tryDecomposeBuildFromValues(ast, trimmed);
+  const bfvResult = tryDecomposeBuildFromValues(ast);
   if (bfvResult !== null) return bfvResult;
 
   // 5. Unrecognized — custom expression fallback

@@ -217,7 +217,7 @@ export function LogicStepList({
           className="w-full inline-flex items-center justify-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded-lg px-3 py-2 border border-dashed border-zinc-700 hover:border-zinc-500 transition-colors"
           data-testid="logic-step-list-add-logic"
         >
-          + Add logic
+          Add Transformation, conditional logic, or value mapping
         </button>
       )}
     </div>

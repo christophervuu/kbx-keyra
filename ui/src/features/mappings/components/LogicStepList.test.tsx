@@ -63,9 +63,11 @@ describe('LogicStepList — rendering', () => {
     expect(screen.getByTestId('logic-step-list-bottom-connector')).toBeInTheDocument();
   });
 
-  it('renders [+ Add logic] button when picker is closed', () => {
+  it('renders renamed logic add button when picker is closed', () => {
     renderList();
-    expect(screen.getByTestId('logic-step-list-add-logic')).toBeInTheDocument();
+    expect(screen.getByTestId('logic-step-list-add-logic')).toHaveTextContent(
+      'Add Transformation, conditional logic, or value mapping',
+    );
   });
 
   it('AE-10: step number badges render correctly', () => {

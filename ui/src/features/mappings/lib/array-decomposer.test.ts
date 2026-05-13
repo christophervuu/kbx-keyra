@@ -16,19 +16,18 @@
  *     produces semantically equivalent DSL for all supported patterns
  */
 
-import { describe, expect, it } from 'vitest';
-import { decomposeArrayExpression } from './array-decomposer';
-import { generateArrayExpression } from './array-expression-generator';
 import { parse } from '@keyra/engine';
+import { describe, expect, it } from 'vitest';
+
 import type {
   ArrayBuilderState,
   MapCollectionState,
   FilterMapCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
-  ItemFieldMapping,
 } from './array-builder-state';
-import { createFieldSourceChain } from './chain-builder-state';
+import { decomposeArrayExpression } from './array-decomposer';
+import { generateArrayExpression } from './array-expression-generator';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -248,6 +247,17 @@ describe('decomposeArrayExpression — Merge Array Branches mode', () => {
 // ---------------------------------------------------------------------------
 
 describe('decomposeArrayExpression — Cross-array lookup', () => {
+  it('preserves unsupported leaf function expressions as expression mappings', () => {
+    const expr = 'map(source("items"), {"hasDiscount": gt(item("discountAmount"), 0)})';
+    const state = assertSuccess(expr);
+    const field = state.itemTemplate.fields[0]!;
+    expect(field.kind).toBe('expression');
+    if (field.kind === 'expression') {
+      expect(field.targetFieldPath).toBe('hasDiscount');
+      expect(field.dsl).toBe('gt(item("discountAmount"), 0)');
+    }
+  });
+
   it('detects default(get(find(...), ...), ...) pattern in item template', () => {
     const expr = 'map(source("orders"), {"taxAmount": default(get(find(source("taxLines"), eq(item("lineRef"), item("id"))), "taxAmount"), 0)})';
     const state = assertSuccess(expr);

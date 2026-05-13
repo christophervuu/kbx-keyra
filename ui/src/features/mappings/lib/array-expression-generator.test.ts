@@ -9,22 +9,13 @@
  * engine parse() function to confirm syntactic correctness.
  */
 
-import { describe, expect, it } from 'vitest';
 import { parse } from '@keyra/engine';
-import {
-  generateArrayExpression,
-  generateFilterPredicate,
-  generateCrossArrayLookup,
-  generateObjectTemplate,
-  generateValueEntry,
-  generateMergeBranchExpression,
-} from './array-expression-generator';
+import { describe, expect, it } from 'vitest';
+
 import {
   createEmptyArrayBuilderState,
-  createCollectionStateForMode,
-  createEmptyItemTemplate,
-  createEmptyMergeBranch,
   createEmptyFilterPredicate,
+  createEmptyItemTemplate,
 } from './array-builder-state';
 import type {
   ArrayBuilderState,
@@ -40,7 +31,15 @@ import type {
   CrossArrayLookupState,
   ValueEntry,
 } from './array-builder-state';
-import { createFieldSourceChain, createEmptyChain } from './chain-builder-state';
+import {
+  generateArrayExpression,
+  generateFilterPredicate,
+  generateCrossArrayLookup,
+  generateObjectTemplate,
+  generateValueEntry,
+  generateMergeBranchExpression,
+} from './array-expression-generator';
+import { createFieldSourceChain } from './chain-builder-state';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -148,11 +147,35 @@ describe('Map mode', () => {
       { kind: 'chain', targetFieldPath: 'qty', chainState: createFieldSourceChain('quantity') },
     ];
     const result = generateArrayExpression(makeMapState('items', fields));
-    // Chain generator uses source() for field sources — the item context is handled
-    // by the array builder scope; leaf chains use source() which maps to item() in context
+    // Plain chain field paths keep source() behavior for backward compatibility.
     expect(result).toContain('map(source("items"),');
+    expect(result).toContain('"productCode": source("sku")');
+    expect(result).toContain('"qty": source("quantity")');
     expect(result).toContain('"productCode"');
     expect(result).toContain('"qty"');
+    assertParses(result);
+  });
+
+  it('normalizes full target field paths to item-level object keys', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'invoice.lineItems.productCode',
+        chainState: { source: { kind: 'field', path: '__item__:sku' }, steps: [] },
+      },
+      {
+        kind: 'chain',
+        targetFieldPath: 'invoice.lineItems.currency',
+        chainState: { source: { kind: 'field', path: '__source__:currency' }, steps: [] },
+      },
+    ];
+
+    const result = generateArrayExpression(makeMapState('items', fields));
+
+    expect(result).toContain('"productCode": item("sku")');
+    expect(result).toContain('"currency": source("currency")');
+    expect(result).not.toContain('"invoice.lineItems.productCode"');
+    expect(result).not.toContain('"invoice.lineItems.currency"');
     assertParses(result);
   });
 
@@ -634,14 +657,50 @@ describe('generateCrossArrayLookup', () => {
 // ---------------------------------------------------------------------------
 
 describe('scope-aware references', () => {
-  it('chain field source generates source() reference (leaf level)', () => {
-    // The chain builder uses source() for field references.
-    // In the array context, the engine resolves item() vs source() based on context.
+  it('expression mapping emits raw function DSL for item field', () => {
     const fields: ItemFieldMapping[] = [
-      { kind: 'chain', targetFieldPath: 'sku', chainState: createFieldSourceChain('sku') },
+      {
+        kind: 'expression',
+        targetFieldPath: 'hasDiscount',
+        dsl: 'gt(item("discountAmount"), 0)',
+      },
     ];
     const result = generateArrayExpression(makeMapState('items', fields));
-    expect(result).toContain('source("sku")');
+    expect(result).toContain('"hasDiscount": gt(item("discountAmount"), 0)');
+    assertParses(result);
+  });
+
+  it('chain field source generates item() reference for item-scoped paths', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'sku',
+        chainState: {
+          source: { kind: 'field', path: '__item__:sku' },
+          steps: [],
+        },
+      },
+    ];
+    const result = generateArrayExpression(makeMapState('items', fields));
+    expect(result).toContain('item("sku")');
+    expect(result).not.toContain('source("__item__:sku")');
+    assertParses(result);
+  });
+
+  it('chain field source generates source() reference for root-scoped paths', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'currency',
+        chainState: {
+          source: { kind: 'field', path: '__source__:currency' },
+          steps: [],
+        },
+      },
+    ];
+    const result = generateArrayExpression(makeMapState('items', fields));
+    expect(result).toContain('source("currency")');
+    expect(result).not.toContain('source("__source__:currency")');
     assertParses(result);
   });
 
@@ -673,7 +732,6 @@ describe('nested array generation', () => {
     // nested array fields appear as ItemFieldMappings with kind 'chain' or 'crossArrayLookup'
     // in the outer item template, where the chain expression itself is a nested map() call.
     // This test verifies that a chain containing a nested map expression is passed through.
-    const nestedMapExpr = 'map(item("employees"), {"id": item("id"), "dept": parent("name")})';
     const fields: ItemFieldMapping[] = [
       {
         kind: 'chain',

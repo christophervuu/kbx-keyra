@@ -23,8 +23,9 @@ import type {
   FilterLeftOperand,
   FilterRightOperand,
 } from '../lib/array-builder-state';
-import type { ParsedSchema } from '@/lib/types/domain';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+
+import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,7 @@ import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 export interface FilterPredicateEditorProps {
   readonly predicate: FilterPredicateState;
   readonly parsedSourceSchema: ParsedSchema | null;
+  readonly sourceArrayPath: string;
   readonly onPredicateChange: (predicate: FilterPredicateState) => void;
   readonly className?: string;
 }
@@ -88,33 +90,61 @@ function summarizePredicate(predicate: FilterPredicateState): string {
   return `${leftStr} ${opLabel} ${rightStr}`;
 }
 
+function getSourceArrayItemFieldPaths(
+  parsedSourceSchema: ParsedSchema | null,
+  sourceArrayPath: string,
+): string[] {
+  if (!parsedSourceSchema || !sourceArrayPath.trim()) return [];
+
+  const prefix = `${sourceArrayPath}.`;
+  const result = flattenSchemaPaths(parsedSourceSchema)
+    .map((entry) => entry.path)
+    .filter((path) => path.startsWith(prefix))
+    .map((path) => path.slice(prefix.length))
+    .filter((path) => path.length > 0);
+
+  return Array.from(new Set(result));
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
 function LeftOperandInput({
   left,
+  sourceArrayPath,
+  parsedSourceSchema,
   onChange,
 }: {
   left: FilterLeftOperand;
+  sourceArrayPath: string;
+  parsedSourceSchema: ParsedSchema | null;
   onChange: (left: FilterLeftOperand) => void;
 }) {
+  const itemFieldOptions = getSourceArrayItemFieldPaths(parsedSourceSchema, sourceArrayPath);
+
   return (
     <div className="space-y-1">
       <label className="block text-[10px] font-medium uppercase tracking-wide text-slate-500">
         Field
       </label>
-      <input
-        type="text"
-        value={left.kind === 'itemField' ? left.fieldPath : left.dsl}
-        placeholder='e.g. status'
+      <select
+        value={left.kind === 'itemField' ? left.fieldPath : ''}
         aria-label="Filter field path"
         data-testid="filter-left-operand"
+        disabled={!sourceArrayPath.trim()}
         onChange={(e) => {
           onChange({ kind: 'itemField', fieldPath: e.target.value });
         }}
-        className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-      />
+        className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <option value="">
+          {sourceArrayPath.trim() ? 'Select item field…' : 'Select source array first…'}
+        </option>
+        {itemFieldOptions.map((path) => (
+          <option key={path} value={path}>{path}</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -148,7 +178,7 @@ function OperatorSelect({
   );
 }
 
-type RightOperandKind = 'static' | 'sourceField';
+type RightOperandKind = 'sourceField' | 'static' | 'external';
 
 function RightOperandInput({
   right,
@@ -168,6 +198,7 @@ function RightOperandInput({
     : [];
 
   function handleKindChange(kind: RightOperandKind) {
+    if (kind === 'external') return;
     setInputKind(kind);
     if (kind === 'static') {
       onChange({ kind: 'static', value: '' });
@@ -187,22 +218,25 @@ function RightOperandInput({
           aria-label="Right operand type"
           className="inline-flex overflow-hidden rounded border border-slate-700"
         >
-          {(['static', 'sourceField'] as RightOperandKind[]).map((k) => (
+          {(['sourceField', 'static', 'external'] as RightOperandKind[]).map((k) => (
             <button
               key={k}
               type="button"
+              disabled={k === 'external'}
               aria-pressed={inputKind === k}
               data-testid={`filter-right-kind-${k}`}
+              title={k === 'external' ? 'External - available later' : undefined}
               onClick={() => { handleKindChange(k); }}
               className={[
                 'px-2 py-0.5 text-[10px] font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+                k === 'external' ? 'cursor-not-allowed opacity-60' : '',
                 inputKind === k
                   ? 'bg-blue-600 text-white'
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200',
               ].join(' ')}
             >
-              {k === 'static' ? 'Static' : 'Field'}
+              {k === 'sourceField' ? 'Source' : k === 'static' ? 'Static' : 'External'}
             </button>
           ))}
         </div>
@@ -232,6 +266,9 @@ function RightOperandInput({
           ))}
         </select>
       )}
+      <p className="text-[10px] text-slate-500">
+        External values are planned and will be enabled in a future release.
+      </p>
     </div>
   );
 }
@@ -243,6 +280,7 @@ function RightOperandInput({
 export function FilterPredicateEditor({
   predicate,
   parsedSourceSchema,
+  sourceArrayPath,
   onPredicateChange,
   className = '',
 }: FilterPredicateEditorProps) {
@@ -358,6 +396,8 @@ export function FilterPredicateEditor({
             <>
               <LeftOperandInput
                 left={predicate.left}
+                sourceArrayPath={sourceArrayPath}
+                parsedSourceSchema={parsedSourceSchema}
                 onChange={handleLeftChange}
               />
               <OperatorSelect

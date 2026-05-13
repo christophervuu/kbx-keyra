@@ -3,6 +3,7 @@ import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-do
 
 
 import { Button } from '@/components';
+import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { ConfirmDialog } from '@/features/mappings/components';
 import {
   ArrayBuilder,
@@ -32,7 +33,6 @@ import { useMappingEditor, useVersionHistory, useTargetStatus, useAutoMapWorkspa
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
-import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -323,6 +323,11 @@ export default function MappingEditor() {
     [selectedTargetPath, editor.actions],
   );
 
+  const effectiveRules = useMemo(
+    () => editor.config?.rules ?? editor.rules,
+    [editor.config, editor.rules],
+  );
+
   // ---------------------------------------------------------------------------
   // Derived: target status map (for ObjectSummaryPanel child info)
   // ---------------------------------------------------------------------------
@@ -333,7 +338,7 @@ export default function MappingEditor() {
     for (const path of targetPaths) statusMap.set(path, 'unmapped');
 
     const ruleIndexesByTarget = new Map<string, number[]>();
-    editor.rules.forEach((rule, index) => {
+    effectiveRules.forEach((rule, index) => {
       const bucket = ruleIndexesByTarget.get(rule.target) ?? [];
       bucket.push(index);
       ruleIndexesByTarget.set(rule.target, bucket);
@@ -356,11 +361,11 @@ export default function MappingEditor() {
       statusMap.set(path, hasDiagnostics ? 'warning' : 'mapped');
     }
     return statusMap;
-  }, [editor.parsedTargetSchema, editor.rules, editor.validation]);
+  }, [editor.parsedTargetSchema, effectiveRules, editor.validation]);
 
   // Leaf-field coverage map — used by ObjectSummaryPanel for accurate x/y ratio
   const { coverageMap: leafCoverageMap } = useTargetStatus(
-    editor.rules,
+    effectiveRules,
     editor.validation.result ?? null,
     editor.parsedTargetSchema?.nodes ?? [],
   );
@@ -473,7 +478,7 @@ export default function MappingEditor() {
     ) : (
       <TargetWorklist
         nodes={editor.parsedTargetSchema?.nodes ?? []}
-        rules={editor.rules}
+        rules={effectiveRules}
         validationResult={editor.validation.result ?? null}
         selectedPath={selectedTargetPath}
         groupingMode="schema"

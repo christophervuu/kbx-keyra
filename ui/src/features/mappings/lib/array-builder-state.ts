@@ -278,6 +278,7 @@ export interface CrossArrayLookupState {
  *
  * Discriminated on `kind`:
  * - 'chain'            — leaf field mapped via a ChainState (scalar chain builder)
+ * - 'expression'       — leaf field mapped via a raw DSL expression
  * - 'crossArrayLookup' — leaf field mapped via the cross-array lookup helper
  * - 'empty'            — field not yet mapped (incomplete, not an error)
  */
@@ -288,6 +289,13 @@ export type ItemFieldMapping =
       readonly targetFieldPath: string;
       /** The chain state for this leaf field. */
       readonly chainState: ChainState;
+    }
+  | {
+      readonly kind: 'expression';
+      /** The target item field path this mapping applies to. */
+      readonly targetFieldPath: string;
+      /** Raw DSL expression for this field (for example: gt(item("discountAmount"), 0)). */
+      readonly dsl: string;
     }
   | {
       readonly kind: 'crossArrayLookup';
@@ -686,7 +694,8 @@ export function createEmptyMergeBranch(): MergeBranch {
 /**
  * Creates an empty cross-array lookup state.
  */
-export function createEmptyCrossArrayLookup(targetFieldPath: string): CrossArrayLookupState {
+export function createEmptyCrossArrayLookup(_targetFieldPath: string): CrossArrayLookupState {
+  void _targetFieldPath;
   return {
     kind: 'crossArrayLookup',
     lookupArrayPath: '',
@@ -807,6 +816,12 @@ export function isCrossArrayLookupMapping(
   m: ItemFieldMapping,
 ): m is { kind: 'crossArrayLookup'; targetFieldPath: string; lookupState: CrossArrayLookupState } {
   return m.kind === 'crossArrayLookup';
+}
+
+export function isExpressionFieldMapping(
+  m: ItemFieldMapping,
+): m is { kind: 'expression'; targetFieldPath: string; dsl: string } {
+  return m.kind === 'expression';
 }
 
 export function isEmptyFieldMapping(

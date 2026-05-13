@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+
 import {
   deriveCompletionStatus,
   isCompatibleModeSwitch,
@@ -31,6 +32,7 @@ import {
   isStructuredFilterPredicate,
   isRawFilterPredicate,
   isChainFieldMapping,
+  isExpressionFieldMapping,
   isCrossArrayLookupMapping,
   isEmptyFieldMapping,
   isObjectValueEntry,
@@ -657,6 +659,16 @@ describe('type guards', () => {
     };
     expect(isCrossArrayLookupMapping(m)).toBe(true);
     expect(isCrossArrayLookupMapping(createEmptyItemFieldMapping('tax'))).toBe(false);
+  });
+
+  it('isExpressionFieldMapping', () => {
+    const m: ItemFieldMapping = {
+      kind: 'expression',
+      targetFieldPath: 'hasDiscount',
+      dsl: 'gt(item("discountAmount"), 0)',
+    };
+    expect(isExpressionFieldMapping(m)).toBe(true);
+    expect(isExpressionFieldMapping(createEmptyItemFieldMapping('hasDiscount'))).toBe(false);
   });
 
   it('isEmptyFieldMapping', () => {

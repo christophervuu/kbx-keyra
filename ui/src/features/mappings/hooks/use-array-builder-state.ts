@@ -41,10 +41,11 @@ import type {
   MergeBranch,
   ValueEntry,
 } from '../lib/array-builder-state';
-import { generateArrayExpression } from '../lib/array-expression-generator';
 import { decomposeArrayExpression } from '../lib/array-decomposer';
+import { generateArrayExpression } from '../lib/array-expression-generator';
 import { deriveArrayValidation } from '../lib/array-validation';
 import type { ArrayValidationState } from '../lib/array-validation';
+
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -655,7 +656,7 @@ export function useArrayBuilderState({
       setPendingModeSwitch(toMode);
       return prev;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   const confirmModeSwitch = useCallback(() => {
@@ -663,7 +664,7 @@ export function useArrayBuilderState({
     const toMode = pendingModeSwitch;
     setPendingModeSwitch(null);
     setState((prev) => applyModeSwitch(prev, toMode));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [pendingModeSwitch]);
 
   const cancelModeSwitch = useCallback(() => {
@@ -690,7 +691,9 @@ export function useArrayBuilderState({
   const enterNestedArray = useCallback((targetFieldPath: string) => {
     // Ensure a nested state exists for this path; create empty if not
     setState((prev) => {
-      const existing = prev.itemTemplate.nestedArrays.get(targetFieldPath);
+      const leafKey = targetFieldPath.includes('.') ? targetFieldPath.slice(targetFieldPath.lastIndexOf('.') + 1) : targetFieldPath;
+      const existing = prev.itemTemplate.nestedArrays.get(targetFieldPath)
+        ?? prev.itemTemplate.nestedArrays.get(leafKey);
       if (existing) return prev; // already exists — no state change needed
       const newNestedState = createEmptyArrayBuilderState('map');
       const updatedNestedArrays = new Map(prev.itemTemplate.nestedArrays);
@@ -710,7 +713,11 @@ export function useArrayBuilderState({
     (targetFieldPath: string, mapping: ItemFieldMapping) => {
       setState((prev) => {
         if (!activeNestedPath) return prev;
-        const nestedState = prev.itemTemplate.nestedArrays.get(activeNestedPath);
+        const nestedLeafKey = activeNestedPath.includes('.')
+          ? activeNestedPath.slice(activeNestedPath.lastIndexOf('.') + 1)
+          : activeNestedPath;
+        const nestedState = prev.itemTemplate.nestedArrays.get(activeNestedPath)
+          ?? prev.itemTemplate.nestedArrays.get(nestedLeafKey);
         if (!nestedState) return prev;
         const existingFields = nestedState.itemTemplate.fields;
         const idx = existingFields.findIndex((f) => f.targetFieldPath === targetFieldPath);
@@ -731,7 +738,7 @@ export function useArrayBuilderState({
         return { ...partial, completionStatus: deriveCompletionStatus(partial) };
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [activeNestedPath],
   );
 
@@ -746,13 +753,21 @@ export function useArrayBuilderState({
         return { ...partial, completionStatus: deriveCompletionStatus(partial) };
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [activeNestedPath],
   );
 
   const activeNestedState: ArrayBuilderState | null =
     activeNestedPath !== null
-      ? (state.itemTemplate.nestedArrays.get(activeNestedPath) ?? createEmptyArrayBuilderState('map'))
+      ? (
+          state.itemTemplate.nestedArrays.get(activeNestedPath)
+          ?? state.itemTemplate.nestedArrays.get(
+            activeNestedPath.includes('.')
+              ? activeNestedPath.slice(activeNestedPath.lastIndexOf('.') + 1)
+              : activeNestedPath,
+          )
+          ?? createEmptyArrayBuilderState('map')
+        )
       : null;
 
   // ---------------------------------------------------------------------------

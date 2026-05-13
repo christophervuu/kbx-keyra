@@ -20,14 +20,26 @@
  * DSL expression directly.
  */
 
-import { ChevronDown, ChevronRight, Check, Circle, AlertCircle, Database, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, Check, Circle, AlertCircle, Database, Search, Plus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
-import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { CrossArrayLookupEditor } from './CrossArrayLookupEditor';
+import { LogicStepList } from './LogicStepList';
 import type { ItemFieldMapping, CrossArrayLookupState } from '../lib/array-builder-state';
 import { createEmptyCrossArrayLookup } from '../lib/array-builder-state';
-import { CrossArrayLookupEditor, summarizeLookup } from './CrossArrayLookupEditor';
 import type { ArrayValidationEntry } from '../lib/array-validation';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import type { SchemaPathEntry } from '../lib/autocomplete-utils';
+import {
+  createEmptyChainState,
+  createEmptyConditionStep,
+  createEmptyTransformStep,
+  createEmptyValueMapStep,
+} from '../lib/chain-builder-state';
+import type { ChainBuilderState, LogicStep } from '../lib/chain-builder-state';
+import { generateExpressionFromChain } from '../lib/chain-expression-generator';
+
 import type { ParsedSchema, SchemaNodeType } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -37,7 +49,7 @@ import type { ParsedSchema, SchemaNodeType } from '@/lib/types/domain';
 export type ItemFieldScope = 'item' | 'source' | 'static';
 
 /** Top-level logic type for a field row. */
-export type ItemFieldLogicType = 'item' | 'source' | 'static' | 'crossArrayLookup';
+export type ItemFieldLogicType = 'source' | 'static' | 'external' | 'expression' | 'crossArrayLookup';
 
 export interface ItemFieldRowProps {
   /** Target field name (leaf, e.g. "id", "name"). */
@@ -77,21 +89,6 @@ export interface ItemFieldRowProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function expressionSummary(mapping: ItemFieldMapping): string {
-  if (mapping.kind === 'empty') return '';
-  if (mapping.kind === 'crossArrayLookup') return summarizeLookup(mapping.lookupState);
-  const { chainState } = mapping;
-  if (chainState.source.kind === 'none') return '';
-  if (chainState.source.kind === 'static') {
-    const v = chainState.source.value;
-    if (v.type === 'null') return 'null';
-    if (v.type === 'boolean') return String(v.value);
-    return String((v as { value: unknown }).value ?? '');
-  }
-  // field source — path is the full DSL expression (item("x") or source("x"))
-  return chainState.source.path;
-}
-
 function scopeFromMapping(mapping: ItemFieldMapping): ItemFieldScope {
   if (mapping.kind !== 'chain') return 'item';
   const { source } = mapping.chainState;
@@ -110,7 +107,9 @@ function scopeFromMapping(mapping: ItemFieldMapping): ItemFieldScope {
 
 function logicTypeFromMapping(mapping: ItemFieldMapping): ItemFieldLogicType {
   if (mapping.kind === 'crossArrayLookup') return 'crossArrayLookup';
-  return scopeFromMapping(mapping);
+  if (mapping.kind === 'expression') return 'expression';
+  const scope = scopeFromMapping(mapping);
+  return scope === 'static' ? 'static' : 'source';
 }
 
 function fieldPathFromMapping(mapping: ItemFieldMapping): string {
@@ -132,19 +131,58 @@ function staticValueFromMapping(mapping: ItemFieldMapping): string {
   return String((v as { value: unknown }).value ?? '');
 }
 
-/**
- * Generates the DSL expression for a given scope + field/value.
- * Uses internal path prefixes to track scope in ChainState.source.path.
- */
-function buildExpression(scope: ItemFieldScope, fieldOrValue: string): string {
-  switch (scope) {
-    case 'item':
-      return fieldOrValue ? `item("${fieldOrValue}")` : '';
-    case 'source':
-      return fieldOrValue ? `source("${fieldOrValue}")` : '';
-    case 'static':
-      return fieldOrValue ? `static("${fieldOrValue}")` : '';
+function expressionDslFromMapping(mapping: ItemFieldMapping): string {
+  if (mapping.kind !== 'expression') return '';
+  return mapping.dsl;
+}
+
+function sourceScopeFromMapping(mapping: ItemFieldMapping): Exclude<ItemFieldScope, 'static'> {
+  if (mapping.kind !== 'chain') return 'item';
+  const { source } = mapping.chainState;
+  if (source.kind !== 'field') return 'item';
+  if (source.path.startsWith('__source__:')) return 'source';
+  return 'item';
+}
+
+function toMappingPrefix(scope: Exclude<ItemFieldScope, 'static'>): string {
+  return scope === 'item' ? '__item__:' : '__source__:';
+}
+
+type UnifiedSourceOption = {
+  readonly path: string;
+  readonly scope: Exclude<ItemFieldScope, 'static'>;
+};
+
+function buildUnifiedSourceOptions(
+  itemPaths: readonly string[],
+  sourcePaths: readonly string[],
+): UnifiedSourceOption[] {
+  const results: UnifiedSourceOption[] = [];
+  const seen = new Set<string>();
+
+  for (const path of itemPaths) {
+    if (!path.trim()) continue;
+    const key = `item:${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push({ path, scope: 'item' });
   }
+
+  for (const path of sourcePaths) {
+    if (!path.trim()) continue;
+    const key = `source:${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push({ path, scope: 'source' });
+  }
+
+  return results;
+}
+
+function normalizeScopedSourceCalls(expression: string): string {
+  return expression
+    .replace(/source\("__item__:(.*?)"\)/g, 'item("$1")')
+    .replace(/source\("__source__:(.*?)"\)/g, 'source("$1")');
 }
 
 /**
@@ -228,10 +266,16 @@ function StatusDot({
 // Sub-component: LogicTypeSelector
 // ---------------------------------------------------------------------------
 
-const LOGIC_TYPE_OPTIONS: { value: ItemFieldLogicType; label: string; isHelper?: boolean }[] = [
-  { value: 'item', label: 'Item field' },
-  { value: 'source', label: 'Root source' },
+const LOGIC_TYPE_OPTIONS: { value: ItemFieldLogicType; label: string; isHelper?: boolean; disabled?: boolean; tooltip?: string }[] = [
+  { value: 'source', label: 'Source' },
   { value: 'static', label: 'Static' },
+  {
+    value: 'external',
+    label: 'External',
+    disabled: true,
+    tooltip: 'External data sources - available in a future release',
+  },
+  { value: 'expression', label: 'Function expression' },
   { value: 'crossArrayLookup', label: 'Cross-array Lookup', isHelper: true },
 ];
 
@@ -252,16 +296,19 @@ function LogicTypeSelector({
         aria-label="Logic type"
         className="flex flex-wrap gap-1"
       >
-        {LOGIC_TYPE_OPTIONS.map(({ value, label, isHelper }) => (
+        {LOGIC_TYPE_OPTIONS.map(({ value, label, isHelper, disabled, tooltip }) => (
           <button
             key={value}
             type="button"
+            disabled={disabled}
             aria-pressed={logicType === value}
             data-testid={`logic-type-btn-${value}`}
+            title={tooltip}
             onClick={() => { onChange(value); }}
             className={[
               'inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium transition-colors',
               'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+              disabled ? 'cursor-not-allowed opacity-50' : '',
               logicType === value
                 ? 'bg-blue-600 text-white'
                 : 'bg-slate-800 border border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200',
@@ -303,28 +350,126 @@ export function ItemFieldRow({
   className = '',
 }: ItemFieldRowProps) {
   const [logicType, setLogicType] = useState<ItemFieldLogicType>(() => logicTypeFromMapping(mapping));
+  const [selectedSourceScope, setSelectedSourceScope] = useState<Exclude<ItemFieldScope, 'static'>>(
+    () => sourceScopeFromMapping(mapping),
+  );
   // Derive scope for chain-based logic types
-  const scope: ItemFieldScope = logicType === 'crossArrayLookup' ? 'item' : logicType;
+  const scope: ItemFieldScope = logicType === 'static' ? 'static' : selectedSourceScope;
   const [selectedField, setSelectedField] = useState<string>(() => fieldPathFromMapping(mapping));
   const [staticValue, setStaticValue] = useState<string>(() => staticValueFromMapping(mapping));
+  const [expressionDsl, setExpressionDsl] = useState<string>(() => expressionDslFromMapping(mapping));
+  const [showAddLogicPicker, setShowAddLogicPicker] = useState(false);
+  const [logicChainState, setLogicChainState] = useState<ChainBuilderState>(() => {
+    const state = createEmptyChainState();
+    if (mapping.kind === 'chain' && mapping.chainState.source.kind === 'field') {
+      return {
+        ...state,
+        entryType: 'source',
+        sourcePath: mapping.chainState.source.path,
+      };
+    }
+    if (mapping.kind === 'chain' && mapping.chainState.source.kind === 'static') {
+      return {
+        ...state,
+        entryType: 'static',
+        staticValue: mapping.chainState.source.value,
+      };
+    }
+    return state;
+  });
+  const [sourceSearch, setSourceSearch] = useState<string>(() => fieldPathFromMapping(mapping));
+  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const sourceInputRef = useRef<HTMLInputElement | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const sourcePaths = useMemo(
     () => parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema).map((e) => e.path) : [],
     [parsedSourceSchema],
   );
 
-  const summary = expressionSummary(mapping);
-  const isMapped = mapping.kind !== 'empty';
+  const unifiedSourceOptions = useMemo(
+    () => buildUnifiedSourceOptions(itemFieldPaths, sourcePaths),
+    [itemFieldPaths, sourcePaths],
+  );
+
+  const filteredSourceOptions = useMemo(() => {
+    const query = sourceSearch.trim().toLowerCase();
+    if (!query) return unifiedSourceOptions;
+    return unifiedSourceOptions.filter((option) => option.path.toLowerCase().includes(query));
+  }, [sourceSearch, unifiedSourceOptions]);
+
   const typeBadgeClass = TYPE_BADGE_CLASSES[fieldType] ?? 'bg-slate-700 text-slate-400';
+
+  const logicSourceOptions = useMemo<SchemaPathEntry[]>(() => {
+    return unifiedSourceOptions.map((option) => ({
+      path: `${toMappingPrefix(option.scope)}${option.path}`,
+      type: 'string',
+    }));
+  }, [unifiedSourceOptions]);
+
+  useEffect(() => {
+    if (!showSourceDropdown) return;
+
+    const updatePosition = () => {
+      const input = sourceInputRef.current;
+      if (!input) return;
+      const rect = input.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [showSourceDropdown]);
+
+  useEffect(() => {
+    if (!showSourceDropdown) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (sourceInputRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setShowSourceDropdown(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowSourceDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showSourceDropdown]);
 
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
 
   function handleLogicTypeChange(newType: ItemFieldLogicType) {
+    if (newType === 'external') {
+      return;
+    }
     setLogicType(newType);
     setSelectedField('');
     setStaticValue('');
+    setExpressionDsl('');
+    setShowAddLogicPicker(false);
+    setShowSourceDropdown(false);
     if (newType === 'crossArrayLookup') {
       onMappingChange(fieldPath, {
         kind: 'crossArrayLookup',
@@ -336,13 +481,33 @@ export function ItemFieldRow({
     }
   }
 
-  function handleFieldSelect(field: string) {
-    setSelectedField(field);
-    onMappingChange(fieldPath, buildMapping(fieldPath, scope, field));
+  function handleFieldSelect(option: UnifiedSourceOption) {
+    setSelectedField(option.path);
+    setSourceSearch(option.path);
+    setSelectedSourceScope(option.scope);
+    setShowSourceDropdown(false);
+    setLogicChainState((prev) => ({
+      ...prev,
+      entryType: 'source',
+      sourcePath: `${toMappingPrefix(option.scope)}${option.path}`,
+    }));
+    onMappingChange(fieldPath, {
+      kind: 'chain',
+      targetFieldPath: fieldPath,
+      chainState: {
+        source: { kind: 'field', path: `${toMappingPrefix(option.scope)}${option.path}` },
+        steps: [],
+      },
+    });
   }
 
   function handleStaticChange(value: string) {
     setStaticValue(value);
+    setLogicChainState((prev) => ({
+      ...prev,
+      entryType: 'static',
+      staticValue: { type: 'string', value },
+    }));
     onMappingChange(fieldPath, buildMapping(fieldPath, scope, value));
   }
 
@@ -354,11 +519,131 @@ export function ItemFieldRow({
     });
   }
 
+  function handleExpressionChange(value: string) {
+    setExpressionDsl(value);
+    if (!value.trim()) {
+      onMappingChange(fieldPath, { kind: 'empty', targetFieldPath: fieldPath });
+      return;
+    }
+    onMappingChange(fieldPath, {
+      kind: 'expression',
+      targetFieldPath: fieldPath,
+      dsl: value,
+    });
+  }
+
+  function handleAddLogic(kind: 'transform' | 'condition' | 'valueMap') {
+    const newStep: LogicStep =
+      kind === 'transform'
+        ? createEmptyTransformStep()
+        : kind === 'condition'
+          ? createEmptyConditionStep()
+          : createEmptyValueMapStep();
+
+    setLogicChainState((prev) => {
+      const baseState: ChainBuilderState = {
+        ...prev,
+        entryType: logicType === 'static' ? 'static' : 'source',
+        sourcePath:
+          logicType === 'static'
+            ? prev.sourcePath
+            : `${toMappingPrefix(selectedSourceScope)}${selectedField}`,
+        staticValue:
+          logicType === 'static'
+            ? { type: 'string', value: staticValue }
+            : prev.staticValue,
+      };
+
+      const updated: ChainBuilderState = {
+        ...baseState,
+        logicSteps: [...baseState.logicSteps, newStep],
+        expandedStepIndex: baseState.logicSteps.length,
+      };
+
+      const generated = normalizeScopedSourceCalls(generateExpressionFromChain(updated));
+      if (generated.trim()) {
+        setLogicType('expression');
+        setExpressionDsl(generated);
+        onMappingChange(fieldPath, {
+          kind: 'expression',
+          targetFieldPath: fieldPath,
+          dsl: generated,
+        });
+      }
+
+      return updated;
+    });
+
+    setShowAddLogicPicker(false);
+  }
+
+  function handleLogicStepChange(index: number, step: LogicStep) {
+    setLogicChainState((prev) => {
+      const updated: ChainBuilderState = {
+        ...prev,
+        logicSteps: prev.logicSteps.map((s, i) => (i === index ? step : s)),
+      };
+      const generated = normalizeScopedSourceCalls(generateExpressionFromChain(updated));
+      setLogicType('expression');
+      setExpressionDsl(generated);
+      onMappingChange(fieldPath, {
+        kind: 'expression',
+        targetFieldPath: fieldPath,
+        dsl: generated,
+      });
+      return updated;
+    });
+  }
+
+  function handleLogicStepRemove(index: number) {
+    setLogicChainState((prev) => {
+      const updatedSteps = prev.logicSteps.filter((_, i) => i !== index);
+      const updated: ChainBuilderState = {
+        ...prev,
+        logicSteps: updatedSteps,
+        expandedStepIndex:
+          prev.expandedStepIndex === index
+            ? null
+            : prev.expandedStepIndex !== null && prev.expandedStepIndex > index
+              ? prev.expandedStepIndex - 1
+              : prev.expandedStepIndex,
+      };
+
+      if (updatedSteps.length === 0) {
+        const restoredScope = logicType === 'static' ? 'static' : selectedSourceScope;
+        const restoredValue = logicType === 'static' ? staticValue : selectedField;
+        const restoredMapping = buildMapping(fieldPath, restoredScope, restoredValue);
+        onMappingChange(fieldPath, restoredMapping);
+        if (restoredMapping.kind === 'chain') {
+          setLogicType(restoredScope === 'static' ? 'static' : 'source');
+        }
+      } else {
+        const generated = normalizeScopedSourceCalls(generateExpressionFromChain(updated));
+        setLogicType('expression');
+        setExpressionDsl(generated);
+        onMappingChange(fieldPath, {
+          kind: 'expression',
+          targetFieldPath: fieldPath,
+          dsl: generated,
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  function handleExpandedStepIndexChange(index: number | null) {
+    setLogicChainState((prev) => ({ ...prev, expandedStepIndex: index }));
+  }
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
-  const fieldOptions = scope === 'item' ? [...itemFieldPaths] : sourcePaths;
+  const canShowAddLogic =
+    (logicType === 'source' && selectedField.trim().length > 0)
+    || (logicType === 'static' && staticValue.trim().length > 0)
+    || (logicType === 'expression' && expressionDsl.trim().length > 0);
 
   // Current lookup state (if applicable)
   const currentLookupState: CrossArrayLookupState =
@@ -412,16 +697,6 @@ export function ItemFieldRow({
           {fieldType}
         </span>
 
-        {/* Expression summary when collapsed */}
-        {!isExpanded && isMapped && (
-          <span
-            data-testid={`item-field-summary-${fieldPath}`}
-            className="ml-1 max-w-[120px] truncate font-mono text-[10px] text-slate-400"
-            title={summary}
-          >
-            {summary}
-          </span>
-        )}
       </button>
 
       {/* Expanded body */}
@@ -442,6 +717,23 @@ export function ItemFieldRow({
               hasParentScope={hasParentScope}
               onChange={handleLookupChange}
             />
+          ) : logicType === 'expression' ? (
+            <div className="space-y-1">
+              <label
+                htmlFor={`expression-input-${fieldPath}`}
+                className="block text-[10px] font-medium uppercase tracking-wide text-slate-500"
+              >
+                Expression
+              </label>
+              <textarea
+                id={`expression-input-${fieldPath}`}
+                value={expressionDsl}
+                placeholder='e.g. gt(item("discountAmount"), 0)'
+                data-testid={`expression-input-${fieldPath}`}
+                onChange={(e) => { handleExpressionChange(e.target.value); }}
+                className="min-h-[64px] w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
           ) : scope === 'static' ? (
             /* Static value input */
             <div className="space-y-1">
@@ -462,77 +754,120 @@ export function ItemFieldRow({
               />
             </div>
           ) : (
-            /* Item / Source field picker */
+            /* Unified source field picker */
             <div className="space-y-1">
               <label
                 htmlFor={`field-select-${fieldPath}`}
                 className="block text-[10px] font-medium uppercase tracking-wide text-slate-500"
               >
-                {scope === 'item' ? 'Item field' : 'Source field'}
+                Source field
               </label>
-              {fieldOptions.length === 0 ? (
-                <p className="text-[11px] text-slate-500">
-                  {scope === 'item'
-                    ? 'No item fields available. Configure source array first.'
-                    : 'Load a source schema to see available fields.'}
-                </p>
-              ) : (
+              <input
+                ref={sourceInputRef}
+                type="text"
+                value={sourceSearch}
+                onFocus={() => { setShowSourceDropdown(true); }}
+                onClick={() => { setShowSourceDropdown(true); }}
+                onChange={(e) => {
+                  setSourceSearch(e.target.value);
+                  setShowSourceDropdown(true);
+                }}
+                placeholder="Search fields"
+                data-testid={`field-search-${fieldPath}`}
+                className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {showSourceDropdown && dropdownPosition !== null && createPortal(
                 <div
+                  ref={dropdownRef}
                   role="listbox"
-                  aria-label={scope === 'item' ? 'Item fields' : 'Source fields'}
+                  aria-label="Source fields"
                   data-testid={`field-listbox-${fieldPath}`}
-                  className="max-h-36 overflow-y-auto rounded border border-slate-700 bg-slate-800/60 p-1"
+                  className="fixed z-[1000] max-h-56 overflow-y-auto rounded border border-slate-700 bg-slate-800 p-1 shadow-xl"
+                  style={{
+                    top: `${dropdownPosition.top}px`,
+                    left: `${dropdownPosition.left}px`,
+                    width: `${dropdownPosition.width}px`,
+                  }}
                 >
-                  {fieldOptions.map((path) => (
-                    <button
-                      key={path}
-                      type="button"
-                      role="option"
-                      aria-selected={path === selectedField}
-                      data-testid={`field-option-${fieldPath}-${path}`}
-                      onClick={() => { handleFieldSelect(path); }}
-                      className={[
-                        'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors',
-                        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-                        path === selectedField
-                          ? 'bg-blue-950/50 text-blue-300 ring-1 ring-inset ring-blue-700/60'
-                          : 'text-slate-300 hover:bg-slate-700/60 hover:text-slate-100',
-                      ].join(' ')}
-                    >
-                      <Database
-                        size={10}
-                        aria-hidden="true"
-                        className={path === selectedField ? 'text-blue-400 shrink-0' : 'text-slate-500 shrink-0'}
-                      />
-                      <span className="min-w-0 flex-1 truncate font-mono">{path}</span>
-                      {path === selectedField && (
-                        <Check size={10} className="shrink-0 text-blue-400" aria-hidden="true" />
-                      )}
-                    </button>
-                  ))}
-                </div>
+                  {filteredSourceOptions.length === 0 ? (
+                    <p className="px-2 py-1.5 text-[11px] text-slate-500">No fields match your search.</p>
+                  ) : (
+                    filteredSourceOptions.map((option) => {
+                      const normalizedValue = `${toMappingPrefix(option.scope)}${option.path}`;
+                      const normalizedSelected = `${toMappingPrefix(selectedSourceScope)}${selectedField}`;
+                      const isSelected = normalizedValue === normalizedSelected;
+                      return (
+                        <button
+                          key={`${option.scope}:${option.path}`}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          data-testid={`field-option-${fieldPath}-${option.scope}-${option.path}`}
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={() => { handleFieldSelect(option); }}
+                          className={[
+                            'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors',
+                            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                            isSelected
+                              ? 'bg-blue-950/50 text-blue-300 ring-1 ring-inset ring-blue-700/60'
+                              : 'text-slate-300 hover:bg-slate-700/60 hover:text-slate-100',
+                          ].join(' ')}
+                        >
+                          <Database
+                            size={10}
+                            aria-hidden="true"
+                            className={isSelected ? 'text-blue-400 shrink-0' : 'text-slate-500 shrink-0'}
+                          />
+                          <span className="min-w-0 flex-1 truncate font-mono">{option.path}</span>
+                          {option.scope === 'item' && (
+                            <span className="shrink-0 rounded bg-blue-950/50 px-1.5 py-0.5 text-[9px] font-medium text-blue-300">
+                              item
+                            </span>
+                          )}
+                          {isSelected && (
+                            <Check size={10} className="shrink-0 text-blue-400" aria-hidden="true" />
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>,
+                document.body,
               )}
             </div>
           )}
 
-          {/* Generated expression preview (chain-based only) */}
-          {isMapped && logicType !== 'crossArrayLookup' && (
-            <div className="rounded border border-slate-700 bg-slate-900/60 px-2.5 py-1.5">
-              <span className="block text-[9px] font-medium uppercase tracking-wide text-slate-600 mb-0.5">
-                Expression
-              </span>
-              <span
-                data-testid={`item-field-expression-${fieldPath}`}
-                className="font-mono text-[11px] text-green-300"
-              >
-                {buildExpression(
-                  scope,
-                  scope === 'static' ? staticValue : selectedField,
-                )}
-              </span>
+          {canShowAddLogic && logicType !== 'crossArrayLookup' && (
+            <div className="space-y-2">
+              {logicChainState.logicSteps.length === 0 && !showAddLogicPicker && (
+                <button
+                  type="button"
+                  onClick={() => { setShowAddLogicPicker(true); }}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-400 hover:text-blue-300 hover:bg-slate-700 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+                  data-testid={`item-field-add-logic-${fieldPath}`}
+                >
+                  <Plus size={11} aria-hidden="true" />
+                  Add logic
+                </button>
+              )}
+              {(logicChainState.logicSteps.length > 0 || showAddLogicPicker) && (
+                <LogicStepList
+                  steps={logicChainState.logicSteps}
+                  expandedStepIndex={logicChainState.expandedStepIndex}
+                  onExpandedStepIndexChange={handleExpandedStepIndexChange}
+                  onStepChange={handleLogicStepChange}
+                  onRemoveStep={handleLogicStepRemove}
+                  onAddStep={handleAddLogic}
+                  forcePickerOpen={showAddLogicPicker}
+                  onPickerOpenChange={setShowAddLogicPicker}
+                  sourceOptions={logicSourceOptions}
+                  currentValueLabel={selectedField || 'current value'}
+                />
+              )}
             </div>
           )}
-
           {/* T-11: Validation messages */}
           {validationEntries.length > 0 && (
             <div className="space-y-1">

@@ -27,7 +27,9 @@
  */
 
 import { Check, X } from 'lucide-react';
+import type { ChangeEvent } from 'react';
 import { useCallback, useState } from 'react';
+
 import type { StaticValueBranch } from '../lib/chain-builder-state';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +47,8 @@ export interface StaticValueInputProps {
   readonly onValidChange: (isValid: boolean) => void;
   /** Fires when the user clicks "+ Add logic". */
   readonly onAddLogic: () => void;
+  /** Controls whether the inline "+ Add logic" button is shown. */
+  readonly showAddLogicButton?: boolean;
   /** Optional className for the root element. */
   readonly className?: string;
 }
@@ -141,6 +145,7 @@ export function StaticValueInput({
   onValueChange,
   onValidChange,
   onAddLogic,
+  showAddLogicButton = true,
   className,
 }: StaticValueInputProps) {
   const [rawValue, setRawValue] = useState(initialValue);
@@ -153,7 +158,7 @@ export function StaticValueInput({
   const showSuccess = !isEmpty && isValid;
 
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: ChangeEvent<HTMLInputElement>) => {
       const next = e.target.value;
       setRawValue(next);
       setTouched(true);
@@ -242,15 +247,17 @@ export function StaticValueInput({
       )}
 
       {/* + Add logic button */}
-      <button
-        type="button"
-        onClick={onAddLogic}
-        className="inline-flex items-center gap-1 self-start rounded px-2 py-1 text-xs text-blue-400 hover:text-blue-300 hover:bg-zinc-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-        aria-label="Add logic step"
-        data-testid="static-value-add-logic"
-      >
-        + Add logic
-      </button>
+      {showAddLogicButton && (
+        <button
+          type="button"
+          onClick={onAddLogic}
+          className="inline-flex items-center gap-1 self-start rounded px-2 py-1 text-xs text-blue-400 hover:text-blue-300 hover:bg-zinc-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label="Add logic step"
+          data-testid="static-value-add-logic"
+        >
+          + Add logic
+        </button>
+      )}
     </div>
   );
 }

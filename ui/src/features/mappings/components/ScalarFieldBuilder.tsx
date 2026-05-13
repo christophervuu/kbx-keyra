@@ -29,7 +29,6 @@ import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { ChainBuilderShell } from './ChainBuilderShell';
-import { EntryPointSelector } from './EntryPointSelector';
 import { ChainSourceCard } from './ChainSourceCard';
 import { StaticValueInput } from './StaticValueInput';
 import { LogicStepList } from './LogicStepList';
@@ -207,6 +206,87 @@ function MappingStatusIcon({ status }: { status: TargetFieldStatus }) {
     default:
       return <Circle size={14} className="text-slate-600" aria-hidden="true" />;
   }
+}
+
+interface ScalarEntryOption {
+  readonly type: BuilderEntryType;
+  readonly label: string;
+  readonly description: string;
+  readonly disabled?: boolean;
+  readonly tooltip?: string;
+}
+
+const SCALAR_ENTRY_OPTIONS: readonly ScalarEntryOption[] = [
+  {
+    type: 'source',
+    label: 'Source field',
+    description: 'Use a field from the source schema',
+  },
+  {
+    type: 'static',
+    label: 'Static value',
+    description: 'Use a literal value for this target field',
+  },
+  {
+    type: 'external',
+    label: 'External',
+    description: 'Use external data (coming later)',
+    disabled: true,
+    tooltip: 'External data sources - available in a future release',
+  },
+];
+
+function ScalarEntryModeSelector({
+  selectedType,
+  onSelect,
+}: {
+  selectedType: BuilderEntryType;
+  onSelect: (type: BuilderEntryType) => void;
+}) {
+  return (
+    <div className="space-y-1.5" data-testid="scalar-entry-mode-selector">
+      {SCALAR_ENTRY_OPTIONS.map((option) => {
+        const isSelected = selectedType === option.type;
+        return (
+          <button
+            key={option.type}
+            type="button"
+            disabled={option.disabled}
+            title={option.tooltip}
+            aria-pressed={isSelected}
+            data-testid={`scalar-entry-mode-${option.type}`}
+            onClick={() => {
+              if (!option.disabled) {
+                onSelect(option.type);
+              }
+            }}
+            className={[
+              'flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-900',
+              option.disabled
+                ? 'cursor-not-allowed border-slate-700 bg-slate-800/20 text-slate-600'
+                : isSelected
+                  ? 'border-blue-500 bg-blue-950/40 text-slate-100'
+                  : 'border-slate-700 bg-slate-800/40 text-slate-300 hover:border-slate-500 hover:bg-slate-800/70 hover:text-slate-100',
+            ].join(' ')}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-semibold leading-tight">{option.label}</span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-slate-400">
+                {option.description}
+              </span>
+            </span>
+            {isSelected && !option.disabled && (
+              <span
+                aria-hidden="true"
+                className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-blue-400"
+              />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -603,6 +683,7 @@ export function ScalarFieldBuilder({
 
   // FS-038 T-12: Chain state update handlers
   const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
+    setAddLogicPickerOpen(false);
     setChainState((prev) => ({
       ...createEmptyChainState(),
       entryType: type,
@@ -662,16 +743,21 @@ export function ScalarFieldBuilder({
 
   // Current value label for condition/value map forms
   const currentValueLabel = chainState.sourcePath ?? 'the current value';
+  const hasAnsweredEntryQuestion =
+    (chainState.entryType === 'source' && Boolean(chainState.sourcePath?.trim()))
+    || (chainState.entryType === 'static' && chainState.staticValue !== undefined);
+  const shouldShowLogicLane =
+    hasAnsweredEntryQuestion || chainState.logicSteps.length > 0 || addLogicPickerOpen;
 
   return (
     <div
       data-testid="scalar-field-builder"
-      className={`flex flex-col gap-0 overflow-y-auto ${className}`}
+      className={`flex flex-col gap-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-900/30 ${className}`}
     >
       {/* ------------------------------------------------------------------ */}
       {/* Header: target context + Builder|Editor toggle                      */}
       {/* ------------------------------------------------------------------ */}
-      <div className="shrink-0 border-b border-slate-700 px-4 py-3">
+      <div className="shrink-0 border-b border-slate-700 bg-slate-900/40 px-4 py-3">
         <div className="flex items-center gap-2">
           {/* Mapping status icon */}
           <span className={STATUS_CLASSES[currentStatus]} data-testid="header-status-icon">
@@ -736,7 +822,7 @@ export function ScalarFieldBuilder({
 
       <div
         className={[
-          'min-h-0 flex-1 overflow-y-auto px-4 py-3 transition-colors',
+          'min-h-0 flex-1 overflow-y-auto bg-slate-900/20 px-4 py-3 transition-colors',
           isDragOver ? 'bg-blue-950/40 ring-1 ring-inset ring-blue-500' : '',
         ]
           .filter(Boolean)
@@ -793,22 +879,31 @@ export function ScalarFieldBuilder({
               }}
               showChrome={false}
             >
-              {/* Entry point selector */}
-              <EntryPointSelector
-                value={chainState.entryType}
-                hasLogicSteps={chainState.logicSteps.length > 0}
-                onEntryTypeChange={handleEntryTypeChange}
-              />
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400" data-testid="scalar-entry-question">
+                  Where does this value come from?
+                </p>
+                <ScalarEntryModeSelector
+                  selectedType={chainState.entryType}
+                  onSelect={handleEntryTypeChange}
+                />
+              </div>
 
               {/* Source entry */}
               {chainState.entryType === 'source' && (
-                <ChainSourceCard
-                  sourcePath={chainState.sourcePath}
-                  sourceOptions={sourceOptions.map((option) => option.path)}
-                  logicStepCount={chainState.logicSteps.length}
-                  onSourceSelect={handleSourceSelect}
-                  onAddLogic={() => { setAddLogicPickerOpen(true); }}
-                />
+                <div className="space-y-2" data-testid="scalar-source-field-section">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400" data-testid="scalar-source-field-heading">
+                    Source Field
+                  </p>
+                  <ChainSourceCard
+                    sourcePath={chainState.sourcePath}
+                    sourceOptions={sourceOptions.map((option) => option.path)}
+                    logicStepCount={chainState.logicSteps.length}
+                    onSourceSelect={handleSourceSelect}
+                    onAddLogic={() => { setAddLogicPickerOpen(true); }}
+                    showAddLogicButton={false}
+                  />
+                </div>
               )}
 
               {/* Static entry */}
@@ -823,23 +918,34 @@ export function ScalarFieldBuilder({
                   onValueChange={handleStaticValueChange}
                   onValidChange={() => {}}
                   onAddLogic={() => { setAddLogicPickerOpen(true); }}
+                  showAddLogicButton={false}
                 />
               )}
 
-              {/* Logic step list */}
-              {(chainState.logicSteps.length > 0 || addLogicPickerOpen) && (
-                <LogicStepList
-                  steps={chainState.logicSteps}
-                  expandedStepIndex={chainState.expandedStepIndex}
-                  onExpandedStepIndexChange={handleExpandedStepIndexChange}
-                  onStepChange={handleStepChange}
-                  onRemoveStep={handleRemoveStep}
-                  onAddStep={handleAddStep}
-                  forcePickerOpen={addLogicPickerOpen}
-                  onPickerOpenChange={setAddLogicPickerOpen}
-                  sourceOptions={sourceOptions}
-                  currentValueLabel={currentValueLabel}
-                />
+              {/* Logic section */}
+              {shouldShowLogicLane && (
+                <div className="space-y-2" data-testid="scalar-logic-lane">
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-slate-700/70" />
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500" data-testid="scalar-logic-heading">Logic</span>
+                    <div className="h-px flex-1 bg-slate-700/70" />
+                  </div>
+                  <p className="text-xs text-slate-400" data-testid="scalar-logic-prompt">
+                    Add transformation, conditional logic, or value mapping.
+                  </p>
+                  <LogicStepList
+                    steps={chainState.logicSteps}
+                    expandedStepIndex={chainState.expandedStepIndex}
+                    onExpandedStepIndexChange={handleExpandedStepIndexChange}
+                    onStepChange={handleStepChange}
+                    onRemoveStep={handleRemoveStep}
+                    onAddStep={handleAddStep}
+                    forcePickerOpen={addLogicPickerOpen}
+                    onPickerOpenChange={setAddLogicPickerOpen}
+                    sourceOptions={sourceOptions}
+                    currentValueLabel={currentValueLabel}
+                  />
+                </div>
               )}
             </ChainBuilderShell>
           </div>
@@ -875,7 +981,7 @@ export function ScalarFieldBuilder({
       {/* ------------------------------------------------------------------ */}
       {/* AI Actions + Reset draft + Discard (FS-040 T-04)                  */}
       {/* ------------------------------------------------------------------ */}
-      <div className="shrink-0 border-t border-slate-700 px-4 py-3" data-testid="builder-action-row">
+      <div className="shrink-0 border-t border-slate-700 bg-slate-900/40 px-4 py-3" data-testid="builder-action-row">
         {/* Reset draft confirmation prompt — inline, shown above action row */}
         {confirmingReset && (
           <div

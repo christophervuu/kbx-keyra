@@ -11,9 +11,10 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
-import { MapCollectionEditor } from './MapCollectionEditor';
 import { FilterPredicateEditor } from './FilterPredicateEditor';
+import { MapCollectionEditor } from './MapCollectionEditor';
 import type { FilterPredicateState } from '../lib/array-builder-state';
+
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,7 @@ export function FilterMapCollectionEditor({
             <FilterPredicateEditor
               predicate={filterPredicate}
               parsedSourceSchema={parsedSourceSchema}
+              sourceArrayPath={sourceArrayPath}
               onPredicateChange={onFilterPredicateChange}
             />
           </div>

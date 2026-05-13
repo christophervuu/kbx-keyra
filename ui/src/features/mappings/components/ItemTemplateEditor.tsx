@@ -16,15 +16,16 @@
  *   - T-11: Passes per-field validation entries to ItemFieldRow
  */
 
-import { useMemo, useState } from 'react';
 import { Layers, ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { ItemFieldRow } from './ItemFieldRow';
-import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import { createEmptyItemFieldMapping } from '../lib/array-builder-state';
 import type { ItemFieldMapping, ItemTemplateState, ArrayBuilderState } from '../lib/array-builder-state';
-import type { ArrayValidationState } from '../lib/array-validation';
 import { getFieldValidationEntries } from '../lib/array-validation';
+import type { ArrayValidationState } from '../lib/array-validation';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -111,8 +112,11 @@ function findMapping(
   itemTemplate: ItemTemplateState,
   fieldPath: string,
 ): ItemFieldMapping {
+  const leafKey = fieldPath.includes('.') ? fieldPath.slice(fieldPath.lastIndexOf('.') + 1) : fieldPath;
   return (
-    itemTemplate.fields.find((f) => f.targetFieldPath === fieldPath) ??
+    itemTemplate.fields.find((f) => f.targetFieldPath === fieldPath)
+    ?? itemTemplate.fields.find((f) => f.targetFieldPath === leafKey)
+    ??
     createEmptyItemFieldMapping(fieldPath)
   );
 }
@@ -271,7 +275,9 @@ export function ItemTemplateEditor({
 
           // Nested array fields — T-10 entry point
           if (isNestedArray) {
-            const hasNestedState = nestedArrayStates?.has(field.path) ?? false;
+            const nestedLeafKey = field.path.includes('.') ? field.path.slice(field.path.lastIndexOf('.') + 1) : field.path;
+            const hasNestedState = (nestedArrayStates?.has(field.path) ?? false)
+              || (nestedArrayStates?.has(nestedLeafKey) ?? false);
             const atDepthLimit = nestingDepth >= 2;
             return (
               <NestedArrayRow
