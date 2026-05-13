@@ -58,9 +58,9 @@ ui/src/
     PageHeader.tsx            Primitive page heading block
     StatusBadge.tsx           Primitive deploy status badge
     layout/                   App shell components
-      AppLayout.tsx           NavBar + Breadcrumbs + Outlet wrapper
-      NavBar.tsx              Top global navigation
-      Breadcrumbs.tsx         Path-derived breadcrumb navigation
+      AppLayout.tsx           NavBar + Breadcrumbs + Outlet wrapper (provides BreadcrumbProvider)
+      BreadcrumbContext.tsx   Split context for breadcrumb label registration (FS-050 T-01)
+      Breadcrumbs.tsx         Path-derived breadcrumb navigation (reads from BreadcrumbContext)
       index.ts                Layout component barrel
 
   hooks/

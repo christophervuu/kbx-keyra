@@ -19,9 +19,44 @@ describe('ProjectOverviewSkeleton', () => {
 
   it('renders animated pulse blocks', () => {
     const { container } = render(<ProjectOverviewSkeleton />);
-    // Each skeleton block should have animate-pulse
     const pulseBlocks = container.querySelectorAll('.animate-pulse');
     expect(pulseBlocks.length).toBeGreaterThan(0);
+  });
+
+  // AE-15: skeleton reflects new layout
+  it('AE-15: has role="status" for accessibility', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.getByRole('status')).toBeInTheDocument();
+  });
+
+  it('AE-15: has sr-only "Loading project..." text', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.getByText('Loading project...')).toBeInTheDocument();
+  });
+
+  it('AE-15: renders header area skeleton', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.getByTestId('skeleton-header-area')).toBeInTheDocument();
+  });
+
+  it('AE-15: renders summary row skeleton', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.getByTestId('skeleton-summary-row')).toBeInTheDocument();
+  });
+
+  it('AE-15: renders mappings area skeleton', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.getByTestId('skeleton-mappings-area')).toBeInTheDocument();
+  });
+
+  it('AE-15: renders schemas area skeleton', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.getByTestId('skeleton-schemas-area')).toBeInTheDocument();
+  });
+
+  it('AE-15: no tab bar skeleton (tabs removed in T-02)', () => {
+    render(<ProjectOverviewSkeleton />);
+    expect(screen.queryByTestId('skeleton-tab-bar')).not.toBeInTheDocument();
   });
 });
 

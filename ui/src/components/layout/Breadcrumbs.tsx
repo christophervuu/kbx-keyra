@@ -1,11 +1,22 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
 
+import { useBreadcrumbLabels } from './BreadcrumbContext';
+
 interface BreadcrumbSegment {
   label: string;
   path: string;
 }
 
-function formatSegment(segment: string, params: Record<string, string | undefined>): string {
+function formatSegment(
+  segment: string,
+  params: Record<string, string | undefined>,
+  labels: ReadonlyMap<string, string>,
+): string {
+  // Check context-registered labels first (human-readable name resolution)
+  if (labels.has(segment)) {
+    return labels.get(segment)!;
+  }
+
   // If the segment matches a param value, show the param value directly
   for (const value of Object.values(params)) {
     if (value === segment) {
@@ -23,6 +34,7 @@ function formatSegment(segment: string, params: Record<string, string | undefine
 function buildBreadcrumbs(
   pathname: string,
   params: Record<string, string | undefined>,
+  labels: ReadonlyMap<string, string>,
 ): BreadcrumbSegment[] {
   const segments = pathname.split('/').filter(Boolean);
   const crumbs: BreadcrumbSegment[] = [{ label: 'Home', path: '/' }];
@@ -31,7 +43,7 @@ function buildBreadcrumbs(
   for (const segment of segments) {
     currentPath += `/${segment}`;
     crumbs.push({
-      label: formatSegment(segment, params),
+      label: formatSegment(segment, params, labels),
       path: currentPath,
     });
   }
@@ -42,13 +54,14 @@ function buildBreadcrumbs(
 export function Breadcrumbs() {
   const location = useLocation();
   const params = useParams();
+  const labels = useBreadcrumbLabels();
 
   // Don't render breadcrumbs on home page
   if (location.pathname === '/') {
     return null;
   }
 
-  const crumbs = buildBreadcrumbs(location.pathname, params);
+  const crumbs = buildBreadcrumbs(location.pathname, params, labels);
 
   return (
     <nav

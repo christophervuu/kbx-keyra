@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import { PageHeader } from '@/components/PageHeader';
+
+import { MappingListSection } from './MappingListSection';
+import { ProjectErrorState } from './ProjectErrorState';
+import { ProjectHeader } from './ProjectHeader';
+import { ProjectNotFoundState } from './ProjectNotFoundState';
+import { ProjectOverviewSkeleton } from './ProjectOverviewSkeleton';
+import { ProjectSummaryRow } from './ProjectSummaryRow';
+import { SchemaManagementSection } from './SchemaManagementSection';
+import { SchemaUploadDialog } from './SchemaUploadDialog';
+import { useProjectOverview } from '../hooks/use-project-overview';
+
+import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { PATHS } from '@/routes/paths';
-
-import { useProjectOverview } from '../hooks/use-project-overview';
-import { ProjectMetadataSection } from './ProjectMetadataSection';
-import { SchemaManagementSection } from './SchemaManagementSection';
-import { MappingListSection } from './MappingListSection';
-import { ProjectActionsSection } from './ProjectActionsSection';
-import { SchemaUploadDialog } from './SchemaUploadDialog';
-import { ProjectOverviewSkeleton } from './ProjectOverviewSkeleton';
-import { ProjectErrorState } from './ProjectErrorState';
-import { ProjectNotFoundState } from './ProjectNotFoundState';
 
 // ---------------------------------------------------------------------------
 // Inner page (receives resolved projectId)
@@ -42,6 +43,15 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     schemasReferencingMapping,
   } = useProjectOverview(projectId);
 
+  // Register the project name in the breadcrumb (FS-050 T-01).
+  // - While loading: project is undefined → shows "Loading..."
+  // - When loaded: shows project.name
+  // - On error/not-found: loadState is 'error'/'not-found' and project is
+  //   undefined, so we pass projectId as the label to show the raw ID fallback.
+  const breadcrumbLabel =
+    loadState === 'error' || loadState === 'not-found' ? projectId : project?.name;
+  useBreadcrumbLabel(projectId, breadcrumbLabel);
+
   // Record recent activity when the project loads successfully (FS-049 T-03)
   useEffect(() => {
     if (loadState === 'loaded' && project) {
@@ -57,7 +67,6 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   if (loadState === 'loading') {
     return (
       <div data-testid="page-project-overview">
-        <PageHeader title="Loading…" />
         <ProjectOverviewSkeleton />
       </div>
     );
@@ -70,7 +79,6 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   if (loadState === 'not-found') {
     return (
       <div data-testid="page-project-overview">
-        <PageHeader title="Project Not Found" />
         <ProjectNotFoundState />
       </div>
     );
@@ -83,7 +91,6 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   if (loadState === 'error') {
     return (
       <div data-testid="page-project-overview">
-        <PageHeader title="Project Overview" />
         <ProjectErrorState onRetry={retry} />
       </div>
     );
@@ -119,28 +126,30 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
 
   return (
     <div data-testid="page-project-overview">
-      <PageHeader title={project.name} description={project.description ?? undefined} />
-
       <div className="flex flex-col gap-6">
-        {/* Section A — Metadata */}
-        <ProjectMetadataSection
+        {/* Section 1 — Refined Header (FS-050 T-02) */}
+        <ProjectHeader
           project={project}
+          mappingCount={mappings.length}
+          schemaCount={schemas.length}
           onUpdateName={updateName}
           onUpdateDescription={updateDescription}
           onUpdateTags={updateTags}
+          onCreateMapping={handleCreateMapping}
+          onAddSchema={handleOpenSchemaUpload}
+          onDuplicateProject={handleDuplicateProject}
+          onDeleteProject={handleDeleteProject}
         />
 
-        {/* Section B — Schemas */}
-        <SchemaManagementSection
-          schemas={schemas}
-          onUpload={handleOpenSchemaUpload}
-          onLink={addSchemaRef}
-          onRemove={removeSchema}
-          onView={handleViewSchema}
-          mappingsReferencingSchema={schemasReferencingMapping}
+        {/* Section 2 — Summary Row (FS-050 T-03) */}
+        <ProjectSummaryRow
+          mappingCount={mappings.length}
+          schemaCount={schemas.length}
+          errorCount={mappings.filter((m) => m.status === 'has-errors').length}
+          projectId={projectId}
         />
 
-        {/* Section C — Mappings */}
+        {/* Section 3 — Mappings (promoted above schemas, AE-06) */}
         <MappingListSection
           mappings={mappings}
           projectId={projectId}
@@ -149,19 +158,18 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           onDelete={deleteMappingAction}
         />
 
-        {/* Section D — Actions */}
-        <ProjectActionsSection
-          projectId={projectId}
-          mappingCount={mappings.length}
-          schemaCount={schemas.length}
-          onCreateMapping={handleCreateMapping}
-          onAddSchema={handleOpenSchemaUpload}
-          onDuplicateProject={handleDuplicateProject}
-          onDeleteProject={handleDeleteProject}
+        {/* Section 4 — Schemas */}
+        <SchemaManagementSection
+          schemas={schemas}
+          onUpload={handleOpenSchemaUpload}
+          onLink={addSchemaRef}
+          onRemove={removeSchema}
+          onView={handleViewSchema}
+          mappingsReferencingSchema={schemasReferencingMapping}
         />
       </div>
 
-      {/* Schema Upload Dialog (T-11) */}
+      {/* Schema Upload Dialog */}
       <SchemaUploadDialog
         open={showUploadDialog}
         onClose={() => setShowUploadDialog(false)}

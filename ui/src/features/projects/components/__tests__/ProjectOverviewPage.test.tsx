@@ -1,8 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
+import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
@@ -103,15 +105,19 @@ function renderPage(
   adapter: ApiAdapter,
   projectId = 'proj-1',
   initialPath = `/projects/${projectId}`,
+  { withBreadcrumbs = false }: { withBreadcrumbs?: boolean } = {},
 ) {
   return render(
     <AdapterProvider adapter={adapter}>
       <MemoryRouter initialEntries={[initialPath]}>
-        <Routes>
-          <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
-          <Route path="/" element={<div data-testid="home-page">Home</div>} />
-          <Route path="/projects/:projectId/mappings/new" element={<div data-testid="create-mapping-page" />} />
-        </Routes>
+        <BreadcrumbProvider>
+          {withBreadcrumbs && <Breadcrumbs />}
+          <Routes>
+            <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
+            <Route path="/" element={<div data-testid="home-page">Home</div>} />
+            <Route path="/projects/:projectId/mappings/new" element={<div data-testid="create-mapping-page" />} />
+          </Routes>
+        </BreadcrumbProvider>
       </MemoryRouter>
     </AdapterProvider>,
   );
@@ -144,20 +150,20 @@ describe('ProjectOverviewPage', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
     });
 
-    // Section A — metadata (shows project name in PageHeader h1)
-    expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+    // Header — project name as inline-editable h1 (role="button", aria-label="Project name")
+    expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
 
-    // Section B — schemas (heading)
+    // Section — schemas (heading)
     expect(screen.getByRole('heading', { name: /schemas/i })).toBeInTheDocument();
 
-    // Section C — mappings (heading)
+    // Section — mappings (heading)
     expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
 
-    // Section D — actions (Delete Project button in danger zone)
-    expect(screen.getByRole('button', { name: /delete project/i })).toBeInTheDocument();
+    // Header — overflow menu trigger (replaces ProjectActionsSection)
+    expect(screen.getByRole('button', { name: /more project actions/i })).toBeInTheDocument();
   });
 
   it('not-found state shows message and home link', async () => {
@@ -202,7 +208,7 @@ describe('ProjectOverviewPage', () => {
     await user.click(screen.getByTestId('retry-button'));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
     });
 
     expect(getProject).toHaveBeenCalledTimes(2);
@@ -213,7 +219,7 @@ describe('ProjectOverviewPage', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole('button', { name: /upload schema/i }));
@@ -227,7 +233,7 @@ describe('ProjectOverviewPage', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole('button', { name: /add schema/i }));
@@ -240,12 +246,171 @@ describe('ProjectOverviewPage', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'My Project' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
     });
 
     const createButtons = screen.getAllByRole('button', { name: /create mapping/i });
     await user.click(createButtons[0]);
 
     expect(screen.getByTestId('create-mapping-page')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-02 layout acceptance checks (FS-050 AE-04, AE-06, AE-16)
+// ---------------------------------------------------------------------------
+
+describe('ProjectOverviewPage — T-02 layout (AE-04, AE-06, AE-16)', () => {
+  let adapter: ApiAdapter;
+
+  beforeEach(() => {
+    adapter = createMockAdapter();
+  });
+
+  it('AE-04: project name is visible in the header and is inline-editable', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
+    });
+
+    // The inline-editable h1 renders as role="button" with aria-label="Project name"
+    const nameButton = screen.getByRole('button', { name: 'Project name' });
+    expect(nameButton.tagName).toBe('H1');
+    // The text content is the actual project name
+    expect(nameButton).toHaveTextContent('My Project');
+  });
+
+  it('AE-04 / AE-16: Create Mapping and Add Schema buttons are visible in the header', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('header-create-mapping-btn')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('header-create-mapping-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('header-add-schema-btn')).toBeInTheDocument();
+  });
+
+  it('AE-16: overflow menu trigger is visible', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overflow-menu-trigger')).toBeInTheDocument();
+    });
+  });
+
+  it('AE-16: overflow menu opens and contains expected items', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overflow-menu-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('project-overflow-menu-trigger'));
+
+    const menu = screen.getByTestId('project-overflow-menu');
+    expect(menu).toBeInTheDocument();
+    expect(within(menu).getByText('Open Deployments')).toBeInTheDocument();
+    expect(within(menu).getByText('Project Settings')).toBeInTheDocument();
+    expect(within(menu).getByText('Duplicate Project')).toBeInTheDocument();
+    expect(within(menu).getByText('Export Project')).toBeInTheDocument();
+    expect(within(menu).getByText('Delete Project')).toBeInTheDocument();
+  });
+
+  it('AE-16: overflow menu closes on outside click', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overflow-menu-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('project-overflow-menu-trigger'));
+    expect(screen.getByTestId('project-overflow-menu')).toBeInTheDocument();
+
+    // Click outside
+    await user.click(document.body);
+    expect(screen.queryByTestId('project-overflow-menu')).not.toBeInTheDocument();
+  });
+
+  it('AE-06: mappings section precedes schemas section in DOM order', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
+    });
+
+    const mappingsHeading = screen.getByRole('heading', { name: /mappings/i });
+    const schemasHeading = screen.getByRole('heading', { name: /schemas/i });
+
+    // compareDocumentPosition: DOCUMENT_POSITION_FOLLOWING = 4
+    // If mappings comes before schemas, schemas.compareDocumentPosition(mappings) returns PRECEDING (2)
+    const position = schemasHeading.compareDocumentPosition(mappingsHeading);
+    expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('data-testid="page-project-overview" is preserved', async () => {
+    renderPage(adapter);
+    expect(screen.getByTestId('page-project-overview')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Breadcrumb label integration (FS-050 T-01 AE-01, AE-02, AE-03)
+// ---------------------------------------------------------------------------
+
+describe('ProjectOverviewPage — breadcrumb label registration', () => {
+  it('AE-01: breadcrumb shows project name once data loads', async () => {
+    const adapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        name: 'Order Processing',
+      }),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+
+    renderPage(adapter, 'proj-1', '/projects/proj-1', { withBreadcrumbs: true });
+
+    // While loading, breadcrumb shows "Loading..."
+    const breadcrumbNav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(breadcrumbNav).getByText('Loading...')).toBeInTheDocument();
+
+    // After data loads, breadcrumb shows the project name
+    await waitFor(() => {
+      expect(within(breadcrumbNav).getByText('Order Processing')).toBeInTheDocument();
+    });
+
+    // Raw ID should not appear in breadcrumb
+    expect(within(breadcrumbNav).queryByText('proj-1')).not.toBeInTheDocument();
+  });
+
+  it('AE-02: breadcrumb shows "Loading..." while project data is loading', async () => {
+    const adapter = createMockAdapter({
+      getProject: vi.fn().mockReturnValue(new Promise(() => {})),
+      listSchemas: vi.fn().mockReturnValue(new Promise(() => {})),
+      listMappings: vi.fn().mockReturnValue(new Promise(() => {})),
+    });
+
+    renderPage(adapter, 'proj-1', '/projects/proj-1', { withBreadcrumbs: true });
+
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
+  });
+
+  it('AE-03: breadcrumb shows raw project ID on load error', async () => {
+    const adapter = createMockAdapter({
+      getProject: vi.fn().mockRejectedValue(new Error('Network error')),
+      listSchemas: vi.fn().mockRejectedValue(new Error('Network error')),
+      listMappings: vi.fn().mockRejectedValue(new Error('Network error')),
+    });
+
+    renderPage(adapter, 'proj-1', '/projects/proj-1', { withBreadcrumbs: true });
+
+    await waitFor(() => {
+      // On error, breadcrumb falls back to raw project ID (not "Loading...")
+      expect(screen.getByText('proj-1')).toBeInTheDocument();
+    });
   });
 });

@@ -22,6 +22,12 @@ export type { MappingRowProps } from './MappingRow';
 export { MappingListSection } from './MappingListSection';
 export type { MappingListSectionProps } from './MappingListSection';
 
+export { ProjectHeader } from './ProjectHeader';
+export type { ProjectHeaderProps } from './ProjectHeader';
+
+export { ProjectSummaryRow } from './ProjectSummaryRow';
+export type { ProjectSummaryRowProps } from './ProjectSummaryRow';
+
 export { ProjectActionsSection } from './ProjectActionsSection';
 export type { ProjectActionsSectionProps } from './ProjectActionsSection';
 

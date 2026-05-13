@@ -1,12 +1,13 @@
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AdapterProvider } from '@/lib/api';
-import type { ApiAdapter } from '@/lib/api';
 import type { SchemaCardData } from '../../types';
 import { SchemaManagementSection } from '../SchemaManagementSection';
+
+import type { ApiAdapter } from '@/lib/api';
+import { AdapterProvider } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -103,6 +104,25 @@ describe('SchemaManagementSection', () => {
     expect(screen.getByRole('heading', { name: 'Schemas' })).toBeInTheDocument();
   });
 
+  it('heading uses lighter weight (font-medium, not font-semibold)', () => {
+    renderSection([SCHEMA_A]);
+    const heading = screen.getByRole('heading', { name: 'Schemas' });
+    expect(heading).toHaveClass('font-medium');
+    expect(heading).not.toHaveClass('font-semibold');
+  });
+
+  it('heading uses text-lg (secondary to mappings text-xl)', () => {
+    renderSection([SCHEMA_A]);
+    const heading = screen.getByRole('heading', { name: 'Schemas' });
+    expect(heading).toHaveClass('text-lg');
+  });
+
+  it('shows schema count badge', () => {
+    renderSection([SCHEMA_A]);
+    // Count badge shows "1" for one schema
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
   it('renders schema cards', () => {
     renderSection([SCHEMA_A]);
     expect(screen.getByText('Customer Schema')).toBeInTheDocument();
@@ -111,7 +131,26 @@ describe('SchemaManagementSection', () => {
   it('shows empty state when no schemas', () => {
     renderSection([]);
     expect(screen.getByTestId('schema-empty-state')).toBeInTheDocument();
-    expect(screen.getByText('No schemas attached to this project')).toBeInTheDocument();
+    expect(screen.getByText('No schemas attached')).toBeInTheDocument();
+    expect(
+      screen.getByText(/upload a schema or link an existing one/i),
+    ).toBeInTheDocument();
+  });
+
+  it('AE-12: no-schemas empty state shows icon, heading, subtext, and both CTAs', () => {
+    renderSection([]);
+    const emptyState = screen.getByTestId('schema-empty-state');
+    // Icon rendered (aria-hidden, so check by container presence)
+    expect(emptyState).toBeInTheDocument();
+    // Heading
+    expect(screen.getByText('No schemas attached')).toBeInTheDocument();
+    // Subtext
+    expect(
+      screen.getByText(/upload a schema or link an existing one/i),
+    ).toBeInTheDocument();
+    // Both CTAs
+    expect(screen.getAllByRole('button', { name: /upload schema/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /link schema/i }).length).toBeGreaterThan(0);
   });
 
   it('Upload Schema buttons call onUpload', async () => {

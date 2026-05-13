@@ -211,34 +211,37 @@ ui/
           InlineEditableText.tsx    Toggles between display and text input/textarea on click; saves on Enter or blur (FS-013 T-04)
           InlineEditableTags.tsx    Tag pill display with inline edit: comma/Enter adds tags, Backspace removes, blur saves (FS-013 T-04)
           ProjectMetadataSection.tsx  Section A — project name/description/tags inline editing + read-only dates (FS-013 T-04)
-          SchemaCard.tsx            Schema metadata card: name, format/origin/scope badges, field count, sync status, inferred warning, View/Remove actions (FS-013 T-05)
+          SchemaCard.tsx            Schema metadata card: color-coded origin badges (CDM=blue, Published=purple, Local=gray), scope badges (Global/Project), sync status indicator (non-local only), field count, inferred warning, usageCount "Used by N mappings" label, View/Remove actions (FS-013 T-05, FS-050 T-05)
           SchemaLinkPicker.tsx      Modal picker: loads available schemas via adapter, filters attached, radio-style select + confirm (FS-013 T-05)
-          SchemaManagementSection.tsx  Section B — schema grid/empty state, Upload/Link buttons, inline remove confirmation with mapping-reference warning (FS-013 T-05)
-          MappingRow.tsx            Single table row: name link, source→target, rules, coverage%, status badge, DEV/QA/PROD deploy badges, edit/deploy/duplicate/delete actions (FS-013 T-06)
-          MappingListSection.tsx    Section C — sortable mapping table, Create Mapping button, empty state, inline delete confirmation (FS-013 T-06)
-          ProjectActionsSection.tsx Section D — primary actions (Create Mapping, Add Schema, Duplicate), placeholder actions (Export/Import disabled), Project Settings link, Delete Project with confirmation (FS-013 T-07)
-          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states, composes sections A–D (FS-013 T-08)
+          SchemaManagementSection.tsx  Schema grid/empty state (secondary surface — text-lg font-medium heading), Upload/Link buttons, inline remove confirmation with mapping-reference warning; derives usageCount per card from mappingsReferencingSchema prop (FS-013 T-05, FS-050 T-05)
+          MappingRow.tsx            Single table row: name link, source→target, rules, coverage%, filled status badge (AE-08), condensed "Not deployed" deploy badge (AE-07), deploy nav link (AE-14), Test Lab link (AE-17), duplicate/delete actions (FS-013 T-06, FS-050 T-04)
+          MappingListSection.tsx    Mappings-first section (text-xl font-semibold heading), sortable table, RecentlyEditedCard (AE-09/AE-10), Create Mapping button, empty state with subtext CTA, inline delete confirmation (FS-013 T-06, FS-050 T-04)
+          ProjectActionsSection.tsx Section D — primary actions (retired from page render in FS-050 T-02; actions absorbed into ProjectHeader; file retained for backward compat)
+          ProjectHeader.tsx         Consolidated project header: inline-editable h1 (InlineEditableText), metadata row (description/dates/tags), "Create Mapping" + "Add Schema" primary action buttons, OverflowMenu (Open Deployments / Project Settings / Duplicate / Export / Delete) (FS-050 T-02)
+          ProjectSummaryRow.tsx     Compact horizontal metrics row: mapping count, schema count, error count (red when >0), scaffold deployment placeholders with muted styling + aria-label, "View Deployments" link (FS-050 T-03)
+          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states; section order: Header → Summary Row → Mappings → Schemas (FS-050 T-02)
           CreateProjectPage.tsx     Create Project form: name/description/tags fields, slug derivation, createProject() call, navigate to new project on success (FS-013 T-09)
           CreateMappingPage.tsx     Create Mapping 3-step wizard: name → source schema → target schema; skip option; createMapping() call; navigate to editor on success (FS-013 T-10)
           SchemaUploadDialog.tsx    Modal dialog: file picker (.json/.xsd/.xml), format detection, field count, inferred warning, scope selection, createSchema() + addSchemaRef() on confirm (FS-013 T-11)
-          ProjectOverviewSkeleton.tsx  Animated pulse skeleton mimicking Sections A–D layout (FS-013 T-13)
+          ProjectOverviewSkeleton.tsx  Animated pulse skeleton: header area + summary row + mappings table + schemas grid; role="status" + sr-only "Loading project..." (FS-013 T-13, FS-050 T-06 AE-15)
           ProjectErrorState.tsx     Error state: alert icon, "Failed to load project", optional error detail, Retry button (FS-013 T-13)
           ProjectNotFoundState.tsx  Not-found state: icon, "Project not found", "Go to Dashboard" link (FS-013 T-13)
           __tests__/
             InlineEditableText.test.tsx         Component tests (8 tests)
             InlineEditableTags.test.tsx         Component tests (7 tests)
             ProjectMetadataSection.test.tsx     Component tests (9 tests)
-            SchemaCard.test.tsx                 Component tests (11 tests)
+            SchemaCard.test.tsx                 Component tests (20 tests: AE-13 origin/scope/sync badges, usage count label, view/remove callbacks)
             SchemaLinkPicker.test.tsx           Component tests (6 tests)
-            SchemaManagementSection.test.tsx    Component tests (10 tests)
-            MappingRow.test.tsx                 Component tests (12 tests: link, schema names, coverage, status badges, deploy badges, duplicate/delete callbacks)
-            MappingListSection.test.tsx         Component tests (12 tests: heading, empty state, rows, default sort, sort toggle, create/delete/duplicate callbacks, column headers)
+            SchemaManagementSection.test.tsx    Component tests (14 tests: AE-12 empty state, heading weight, schema count badge, upload/link/remove/view flows)
+            MappingRow.test.tsx                 Component tests (23 tests: AE-07 condensed badge, AE-08 filled badge colors, AE-14 deploy nav, AE-17 Test Lab link)
+            MappingListSection.test.tsx         Component tests (21 tests: AE-09/AE-10 recently-edited card, AE-11 empty state, heading, sort, CRUD callbacks)
             ProjectActionsSection.test.tsx      Component tests (16 tests: button variants, disabled states, delete confirm counts, plural/singular, confirm/cancel callbacks, settings link route)
-            ProjectOverviewPage.test.tsx        Component tests (6 tests: testid preservation, loading skeleton, all sections loaded, not-found state, error state, retry)
+            ProjectOverviewPage.test.tsx        Component tests (30+ tests: AE-01–AE-06, AE-15, AE-16 layout checks, breadcrumb integration, overflow menu, section order)
             CreateProjectPage.test.tsx          Component tests (10 tests: fields, required indicator, validation, createProject call, navigation, cancel, submit error, tag parsing)
             CreateMappingPage.test.tsx          Component tests (12 tests: step navigation, name validation, schema dropdowns, skip option, schema refs, navigate to editor, cancel, submit error)
             SchemaUploadDialog.test.tsx         Component tests (11 tests: open/closed, file input extensions, upload disabled before file, format badge, inferred warning, empty file error, FileReader error, createSchema+addSchemaRef, cancel, scope radios)
-            ProjectStateComponents.test.tsx     Component tests (12 tests: skeleton pulse blocks, error state heading/detail/retry/role, not-found heading/message/link)
+            ProjectStateComponents.test.tsx     Component tests (19 tests: AE-15 skeleton layout/role/sr-only/section testids/no-tab-bar, error state heading/detail/retry/role, not-found heading/message/link)
+            ProjectSummaryRow.test.tsx          Component tests (11 tests: AE-05 counts, AE-18 neutral error styling, scaffold placeholders, deployments link)
         hooks/
           index.ts        Hooks barrel
           use-project-overview.ts   Orchestration hook: load project + schemas + mappings, inline editing, schema/mapping/project actions (FS-013 T-03)
@@ -529,9 +532,10 @@ ui/
       PageHeader.tsx      Page title + optional description + action slot
       StatusBadge.tsx     Deploy status colored badge (dot + label)
       layout/             App shell components
-        AppLayout.tsx     Layout wrapper (NavBar + Breadcrumbs + Outlet)
+        AppLayout.tsx     Layout wrapper (NavBar + Breadcrumbs + Outlet, provides BreadcrumbProvider)
+        BreadcrumbContext.tsx  Split context for breadcrumb label registration (FS-050 T-01)
+        Breadcrumbs.tsx   Route-derived breadcrumb bar (reads from BreadcrumbContext)
         NavBar.tsx        Top navigation bar with app name + nav links
-        Breadcrumbs.tsx   Route-derived breadcrumb bar
         index.ts          Barrel export
     hooks/                Shared React hooks
     lib/

@@ -1,9 +1,11 @@
+import { ChevronDown, ChevronUp, GitBranch, Plus } from 'lucide-react';
 import { useState } from 'react';
-import { Plus, ChevronUp, ChevronDown, GitBranch } from 'lucide-react';
 
-import { Button } from '@/components/Button';
 import type { MappingRowData } from '../types';
 import { MappingRow } from './MappingRow';
+
+import { Button } from '@/components/Button';
+import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 
 // ---------------------------------------------------------------------------
 // Sorting
@@ -141,6 +143,79 @@ function DeleteConfirmDialog({ mappingName, onConfirm, onCancel }: DeleteConfirm
 }
 
 // ---------------------------------------------------------------------------
+// Recently-edited mapping affordance (AE-09, AE-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * Formats a timestamp as a relative string (e.g. "2 hours ago").
+ * Falls back to a locale date string for older entries.
+ */
+function formatRelativeTime(isoTimestamp: string): string {
+  try {
+    const diff = Date.now() - new Date(isoTimestamp).getTime();
+    const minutes = Math.floor(diff / 60_000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
+    return new Date(isoTimestamp).toLocaleDateString();
+  } catch {
+    return '';
+  }
+}
+
+interface RecentlyEditedCardProps {
+  projectId: string;
+  mappings: MappingRowData[];
+}
+
+function RecentlyEditedCard({ projectId, mappings }: RecentlyEditedCardProps) {
+  const { getRecentItems } = useRecentActivity();
+
+  const recentItems = getRecentItems();
+  const mappingIds = new Set(mappings.map((m) => m.mappingId));
+
+  // Find the most recent activity entry that is a mapping in this project
+  // and still exists in the current mappings list
+  const match = recentItems.find(
+    (entry) =>
+      entry.type === 'mapping' &&
+      (entry.projectId === projectId || !entry.projectId) &&
+      mappingIds.has(entry.id),
+  );
+
+  if (!match) return null;
+
+  const editorPath = `/projects/${projectId}/mappings/${match.id}`;
+
+  return (
+    <div
+      data-testid="recently-edited-mapping"
+      className="mb-4 flex items-center justify-between rounded-md border border-slate-700 bg-slate-800/60 px-4 py-2.5"
+    >
+      <div className="min-w-0">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          Continue where you left off
+        </p>
+        <p className="mt-0.5 truncate text-sm font-medium text-slate-200">{match.name}</p>
+        <p className="text-xs text-slate-500">
+          <time dateTime={match.timestamp}>{formatRelativeTime(match.timestamp)}</time>
+        </p>
+      </div>
+      <a
+        href={editorPath}
+        className="ml-4 shrink-0 rounded px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-slate-700 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        data-testid="recently-edited-resume-link"
+      >
+        Resume →
+      </a>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -157,8 +232,12 @@ export interface MappingListSectionProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Section C — Mapping list table with sortable columns, row actions, and
- * a delete confirmation dialog.
+ * Mappings section — primary content area on the Project Overview page (FS-050 T-04).
+ *
+ * Enhancements:
+ * - "Continue where you left off" card above the table (AE-09, AE-10)
+ * - Heading uses `text-xl font-semibold` (primary treatment vs schemas `text-lg`)
+ * - MappingRow handles condensed deploy badges and Test Lab action
  */
 export function MappingListSection({
   mappings,
@@ -196,14 +275,19 @@ export function MappingListSection({
 
   return (
     <section aria-label="Mapping list">
-      {/* Section header */}
+      {/* Section header — primary treatment (text-xl, AE-06 reinforcement) */}
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-100">Mappings</h2>
+        <h2 className="text-xl font-semibold text-slate-100">Mappings</h2>
         <Button variant="primary" size="sm" onClick={onCreateMapping}>
           <Plus size={14} aria-hidden="true" />
           Create Mapping
         </Button>
       </div>
+
+      {/* Recently-edited affordance (AE-09, AE-10) */}
+      {mappings.length > 0 && (
+        <RecentlyEditedCard projectId={projectId} mappings={mappings} />
+      )}
 
       {/* Empty state */}
       {mappings.length === 0 ? (
@@ -212,9 +296,12 @@ export function MappingListSection({
           data-testid="mapping-empty-state"
         >
           <GitBranch size={40} className="text-slate-600" aria-hidden="true" />
-          <p className="text-sm text-slate-400">
-            No mappings yet — create your first mapping
-          </p>
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-medium text-slate-300">No mappings yet</p>
+            <p className="text-xs text-slate-500">
+              Create your first mapping to start transforming data between your schemas.
+            </p>
+          </div>
           <Button variant="primary" size="sm" onClick={onCreateMapping}>
             <Plus size={14} aria-hidden="true" />
             Create Mapping
@@ -238,21 +325,10 @@ export function MappingListSection({
                 <SortableHeader label="Status" column="status" {...sortProps} />
                 <th
                   scope="col"
+                  colSpan={3}
                   className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
                 >
-                  DEV
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
-                >
-                  QA
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
-                >
-                  PROD
+                  Deploy
                 </th>
                 <SortableHeader label="Last Modified" column="updatedAt" {...sortProps} />
                 <th
