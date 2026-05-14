@@ -14,9 +14,12 @@
 import { ChevronDown, ChevronRight, Database, Minus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { ItemTemplateEditor } from './ItemTemplateEditor';
+import type { ItemFieldMapping } from '../lib/array-builder-state';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { MergeBranch } from '../lib/array-builder-state';
-import type { ParsedSchema } from '@/lib/types/domain';
+import type { ArrayValidationState } from '../lib/array-validation';
+import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +30,9 @@ export interface MergeBranchEditorProps {
   readonly branchIndex: number;
   readonly totalBranches: number;
   readonly parsedSourceSchema: ParsedSchema | null;
+  readonly targetArrayNode: SchemaTreeNode | null;
+  readonly validationState?: ArrayValidationState | null;
+  readonly nestingDepth?: number;
   readonly onBranchChange: (index: number, branch: MergeBranch) => void;
   readonly onRemove: (index: number) => void;
   readonly className?: string;
@@ -58,6 +64,9 @@ export function MergeBranchEditor({
   branchIndex,
   totalBranches,
   parsedSourceSchema,
+  targetArrayNode,
+  validationState = null,
+  nestingDepth = 0,
   onBranchChange,
   onRemove,
   className = '',
@@ -72,6 +81,23 @@ export function MergeBranchEditor({
   function handleSelect(path: string) {
     onBranchChange(branchIndex, { ...branch, sourceArrayPath: path });
     setIsExpanded(false);
+  }
+
+  function handleFieldMappingChange(fieldPath: string, mapping: ItemFieldMapping) {
+    const existingFields = branch.itemTemplate.fields;
+    const idx = existingFields.findIndex((field) => field.targetFieldPath === fieldPath);
+    const updatedFields =
+      idx >= 0
+        ? existingFields.map((field, i) => (i === idx ? mapping : field))
+        : [...existingFields, mapping];
+
+    onBranchChange(branchIndex, {
+      ...branch,
+      itemTemplate: {
+        ...branch.itemTemplate,
+        fields: updatedFields,
+      },
+    });
   }
 
   return (
@@ -216,14 +242,20 @@ export function MergeBranchEditor({
             </div>
           </div>
 
-          {/* Item template placeholder — T-07 will replace this */}
-          <div
-            data-testid={`branch-item-template-placeholder-${branchIndex}`}
-            className="rounded border border-dashed border-slate-700 px-3 py-3 text-center"
-          >
-            <p className="text-[11px] text-slate-500">
-              Item template — configured in T-07
-            </p>
+          {/* Branch item template */}
+          <div className="space-y-1.5">
+            <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Branch item mapping
+            </span>
+            <ItemTemplateEditor
+              itemTemplate={branch.itemTemplate}
+              targetArrayNode={targetArrayNode}
+              parsedSourceSchema={parsedSourceSchema}
+              sourceArrayPath={branch.sourceArrayPath}
+              nestingDepth={nestingDepth}
+              validationState={validationState}
+              onFieldMappingChange={handleFieldMappingChange}
+            />
           </div>
         </div>
       )}

@@ -106,8 +106,9 @@ ui/src/
         AutoMapReviewDrawer.tsx     FS-046 legacy drawer component retained for compatibility; no longer composed in MappingEditor (retired by FS-048)
         SuggestionReviewCard.tsx    FS-046 legacy drawer card retained for compatibility; superseded by WorkspaceSuggestionCard in FS-048
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
-        ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (collection layer + item template layer); mode selector, mode-specific collection editors, nested focused panel, custom expression fallback, validation summary, and array preview integration (FS-043)
-        ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches / customExpression (advanced section)
+        ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (FS-043, updated FS-051); header row: status icon + type badge + target path + Builder/Editor ModeToggle + ⋮ HeaderOverflowMenu; Builder mode: ArrayModeSelector + CollectionEditorSlot + ItemTemplateEditor; Editor mode: RawDslEditor + parse status + error list + restore/reset actions; nested focused panel (NestedArrayPanel) with "Back to parent" navigation; ValidationSummaryRow pinned between feedback area and content; action row: Reset draft + Discard changes (no AI buttons — intentionally omitted)
+        ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches (4 cards only; customExpression removed as mode card in FS-051 T-01 — raw DSL now accessed via Builder/Editor toggle in header)
+        ValidationSummaryRow.tsx Shared pinned bar showing error/warning/incomplete counts; renders null when all counts are zero; used by both ArrayBuilder (testId="array-validation-summary") and ScalarFieldBuilder (testId="scalar-validation-summary") (FS-051 T-04)
         MapCollectionEditor.tsx Collection editor for map mode (source array selection)
         FilterMapCollectionEditor.tsx Collection editor for filter+map mode (source selection + filter predicate)
         BuildFromValuesEditor.tsx Collection editor for build-from-values mode (ordered entries + null filtering)
@@ -579,12 +580,14 @@ When a target field is selected in Target View, the center builder panel renders
 
 `ScalarFieldBuilder` renders within the expression-panel context — it owns its own UnifiedExpressionBuilder/RawDslEditor mode toggle and drop zone, rather than relying on a standalone Panel 4 slot.
 
-### Array Builder Architecture Model (FS-043)
+### Array Builder Architecture Model (FS-043, updated FS-051)
 
 FS-043 replaces the legacy 4-step array wizard with a chain-aligned **two-layer builder model**:
 
-- **Collection layer:** chooses and configures array production strategy (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`, `customExpression`)
+- **Collection layer:** chooses and configures array production strategy (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`)
 - **Item layer:** maps item fields using leaf-level chain-compatible expressions plus guided helpers
+
+> **FS-051 update:** `customExpression` is no longer a selectable mode card in `ArrayModeSelector`. Raw DSL editing is accessed via the **Builder/Editor toggle** in the ArrayBuilder header (same pattern as ScalarFieldBuilder). `customExpression` remains as an internal backing store in `ArrayBuilderMode` and `useArrayBuilderState` — it is used when the user switches to Editor mode or when a saved expression cannot be decomposed into a structured mode.
 
 Alignment with scalar chain architecture:
 - Leaf field generation reuses chain generator/decomposer contracts (rather than introducing a separate array-only transform model)
@@ -606,17 +609,98 @@ Nested arrays:
 Mode switching + compatibility model:
 - Compatible switches preserve relevant state where possible
 - Incompatible switches use explicit confirmation via `ModeSwitchConfirmDialog`
-- Custom expression mode acts as escape hatch; recognized expressions can round-trip back into structured modes via decomposition
+- Builder → Editor: generates current expression into RawDslEditor; preserves structured state in memory
+- Editor → Builder: attempts `decomposeArrayExpression()`; on success hydrates structured state; on failure shows warning banner and blocks the switch
+- Unrecognized saved expression: defaults to Editor mode with amber banner on field selection
 
 Validation model summary:
 - Validation is represented across collection/item/leaf/final-output levels
 - Incomplete drafting state is distinct from invalid/error state
-- UI surfaces include BuilderFeedbackArea + array validation summary + per-field indicators
+- UI surfaces include BuilderFeedbackArea + ValidationSummaryRow + per-field indicators
 
 Preview model summary:
 - Array result preview renders array-shaped results with truncation and expand behavior
 - Empty/null states provide contextual hints
 - Merge branch contribution summary is best-effort and may be estimated when exact derivation is impractical
+
+### Unified Builder Visual Shell (FS-051)
+
+FS-051 aligns `ScalarFieldBuilder` and `ArrayBuilder` to share an identical visual shell. The guiding principle: **use consistent structure for real affordances; do not add disabled controls purely for visual symmetry.**
+
+#### Shared shell layout
+
+Both builders render the same five-zone layout:
+
+```
+┌─────────────────────────────────────────────┐
+│ Header (shrink-0, border-b, px-4 py-3)      │
+│   Row 1: status icon · type badge · path    │
+│           · Builder/Editor toggle · ⋮ menu  │
+│   Row 2: Required label · completion status │
+├─────────────────────────────────────────────┤
+│ BuilderFeedbackArea (pinned, shrink-0)      │
+├─────────────────────────────────────────────┤
+│ ValidationSummaryRow (pinned, shrink-0)     │
+│   hidden when all counts are zero           │
+├─────────────────────────────────────────────┤
+│ Scrollable content (min-h-0 flex-1          │
+│   overflow-y-auto space-y-4 px-4 py-4)     │
+├─────────────────────────────────────────────┤
+│ Action row (shrink-0, border-t, px-4 py-2) │
+└─────────────────────────────────────────────┘
+```
+
+#### Builder/Editor toggle
+
+Both builders expose a `ModeToggle` (Builder | Editor) in header row 1:
+
+- **Builder mode:** renders the structured authoring surface (strategy cards + editors for array; chain builder for scalar)
+- **Editor mode:** renders `RawDslEditor` with parse status badge, error list, and restore/reset actions
+- **Builder → Editor:** generates current expression into the editor; preserves structured state in memory
+- **Editor → Builder:** attempts decomposition (`decomposeArrayExpression` / `decomposeToChain`); on failure shows warning banner and blocks the switch
+- **Unrecognized saved expression:** defaults to Editor mode with amber banner
+
+#### Overflow menu (⋮)
+
+Both builders render a `HeaderOverflowMenu` (⋮) in header row 1, after the mode toggle:
+
+- Contains "Remove mapping" action with `role="alertdialog"` confirmation
+- ScalarFieldBuilder: shown when `currentStatus === 'mapped'` and `onClearMapping` is provided
+- ArrayBuilder: shown when `onClearMapping` is provided
+
+#### Completion status
+
+Both builders show a completion status label in header row 2:
+
+- `Not started` — expression is empty
+- `In progress` — expression non-empty but not yet complete
+- `Complete` — expression valid and structurally complete
+- `Has errors` — expression non-empty but parse or structure invalid
+
+ArrayBuilder derives this from `state.completionStatus` (via `useArrayBuilderState`). ScalarFieldBuilder derives this via `deriveScalarCompletionStatus()` (pure function, FS-051 T-03).
+
+#### Action row — capability-driven contents
+
+Both builders share the same action row container (`shrink-0 border-t border-slate-700 px-4 py-2`). Contents differ by available capability:
+
+| Action | ScalarFieldBuilder | ArrayBuilder |
+|---|---|---|
+| Reset draft (with inline confirmation) | ✓ | ✓ |
+| Discard changes (when dirty) | ✓ | ✓ |
+| Suggest (AI) | ✓ | — intentionally omitted |
+| Explain (AI) | ✓ | — intentionally omitted |
+| Fix (AI placeholder) | ✓ | — intentionally omitted |
+
+AI buttons are omitted from ArrayBuilder — not disabled — until array-level AI features exist.
+
+#### Intentional-differences-only principle
+
+After FS-051, the only differences between the two builders are data-model-specific:
+- Strategy cards (ArrayModeSelector vs ScalarEntryModeSelector)
+- Collection editors (array-specific: MapCollectionEditor, FilterMapCollectionEditor, etc.)
+- Item template layer (array only)
+- Result preview (ArrayResultPreview vs scalar expression preview)
+- Action row AI buttons (scalar only, capability-driven)
 
 ### Auto-Map Review Workspace Architecture (FS-046 → FS-048)
 
@@ -831,7 +915,7 @@ Location: `ui/src/features/mappings/hooks/use-array-builder-state.ts`
 
 Manages the FS-043 chain-aligned array builder state for `ArrayBuilder` using a two-layer model:
 
-1. **Collection layer** — how the array is produced (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`, `customExpression`)
+1. **Collection layer** — how the array is produced (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`; `customExpression` is an internal backing store for Editor mode — not a selectable mode card)
 2. **Item layer** — how each mapped item field is produced (`itemTemplate` with leaf mappings + nested arrays)
 
 Primary inputs:
@@ -872,7 +956,7 @@ State model summary:
   - `FilterMapCollectionState`
   - `BuildFromValuesCollectionState`
   - `MergeBranchesCollectionState`
-  - `CustomExpressionCollectionState`
+  - `CustomExpressionCollectionState` (internal — backing store for Editor mode; not a selectable mode card)
 - **`ItemTemplateState`**
   - `fields` (leaf mappings)
   - `nestedArrays` (recursive nested `ArrayBuilderState` map)
@@ -882,8 +966,9 @@ State model summary:
 Mode-switch behavior (architecture level):
 - Compatible transitions (for example `map ↔ filterMap`) preserve source selection and item template where possible
 - Incompatible transitions stage `pendingModeSwitch` and require explicit confirmation
-- Structured → `customExpression` stores `previousStructuredDraft` and generates best-effort DSL
-- `customExpression` → structured attempts decomposition first; if not recognized, reset/restore flow applies
+- Builder → Editor (via header toggle): calls `switchMode('customExpression')` to store current expression; sets `builderEditorMode = 'editor'`
+- Editor → Builder (via header toggle): attempts `decomposeArrayExpression()`; on success hydrates structured state; on failure shows warning banner and stays in Editor
+- Unrecognized saved expression: `isFromUnrecognized` flag causes `builderEditorMode` to default to `'editor'` on mount
 
 Draft integration:
 - The hook auto-generates expression output on state changes and writes through `updateDraft(targetPath, expression)`
@@ -1443,16 +1528,45 @@ ScalarFieldBuilder
 │   ├── Expression row (syntax-highlighted DSL; "Expression (incomplete)" label when chain incomplete)
 │   ├── Result row (useExpressionPreview; "Load test data" prompt when sourceData null)
 │   └── Validation row (Structure badge + Output Type badge)
+├── ValidationSummaryRow (FS-051 T-04 — pinned; hidden when no diagnostics)
 ├── UnsavedDiffPanel (FS-040 T-05 — collapsible, always rendered)
 │   ├── Trigger button (aria-expanded, unsaved badge when hasUnsavedChanges)
 │   └── Expanded content (Last saved vs Current draft, status badge, Revert to saved button)
 ├── Expression Area (drop zone for DnD):
 │   ├── ChainBuilderShell (builder mode) — see Chain-Based Builder Model below
 │   └── RawDslEditor (editor mode)
-└── Action Row (AI placeholder buttons: Suggest, Explain, Fix; Reset draft with confirmation; Discard changes)
+└── Action Row (AI buttons: Suggest, Explain, Fix placeholder; Reset draft with confirmation; Discard changes)
 ```
 
-Note: "Remove mapping" is in the header overflow menu (⋮), not in the action row.
+Note: "Remove mapping" is in the header overflow menu (⋮), not in the action row. AI buttons are present in ScalarFieldBuilder only — intentionally omitted from ArrayBuilder until array-level AI features exist.
+
+#### Component hierarchy (Target View / ArrayBuilder) — FS-043, updated FS-051
+
+```
+ArrayBuilder
+├── Header (target path, type badge, required/optional, status, Builder|Editor toggle, ⋮ overflow menu)
+│   ├── ModeToggle (Builder | Editor)
+│   └── HeaderOverflowMenu (Remove mapping with alertdialog confirmation)
+├── BuilderFeedbackArea (pinned, always visible)
+│   └── resultSlot: ArrayResultPreview (truncation, null/empty hints, merge branch summary)
+├── ValidationSummaryRow (pinned; hidden when all counts are zero)
+├── Scrollable content:
+│   [Builder mode]
+│   ├── ArrayModeSelector (4 cards: map / filterMap / buildFromValues / mergeArrayBranches)
+│   ├── CollectionEditorSlot (mode-specific: MapCollectionEditor / FilterMapCollectionEditor /
+│   │   BuildFromValuesEditor / MergeBranchesEditor)
+│   └── ItemTemplateEditor (shown for map, filterMap, mergeArrayBranches)
+│       └── NestedArrayPanel (recursive, depth-limited at nestingDepth >= 2)
+│   [Editor mode]
+│   ├── Unrecognized expression banner (amber, when isFromUnrecognized)
+│   ├── Decomposition warning banner (amber, when Editor→Builder switch fails)
+│   ├── ParseStatusBadge + RawDslEditor (with autocomplete + error decorations)
+│   ├── Error list (from useDslValidation diagnostics)
+│   ├── Restore previous draft action
+│   └── Reset to builder action
+├── Action Row (Reset draft with confirmation; Discard changes — no AI buttons)
+└── ModeSwitchConfirmDialog (modal, when pendingModeSwitch is set)
+```
 
 #### State model (legacy — pre-FS-038)
 

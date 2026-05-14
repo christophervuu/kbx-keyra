@@ -555,7 +555,7 @@ export function ChainConditionForm({
     return (
       <div
         className={[
-          'rounded-lg border border-zinc-700 bg-zinc-800/60 overflow-hidden',
+          'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
           className ?? '',
         ]
           .filter(Boolean)
@@ -565,14 +565,14 @@ export function ChainConditionForm({
         <button
           type="button"
           onClick={() => { setCollapsed(false); }}
-          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-700/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-800/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
           aria-label="Expand condition step"
           data-testid={`chain-condition-summary-${stepIndex}`}
         >
-          <span className="text-[11px] font-mono text-zinc-400 flex-1 truncate">
+          <span className="flex-1 truncate font-mono text-[11px] text-slate-400">
             {summarizeConditionStep(step)}
           </span>
-          <ChevronDown className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
         </button>
       </div>
     );
@@ -585,7 +585,7 @@ export function ChainConditionForm({
   return (
     <div
       className={[
-        'rounded-lg border border-zinc-700 bg-zinc-800/60 overflow-hidden',
+        'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
         className ?? '',
       ]
         .filter(Boolean)
@@ -593,8 +593,8 @@ export function ChainConditionForm({
       data-testid={`chain-condition-form-${stepIndex}`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700 bg-zinc-800">
-        <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">
+      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-3 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">
           Condition
         </span>
         <div className="flex items-center gap-1">
@@ -602,7 +602,7 @@ export function ChainConditionForm({
             type="button"
             onClick={() => { setCollapsed(true); }}
             aria-label="Collapse condition step"
-            className="text-zinc-500 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded p-0.5 transition-colors"
+            className="rounded p-0.5 text-slate-500 transition-colors hover:text-slate-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
             data-testid={`chain-condition-collapse-${stepIndex}`}
           >
             <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
@@ -611,7 +611,7 @@ export function ChainConditionForm({
             type="button"
             onClick={handleRemove}
             aria-label="Remove condition step"
-            className="text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors"
+            className="rounded p-0.5 text-slate-500 transition-colors hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
             data-testid={`chain-condition-remove-${stepIndex}`}
           >
             <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -635,7 +635,7 @@ export function ChainConditionForm({
 
         {/* THEN section */}
         <div
-          className="border-t border-zinc-700/50 pt-3"
+          className="border-t border-slate-700/50 pt-3"
           data-testid={`chain-condition-then-${stepIndex}`}
         >
           <BranchEditor
@@ -650,18 +650,18 @@ export function ChainConditionForm({
         {elseIfSteps.map((elseIf, i) => (
           <div
             key={i}
-            className="border-t border-zinc-700/50 pt-3 space-y-3"
+            className="space-y-3 border-t border-slate-700/50 pt-3"
             data-testid={`chain-condition-elseif-${stepIndex}-${i}`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                 Else if
               </span>
               <button
                 type="button"
                 onClick={() => { handleRemoveElseIf(i); }}
                 aria-label={`Remove else-if ${i + 1}`}
-                className="text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors"
+                className="rounded p-0.5 text-slate-500 transition-colors hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
                 data-testid={`chain-condition-elseif-remove-${stepIndex}-${i}`}
               >
                 <X className="h-3 w-3" aria-hidden="true" />
@@ -689,7 +689,7 @@ export function ChainConditionForm({
 
         {/* ELSE section */}
         <div
-          className="border-t border-zinc-700/50 pt-3 space-y-2"
+          className="space-y-2 border-t border-slate-700/50 pt-3"
           data-testid={`chain-condition-else-${stepIndex}`}
         >
           <BranchEditor
@@ -726,7 +726,7 @@ export function ChainConditionForm({
         {/* Apply disabled notice */}
         {applyDisabled && (
           <p
-            className="text-[11px] text-zinc-500 italic"
+            className="text-[11px] italic text-slate-500"
             data-testid={`chain-condition-apply-disabled-${stepIndex}`}
           >
             Fill in all required branches to apply.

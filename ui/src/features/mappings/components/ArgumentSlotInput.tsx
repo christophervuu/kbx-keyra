@@ -70,6 +70,10 @@ export interface ArgumentSlotInputProps {
   readonly hint?: SlotHint;
   /** Optional source field options used by source-mode searchable picker. */
   readonly sourceOptions?: readonly SchemaPathEntry[];
+  /** Force this slot to render the conditional row editor (filter/find condition). */
+  readonly forceConditionEditor?: boolean;
+  /** Array path context used for condition row field suggestions. */
+  readonly conditionArrayPath?: string;
   /** Fires when the slot value changes. */
   readonly onSlotChange: (updated: ArgumentSlot) => void;
   /** Optional: fires when this slot should be removed (variadic slots only). */
@@ -124,6 +128,27 @@ function parseOperandFromFilterSlot(slot: ArgumentSlot): Operand | null {
     return null;
   }
   return null;
+}
+
+function normalizeConditionFieldPath(path: string, arrayPath: string): string {
+  const trimmedPath = path.trim();
+  if (trimmedPath === '') return '';
+
+  const normalizedArrayPath =
+    arrayPath.startsWith('__item__:')
+      ? arrayPath.slice('__item__:'.length)
+      : arrayPath.startsWith('__source__:')
+        ? arrayPath.slice('__source__:'.length)
+        : arrayPath;
+
+  if (normalizedArrayPath === '') return trimmedPath;
+
+  const prefix = `${normalizedArrayPath}.`;
+  if (trimmedPath.startsWith(prefix)) {
+    return trimmedPath.slice(prefix.length);
+  }
+
+  return trimmedPath;
 }
 
 function makeFilterOperandSlot(operand: Operand): ArgumentSlot {
@@ -199,11 +224,27 @@ function parseFilterConditionSlotToRow(slot: ArgumentSlot): ConditionRow | null 
   };
 }
 
-function buildFilterConditionSlot(row: ConditionRow): ArgumentSlot {
-  const left = makeFilterOperandSlot(row.leftOperand);
+function buildFilterConditionSlot(row: ConditionRow, arrayPath = ''): ArgumentSlot {
+  const normalizedLeftOperand: Operand =
+    row.leftOperand.kind === 'source'
+      ? {
+        ...row.leftOperand,
+        value: normalizeConditionFieldPath(row.leftOperand.value, arrayPath),
+      }
+      : row.leftOperand;
+
+  const normalizedRightOperand: Operand =
+    row.rightOperand.kind === 'source'
+      ? {
+        ...row.rightOperand,
+        value: normalizeConditionFieldPath(row.rightOperand.value, arrayPath),
+      }
+      : row.rightOperand;
+
+  const left = makeFilterOperandSlot(normalizedLeftOperand);
 
   if (FILTER_BINARY_OPERATORS.has(row.comparison)) {
-    const right = makeFilterOperandSlot(row.rightOperand);
+    const right = makeFilterOperandSlot(normalizedRightOperand);
     return makeExpressionSlot({
       functionName: row.comparison,
       slots: [left, right],
@@ -245,9 +286,24 @@ function buildArrayItemFieldOptions(
 ): SchemaPathEntry[] {
   if (!sourceOptions || sourceOptions.length === 0) return [];
 
-  if (arrayPath !== '') {
-    const prefix = `${arrayPath}.`;
+  const normalizedArrayPath =
+    arrayPath.startsWith('__item__:')
+      ? arrayPath.slice('__item__:'.length)
+      : arrayPath.startsWith('__source__:')
+        ? arrayPath.slice('__source__:'.length)
+        : arrayPath;
+
+  if (normalizedArrayPath !== '') {
+    const prefix = `${normalizedArrayPath}.`;
     const nested = sourceOptions
+      .map((opt) => {
+        const path = opt.path.startsWith('__item__:')
+          ? opt.path.slice('__item__:'.length)
+          : opt.path.startsWith('__source__:')
+            ? opt.path.slice('__source__:'.length)
+            : opt.path;
+        return { path, type: opt.type };
+      })
       .filter((opt) => opt.path.startsWith(prefix))
       .map((opt) => ({
         path: opt.path.slice(prefix.length),
@@ -320,6 +376,8 @@ export function ArgumentSlotInput({
   description,
   hint,
   sourceOptions,
+  forceConditionEditor = false,
+  conditionArrayPath = '',
   onSlotChange,
   onRemove,
   exampleHint,
@@ -349,7 +407,31 @@ export function ArgumentSlotInput({
 
   // Current inline transform (only relevant in source mode)
   const currentTransform: InlineTransform | undefined =
-    slot.mode === 'source' ? slot.transform : undefined;
+    (() => {
+      if (slot.mode !== 'source' || slot.transform === undefined) return undefined;
+      const candidate = slot.transform as InlineTransform & {
+        functionName?: string;
+        args?: readonly ArgumentSlot[];
+      };
+      if (Array.isArray(candidate.steps)) return candidate;
+      if (typeof candidate.functionName === 'string') {
+        return {
+          steps: [{
+            functionName: candidate.functionName,
+            args: candidate.args ?? [],
+          }],
+        };
+      }
+      return undefined;
+    })();
+
+  const forcedConditionRow = forceConditionEditor
+    ? (parseFilterConditionSlotToRow(slot) ?? {
+      leftOperand: { kind: 'source', value: '' },
+      comparison: 'isTruthy',
+      rightOperand: { kind: 'static', value: '' },
+    })
+    : null;
 
   // -------------------------------------------------------------------------
   // Mode toggle
@@ -440,8 +522,10 @@ export function ArgumentSlotInput({
   // -------------------------------------------------------------------------
 
   const isEmpty =
-    (currentMode === 'source' && sourcePath === '') ||
-    (currentMode === 'literal' && literalValue === '');
+    !forceConditionEditor && (
+      (currentMode === 'source' && sourcePath === '') ||
+      (currentMode === 'literal' && literalValue === '')
+    );
   const showValidationWarning = parameter.required && isEmpty;
 
   const slotTestId = `${testIdPrefix}-${slotIndex}`;
@@ -514,34 +598,35 @@ export function ArgumentSlotInput({
         </p>
       )}
 
-      {/* Mode toggle: Source | Literal */}
-      <div
-        role="group"
-        aria-label={`Input mode for ${effectiveName}`}
-        className="inline-flex rounded border border-zinc-700 overflow-hidden text-xs"
-        data-testid={`${slotTestId}-mode-toggle`}
-      >
-        {(['source', 'literal', 'expression'] as SlotMode[]).map((m) => (
-          <button
-            key={m}
-            type="button"
-            role="radio"
-            aria-checked={currentMode === m}
-            onClick={() => { handleModeChange(m); }}
-            className={[
-              'px-2.5 py-1 font-medium capitalize transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-              currentMode === m
-                ? 'bg-blue-700 text-white'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200',
-            ].join(' ')}
-            data-testid={`${slotTestId}-mode-${m}`}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
+      {!forceConditionEditor && (
+        <div
+          role="group"
+          aria-label={`Input mode for ${effectiveName}`}
+          className="inline-flex rounded border border-zinc-700 overflow-hidden text-xs"
+          data-testid={`${slotTestId}-mode-toggle`}
+        >
+          {(['source', 'literal', 'expression'] as SlotMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={currentMode === m}
+              onClick={() => { handleModeChange(m); }}
+              className={[
+                'px-2.5 py-1 font-medium capitalize transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                currentMode === m
+                  ? 'bg-blue-700 text-white'
+                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200',
+              ].join(' ')}
+              data-testid={`${slotTestId}-mode-${m}`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {expressionPickerOpen && currentMode !== 'expression' && (
+      {expressionPickerOpen && !forceConditionEditor && currentMode !== 'expression' && (
         <div className="relative z-30" data-testid={`${slotTestId}-expression-picker`}>
           <TransformFunctionPicker
             includeSourceAccess
@@ -551,8 +636,23 @@ export function ArgumentSlotInput({
         </div>
       )}
 
+      {forceConditionEditor && forcedConditionRow !== null && (
+        <div className="space-y-2" data-testid={`${slotTestId}-condition-editor`}>
+          <ConditionRowEditor
+            condition={forcedConditionRow}
+            onChange={(updated) => {
+              onSlotChange(buildFilterConditionSlot(updated, conditionArrayPath));
+            }}
+            parsedSourceSchema={null}
+            sourceFieldOptions={buildArrayItemFieldOptions(conditionArrayPath, sourceOptions)}
+            allowPipelineOperands={false}
+            rowIndex={slotIndex}
+          />
+        </div>
+      )}
+
       {/* Source mode content */}
-      {currentMode === 'source' && (
+      {!forceConditionEditor && currentMode === 'source' && (
         <div className="space-y-2">
           {/* Source path input */}
           <div className="relative">
@@ -679,7 +779,7 @@ export function ArgumentSlotInput({
                               onChange={(updated) => {
                                 if (currentTransform === undefined || currentMode !== 'source') return;
                                 const nextArgs = stepArgs.map((currentArg, i) =>
-                                  i === index ? buildFilterConditionSlot(updated) : currentArg,
+                                  i === index ? buildFilterConditionSlot(updated, sourcePath) : currentArg,
                                 );
                                 onSlotChange(
                                   makeSourceSlotWithTransform(sourcePath, {
@@ -754,7 +854,7 @@ export function ArgumentSlotInput({
       )}
 
       {/* Expression mode content */}
-      {currentMode === 'expression' && slot.mode === 'expression' && (
+      {!forceConditionEditor && currentMode === 'expression' && slot.mode === 'expression' && (
         <div className="space-y-2" data-testid={`${slotTestId}-expression-content`}>
           <div className="flex items-center gap-2">
             <span
@@ -814,7 +914,7 @@ export function ArgumentSlotInput({
       )}
 
       {/* Literal mode content */}
-      {currentMode === 'literal' && (
+      {!forceConditionEditor && currentMode === 'literal' && (
         <div data-testid={`${slotTestId}-literal-content`}>
           {/* Dropdown mode (when hints are provided) */}
           {hint !== undefined && hint.options.length > 0 ? (

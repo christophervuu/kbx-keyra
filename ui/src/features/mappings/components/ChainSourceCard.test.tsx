@@ -5,6 +5,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
 import { ChainSourceCard } from './ChainSourceCard';
 import type { ChainSourceCardProps } from './ChainSourceCard';
 
@@ -19,188 +20,96 @@ function renderCard(overrides: Partial<ChainSourceCardProps> = {}) {
   return render(<ChainSourceCard {...DEFAULT_PROPS} {...overrides} />);
 }
 
-// ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
-
-describe('ChainSourceCard — empty state', () => {
-  it('renders the card container', () => {
-    renderCard();
-    expect(screen.getByTestId('chain-source-card')).toBeInTheDocument();
-  });
-
-  it('renders empty state when no source is selected', () => {
-    renderCard({ sourcePath: undefined });
-    expect(screen.getByTestId('chain-source-card-empty')).toBeInTheDocument();
-  });
-
-  it('renders guidance text in empty state', () => {
+describe('ChainSourceCard', () => {
+  it('renders guidance text when no source is selected', () => {
     renderCard({ sourcePath: undefined });
     expect(screen.getByTestId('chain-source-card-guidance')).toHaveTextContent(
-      'Select a source field from the panel or drag one here',
+      'Source field',
     );
   });
 
-  it('does NOT render selected state when no source', () => {
-    renderCard({ sourcePath: undefined });
-    expect(screen.queryByTestId('chain-source-card-selected')).not.toBeInTheDocument();
-  });
-
-  it('does NOT render empty state when source is set', () => {
-    renderCard({ sourcePath: 'order.name' });
-    expect(screen.queryByTestId('chain-source-card-empty')).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Selected state
-// ---------------------------------------------------------------------------
-
-describe('ChainSourceCard — selected state', () => {
-  it('renders selected state when source is set', () => {
+  it('keeps guidance header visible when source is selected', () => {
     renderCard({ sourcePath: 'order.customerName' });
-    expect(screen.getByTestId('chain-source-card-selected')).toBeInTheDocument();
+    expect(screen.getByTestId('chain-source-card-guidance')).toHaveTextContent('Source field');
   });
 
-  it('renders the source path', () => {
-    renderCard({ sourcePath: 'order.customerName' });
-    expect(screen.getByTestId('chain-source-card-path')).toHaveTextContent('order.customerName');
-  });
-
-  it('AE-01: shows "Direct copy" when no logic steps', () => {
+  it('does not show direct copy status when source has no logic steps', () => {
     renderCard({ sourcePath: 'order.name', logicStepCount: 0 });
-    expect(screen.getByTestId('chain-source-card-status')).toHaveTextContent('Direct copy');
+    expect(screen.queryByTestId('chain-source-card-status')).not.toBeInTheDocument();
   });
 
-  it('shows "1 logic step" when one step exists', () => {
-    renderCard({ sourcePath: 'order.name', logicStepCount: 1 });
-    expect(screen.getByTestId('chain-source-card-status')).toHaveTextContent('1 logic step');
-  });
-
-  it('shows "2 logic steps" when two steps exist', () => {
+  it('does not show logic step count when source has steps', () => {
     renderCard({ sourcePath: 'order.name', logicStepCount: 2 });
-    expect(screen.getByTestId('chain-source-card-status')).toHaveTextContent('2 logic steps');
+    expect(screen.queryByTestId('chain-source-card-status')).not.toBeInTheDocument();
   });
 
-  it('renders "+ Add logic" button', () => {
-    renderCard({ sourcePath: 'order.name' });
-    expect(screen.getByTestId('chain-source-card-add-logic')).toBeInTheDocument();
-  });
-
-  it('fires onAddLogic when "+ Add logic" is clicked', async () => {
+  it('renders add logic button and triggers callback', async () => {
     const user = userEvent.setup();
     const onAddLogic = vi.fn();
     renderCard({ sourcePath: 'order.name', onAddLogic });
+
     await user.click(screen.getByTestId('chain-source-card-add-logic'));
     expect(onAddLogic).toHaveBeenCalledTimes(1);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Drag-and-drop
-// ---------------------------------------------------------------------------
+  it('shows dropdown options only after focusing the input', async () => {
+    const user = userEvent.setup();
+    renderCard({ sourceOptions: ['order.status', 'order.id'] });
 
-describe('ChainSourceCard — drag-and-drop', () => {
-  it('accepts a dropped source field path', () => {
-    const onSourceSelect = vi.fn();
-    renderCard({ sourcePath: undefined, onSourceSelect });
+    expect(screen.queryByTestId('chain-source-card-dropdown')).not.toBeInTheDocument();
 
-    const dropZone = screen.getByTestId('chain-source-card-empty');
+    await user.click(screen.getByTestId('chain-source-card-input'));
 
-    fireEvent.dragEnter(dropZone);
-    fireEvent.dragOver(dropZone);
-    fireEvent.drop(dropZone, {
-      dataTransfer: { getData: () => 'order.status' },
-    });
-
-    expect(onSourceSelect).toHaveBeenCalledWith('order.status');
+    expect(screen.getByTestId('chain-source-card-dropdown')).toBeInTheDocument();
+    expect(screen.getByTestId('chain-source-card-option-order.status')).toBeInTheDocument();
+    expect(screen.getByTestId('chain-source-card-option-order.id')).toBeInTheDocument();
   });
 
-  it('shows drag-over visual state when dragging over empty zone', () => {
-    renderCard({ sourcePath: undefined });
-    const dropZone = screen.getByTestId('chain-source-card-empty');
-    fireEvent.dragEnter(dropZone, {
-      dataTransfer: {
-        dropEffect: 'copy',
-        getData: () => '',
-        setData: () => undefined,
-      },
-    });
-    // The isDragOver class change is applied — verify the element is still present
-    expect(dropZone).toBeInTheDocument();
-  });
-});
+  it('positions the dropdown as an overlay anchored under the input', async () => {
+    const user = userEvent.setup();
+    renderCard({ sourceOptions: ['order.status', 'order.id'] });
 
-// ---------------------------------------------------------------------------
-// Keyboard accessibility
-// ---------------------------------------------------------------------------
+    await user.click(screen.getByTestId('chain-source-card-input'));
+    const dropdown = screen.getByTestId('chain-source-card-dropdown');
 
-describe('ChainSourceCard — keyboard accessibility', () => {
-  it('+ Add logic button is keyboard focusable', () => {
-    renderCard({ sourcePath: 'order.name' });
-    const btn = screen.getByTestId('chain-source-card-add-logic');
-    btn.focus();
-    expect(document.activeElement).toBe(btn);
+    expect(dropdown.className).toContain('fixed');
+    expect(dropdown.style.top).not.toBe('');
+    expect(dropdown.style.left).not.toBe('');
+    expect(dropdown.style.width).not.toBe('');
   });
 
-  it('+ Add logic button has aria-label', () => {
-    renderCard({ sourcePath: 'order.name' });
-    expect(screen.getByTestId('chain-source-card-add-logic')).toHaveAttribute(
-      'aria-label',
-      'Add logic step',
-    );
-  });
+  it('filters source options while typing', async () => {
+    const user = userEvent.setup();
+    renderCard({ sourceOptions: ['order.status', 'order.id', 'customer.email'] });
 
-  it('renders source text input dropdown in empty state', () => {
-    renderCard({ sourcePath: undefined, sourceOptions: ['order.status', 'order.id'] });
-    expect(screen.getByTestId('chain-source-card-input')).toBeInTheDocument();
-    expect(screen.getByTestId('chain-source-card-input')).toHaveAttribute('autocomplete', 'off');
-    expect(screen.queryByRole('listbox', { name: 'Source field options' })).not.toBeInTheDocument();
-  });
-
-  it('shows a custom dropdown list below input on focus and calls onSourceSelect on click', () => {
-    const onSourceSelect = vi.fn();
-    renderCard({
-      sourcePath: undefined,
-      sourceOptions: ['order.status', 'order.id'],
-      onSourceSelect,
-    });
-
-    const input = screen.getByTestId('chain-source-card-input');
-    fireEvent.focus(input);
-
-    const listbox = screen.getByRole('listbox', { name: 'Source field options' });
-    expect(listbox).toBeInTheDocument();
-    expect(document.body).toContainElement(listbox);
-    expect(listbox).toHaveClass('fixed');
-    expect(listbox).toHaveClass('max-h-48');
-    expect(listbox).toHaveClass('overflow-y-auto');
-
-    fireEvent.click(screen.getByTestId('chain-source-card-option-order.status'));
-
-    expect(onSourceSelect).toHaveBeenCalledWith('order.status');
-  });
-
-  it('filters dropdown options as user types', () => {
-    renderCard({
-      sourcePath: undefined,
-      sourceOptions: ['order.status', 'order.id', 'customer.email'],
-      onSourceSelect: vi.fn(),
-    });
-
-    const input = screen.getByTestId('chain-source-card-input');
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: 'order.' } });
+    await user.click(screen.getByTestId('chain-source-card-input'));
+    await user.type(screen.getByTestId('chain-source-card-input'), 'order.');
 
     expect(screen.getByTestId('chain-source-card-option-order.status')).toBeInTheDocument();
     expect(screen.getByTestId('chain-source-card-option-order.id')).toBeInTheDocument();
     expect(screen.queryByTestId('chain-source-card-option-customer.email')).not.toBeInTheDocument();
   });
 
-  it('calls onSourceSelect when pressing Enter with a typed source path', () => {
+  it('selects source option on click and closes dropdown', async () => {
+    const user = userEvent.setup();
     const onSourceSelect = vi.fn();
+
     renderCard({
-      sourcePath: undefined,
+      sourceOptions: ['order.status', 'order.id'],
+      onSourceSelect,
+    });
+
+    await user.click(screen.getByTestId('chain-source-card-input'));
+    await user.click(screen.getByTestId('chain-source-card-option-order.status'));
+
+    expect(onSourceSelect).toHaveBeenCalledWith('order.status');
+    expect(screen.queryByTestId('chain-source-card-dropdown')).not.toBeInTheDocument();
+  });
+
+  it('calls onSourceSelect when pressing Enter with a typed path', () => {
+    const onSourceSelect = vi.fn();
+
+    renderCard({
       sourceOptions: ['order.status', 'order.id'],
       onSourceSelect,
     });
@@ -210,5 +119,30 @@ describe('ChainSourceCard — keyboard accessibility', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     expect(onSourceSelect).toHaveBeenCalledWith('order.customer.email');
+  });
+
+  it('closes dropdown when clicking outside', async () => {
+    const user = userEvent.setup();
+    renderCard({ sourceOptions: ['order.status', 'order.id'] });
+
+    await user.click(screen.getByTestId('chain-source-card-input'));
+    expect(screen.getByTestId('chain-source-card-dropdown')).toBeInTheDocument();
+
+    await user.click(document.body);
+    expect(screen.queryByTestId('chain-source-card-dropdown')).not.toBeInTheDocument();
+  });
+
+  it('accepts dropped source field path', () => {
+    const onSourceSelect = vi.fn();
+    renderCard({ sourcePath: undefined, onSourceSelect });
+
+    const dropZone = screen.getByTestId('chain-source-card');
+    fireEvent.dragEnter(dropZone);
+    fireEvent.dragOver(dropZone);
+    fireEvent.drop(dropZone, {
+      dataTransfer: { getData: () => 'order.status' },
+    });
+
+    expect(onSourceSelect).toHaveBeenCalledWith('order.status');
   });
 });

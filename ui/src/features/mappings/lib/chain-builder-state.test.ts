@@ -363,6 +363,46 @@ describe('isChainComplete — transform steps', () => {
     };
     expect(isChainComplete(state)).toBe(false);
   });
+
+  it('returns true for replaceAll when replacement literal is empty string', () => {
+    const state: ChainBuilderState = {
+      entryType: 'source',
+      sourcePath: 'primaryPhone',
+      logicSteps: [
+        createTransformStep('replaceAll', [
+          { mode: 'literal', value: '-' },
+          { mode: 'literal', value: '' },
+        ]),
+      ],
+      expandedStepIndex: null,
+    };
+    expect(isChainComplete(state)).toBe(true);
+  });
+
+  it('returns true for replace when replacement literal is empty string', () => {
+    const state: ChainBuilderState = {
+      entryType: 'source',
+      sourcePath: 'primaryPhone',
+      logicSteps: [
+        createTransformStep('replace', [
+          { mode: 'literal', value: '-' },
+          { mode: 'literal', value: '' },
+        ]),
+      ],
+      expandedStepIndex: null,
+    };
+    expect(isChainComplete(state)).toBe(true);
+  });
+
+  it('keeps empty literal invalid for non-replacement transforms', () => {
+    const state: ChainBuilderState = {
+      entryType: 'source',
+      sourcePath: 'order.amount',
+      logicSteps: [createTransformStep('multiply', [{ mode: 'literal', value: '' }])],
+      expandedStepIndex: null,
+    };
+    expect(isChainComplete(state)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

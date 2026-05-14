@@ -63,11 +63,12 @@ describe('LogicStepList — rendering', () => {
     expect(screen.getByTestId('logic-step-list-bottom-connector')).toBeInTheDocument();
   });
 
-  it('renders renamed logic add button when picker is closed', () => {
+  it('renders always-visible logic options picker', () => {
     renderList();
-    expect(screen.getByTestId('logic-step-list-add-logic')).toHaveTextContent(
-      'Add Transformation, conditional logic, or value mapping',
-    );
+    expect(screen.getByTestId('logic-step-list-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-transform')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-condition')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-valuemap')).toBeInTheDocument();
   });
 
   it('AE-10: step number badges render correctly', () => {
@@ -119,32 +120,23 @@ describe('LogicStepList — single-expansion constraint', () => {
 // ---------------------------------------------------------------------------
 
 describe('LogicStepList — add logic picker', () => {
-  it('clicking [+ Add logic] opens the picker', () => {
-    renderList();
-    fireEvent.click(screen.getByTestId('logic-step-list-add-logic'));
-    expect(screen.getByTestId('logic-step-list-picker')).toBeInTheDocument();
-  });
-
-  it('selecting a logic kind fires onAddStep and closes picker', () => {
+  it('selecting a logic kind fires onAddStep', () => {
     const onAddStep = vi.fn();
     renderList({ onAddStep });
-    fireEvent.click(screen.getByTestId('logic-step-list-add-logic'));
     fireEvent.click(screen.getByTestId('add-logic-option-transform'));
     expect(onAddStep).toHaveBeenCalledWith('transform');
-    expect(screen.queryByTestId('logic-step-list-picker')).not.toBeInTheDocument();
   });
 
-  it('shows picker immediately when forcePickerOpen is true', () => {
+  it('keeps picker visible when forcePickerOpen is true', () => {
     renderList({ forcePickerOpen: true });
     expect(screen.getByTestId('logic-step-list-picker')).toBeInTheDocument();
-    expect(screen.queryByTestId('logic-step-list-add-logic')).not.toBeInTheDocument();
   });
 
-  it('notifies onPickerOpenChange(false) when picker is dismissed', () => {
+  it('does not dismiss picker on outside pointer down', () => {
     const onPickerOpenChange = vi.fn();
     renderList({ forcePickerOpen: true, onPickerOpenChange });
     fireEvent.pointerDown(document.body);
-    expect(onPickerOpenChange).toHaveBeenCalledWith(false);
+    expect(onPickerOpenChange).not.toHaveBeenCalled();
   });
 });
 

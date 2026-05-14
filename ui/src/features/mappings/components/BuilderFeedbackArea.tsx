@@ -300,6 +300,35 @@ export function BuilderFeedbackArea({
     return value.length > 72 ? `${value.slice(0, 69)}...` : value;
   }, [expression]);
 
+  const compactStatus = useMemo<'valid' | 'issue' | 'neutral'>(() => {
+    if (!expression.trim()) return 'neutral';
+    if (preview.error !== null) return 'issue';
+    if (!validationState.structureValid) return 'issue';
+    if (validationState.outputTypeMismatch !== null) return 'issue';
+    return 'valid';
+  }, [expression, preview.error, validationState.outputTypeMismatch, validationState.structureValid]);
+
+  const compactDetailItems = useMemo(() => {
+    const details: string[] = [];
+    for (const issue of validationState.structureIssues) {
+      details.push(issue.message);
+    }
+    if (validationState.outputTypeMismatch !== null) {
+      details.push(validationState.outputTypeMismatch.message);
+    }
+    if (preview.error !== null) {
+      details.push(preview.error);
+    }
+    return details;
+  }, [preview.error, validationState.outputTypeMismatch, validationState.structureIssues]);
+
+  const statusLabel =
+    compactStatus === 'valid'
+      ? 'Expression status: valid'
+      : compactStatus === 'issue'
+        ? 'Expression status: has issues'
+        : 'Expression status: not set';
+
   return (
     <section
       role="region"
@@ -313,48 +342,94 @@ export function BuilderFeedbackArea({
         .join(' ')}
     >
       {compact && (
-        <div className="flex items-center gap-2" data-testid="feedback-compact-row">
-          {collapsible && (
-            <button
-              type="button"
-              onClick={() => { setCollapsed((prev) => !prev); }}
-              className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-              aria-label={collapsed ? 'Expand feedback details' : 'Collapse feedback details'}
-              data-testid="feedback-collapse-toggle"
+        <div className="space-y-1.5" data-testid="feedback-compact-block">
+          <div className="flex items-center gap-2" data-testid="feedback-compact-expression-row">
+            <span
+              role="status"
+              aria-label={statusLabel}
+              data-testid="feedback-compact-status"
+              className={[
+                'inline-flex h-4 w-4 items-center justify-center rounded-full',
+                compactStatus === 'valid'
+                  ? 'text-green-400'
+                  : compactStatus === 'issue'
+                    ? 'text-amber-400'
+                    : 'text-zinc-500',
+              ].join(' ')}
             >
-              {collapsed ? <ChevronRight size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
-            </button>
-          )}
-          <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" data-testid="feedback-compact-summary">
-            <span className="text-zinc-400">Expression:</span> {compactExpression}
-            <span className="mx-2 text-zinc-600">|</span>
+              {compactStatus === 'valid' ? (
+                <CheckCircle2 size={12} aria-hidden="true" />
+              ) : compactStatus === 'issue' ? (
+                <AlertTriangle size={12} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={12} aria-hidden="true" />
+              )}
+            </span>
+            <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" data-testid="feedback-compact-expression-summary">
+              <span className="text-zinc-400">Expression:</span> {compactExpression}
+            </p>
+            {collapsible && (
+              <button
+                type="button"
+                onClick={() => { setCollapsed((prev) => !prev); }}
+                className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+                aria-label={collapsed ? 'Expand feedback details' : 'Collapse feedback details'}
+                data-testid="feedback-collapse-toggle"
+              >
+                {collapsed ? <ChevronRight size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+              </button>
+            )}
+          </div>
+          <p className="min-w-0 truncate pl-6 font-mono text-[11px] text-zinc-300" data-testid="feedback-compact-result-summary">
             <span className="text-zinc-400">Result:</span> {compactResult}
           </p>
         </div>
       )}
 
-      {compact && collapsible && collapsed ? null : (
-        <>
-      <ExpressionRow
-        expression={expression}
-        structureValid={validationState.structureValid}
-        mode={mode}
-      />
-      {resultSlot !== undefined ? (
-        <div className="space-y-1" data-testid="feedback-result">
-          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Result</span>
+      {compact ? (
+        collapsible && !collapsed ? (
           <div
-            aria-live="polite"
-            aria-label="Evaluation result"
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs leading-relaxed"
+            className="space-y-2 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2"
+            data-testid="feedback-details-panel"
           >
-            {resultSlot}
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Mapping details</span>
+            {compactDetailItems.length > 0 ? (
+              <div className="space-y-1" data-testid="feedback-details-list">
+                {compactDetailItems.map((item, index) => (
+                  <p key={`${item}-${index}`} className="text-xs text-zinc-300">
+                    {item}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-500" data-testid="feedback-details-placeholder">
+                Additional mapping diagnostics will appear here.
+              </p>
+            )}
           </div>
-        </div>
+        ) : null
       ) : (
-        <ResultRow expression={expression} sourceData={sourceData} />
-      )}
-      {!hideValidation && <ValidationRow validationState={validationState} mode={mode} />}
+        <>
+          <ExpressionRow
+            expression={expression}
+            structureValid={validationState.structureValid}
+            mode={mode}
+          />
+          {resultSlot !== undefined ? (
+            <div className="space-y-1" data-testid="feedback-result">
+              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Result</span>
+              <div
+                aria-live="polite"
+                aria-label="Evaluation result"
+                className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs leading-relaxed"
+              >
+                {resultSlot}
+              </div>
+            </div>
+          ) : (
+            <ResultRow expression={expression} sourceData={sourceData} />
+          )}
+          {!hideValidation && <ValidationRow validationState={validationState} mode={mode} />}
         </>
       )}
     </section>

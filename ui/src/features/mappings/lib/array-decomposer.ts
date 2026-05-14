@@ -72,6 +72,15 @@ function isSourceCall(node: AstNode): boolean {
   );
 }
 
+function isCollectionSourceCall(node: AstNode): boolean {
+  return (
+    node.type === 'FunctionCall' &&
+    (node.name === 'source' || node.name === 'item') &&
+    node.arguments.length === 1 &&
+    node.arguments[0]?.type === 'StringLiteral'
+  );
+}
+
 function extractSourcePath(node: AstNode): string {
   if (
     node.type === 'FunctionCall' &&
@@ -79,6 +88,18 @@ function extractSourcePath(node: AstNode): string {
     node.arguments[0]?.type === 'StringLiteral'
   ) {
     return node.arguments[0].value;
+  }
+  return '';
+}
+
+function extractCollectionSourcePath(node: AstNode): string {
+  if (
+    node.type === 'FunctionCall' &&
+    node.arguments.length === 1 &&
+    node.arguments[0]?.type === 'StringLiteral'
+  ) {
+    if (node.name === 'source') return node.arguments[0].value;
+    if (node.name === 'item') return `__item__:${node.arguments[0].value}`;
   }
   return '';
 }
@@ -409,21 +430,21 @@ function decomposeMapOrFilterMap(
   const firstArg = node.arguments[0]!;
   const templateArg = node.arguments[1]!;
 
-  // map(source("path"), {...}) → Map mode
-  if (isSourceCall(firstArg)) {
-    const sourceArrayPath = extractSourcePath(firstArg);
+  // map(source("path"), {...}) or map(item("path"), {...}) → Map mode
+  if (isCollectionSourceCall(firstArg)) {
+    const sourceArrayPath = extractCollectionSourcePath(firstArg);
     const itemTemplate = decomposeItemTemplate(templateArg);
     const collectionState: CollectionState = { mode: 'map', sourceArrayPath };
     return buildState(collectionState, itemTemplate);
   }
 
-  // map(filter(source("path"), predicate), {...}) → Filter + Map mode
+  // map(filter(source("path")|item("path"), predicate), {...}) → Filter + Map mode
   if (isCall(firstArg, 'filter') && firstArg.arguments.length === 2) {
     const filterSource = firstArg.arguments[0]!;
     const filterPredicate = firstArg.arguments[1]!;
 
-    if (isSourceCall(filterSource)) {
-      const sourceArrayPath = extractSourcePath(filterSource);
+    if (isCollectionSourceCall(filterSource)) {
+      const sourceArrayPath = extractCollectionSourcePath(filterSource);
       const predicate = decomposeFilterPredicate(filterPredicate);
       const itemTemplate = decomposeItemTemplate(templateArg);
       const collectionState: CollectionState = {
@@ -437,7 +458,7 @@ function decomposeMapOrFilterMap(
 
   return {
     success: false,
-    reason: 'map() first argument is not source() or filter(source(), ...)',
+    reason: 'map() first argument is not source()/item() or filter(source()/item(), ...)',
     rawExpression: astToString(node),
   };
 }

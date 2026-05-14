@@ -17,7 +17,9 @@ import { useCallback } from 'react';
 import { MergeBranchEditor } from './MergeBranchEditor';
 import { createEmptyMergeBranch } from '../lib/array-builder-state';
 import type { MergeBranch, MergeBranchesCollectionState } from '../lib/array-builder-state';
+import type { ArrayValidationState } from '../lib/array-validation';
 import type { ParsedSchema } from '@/lib/types/domain';
+import type { SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,6 +35,9 @@ const MIN_BRANCHES = 2;
 export interface MergeBranchesEditorProps {
   readonly collectionState: MergeBranchesCollectionState;
   readonly parsedSourceSchema: ParsedSchema | null;
+  readonly targetArrayNode: SchemaTreeNode | null;
+  readonly validationState?: ArrayValidationState | null;
+  readonly nestingDepth?: number;
   readonly onCollectionStateChange: (state: MergeBranchesCollectionState) => void;
   readonly className?: string;
 }
@@ -44,6 +49,9 @@ export interface MergeBranchesEditorProps {
 export function MergeBranchesEditor({
   collectionState,
   parsedSourceSchema,
+  targetArrayNode,
+  validationState = null,
+  nestingDepth = 0,
   onCollectionStateChange,
   className = '',
 }: MergeBranchesEditorProps) {
@@ -106,6 +114,9 @@ export function MergeBranchesEditor({
             branchIndex={index}
             totalBranches={branches.length}
             parsedSourceSchema={parsedSourceSchema}
+            targetArrayNode={targetArrayNode}
+            validationState={validationState}
+            nestingDepth={nestingDepth}
             onBranchChange={handleBranchChange}
             onRemove={handleRemoveBranch}
           />

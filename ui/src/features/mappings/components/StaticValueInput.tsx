@@ -184,74 +184,71 @@ export function StaticValueInput({
       className={['flex flex-col gap-2', className ?? ''].filter(Boolean).join(' ')}
       data-testid="static-value-input"
     >
-      {/* Target type label */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-zinc-500">Value</span>
+      <div className="flex items-center justify-between gap-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Static value</span>
         <span
-          className="rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-zinc-700 text-zinc-400"
+          className="rounded bg-slate-700 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300"
           data-testid="static-value-target-type"
         >
           {targetType}
         </span>
       </div>
 
-      {/* Input row */}
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={rawValue}
-          onChange={handleChange}
-          onBlur={handleBlur}
-          placeholder={getPlaceholder(targetType)}
-          className={[
-            'flex-1 rounded-md border bg-zinc-900 px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors',
-            showError
-              ? 'border-red-500'
-              : showSuccess
-                ? 'border-green-600'
-                : 'border-zinc-700',
-          ].join(' ')}
-          aria-label="Static value"
-          aria-invalid={showError}
-          aria-describedby={showError ? 'static-value-error' : undefined}
-          data-testid="static-value-text-input"
-        />
+      <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-800/40 p-2.5">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={rawValue}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            placeholder={getPlaceholder(targetType)}
+            className={[
+              'flex-1 rounded border bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-100 placeholder:text-slate-500 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+              showError
+                ? 'border-red-500'
+                : showSuccess
+                  ? 'border-green-600'
+                  : 'border-slate-700',
+            ].join(' ')}
+            aria-label="Static value"
+            aria-invalid={showError}
+            aria-describedby={showError ? 'static-value-error' : undefined}
+            data-testid="static-value-text-input"
+          />
 
-        {/* Validation indicator */}
-        {showSuccess && (
-          <Check
-            className="h-4 w-4 flex-shrink-0 text-green-500"
-            aria-label="Valid"
-            data-testid="static-value-valid-icon"
-          />
-        )}
+          {showSuccess && (
+            <Check
+              className="h-4 w-4 flex-shrink-0 text-green-500"
+              aria-label="Valid"
+              data-testid="static-value-valid-icon"
+            />
+          )}
+          {showError && (
+            <X
+              className="h-4 w-4 flex-shrink-0 text-red-500"
+              aria-label="Invalid"
+              data-testid="static-value-invalid-icon"
+            />
+          )}
+        </div>
+
         {showError && (
-          <X
-            className="h-4 w-4 flex-shrink-0 text-red-500"
-            aria-label="Invalid"
-            data-testid="static-value-invalid-icon"
-          />
+          <p
+            id="static-value-error"
+            className="text-xs text-red-400"
+            role="alert"
+            data-testid="static-value-error"
+          >
+            {typeErrorMessage(targetType)}
+          </p>
         )}
       </div>
 
-      {/* Error message */}
-      {showError && (
-        <p
-          id="static-value-error"
-          className="text-xs text-red-400"
-          role="alert"
-          data-testid="static-value-error"
-        >
-          {typeErrorMessage(targetType)}
-        </p>
-      )}
-
-      {/* + Add logic button */}
       {showAddLogicButton && (
         <button
           type="button"
           onClick={onAddLogic}
-          className="inline-flex items-center gap-1 self-start rounded px-2 py-1 text-xs text-blue-400 hover:text-blue-300 hover:bg-zinc-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="inline-flex items-center gap-1 self-start rounded px-2 py-1 text-xs text-blue-400 transition-colors hover:bg-slate-700 hover:text-blue-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           aria-label="Add logic step"
           data-testid="static-value-add-logic"
         >

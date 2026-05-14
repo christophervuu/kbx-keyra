@@ -171,6 +171,39 @@ describe('decomposeToChainState — AE-14: transform chains', () => {
     const names = state.logicSteps.map((s) => (s.kind === 'transform' ? s.functionName : ''));
     expect(names).toEqual(['upper', 'trim', 'lower']);
   });
+
+  it('decomposes join(source("tags"), ",") → source + [join(",")]', () => {
+    const state = expectSuccess(decomposeToChainState('join(source("tags"), ",")'));
+    expect(state.sourcePath).toBe('tags');
+    expect(state.logicSteps).toHaveLength(1);
+    if (state.logicSteps[0]?.kind === 'transform') {
+      expect(state.logicSteps[0].functionName).toBe('join');
+      expect(state.logicSteps[0].args).toHaveLength(1);
+      expect(state.logicSteps[0].args[0]).toEqual({ mode: 'literal', value: ',' });
+    }
+  });
+
+  it('decomposes count(filter(source("items"), gt(item("discountAmount"), 0)))', () => {
+    const state = expectSuccess(
+      decomposeToChainState('count(filter(source("items"), gt(item("discountAmount"), 0)))'),
+    );
+    expect(state.sourcePath).toBe('items');
+    expect(state.logicSteps).toHaveLength(2);
+    if (state.logicSteps[0]?.kind === 'transform') {
+      expect(state.logicSteps[0].functionName).toBe('filter');
+      expect(state.logicSteps[0].args).toHaveLength(1);
+      const conditionArg = state.logicSteps[0].args[0];
+      expect(conditionArg).toBeDefined();
+      expect(conditionArg?.mode).toBe('expression');
+      if (conditionArg?.mode === 'expression') {
+        expect(conditionArg.node.functionName).toBe('gt');
+      }
+    }
+    if (state.logicSteps[1]?.kind === 'transform') {
+      expect(state.logicSteps[1].functionName).toBe('count');
+      expect(state.logicSteps[1].args).toHaveLength(0);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

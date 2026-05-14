@@ -74,10 +74,33 @@ describe('getCompatibleChainableTransforms', () => {
     expect(names).toContain('multiply');
     expect(names).toContain('round');
     expect(names).toContain('abs');
+    expect(names).toContain('coalesce');
+    expect(names).toContain('concat');
+    expect(names).toContain('filter');
+    expect(names).toContain('find');
+    expect(names).toContain('get');
+    expect(names).toContain('join');
+    expect(names).toContain('split');
+    expect(names).toContain('map');
     // Should not include non-chainable functions
-    expect(names).not.toContain('concat');
     expect(names).not.toContain('if');
     expect(names).not.toContain('source');
+  });
+
+  it('includes array-compatible transforms and excludes non-array transforms when outputType is "array"', () => {
+    const result = getCompatibleChainableTransforms('array');
+    const names = result.map((e) => e.name);
+
+    expect(names).toContain('filter');
+    expect(names).toContain('find');
+    expect(names).toContain('first');
+    expect(names).toContain('join');
+    expect(names).toContain('map');
+    // get accepts "any" as first arg, so it remains compatible.
+    expect(names).toContain('get');
+
+    expect(names).not.toContain('upper');
+    expect(names).not.toContain('round');
   });
 
   it('includes number-compatible transforms and excludes string-only ones when outputType is "number"', () => {
@@ -91,6 +114,7 @@ describe('getCompatibleChainableTransforms', () => {
     expect(names).not.toContain('upper');
     expect(names).not.toContain('lower');
     expect(names).not.toContain('trim');
+    expect(names).not.toContain('concat');
   });
 
   it('includes string-compatible transforms and excludes number-only ones when outputType is "string"', () => {
@@ -100,6 +124,7 @@ describe('getCompatibleChainableTransforms', () => {
     expect(names).toContain('upper');
     expect(names).toContain('lower');
     expect(names).toContain('trim');
+    expect(names).toContain('concat');
     // Number-only transforms must be excluded
     expect(names).not.toContain('round');
     expect(names).not.toContain('abs');
@@ -109,15 +134,20 @@ describe('getCompatibleChainableTransforms', () => {
     const result = getCompatibleChainableTransforms('any');
     const names = result.map((e) => e.name);
     // Non-chainable functions must never appear
-    expect(names).not.toContain('concat');
     expect(names).not.toContain('if');
     expect(names).not.toContain('eq');
     expect(names).not.toContain('valueMap');
   });
 
-  it('returns an empty array when outputType has no compatible chainable transforms', () => {
-    // "boolean" is not accepted by any chainable transform's first param
+  it('returns only any-compatible transforms when outputType has no exact matches', () => {
+    // "boolean" has no exact first-param matches among chainable transforms,
+    // but functions that accept "any" remain compatible.
     const result = getCompatibleChainableTransforms('boolean');
-    expect(result.length).toBe(0);
+    const names = result.map((entry) => entry.name);
+    expect(names).toContain('cast');
+    expect(names).toContain('default');
+    expect(names).toContain('coalesce');
+    expect(names).not.toContain('upper');
+    expect(names).not.toContain('round');
   });
 });

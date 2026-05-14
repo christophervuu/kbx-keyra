@@ -46,7 +46,7 @@ import type { ParsedSchema, SchemaNodeType } from '@/lib/types/domain';
 // Types
 // ---------------------------------------------------------------------------
 
-export type ItemFieldScope = 'item' | 'source' | 'static';
+export type ItemFieldScope = 'item' | 'parent' | 'source' | 'static';
 
 /** Top-level logic type for a field row. */
 export type ItemFieldLogicType = 'source' | 'static' | 'external' | 'expression' | 'crossArrayLookup';
@@ -71,6 +71,8 @@ export interface ItemFieldRowProps {
    * Used when scope is 'item'.
    */
   readonly itemFieldPaths: readonly string[];
+  /** Parent-item field paths available in nested context. */
+  readonly parentFieldPaths?: readonly string[];
   /** Whether parent scope is available (nested array context — T-10). */
   readonly hasParentScope?: boolean;
   /**
@@ -117,6 +119,7 @@ function fieldPathFromMapping(mapping: ItemFieldMapping): string {
   const { source } = mapping.chainState;
   if (source.kind !== 'field') return '';
   if (source.path.startsWith('__item__:')) return source.path.slice('__item__:'.length);
+  if (source.path.startsWith('__parent__:')) return source.path.slice('__parent__:'.length);
   if (source.path.startsWith('__source__:')) return source.path.slice('__source__:'.length);
   return source.path;
 }
@@ -140,12 +143,15 @@ function sourceScopeFromMapping(mapping: ItemFieldMapping): Exclude<ItemFieldSco
   if (mapping.kind !== 'chain') return 'item';
   const { source } = mapping.chainState;
   if (source.kind !== 'field') return 'item';
+  if (source.path.startsWith('__parent__:')) return 'parent';
   if (source.path.startsWith('__source__:')) return 'source';
   return 'item';
 }
 
 function toMappingPrefix(scope: Exclude<ItemFieldScope, 'static'>): string {
-  return scope === 'item' ? '__item__:' : '__source__:';
+  if (scope === 'item') return '__item__:';
+  if (scope === 'parent') return '__parent__:';
+  return '__source__:';
 }
 
 type UnifiedSourceOption = {
@@ -155,7 +161,9 @@ type UnifiedSourceOption = {
 
 function buildUnifiedSourceOptions(
   itemPaths: readonly string[],
+  parentPaths: readonly string[],
   sourcePaths: readonly string[],
+  hasParentScope: boolean,
 ): UnifiedSourceOption[] {
   const results: UnifiedSourceOption[] = [];
   const seen = new Set<string>();
@@ -166,6 +174,16 @@ function buildUnifiedSourceOptions(
     if (seen.has(key)) continue;
     seen.add(key);
     results.push({ path, scope: 'item' });
+  }
+
+  if (hasParentScope) {
+    for (const path of parentPaths) {
+      if (!path.trim()) continue;
+      const key = `parent:${path}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ path, scope: 'parent' });
+    }
   }
 
   for (const path of sourcePaths) {
@@ -182,6 +200,7 @@ function buildUnifiedSourceOptions(
 function normalizeScopedSourceCalls(expression: string): string {
   return expression
     .replace(/source\("__item__:(.*?)"\)/g, 'item("$1")')
+    .replace(/source\("__parent__:(.*?)"\)/g, 'parent("$1")')
     .replace(/source\("__source__:(.*?)"\)/g, 'source("$1")');
 }
 
@@ -269,12 +288,7 @@ function StatusDot({
 const LOGIC_TYPE_OPTIONS: { value: ItemFieldLogicType; label: string; isHelper?: boolean; disabled?: boolean; tooltip?: string }[] = [
   { value: 'source', label: 'Source' },
   { value: 'static', label: 'Static' },
-  {
-    value: 'external',
-    label: 'External',
-    disabled: true,
-    tooltip: 'External data sources - available in a future release',
-  },
+  { value: 'external', label: 'External' },
   { value: 'expression', label: 'Function expression' },
   { value: 'crossArrayLookup', label: 'Cross-array Lookup', isHelper: true },
 ];
@@ -343,6 +357,7 @@ export function ItemFieldRow({
   mapping,
   parsedSourceSchema,
   itemFieldPaths,
+  parentFieldPaths = [],
   hasParentScope = false,
   validationEntries = [],
   onToggleExpand,
@@ -389,8 +404,8 @@ export function ItemFieldRow({
   );
 
   const unifiedSourceOptions = useMemo(
-    () => buildUnifiedSourceOptions(itemFieldPaths, sourcePaths),
-    [itemFieldPaths, sourcePaths],
+    () => buildUnifiedSourceOptions(itemFieldPaths, parentFieldPaths, sourcePaths, hasParentScope),
+    [itemFieldPaths, parentFieldPaths, sourcePaths, hasParentScope],
   );
 
   const filteredSourceOptions = useMemo(() => {
@@ -461,9 +476,6 @@ export function ItemFieldRow({
   // ---------------------------------------------------------------------------
 
   function handleLogicTypeChange(newType: ItemFieldLogicType) {
-    if (newType === 'external') {
-      return;
-    }
     setLogicType(newType);
     setSelectedField('');
     setStaticValue('');
@@ -643,7 +655,7 @@ export function ItemFieldRow({
   const canShowAddLogic =
     (logicType === 'source' && selectedField.trim().length > 0)
     || (logicType === 'static' && staticValue.trim().length > 0)
-    || (logicType === 'expression' && expressionDsl.trim().length > 0);
+    || ((logicType === 'expression' || logicType === 'external') && expressionDsl.trim().length > 0);
 
   // Current lookup state (if applicable)
   const currentLookupState: CrossArrayLookupState =
@@ -717,18 +729,22 @@ export function ItemFieldRow({
               hasParentScope={hasParentScope}
               onChange={handleLookupChange}
             />
-          ) : logicType === 'expression' ? (
+          ) : logicType === 'expression' || logicType === 'external' ? (
             <div className="space-y-1">
               <label
                 htmlFor={`expression-input-${fieldPath}`}
                 className="block text-[10px] font-medium uppercase tracking-wide text-slate-500"
               >
-                Expression
+                {logicType === 'external' ? 'External mapping' : 'Expression'}
               </label>
               <textarea
                 id={`expression-input-${fieldPath}`}
                 value={expressionDsl}
-                placeholder='e.g. gt(item("discountAmount"), 0)'
+                placeholder={
+                  logicType === 'external'
+                    ? 'e.g. external("carrierStops")'
+                    : 'e.g. gt(item("discountAmount"), 0)'
+                }
                 data-testid={`expression-input-${fieldPath}`}
                 onChange={(e) => { handleExpressionChange(e.target.value); }}
                 className="min-h-[64px] w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -824,6 +840,11 @@ export function ItemFieldRow({
                           {option.scope === 'item' && (
                             <span className="shrink-0 rounded bg-blue-950/50 px-1.5 py-0.5 text-[9px] font-medium text-blue-300">
                               item
+                            </span>
+                          )}
+                          {option.scope === 'parent' && (
+                            <span className="shrink-0 rounded bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-medium text-amber-300">
+                              parent
                             </span>
                           )}
                           {isSelected && (

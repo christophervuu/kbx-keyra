@@ -34,13 +34,17 @@ export type { ChainState, StaticValueBranch };
  *
  * - 'map'                — Transform each element of a source array
  * - 'filterMap'          — Filter, then transform a source array
+ * - 'splitString'        — Build an array by splitting a source string
  * - 'buildFromValues'    — Construct array entries from individual fields/statics
  * - 'mergeArrayBranches' — Combine multiple source arrays via merge()
- * - 'customExpression'   — Write raw DSL (advanced / escape hatch)
+ * - 'customExpression'   — Internal/legacy backing store for Editor mode (FS-051 T-01).
+ *                          Not exposed as a selectable card in ArrayModeSelector.
+ *                          Used by the Builder/Editor toggle in the ArrayBuilder header.
  */
 export type ArrayBuilderMode =
   | 'map'
   | 'filterMap'
+  | 'splitString'
   | 'buildFromValues'
   | 'mergeArrayBranches'
   | 'customExpression';
@@ -190,6 +194,15 @@ export interface FilterMapCollectionState {
   readonly filterPredicate: FilterPredicateState;
 }
 
+/** Collection state for Split String mode. */
+export interface SplitStringCollectionState {
+  readonly mode: 'splitString';
+  readonly sourceStringPath: string;
+  readonly delimiter: string;
+  readonly trimItems: boolean;
+  readonly dropEmpty: boolean;
+}
+
 /** Collection state for Build from Values mode. */
 export interface BuildFromValuesCollectionState {
   readonly mode: 'buildFromValues';
@@ -234,6 +247,7 @@ export interface CustomExpressionCollectionState {
 export type CollectionState =
   | MapCollectionState
   | FilterMapCollectionState
+  | SplitStringCollectionState
   | BuildFromValuesCollectionState
   | MergeBranchesCollectionState
   | CustomExpressionCollectionState;
@@ -524,6 +538,8 @@ function isCollectionSourceConfigured(state: CollectionState): boolean {
       return state.sourceArrayPath.trim().length > 0;
     case 'filterMap':
       return state.sourceArrayPath.trim().length > 0;
+    case 'splitString':
+      return state.sourceStringPath.trim().length > 0;
     case 'buildFromValues':
       return state.entries.length > 0;
     case 'mergeArrayBranches':
@@ -557,6 +573,8 @@ function hasCollectionErrors(state: CollectionState): boolean {
       return false;
     case 'buildFromValues':
       return false;
+    case 'splitString':
+      return state.delimiter.length === 0;
     case 'mergeArrayBranches':
       // More than 10 branches is a structural error (should not happen via UI)
       return state.branches.length > 10;
@@ -569,6 +587,7 @@ function hasCollectionErrors(state: CollectionState): boolean {
  * Returns true when an item template has all fields mapped (none are 'empty').
  */
 function isItemTemplateComplete(template: ItemTemplateState): boolean {
+  if (template.fields.length === 0) return false;
   return template.fields.every((f) => f.kind !== 'empty');
 }
 
@@ -618,7 +637,26 @@ export function deriveCompletionStatus(state: ArrayBuilderState): CompletionStat
   }
 
   // Check for errors
-  if (hasCollectionErrors(state.collectionState) || hasItemTemplateErrors(state.itemTemplate)) {
+  if (hasCollectionErrors(state.collectionState)) {
+    return 'hasErrors';
+  }
+
+  if (state.mode === 'splitString') {
+    return 'complete';
+  }
+
+  if (state.mode === 'mergeArrayBranches' && state.collectionState.mode === 'mergeArrayBranches') {
+    const branchTemplates = state.collectionState.branches.map((branch) => branch.itemTemplate);
+    if (branchTemplates.some((template) => hasItemTemplateErrors(template))) {
+      return 'hasErrors';
+    }
+    if (branchTemplates.some((template) => !isItemTemplateComplete(template))) {
+      return 'inProgress';
+    }
+    return 'complete';
+  }
+
+  if (hasItemTemplateErrors(state.itemTemplate)) {
     return 'hasErrors';
   }
 
@@ -721,6 +759,14 @@ export function createCollectionStateForMode(mode: ArrayBuilderMode): Collection
         sourceArrayType: undefined,
         filterPredicate: createEmptyFilterPredicate(),
       };
+    case 'splitString':
+      return {
+        mode: 'splitString',
+        sourceStringPath: '',
+        delimiter: ',',
+        trimItems: true,
+        dropEmpty: false,
+      };
     case 'buildFromValues':
       return { mode: 'buildFromValues', entries: [], nullFilteringEnabled: false };
     case 'mergeArrayBranches':
@@ -782,6 +828,12 @@ export function isBuildFromValuesCollectionState(
   s: CollectionState,
 ): s is BuildFromValuesCollectionState {
   return s.mode === 'buildFromValues';
+}
+
+export function isSplitStringCollectionState(
+  s: CollectionState,
+): s is SplitStringCollectionState {
+  return s.mode === 'splitString';
 }
 
 export function isMergeBranchesCollectionState(

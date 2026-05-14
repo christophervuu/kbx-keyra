@@ -162,6 +162,48 @@ describe('AE-06: source + transform with additional arg', () => {
     };
     expect(generateExpressionFromChain(state)).toBe('round(source("x"), 2)');
   });
+
+  it('generates join(source("tags"), ",")', () => {
+    const state: ChainBuilderState = {
+      entryType: 'source',
+      sourcePath: 'tags',
+      logicSteps: [createTransformStep('join', [{ mode: 'literal', value: ',' }])],
+      expandedStepIndex: null,
+    };
+    expect(generateExpressionFromChain(state)).toBe('join(source("tags"), ",")');
+  });
+
+  it('generates count(filter(source("items"), gt(item("discountAmount"), 0)))', () => {
+    const state: ChainBuilderState = {
+      entryType: 'source',
+      sourcePath: 'items',
+      logicSteps: [
+        createTransformStep('filter', [
+          {
+            mode: 'expression',
+            node: {
+              functionName: 'gt',
+              slots: [
+                {
+                  mode: 'expression',
+                  node: {
+                    functionName: 'item',
+                    slots: [{ mode: 'literal', value: 'discountAmount' }],
+                  },
+                },
+                { mode: 'literal', value: '0' },
+              ],
+            },
+          },
+        ]),
+        createTransformStep('count'),
+      ],
+      expandedStepIndex: null,
+    };
+    expect(generateExpressionFromChain(state)).toBe(
+      'count(filter(source("items"), gt(item("discountAmount"), 0)))',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

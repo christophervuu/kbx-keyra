@@ -152,6 +152,37 @@ describe('useTargetStatus', () => {
     const { result } = renderHook(() => useTargetStatus([], null, FLAT_NODES));
     expect(result.current.coverageMap.has('firstName')).toBe(false);
   });
+
+  it('treats array descendants as mapped when array target itself is mapped', () => {
+    const productCodeNode = makeNode('lineItems.productCode', 'productCode', 'string', 1);
+    const qtyNode = makeNode('lineItems.qty', 'qty', 'number', 1);
+    const lineItemsNode = makeNode('lineItems', 'lineItems', 'array', 0, [productCodeNode, qtyNode]);
+    const nodes = [lineItemsNode, productCodeNode, qtyNode];
+
+    const { result } = renderHook(() => useTargetStatus([makeRule('lineItems')], null, nodes));
+
+    expect(result.current.statusMap.get('lineItems')).toBe('mapped');
+    expect(result.current.statusMap.get('lineItems.productCode')).toBe('mapped');
+    expect(result.current.statusMap.get('lineItems.qty')).toBe('mapped');
+    expect(result.current.coverageMap.get('lineItems')).toEqual({ mapped: 2, total: 2 });
+  });
+
+  it('does not force mapped descendants when mapped array target has diagnostics', () => {
+    const productCodeNode = makeNode('lineItems.productCode', 'productCode', 'string', 1);
+    const qtyNode = makeNode('lineItems.qty', 'qty', 'number', 1);
+    const lineItemsNode = makeNode('lineItems', 'lineItems', 'array', 0, [productCodeNode, qtyNode]);
+    const nodes = [lineItemsNode, productCodeNode, qtyNode];
+
+    const validation = makeValidationResult([
+      { code: 'W001', severity: 'warning', message: 'Array warning', targetPath: 'lineItems' },
+    ]);
+
+    const { result } = renderHook(() => useTargetStatus([makeRule('lineItems')], validation, nodes));
+
+    expect(result.current.statusMap.get('lineItems')).not.toBe('mapped');
+    expect(result.current.statusMap.get('lineItems.productCode')).toBe('unmapped');
+    expect(result.current.statusMap.get('lineItems.qty')).toBe('unmapped');
+  });
 });
 
 // ---------------------------------------------------------------------------

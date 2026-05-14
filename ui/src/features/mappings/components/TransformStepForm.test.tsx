@@ -70,6 +70,11 @@ describe('TransformStepForm — rendering', () => {
     expect(screen.getByTestId('argument-form-multiply')).toBeInTheDocument();
   });
 
+  it('does not render duplicate function header from embedded ArgumentForm', () => {
+    renderForm({ step: makeStep({ functionName: 'multiply', args: [] }) });
+    expect(screen.queryByTestId('argument-form-function-name')).not.toBeInTheDocument();
+  });
+
   it('AE-07: concat renders [+ Add value] for variadic', () => {
     renderForm({ step: makeStep({ functionName: 'concat', args: [] }) });
     expect(screen.getByTestId('argument-form-add-value')).toBeInTheDocument();
@@ -101,14 +106,14 @@ describe('TransformStepForm — interactions', () => {
 
   it('renders picker when functionName is empty', () => {
     renderForm({ step: makeStep({ functionName: '' }) });
-    expect(screen.getByTestId('transform-function-picker')).toBeInTheDocument();
+    const picker = screen.getByTestId('transform-function-picker');
+    expect(picker).toBeInTheDocument();
+    expect(picker.className).toContain('w-full');
   });
 
-  it('remove button in picker mode fires onRemoveStep', () => {
-    const onRemoveStep = vi.fn();
-    renderForm({ step: makeStep({ functionName: '' }), onRemoveStep });
-    fireEvent.click(screen.getByTestId('transform-step-remove-0'));
-    expect(onRemoveStep).toHaveBeenCalledWith(0);
+  it('does not render remove button in picker mode', () => {
+    renderForm({ step: makeStep({ functionName: '' }) });
+    expect(screen.queryByTestId('transform-step-remove-0')).not.toBeInTheDocument();
   });
 });
 
@@ -123,5 +128,32 @@ describe('TransformStepForm — parameter slot modes', () => {
     const modeToggle = screen.getByTestId('argument-form-multiply')
       .querySelector('[data-testid*="mode-toggle"]');
     expect(modeToggle).toBeInTheDocument();
+  });
+
+  it('normalizes find condition absolute path to item-relative when condition array path context is provided', () => {
+    const onStepChange = vi.fn();
+
+    renderForm({
+      step: makeStep({ functionName: 'find', args: [] }),
+      sourceOptions: [
+        { path: 'Shipment.Trackings.TrackingType', type: 'string' },
+        { path: 'Shipment.Trackings.TrackingNumber', type: 'string' },
+      ],
+      conditionArrayPath: 'Shipment.Trackings',
+      onStepChange,
+    });
+
+    fireEvent.change(screen.getByTestId('condition-left-0-field-input'), {
+      target: { value: 'Shipment.Trackings.TrackingType' },
+    });
+
+    const emitted = onStepChange.mock.calls[onStepChange.mock.calls.length - 1][1];
+    expect(emitted.args[0]).toEqual({
+      mode: 'expression',
+      node: {
+        functionName: 'item',
+        slots: [{ mode: 'literal', value: 'TrackingType' }],
+      },
+    });
   });
 });

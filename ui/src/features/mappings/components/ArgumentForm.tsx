@@ -277,6 +277,10 @@ export interface ArgumentFormProps {
   readonly onSlotsChange: (slots: ArgumentSlot[]) => void;
   /** Source field options shown when a slot is in source mode. */
   readonly sourceOptions?: readonly SchemaPathEntry[];
+  /** Optional explicit array path context for filter/find condition arguments. */
+  readonly conditionArrayPathOverride?: string;
+  /** Hide function name/description header when parent already renders it. */
+  readonly hideFunctionHeader?: boolean;
   readonly className?: string;
 }
 
@@ -344,6 +348,8 @@ export function ArgumentForm({
   parameterOffset = 0,
   onSlotsChange,
   sourceOptions,
+  conditionArrayPathOverride,
+  hideFunctionHeader = false,
   className,
 }: ArgumentFormProps) {
   const entry = DSL_FUNCTION_CATALOG.find((e) => e.name === functionName);
@@ -411,24 +417,33 @@ export function ArgumentForm({
   const hasVariadic = entry.parameters.slice(parameterOffset).some((p) => p.variadic);
   // Ensure we always render at least the required slots.
   const effectiveSlots = computeEffectiveSlots();
+  const isFilterConditionFunction = functionName === 'filter' || functionName === 'find';
+  const conditionArrayPath =
+    conditionArrayPathOverride
+    ?? (
+      isFilterConditionFunction && effectiveSlots[0]?.mode === 'source'
+        ? effectiveSlots[0].path
+        : ''
+    );
 
   return (
     <div
       className={['space-y-2', className ?? ''].filter(Boolean).join(' ')}
       data-testid={`argument-form-${functionName}`}
     >
-      {/* Function name header */}
-      <div className="flex items-center gap-2">
-        <span
-          className="text-xs font-mono font-semibold text-blue-300"
-          data-testid="argument-form-function-name"
-        >
-          {functionName}
-        </span>
-        <span className="text-xs text-zinc-500">
-          {entry.description}
-        </span>
-      </div>
+      {!hideFunctionHeader && (
+        <div className="flex items-center gap-2">
+          <span
+            className="text-xs font-mono font-semibold text-blue-300"
+            data-testid="argument-form-function-name"
+          >
+            {functionName}
+          </span>
+          <span className="text-xs text-zinc-500">
+            {entry.description}
+          </span>
+        </div>
+      )}
 
       {/* Slot list */}
       <div className="space-y-2" data-testid="argument-form-slots">
@@ -440,6 +455,7 @@ export function ArgumentForm({
           const presentation = getParameterPresentation(functionName, param.name);
           const isVariadicExtra = index >= entry.parameters.length;
           const canRemove = hasVariadic && isVariadicExtra;
+          const forceConditionEditor = isFilterConditionFunction && param.name === 'condition';
 
           return (
             <ArgumentSlotInput
@@ -451,6 +467,8 @@ export function ArgumentForm({
               description={presentation.description}
               hint={hint}
               sourceOptions={sourceOptions}
+              forceConditionEditor={forceConditionEditor}
+              conditionArrayPath={conditionArrayPath}
               onSlotChange={(updated) => { handleSlotChange(index, updated); }}
               onRemove={canRemove ? () => { handleRemoveSlot(index); } : undefined}
               exampleHint={entry.example}

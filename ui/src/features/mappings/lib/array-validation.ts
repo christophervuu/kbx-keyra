@@ -164,6 +164,26 @@ function validateCollection(
       break;
     }
 
+    case 'splitString': {
+      if (!collectionState.sourceStringPath.trim()) {
+        entries.push(entry('collection', '', 'No source text field selected.', 'incomplete'));
+      } else {
+        const sourceType = getSourcePathType(parsedSourceSchema, collectionState.sourceStringPath);
+        if (sourceType !== null && sourceType !== 'string') {
+          entries.push(entry(
+            'collection', '',
+            `Source path "${collectionState.sourceStringPath}" is not a string (found: ${sourceType}).`,
+            'error',
+          ));
+        }
+      }
+
+      if (collectionState.delimiter.length === 0) {
+        entries.push(entry('collection', '', 'Delimiter cannot be empty.', 'error'));
+      }
+      break;
+    }
+
     case 'mergeArrayBranches': {
       const { branches } = collectionState;
       if (branches.length < 2) {
@@ -208,9 +228,12 @@ function validateCollection(
 function validateItemTemplate(
   itemTemplate: ItemTemplateState,
   targetArrayNode: SchemaTreeNode | null,
+  contextLabel?: string,
 ): ArrayValidationEntry[] {
   const entries: ArrayValidationEntry[] = [];
   if (!targetArrayNode) return entries;
+
+  const prefix = contextLabel ? `${contextLabel}: ` : '';
 
   for (const field of targetArrayNode.children) {
     if (field.type === 'array') continue; // nested arrays validated separately
@@ -221,7 +244,7 @@ function validateItemTemplate(
     if (!isMapped && field.isRequired) {
       entries.push(entry(
         'item', field.path,
-        `Required field "${field.fieldName}" is not mapped.`,
+        `${prefix}Required field "${field.fieldName}" is not mapped.`,
         'incomplete',
       ));
     }
@@ -273,9 +296,12 @@ function validateLeafOutputs(
   itemTemplate: ItemTemplateState,
   targetArrayNode: SchemaTreeNode | null,
   parsedSourceSchema: ParsedSchema | null,
+  contextLabel?: string,
 ): ArrayValidationEntry[] {
   const entries: ArrayValidationEntry[] = [];
   if (!targetArrayNode) return entries;
+
+  const prefix = contextLabel ? `${contextLabel}: ` : '';
 
   for (const mapping of itemTemplate.fields) {
     if (mapping.kind === 'empty') continue;
@@ -287,7 +313,7 @@ function validateLeafOutputs(
     if (outputType !== null && !isTypeCompatible(outputType, targetNode.type)) {
       entries.push(entry(
         'leaf', mapping.targetFieldPath,
-        `Type mismatch: expression produces "${outputType}" but target field "${targetNode.fieldName}" expects "${targetNode.type}".`,
+        `${prefix}Type mismatch: expression produces "${outputType}" but target field "${targetNode.fieldName}" expects "${targetNode.type}".`,
         'error',
       ));
     }
@@ -330,11 +356,27 @@ export function deriveArrayValidation(
   parsedSourceSchema: ParsedSchema | null,
   targetArrayNode: SchemaTreeNode | null,
 ): ArrayValidationState {
+  const collectionEntries = validateCollection(state, parsedSourceSchema);
+  const finalOutputEntries = validateFinalOutput(expression);
+  const itemEntries: ArrayValidationEntry[] = [];
+  const leafEntries: ArrayValidationEntry[] = [];
+
+  if (state.collectionState.mode === 'mergeArrayBranches') {
+    state.collectionState.branches.forEach((branch, index) => {
+      const context = `Branch ${index + 1}`;
+      itemEntries.push(...validateItemTemplate(branch.itemTemplate, targetArrayNode, context));
+      leafEntries.push(...validateLeafOutputs(branch.itemTemplate, targetArrayNode, parsedSourceSchema, context));
+    });
+  } else {
+    itemEntries.push(...validateItemTemplate(state.itemTemplate, targetArrayNode));
+    leafEntries.push(...validateLeafOutputs(state.itemTemplate, targetArrayNode, parsedSourceSchema));
+  }
+
   const allEntries: ArrayValidationEntry[] = [
-    ...validateCollection(state, parsedSourceSchema),
-    ...validateItemTemplate(state.itemTemplate, targetArrayNode),
-    ...validateLeafOutputs(state.itemTemplate, targetArrayNode, parsedSourceSchema),
-    ...validateFinalOutput(expression),
+    ...collectionEntries,
+    ...itemEntries,
+    ...leafEntries,
+    ...finalOutputEntries,
   ];
 
   const errorCount = allEntries.filter((e) => e.severity === 'error').length;

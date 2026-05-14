@@ -44,6 +44,8 @@ export interface TransformStepFormProps {
   readonly onRemoveStep: (index: number) => void;
   /** Source field options for source-mode parameter slots. */
   readonly sourceOptions?: readonly SchemaPathEntry[];
+  /** Optional array path context for filter/find condition arguments. */
+  readonly conditionArrayPath?: string;
   readonly className?: string;
 }
 
@@ -56,10 +58,7 @@ export interface TransformStepFormProps {
  * ArgumentSlotRef is a subset of ArgumentSlot — only source and literal modes.
  */
 function refsToSlots(refs: readonly ArgumentSlotRef[]): ArgumentSlot[] {
-  return refs.map((ref): ArgumentSlot => {
-    if (ref.mode === 'source') return { mode: 'source', path: ref.path };
-    return { mode: 'literal', value: ref.value };
-  });
+  return refs as ArgumentSlot[];
 }
 
 /**
@@ -68,12 +67,7 @@ function refsToSlots(refs: readonly ArgumentSlotRef[]): ArgumentSlot[] {
  * (chain model does not support nested expression slots in transform args).
  */
 function slotsToRefs(slots: ArgumentSlot[]): ArgumentSlotRef[] {
-  return slots.map((slot): ArgumentSlotRef => {
-    if (slot.mode === 'source') return { mode: 'source', path: slot.path };
-    if (slot.mode === 'literal') return { mode: 'literal', value: slot.value };
-    // expression mode: downgrade to literal with function name
-    return { mode: 'literal', value: slot.node.functionName };
-  });
+  return slots as ArgumentSlotRef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +83,7 @@ export function TransformStepForm({
   onStepChange,
   onRemoveStep,
   sourceOptions,
+  conditionArrayPath,
   className,
 }: TransformStepFormProps) {
   const [pickerOpen, setPickerOpen] = useState(step.functionName === '');
@@ -140,32 +135,10 @@ export function TransformStepForm({
   if (step.functionName === '' || pickerOpen) {
     return (
       <div
-        className={[
-          'rounded-lg border border-zinc-700 bg-zinc-800/60 overflow-hidden',
-          className ?? '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
+        className={['-m-2 overflow-hidden', className ?? ''].filter(Boolean).join(' ')}
         data-testid={`transform-step-form-${stepIndex}`}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700 bg-zinc-800">
-          <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">
-            Select transformation
-          </span>
-          <button
-            type="button"
-            onClick={handleRemove}
-            aria-label="Remove transform step"
-            className="text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors"
-            data-testid={`transform-step-remove-${stepIndex}`}
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
-
-        {/* Function picker inline */}
-        <div className="p-2" data-testid={`transform-step-picker-${stepIndex}`}>
+        <div data-testid={`transform-step-picker-${stepIndex}`}>
           <TransformFunctionPicker
             allowedFunctions={allowedFunctions}
             onSelect={handleFunctionSelect}
@@ -189,7 +162,7 @@ export function TransformStepForm({
   return (
     <div
       className={[
-        'rounded-lg border border-zinc-700 bg-zinc-800/60 overflow-hidden',
+          'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
         className ?? '',
       ]
         .filter(Boolean)
@@ -197,7 +170,7 @@ export function TransformStepForm({
       data-testid={`transform-step-form-${stepIndex}`}
     >
       {/* Header: function name + description + remove button */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-700 bg-zinc-800">
+      <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900 px-3 py-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span
@@ -211,7 +184,7 @@ export function TransformStepForm({
               type="button"
               onClick={() => { setPickerOpen(true); }}
               aria-label={`Change transform function (currently ${step.functionName})`}
-              className="inline-flex items-center gap-0.5 text-[11px] text-zinc-500 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded px-1 py-0.5 border border-dashed border-zinc-700 hover:border-zinc-500 transition-colors"
+              className="inline-flex items-center gap-0.5 rounded border border-dashed border-slate-700 px-1 py-0.5 text-[11px] text-slate-500 transition-colors hover:border-slate-500 hover:text-slate-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
               data-testid={`transform-step-change-fn-${stepIndex}`}
             >
               <ChevronDown className="h-2.5 w-2.5" aria-hidden="true" />
@@ -220,7 +193,7 @@ export function TransformStepForm({
           </div>
           {catalogEntry !== undefined && (
             <p
-              className="text-[11px] text-zinc-400 mt-0.5 truncate"
+              className="mt-0.5 truncate text-[11px] text-slate-400"
               data-testid={`transform-step-description-${stepIndex}`}
             >
               {catalogEntry.description}
@@ -232,7 +205,7 @@ export function TransformStepForm({
           type="button"
           onClick={handleRemove}
           aria-label={`Remove ${step.functionName} transform step`}
-          className="shrink-0 text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors"
+          className="shrink-0 rounded p-0.5 text-slate-500 transition-colors hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
           data-testid={`transform-step-remove-${stepIndex}`}
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -241,11 +214,11 @@ export function TransformStepForm({
 
       {/* Implicit first arg notice */}
       <div
-        className="px-3 py-1.5 bg-zinc-900/40 border-b border-zinc-700/50"
+        className="border-b border-slate-700/50 bg-slate-950/40 px-3 py-1.5"
         data-testid={`transform-step-implicit-arg-${stepIndex}`}
       >
-        <span className="text-[11px] text-zinc-500 italic">
-          Operates on: <span className="text-zinc-400 not-italic">current value</span>
+        <span className="text-[11px] italic text-slate-500">
+          Operates on: <span className="not-italic text-slate-300">current value</span>
         </span>
       </div>
 
@@ -258,11 +231,13 @@ export function TransformStepForm({
             parameterOffset={1}
             onSlotsChange={handleSlotsChange}
             sourceOptions={sourceOptions}
+            conditionArrayPathOverride={conditionArrayPath}
+            hideFunctionHeader
           />
         </div>
       ) : (
         <div
-          className="px-3 py-2 text-[11px] text-zinc-500 italic"
+          className="px-3 py-2 text-[11px] italic text-slate-500"
           data-testid={`transform-step-no-params-${stepIndex}`}
         >
           No additional parameters required.

@@ -100,6 +100,13 @@ describe('decomposeArrayExpression — Map mode', () => {
     const cs = state.collectionState as MapCollectionState;
     expect(cs.sourceArrayPath).toBe('order.lines');
   });
+
+  it('decomposes map(item("employees"), ...) into item-scoped collection source path', () => {
+    const state = assertSuccess('map(item("employees"), {"id": item("id")})');
+    expect(state.mode).toBe('map');
+    const cs = state.collectionState as MapCollectionState;
+    expect(cs.sourceArrayPath).toBe('__item__:employees');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -156,6 +163,13 @@ describe('decomposeArrayExpression — Filter + Map mode', () => {
     if (cs.filterPredicate.kind === 'raw') {
       expect(cs.filterPredicate.dsl).toContain('and(');
     }
+  });
+
+  it('decomposes filter map with item-scoped collection source', () => {
+    const state = assertSuccess('map(filter(item("employees"), gt(item("tenureMonths"), 6)), {"id": item("id")})');
+    expect(state.mode).toBe('filterMap');
+    const cs = state.collectionState as FilterMapCollectionState;
+    expect(cs.sourceArrayPath).toBe('__item__:employees');
   });
 });
 
@@ -388,6 +402,10 @@ describe('decomposeArrayExpression — Round-trip fidelity', () => {
 
   it('round-trips map mode', () => {
     roundTrip('map(source("items"), {"id": item("id"), "name": item("name")})');
+  });
+
+  it('round-trips map mode with item-scoped collection source', () => {
+    roundTrip('map(item("employees"), {"id": item("id")})');
   });
 
   it('round-trips filterMap mode with eq predicate', () => {

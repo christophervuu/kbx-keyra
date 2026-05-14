@@ -156,6 +156,18 @@ export const DSL_FUNCTION_CATALOG: readonly FunctionCatalogEntry[] = [
     returnType: 'number',
     example: 'length(source("code"))',
   },
+  {
+    name: 'split',
+    category: 'String',
+    description: 'Splits a string into an array using a separator string.',
+    parameterCount: 2,
+    parameters: [
+      { name: 'value', type: 'string', required: true },
+      { name: 'separator', type: 'string', required: true },
+    ],
+    returnType: 'array',
+    example: 'split(source("tags"), ",")',
+  },
 
   // ----- Date -----
   {

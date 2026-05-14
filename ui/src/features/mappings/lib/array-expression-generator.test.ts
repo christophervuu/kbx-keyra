@@ -21,6 +21,7 @@ import type {
   ArrayBuilderState,
   MapCollectionState,
   FilterMapCollectionState,
+  SplitStringCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
   CustomExpressionCollectionState,
@@ -101,6 +102,27 @@ function makeBuildFromValuesState(
     collectionState,
     itemTemplate: createEmptyItemTemplate(),
     completionStatus: 'inProgress',
+  };
+}
+
+function makeSplitStringState(
+  sourceStringPath: string,
+  delimiter = ',',
+  trimItems = true,
+  dropEmpty = false,
+): ArrayBuilderState {
+  const collectionState: SplitStringCollectionState = {
+    mode: 'splitString',
+    sourceStringPath,
+    delimiter,
+    trimItems,
+    dropEmpty,
+  };
+  return {
+    mode: 'splitString',
+    collectionState,
+    itemTemplate: createEmptyItemTemplate(),
+    completionStatus: sourceStringPath ? 'complete' : 'notStarted',
   };
 }
 
@@ -217,6 +239,32 @@ describe('Map mode', () => {
   it('generates nested source path correctly', () => {
     const result = generateArrayExpression(makeMapState('order.items'));
     expect(result).toBe('map(source("order.items"), {})');
+    assertParses(result);
+  });
+
+  it('generates map(item(...)) when collection source path is item-scoped', () => {
+    const result = generateArrayExpression(makeMapState('__item__:employees'));
+    expect(result).toBe('map(item("employees"), {})');
+    assertParses(result);
+  });
+});
+
+describe('Split string mode', () => {
+  it('generates map(split(...), trim(item(""))) for default split mode settings', () => {
+    const result = generateArrayExpression(makeSplitStringState('tags'));
+    expect(result).toBe('map(split(source("tags"), ","), trim(item("")))');
+    assertParses(result);
+  });
+
+  it('generates non-trimmed split mapping when trimItems is false', () => {
+    const result = generateArrayExpression(makeSplitStringState('tags', ',', false, false));
+    expect(result).toBe('map(split(source("tags"), ","), item(""))');
+    assertParses(result);
+  });
+
+  it('wraps split mapping with filter when dropEmpty is enabled', () => {
+    const result = generateArrayExpression(makeSplitStringState('tags', ',', true, true));
+    expect(result).toBe('filter(map(split(source("tags"), ","), trim(item(""))), neq(item(""), ""))');
     assertParses(result);
   });
 });
@@ -390,6 +438,39 @@ describe('Build from Values mode', () => {
     );
     expect(result).toBe(
       'filter(array({"type": "PRIMARY", "number": source("primaryPhone")}), not(isNull(item("number"))))',
+    );
+    assertParses(result);
+  });
+
+  it('generates object entries with expression field values for phone example', () => {
+    const entries: ValueEntry[] = [
+      {
+        kind: 'object',
+        fields: {
+          type: { kind: 'static', value: { type: 'string', value: 'PRIMARY' } },
+          number: { kind: 'expression', dsl: 'replaceAll(source("primaryPhone"), "-", "")' },
+        },
+      },
+      {
+        kind: 'object',
+        fields: {
+          type: { kind: 'static', value: { type: 'string', value: 'MOBILE' } },
+          number: { kind: 'expression', dsl: 'replaceAll(source("mobilePhone"), "-", "")' },
+        },
+      },
+      {
+        kind: 'object',
+        fields: {
+          type: { kind: 'static', value: { type: 'string', value: 'FAX' } },
+          number: { kind: 'expression', dsl: 'replaceAll(source("faxNumber"), "-", "")' },
+        },
+      },
+    ];
+
+    const result = generateArrayExpression(makeBuildFromValuesState(entries, true, 'number'));
+
+    expect(result).toBe(
+      'filter(array({"type": "PRIMARY", "number": replaceAll(source("primaryPhone"), "-", "")}, {"type": "MOBILE", "number": replaceAll(source("mobilePhone"), "-", "")}, {"type": "FAX", "number": replaceAll(source("faxNumber"), "-", "")}), not(isNull(item("number"))))',
     );
     assertParses(result);
   });
@@ -704,6 +785,23 @@ describe('scope-aware references', () => {
     assertParses(result);
   });
 
+  it('chain field source generates parent() reference for parent-scoped paths', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'departmentName',
+        chainState: {
+          source: { kind: 'field', path: '__parent__:name' },
+          steps: [],
+        },
+      },
+    ];
+    const result = generateArrayExpression(makeMapState('__item__:employees', fields));
+    expect(result).toContain('parent("name")');
+    expect(result).not.toContain('source("__parent__:name")');
+    assertParses(result);
+  });
+
   it('static chain source generates literal value', () => {
     const fields: ItemFieldMapping[] = [
       {
@@ -726,25 +824,21 @@ describe('scope-aware references', () => {
 // ---------------------------------------------------------------------------
 
 describe('nested array generation', () => {
-  it('generates nested map() for nested array field via cross-array lookup', () => {
-    // Nested arrays are stored in itemTemplate.nestedArrays.
-    // The outer generator does not recurse into nestedArrays automatically —
-    // nested array fields appear as ItemFieldMappings with kind 'chain' or 'crossArrayLookup'
-    // in the outer item template, where the chain expression itself is a nested map() call.
-    // This test verifies that a chain containing a nested map expression is passed through.
-    const fields: ItemFieldMapping[] = [
+  it('includes nested array expressions from nestedArrays in the parent template', () => {
+    const state = makeMapState('departments', [
       {
         kind: 'chain',
-        targetFieldPath: 'staff',
-        chainState: {
-          source: { kind: 'field', path: 'employees' },
-          steps: [],
-        },
+        targetFieldPath: 'id',
+        chainState: { source: { kind: 'field', path: '__item__:id' }, steps: [] },
       },
-    ];
-    const result = generateArrayExpression(makeMapState('departments', fields));
+    ]);
+
+    state.itemTemplate.nestedArrays.set('employees', makeMapState('__item__:employees'));
+
+    const result = generateArrayExpression(state);
     expect(result).toContain('map(source("departments"),');
-    expect(result).toContain('"staff"');
+    expect(result).toContain('"id": item("id")');
+    expect(result).toContain('"employees": map(item("employees"), {})');
     assertParses(result);
   });
 });
@@ -889,6 +983,49 @@ describe('generateObjectTemplate', () => {
     const result = generateObjectTemplate(template);
     expect(result).toContain('"sku"');
     expect(result).not.toContain('"qty"');
+  });
+
+  it('preserves nested object structure for object child paths', () => {
+    const template: ItemTemplateState = {
+      fields: [
+        {
+          kind: 'chain',
+          targetFieldPath: 'divisions.staff.departmentName',
+          chainState: { source: { kind: 'field', path: '__parent__:name' }, steps: [] },
+        },
+        {
+          kind: 'chain',
+          targetFieldPath: 'divisions.staff.compensation.baseSalary',
+          chainState: { source: { kind: 'field', path: '__item__:salary' }, steps: [] },
+        },
+        {
+          kind: 'expression',
+          targetFieldPath: 'divisions.staff.compensation.salaryBand',
+          dsl: 'if(gte(item("salary"), 100000), source("HIGH"), source("STANDARD"))',
+        },
+      ],
+      nestedArrays: new Map(),
+    };
+
+    const result = generateObjectTemplate(template);
+
+    expect(result).toBe('{"departmentName": parent("name"), "compensation": {"baseSalary": item("salary"), "salaryBand": if(gte(item("salary"), 100000), source("HIGH"), source("STANDARD"))}}');
+  });
+
+  it('keeps object container when a single nested object field is mapped', () => {
+    const template: ItemTemplateState = {
+      fields: [
+        {
+          kind: 'chain',
+          targetFieldPath: 'compensation.baseSalary',
+          chainState: { source: { kind: 'field', path: '__item__:salary' }, steps: [] },
+        },
+      ],
+      nestedArrays: new Map(),
+    };
+
+    const result = generateObjectTemplate(template);
+    expect(result).toBe('{"compensation": {"baseSalary": item("salary")}}');
   });
 });
 

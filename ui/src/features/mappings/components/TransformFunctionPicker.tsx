@@ -116,7 +116,7 @@ export function TransformFunctionPicker({
   return (
     <div
       className={[
-        'bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-80 max-h-96 overflow-y-auto',
+        'w-full max-h-96 overflow-y-auto bg-slate-950',
         className ?? '',
       ]
         .filter(Boolean)
@@ -124,7 +124,7 @@ export function TransformFunctionPicker({
       data-testid="transform-function-picker"
     >
       {/* Search */}
-      <div className="sticky top-0 bg-zinc-900 border-b border-zinc-700 p-2">
+      <div className="sticky top-0 bg-slate-950 border-b border-slate-700">
         <input
           type="text"
           value={searchQuery}
@@ -132,20 +132,20 @@ export function TransformFunctionPicker({
           placeholder="Search functions…"
           aria-label="Search transform functions"
           autoFocus
-          className="w-full bg-zinc-800 border border-zinc-600 rounded-md px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+          className="w-full border-0 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-blue-500"
           data-testid="transform-function-search"
         />
       </div>
 
       {/* No results */}
       {filtered.length === 0 && (
-        <p className="text-sm text-zinc-500 italic py-4 text-center">
+        <p className="py-4 text-center text-sm italic text-slate-500">
           No functions match your search.
         </p>
       )}
 
       {/* Category accordions */}
-      <div className="p-1 space-y-1">
+      <div className="space-y-0">
         {pickerCategories.map((cat) => {
           const fns = byCategory.get(cat) ?? [];
           if (fns.length === 0) return null;
@@ -153,17 +153,17 @@ export function TransformFunctionPicker({
           const headingId = `tfp-cat-${cat.toLowerCase()}`;
 
           return (
-            <div key={cat} className="border border-zinc-700 rounded overflow-hidden">
+            <div key={cat} className="overflow-hidden border-b border-slate-700 last:border-b-0">
               <button
                 type="button"
                 onClick={() => { toggleCategory(cat); }}
                 aria-expanded={isExpanded}
                 id={headingId}
-                className="w-full flex items-center justify-between px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-xs font-semibold text-zinc-300 uppercase tracking-wide focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+                className="w-full flex items-center justify-between bg-slate-900 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-300 hover:bg-slate-800 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
                 data-testid={`transform-category-${cat.toLowerCase()}`}
               >
                 <span>{CATEGORY_LABEL[cat]}</span>
-                <span aria-hidden="true" className="text-zinc-500">
+                <span aria-hidden="true" className="text-slate-500">
                   {isExpanded ? '▲' : '▼'}
                 </span>
               </button>
@@ -177,13 +177,13 @@ export function TransformFunctionPicker({
                         onClick={() => { handleSelect(fn.name); }}
                         title={fn.example}
                         aria-label={`${fn.name}: ${fn.description}`}
-                        className="w-full text-left flex items-start gap-2 px-3 py-2 hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none group transition-colors"
+                        className="group flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-slate-800 focus:bg-slate-800 focus:outline-none"
                         data-testid={`transform-fn-${fn.name}`}
                       >
-                        <span className="font-mono text-sm font-semibold text-blue-300 group-hover:text-blue-200 shrink-0 min-w-[6rem]">
+                        <span className="min-w-[6rem] shrink-0 font-mono text-xs font-semibold text-blue-300 group-hover:text-blue-200">
                           {fn.name}
                         </span>
-                        <span className="text-xs text-zinc-400 group-hover:text-zinc-300 leading-snug flex-1 truncate">
+                        <span className="flex-1 truncate text-xs leading-tight text-slate-400 group-hover:text-slate-200">
                           {fn.description}
                         </span>
                       </button>
@@ -194,18 +194,6 @@ export function TransformFunctionPicker({
             </div>
           );
         })}
-      </div>
-
-      {/* Close / cancel */}
-      <div className="sticky bottom-0 bg-zinc-900 border-t border-zinc-700 p-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full text-xs text-zinc-500 hover:text-zinc-300 py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded"
-          data-testid="transform-function-picker-close"
-        >
-          Cancel
-        </button>
       </div>
     </div>
   );

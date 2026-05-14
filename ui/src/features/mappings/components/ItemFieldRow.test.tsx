@@ -149,4 +149,37 @@ describe('ItemFieldRow', () => {
       dsl: 'upper(item("discountAmount"))',
     });
   });
+
+  it('shows parent-scope options in nested context', async () => {
+    const user = userEvent.setup();
+    renderRow({
+      hasParentScope: true,
+      parentFieldPaths: ['name'],
+    });
+
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+
+    expect(screen.getByTestId('field-option-hasDiscount-parent-name')).toBeInTheDocument();
+    expect(screen.getByText('parent')).toBeInTheDocument();
+  });
+
+  it('maps parent-scope source options using parent scope prefix', async () => {
+    const user = userEvent.setup();
+    const { onMappingChange } = renderRow({
+      hasParentScope: true,
+      parentFieldPaths: ['name'],
+    });
+
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    await user.click(screen.getByTestId('field-option-hasDiscount-parent-name'));
+
+    expect(lastMappingCall(onMappingChange)).toEqual({
+      kind: 'chain',
+      targetFieldPath: 'hasDiscount',
+      chainState: {
+        source: { kind: 'field', path: '__parent__:name' },
+        steps: [],
+      },
+    });
+  });
 });

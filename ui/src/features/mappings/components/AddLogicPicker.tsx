@@ -18,7 +18,7 @@
  * the output of the previous step.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import { ArrowRightLeft, GitBranch, Table2 } from 'lucide-react';
 import type { LogicStep } from '../lib/chain-builder-state';
 
@@ -109,44 +109,23 @@ function getPrecedingContextLabel(kind: LogicStep['kind'] | undefined): string |
 export function AddLogicPicker({
   precedingStepKind,
   onSelectLogicKind,
-  onDismiss,
+  onDismiss: _onDismiss,
   className,
 }: AddLogicPickerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const firstOptionRef = useRef<HTMLButtonElement>(null);
-
-  // Focus first option on mount
-  useEffect(() => {
-    firstOptionRef.current?.focus();
-  }, []);
-
-  // Escape key dismissal
+  // Escape key is ignored in the always-visible mode.
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onDismiss();
       }
     },
-    [onDismiss],
+    [],
   );
-
-  // Click-outside dismissal
-  useEffect(() => {
-    function handlePointerDown(e: PointerEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        onDismiss();
-      }
-    }
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [onDismiss]);
 
   const contextLabel = getPrecedingContextLabel(precedingStepKind);
 
   return (
     <div
-      ref={containerRef}
       className={['flex flex-col gap-2', className ?? ''].filter(Boolean).join(' ')}
       onKeyDown={handleKeyDown}
       data-testid="add-logic-picker"
@@ -170,16 +149,15 @@ export function AddLogicPicker({
         {PICKER_OPTIONS.map((option, index) => (
           <button
             key={option.kind}
-            ref={index === 0 ? firstOptionRef : undefined}
             type="button"
             onClick={() => onSelectLogicKind(option.kind)}
-            className="flex flex-col items-start gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 p-3 text-left transition-colors hover:border-blue-500 hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="flex flex-col items-start gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-left transition-colors hover:border-blue-500 hover:bg-slate-700/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             aria-label={`${option.label}: ${option.description}`}
             data-testid={option.testId}
           >
             <option.Icon className="h-4 w-4 text-blue-400" aria-hidden="true" />
-            <span className="text-xs font-semibold text-zinc-200">{option.label}</span>
-            <span className="text-[10px] leading-snug text-zinc-500">{option.description}</span>
+            <span className="text-xs font-semibold text-slate-100">{option.label}</span>
+            <span className="text-[12px] leading-snug text-slate-400">{option.description}</span>
           </button>
         ))}
       </div>

@@ -9,7 +9,7 @@
  * - Mode-specific behaviour (editor vs builder)
  */
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BuilderFeedbackArea } from './BuilderFeedbackArea';
@@ -315,6 +315,80 @@ describe('BuilderFeedbackArea', () => {
       );
       const badge = screen.getByTestId('validation-output-type-badge');
       expect(badge.getAttribute('role')).toBe('status');
+    });
+  });
+
+  describe('Compact mode', () => {
+    it('shows stacked compact Expression and Result summaries', () => {
+      render(
+        <BuilderFeedbackArea
+          expression='source("email")'
+          sourceData={null}
+          validationState={VALID_STATE}
+          mode="builder"
+          compact={true}
+          collapsible={true}
+          defaultCollapsed={true}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-compact-expression-summary')).toHaveTextContent('Expression:');
+      expect(screen.getByTestId('feedback-compact-result-summary')).toHaveTextContent('Result:');
+    });
+
+    it('shows expression status indicator on the left', () => {
+      render(
+        <BuilderFeedbackArea
+          expression='source("email")'
+          sourceData={null}
+          validationState={INVALID_STRUCTURE_STATE}
+          mode="builder"
+          compact={true}
+          collapsible={true}
+          defaultCollapsed={true}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-compact-status')).toHaveAttribute('aria-label', 'Expression status: has issues');
+    });
+
+    it('renders compact collapse toggle and expands details content on click', () => {
+      render(
+        <BuilderFeedbackArea
+          expression='source("email")'
+          sourceData={null}
+          validationState={INVALID_STRUCTURE_STATE}
+          mode="builder"
+          compact={true}
+          collapsible={true}
+          defaultCollapsed={true}
+        />,
+      );
+
+      expect(screen.queryByTestId('feedback-details-panel')).toBeNull();
+
+      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
+
+      expect(screen.getByTestId('feedback-details-panel')).toBeDefined();
+      expect(screen.getByTestId('feedback-details-list')).toHaveTextContent('Select a source field or enter a static value');
+    });
+
+    it('shows diagnostics placeholder when there are no detailed issues', () => {
+      render(
+        <BuilderFeedbackArea
+          expression='source("email")'
+          sourceData={null}
+          validationState={VALID_STATE}
+          mode="builder"
+          compact={true}
+          collapsible={true}
+          defaultCollapsed={false}
+        />,
+      );
+
+      expect(screen.getByTestId('feedback-details-placeholder')).toHaveTextContent(
+        'Additional mapping diagnostics will appear here.',
+      );
     });
   });
 });

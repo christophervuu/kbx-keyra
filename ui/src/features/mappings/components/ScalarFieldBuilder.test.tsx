@@ -225,6 +225,20 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.queryByTestId('expression-editor-slot')).not.toBeInTheDocument();
   });
 
+  it('keeps expression area as an internal scroll container in builder mode', () => {
+    renderBuilder();
+    const expressionArea = screen.getByTestId('expression-area');
+    expect(expressionArea.className).toContain('overflow-y-auto');
+  });
+
+  it('uses scrollable expression area in editor mode', () => {
+    renderBuilder();
+    fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+    const expressionArea = screen.getByTestId('expression-area');
+    expect(expressionArea.className).toContain('overflow-y-auto');
+  });
+
   it('renders question-first Step 1 prompt in builder mode', () => {
     renderBuilder();
     expect(screen.getByTestId('scalar-entry-question')).toHaveTextContent('Where does this value come from?');
@@ -239,8 +253,20 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('scalar-entry-mode-static')).toHaveTextContent('Static value');
     expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External');
     expect(screen.getByTestId('scalar-entry-mode-external')).toBeDisabled();
-    expect(screen.getByTestId('scalar-source-field-section')).toBeInTheDocument();
-    expect(screen.getByTestId('scalar-source-field-heading')).toHaveTextContent('Source Field');
+    expect(screen.queryByTestId('scalar-source-field-section')).not.toBeInTheDocument();
+  });
+
+  it('collapses entry question block to selected summary and re-expands on change', async () => {
+    const user = userEvent.setup();
+    renderBuilder();
+
+    await user.click(screen.getByTestId('scalar-entry-mode-source'));
+    expect(screen.getByTestId('scalar-entry-question-selected')).toHaveTextContent('Source field');
+    expect(screen.getByTestId('scalar-entry-question-selected')).toHaveTextContent('Use a field from the source schema');
+    expect(screen.queryByTestId('scalar-entry-mode-source')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('scalar-entry-question-toggle'));
+    expect(screen.getByTestId('scalar-entry-mode-source')).toBeInTheDocument();
   });
 
   it('keeps Step 2 logic lane hidden until Step 1 source is selected', async () => {
@@ -249,12 +275,15 @@ describe('ScalarFieldBuilder', () => {
 
     expect(screen.queryByTestId('scalar-logic-lane')).not.toBeInTheDocument();
 
+    await user.click(screen.getByTestId('scalar-entry-mode-source'));
     await user.click(screen.getByTestId('chain-source-card-input'));
     await user.click(screen.getByTestId('chain-source-card-option-firstName'));
 
     expect(screen.getByTestId('scalar-logic-lane')).toBeInTheDocument();
     expect(screen.getByTestId('scalar-logic-heading')).toHaveTextContent('Logic');
-    expect(screen.getByTestId('logic-step-list-add-logic')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-transform')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-condition')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-valuemap')).toBeInTheDocument();
   });
 
   it('shows Step 2 logic lane after Step 1 static value is provided', async () => {
@@ -268,7 +297,7 @@ describe('ScalarFieldBuilder', () => {
 
     expect(screen.getByTestId('scalar-logic-lane')).toBeInTheDocument();
     expect(screen.getByTestId('scalar-logic-heading')).toHaveTextContent('Logic');
-    expect(screen.getByTestId('logic-step-list-add-logic')).toBeInTheDocument();
+    expect(screen.getByTestId('add-logic-option-transform')).toBeInTheDocument();
   });
 
   it('switches to editor mode when Editor toggle is clicked', () => {
@@ -392,12 +421,12 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('decomposition-warning-container')).toBeInTheDocument();
   });
 
-  it('opens concat expression in editor mode without warning when chain decomposition is unavailable', () => {
+  it('opens concat expression in builder mode without warning when chain decomposition succeeds', () => {
     renderBuilder({
       currentExpression: 'concat(source("first"), source("last"))',
       currentStatus: 'mapped',
     });
-    expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     expect(screen.queryByTestId('decomposition-warning-container')).not.toBeInTheDocument();
   });
 
@@ -647,7 +676,7 @@ describe('ScalarFieldBuilder', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('chain-source-card-path')).toHaveTextContent('lastName');
+        expect(screen.getByTestId('chain-source-card-input')).toHaveValue('lastName');
       });
     });
   });
@@ -918,23 +947,18 @@ describe('ScalarFieldBuilder', () => {
 
     it('shows "Load test data to see live results." when no sourceData in context (AE-06)', () => {
       renderBuilderWithContext({}, null);
-      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
-      expect(screen.getByTestId('feedback-result-no-data')).toHaveTextContent(
-        'Load test data to see live results.',
-      );
+      expect(screen.getByTestId('feedback-compact-result-summary')).toHaveTextContent('Result: no test data');
     });
 
     it('feedback result area is present in the builder (AE-05)', () => {
       renderBuilderWithContext({}, null);
-      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
-      expect(screen.getByTestId('feedback-result')).toBeInTheDocument();
+      expect(screen.getByTestId('feedback-compact-result-summary')).toBeInTheDocument();
     });
 
     it('keeps feedback result area rendered when sourceData is provided (AE-05)', async () => {
       renderBuilderWithContext({}, { firstName: 'Alice' });
-      fireEvent.click(screen.getByTestId('feedback-collapse-toggle'));
       await waitFor(() => {
-        expect(screen.getByTestId('feedback-result')).toBeInTheDocument();
+        expect(screen.getByTestId('feedback-compact-result-summary')).toBeInTheDocument();
       });
     });
 
@@ -1186,12 +1210,12 @@ describe('ScalarFieldBuilder', () => {
       fireEvent.click(screen.getByRole('button', { name: /accept/i }));
       expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
       expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
-      expect(screen.getByTestId('chain-source-card-path')).toHaveTextContent('firstName');
+      expect(screen.getByTestId('chain-source-card-input')).toHaveValue('firstName');
       // Panel should close after accept
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
     });
 
-    it('Accepting concat suggestion hydrates editor immediately with accepted expression', async () => {
+    it('Accepting concat suggestion hydrates builder immediately with accepted expression', async () => {
       const updateDraft = vi.fn();
       const suggestExpression = vi.fn().mockResolvedValue({
         expression: 'concat(source("customer.firstName"), " ", source("customer.lastName"))',
@@ -1215,10 +1239,8 @@ describe('ScalarFieldBuilder', () => {
         'patient.firstName',
         'concat(source("customer.firstName"), " ", source("customer.lastName"))',
       );
-      expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
-      expect(screen.getByRole('textbox')).toHaveValue(
-        'concat(source("customer.firstName"), " ", source("customer.lastName"))',
-      );
+      expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
+      expect(screen.getByTestId('chain-source-card-input')).toHaveValue('customer.firstName');
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
     });
 

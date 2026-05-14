@@ -68,6 +68,37 @@ function findNodeByPath(
   return undefined;
 }
 
+interface NodePathResolution {
+  readonly node: SchemaTreeNode;
+  readonly nearestArrayAncestor: SchemaTreeNode | null;
+}
+
+function findNodePathResolution(
+  nodes: readonly SchemaTreeNode[],
+  path: string,
+  nearestArrayAncestor: SchemaTreeNode | null = null,
+): NodePathResolution | undefined {
+  for (const node of nodes) {
+    const nextArrayAncestor = node.type === 'array' ? node : nearestArrayAncestor;
+    if (node.path === path) {
+      return { node, nearestArrayAncestor };
+    }
+    const found = findNodePathResolution(node.children, path, nextArrayAncestor);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export function resolveBuilderTargetPath(
+  nodes: readonly SchemaTreeNode[],
+  path: string,
+): string {
+  const resolution = findNodePathResolution(nodes, path);
+  if (!resolution) return path;
+  if (resolution.node.type === 'array') return resolution.node.path;
+  return resolution.nearestArrayAncestor?.path ?? resolution.node.path;
+}
+
 function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldType'] {
   switch (type) {
     case 'string':
@@ -173,7 +204,7 @@ export default function MappingEditor() {
     projectId,
     rules: editor.rules,
     updateDraft: editor.actions.updateDraft,
-    setSelectedTargetPath: (path: string) => setSelectedTargetPath(path),
+    setSelectedTargetPath: (path: string) => setSelectedTargetPath(resolveSelectedTargetPath(path)),
     exitWorkspace: () => setView('target'),
     parsedSourceSchema: editor.parsedSourceSchema,
     parsedTargetSchema: editor.parsedTargetSchema,
@@ -247,16 +278,23 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   const [selectedTargetPath, setSelectedTargetPath] = useState<string | null>(null);
 
+  const resolveSelectedTargetPath = useCallback(
+    (path: string) => {
+      if (!editor.parsedTargetSchema) return path;
+      return resolveBuilderTargetPath(editor.parsedTargetSchema.nodes, path);
+    },
+    [editor.parsedTargetSchema],
+  );
+
   // Consume jump-to-rule route state from TestLabPage (FS-036 T-07)
   useEffect(() => {
     const incomingPath = (location.state as Record<string, unknown> | null)?.selectedTargetPath;
     if (incomingPath && typeof incomingPath === 'string') {
-      setSelectedTargetPath(incomingPath);
+      setSelectedTargetPath(resolveSelectedTargetPath(incomingPath));
       // Clear the state to prevent stale re-application on refresh
       navigate(location.pathname, { replace: true, state: {} });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally run only on mount
-  }, []);
+  }, [location.state, location.pathname, navigate, resolveSelectedTargetPath]);
 
   // ---------------------------------------------------------------------------
   // Rules View selection state
@@ -292,13 +330,13 @@ export default function MappingEditor() {
         // Rules → Target: resolve selected rule's target path
         if (selectedRuleIndex !== null) {
           const rule = editor.rules[selectedRuleIndex];
-          setSelectedTargetPath(rule?.target ?? null);
+          setSelectedTargetPath(rule ? resolveSelectedTargetPath(rule.target) : null);
         }
       }
 
       setView(nextView);
     },
-    [view, selectedTargetPath, selectedRuleIndex, editor.rules],
+    [view, selectedTargetPath, selectedRuleIndex, editor.rules, resolveSelectedTargetPath],
   );
 
   // ---------------------------------------------------------------------------
@@ -318,9 +356,9 @@ export default function MappingEditor() {
         }
       }
       setStagedSourcePath(null);
-      setSelectedTargetPath(path);
+      setSelectedTargetPath(resolveSelectedTargetPath(path));
     },
-    [selectedTargetPath, editor.actions],
+    [selectedTargetPath, editor.actions, resolveSelectedTargetPath],
   );
 
   const effectiveRules = useMemo(
@@ -588,9 +626,9 @@ export default function MappingEditor() {
             isAutoMapLoading={autoMapWorkspace.status === 'loading'}
             hasPersistedSuggestions={autoMapWorkspace.hasPersistedSuggestions}
             pendingSuggestionCount={autoMapWorkspace.summary.pending}
-            onFilterRequired={(path: string) => setSelectedTargetPath(path)}
+            onFilterRequired={handleSelectTargetNode}
             onValidateSection={() => {/* no-op placeholder */}}
-            onNavigateToChild={(path) => setSelectedTargetPath(path)}
+            onNavigateToChild={handleSelectTargetNode}
             className="h-full"
           />
         );
@@ -606,7 +644,7 @@ export default function MappingEditor() {
         parsedTargetSchema={editor.parsedTargetSchema ?? null}
         updateDraft={editor.actions.updateDraft}
         getDraftExpression={editor.actions.getDraftExpression}
-        savedRules={editor.savedRules}
+        savedRules={editor.rules}
         className="h-full"
       />
     ) : (
@@ -625,7 +663,7 @@ export default function MappingEditor() {
         unsavedChangeCount={editor.unsavedChangeCount}
         onViewUnsavedChanges={() => { setIsChangesOverlayOpen(true); }}
         onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
-        savedRules={editor.savedRules}
+        savedRules={editor.rules}
         className="h-full"
       />
     );
@@ -644,7 +682,7 @@ export default function MappingEditor() {
       getDraftExpression={editor.actions.getDraftExpression}
       onNavigateToRule={(ruleIndex) => {
         const rule = editor.rules[ruleIndex];
-        if (rule) setSelectedTargetPath(rule.target);
+        if (rule) setSelectedTargetPath(resolveSelectedTargetPath(rule.target));
       }}
     />
   );
@@ -719,7 +757,7 @@ export default function MappingEditor() {
         <UnsavedChangesOverlay
           changes={editor.actions.getUnsavedChangeSummary()}
           onRevert={(targetPath) => { editor.actions.revertDraft(targetPath); }}
-          onNavigate={(targetPath) => { setSelectedTargetPath(targetPath); }}
+          onNavigate={(targetPath) => { setSelectedTargetPath(resolveSelectedTargetPath(targetPath)); }}
           onClose={() => { setIsChangesOverlayOpen(false); }}
         />
       )}

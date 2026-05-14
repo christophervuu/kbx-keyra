@@ -1,21 +1,37 @@
 /**
- * ArrayBuilder.tsx — FS-043 T-04 / T-10
+ * ArrayBuilder.tsx — FS-043 T-04 / T-10 / FS-051 T-01
  *
  * New right-panel component for array-type target fields.
  * Replaces ArrayMappingBuilder.tsx with the chain-aligned two-layer builder.
  *
+ * FS-051 T-01 additions:
+ *   - Builder/Editor mode toggle in header (matching ScalarFieldBuilder pattern)
+ *   - Overflow menu (⋮) in header with "Remove mapping" action
+ *   - Editor mode renders RawDslEditor with parse status + error list
+ *   - Builder→Editor: generates current expression into RawDslEditor
+ *   - Editor→Builder: attempts decomposeArrayExpression(); failure shows warning banner
+ *   - Unrecognized saved expression defaults to Editor mode with amber banner
+ *   - Custom Expression mode card removed from ArrayModeSelector (see ArrayModeSelector.tsx)
+ *
  * Layout (outer builder):
  *   ┌─────────────────────────────────────────────┐
- *   │ Header: type badge · target path · status   │
+ *   │ Header: status · badge · path · toggle · ⋮  │
+ *   │         Required + completion status         │
  *   ├─────────────────────────────────────────────┤
  *   │ BuilderFeedbackArea (pinned)                 │
  *   ├─────────────────────────────────────────────┤
+ *   │ ValidationSummaryRow (pinned)                │
+ *   ├─────────────────────────────────────────────┤
  *   │ Scrollable content:                          │
- *   │   ArrayModeSelector                          │
- *   │   ─────────────────                          │
- *   │   Collection editor (mode-specific)          │
- *   │   ─────────────────                          │
- *   │   Item template layer                        │
+ *   │   [Builder mode]                             │
+ *   │     ArrayModeSelector                        │
+ *   │     ─────────────────                        │
+ *   │     Collection editor (mode-specific)        │
+ *   │     ─────────────────                        │
+ *   │     Item template layer                      │
+ *   │   [Editor mode]                              │
+ *   │     RawDslEditor + parse status + errors     │
+ *   │     Decomposition warning banner             │
  *   └─────────────────────────────────────────────┘
  *
  * Layout (nested panel — T-10):
@@ -43,30 +59,33 @@
  *   - Filter + Map editor (T-05)
  *   - Build from Values editor (T-05)
  *   - Merge Branches editor (T-06)
- *   - Custom Expression editor (T-12)
  *   - Item template layer (T-07)
  *   - Mode switching confirmation dialog (T-08)
  *   - Validation display (T-11)
  *   - Result preview (T-13)
  */
 
-import { useCallback, useContext, useMemo } from 'react';
-import { ArrowLeft, Layers, AlertCircle, AlertTriangle, CheckCircle2, Circle, XCircle } from 'lucide-react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, AlertTriangle, CheckCircle, CheckCircle2, Circle, History, Layers, MoreVertical, RotateCcw, Undo2, XCircle, ArrowLeft } from 'lucide-react';
 
 import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { ArrayModeSelector } from './ArrayModeSelector';
 import { MapCollectionEditor } from './MapCollectionEditor';
 import { FilterMapCollectionEditor } from './FilterMapCollectionEditor';
 import { BuildFromValuesEditor } from './BuildFromValuesEditor';
+import type { BuildFromValuesTargetField } from './BuildFromValuesEditor';
 import { MergeBranchesEditor } from './MergeBranchesEditor';
 import { ItemTemplateEditor } from './ItemTemplateEditor';
 import { ModeSwitchConfirmDialog } from './ModeSwitchConfirmDialog';
-import { CustomExpressionEditor } from './CustomExpressionEditor';
 import { ArrayResultPreview } from './ArrayResultPreview';
+import { RawDslEditor } from './RawDslEditor';
+import { ValidationSummaryRow } from './ValidationSummaryRow';
 import { useExpressionPreview } from '../hooks/use-expression-preview';
+import { useDslValidation } from '../hooks/use-dsl-validation';
+import { useDslAutocomplete } from '../hooks/use-dsl-autocomplete';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { TargetFieldStatus } from './TargetFieldRow';
 import { useArrayBuilderState } from '../hooks/use-array-builder-state';
-import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useBuilderValidation } from '../hooks/use-builder-validation';
 import { PreviewContext } from '../context/preview-context';
 import type {
@@ -75,8 +94,10 @@ import type {
   BuildFromValuesCollectionState,
   ItemFieldMapping,
   MergeBranchesCollectionState,
+  SplitStringCollectionState,
 } from '../lib/array-builder-state';
 import { generateArrayExpression } from '../lib/array-expression-generator';
+import { decomposeArrayExpression } from '../lib/array-decomposer';
 import type { ArrayValidationState } from '../lib/array-validation';
 
 import type { ParsedSchema, MappingRule, SchemaTreeNode } from '@/lib/types/domain';
@@ -120,6 +141,16 @@ export interface ArrayBuilderProps {
    */
   readonly savedRules?: readonly MappingRule[];
   /**
+   * Fires when the user clicks "Remove mapping" in the overflow menu.
+   * The parent removes the rule from the working session.
+   */
+  readonly onClearMapping?: (targetPath: string) => void;
+  /**
+   * Reverts the in-memory draft for this target path, restoring the last
+   * committed expression. Used by the Discard changes action.
+   */
+  readonly revertDraft?: (targetPath: string) => void;
+  /**
    * T-10: Current nesting depth. 0 = outer builder, 1 = one level nested.
    * Internal — set automatically when rendering nested panels.
    */
@@ -152,36 +183,315 @@ function MappingStatusIcon({ status }: { status: TargetFieldStatus }) {
   }
 }
 
-const COMPLETION_STATUS_LABELS: Record<string, string> = {
-  notStarted: 'Not started',
-  inProgress: 'In progress',
-  complete: 'Complete',
-  hasErrors: 'Has errors',
-};
+// ---------------------------------------------------------------------------
+// Sub-components — FS-051 T-01
+// ---------------------------------------------------------------------------
 
-const COMPLETION_STATUS_CLASSES: Record<string, string> = {
-  notStarted: 'text-slate-500',
-  inProgress: 'text-amber-400',
-  complete: 'text-green-400',
-  hasErrors: 'text-red-400',
-};
+/**
+ * Builder/Editor mode toggle — matches ScalarFieldBuilder's ModeToggle exactly.
+ */
+function ModeToggle({
+  mode,
+  onSwitch,
+}: {
+  mode: 'builder' | 'editor';
+  onSwitch: (m: 'builder' | 'editor') => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Expression mode"
+      className="inline-flex overflow-hidden rounded border border-slate-700"
+    >
+      {(['builder', 'editor'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          aria-pressed={mode === m}
+          data-testid={`mode-toggle-${m}`}
+          onClick={() => { onSwitch(m); }}
+          className={[
+            'px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
+            mode === m
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200',
+          ].join(' ')}
+        >
+          {m === 'builder' ? 'Builder' : 'Editor'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Header overflow menu (⋮) — matches ScalarFieldBuilder's HeaderOverflowMenu pattern.
+ * Contains "Remove mapping" action.
+ */
+function HeaderOverflowMenu({
+  targetPath,
+  onRemoveMapping,
+}: {
+  targetPath: string;
+  onRemoveMapping: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => { document.removeEventListener('mousedown', handleOutside); };
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('keydown', handleKey); };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        data-testid="header-overflow-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        onClick={() => { setOpen((prev) => !prev); }}
+        className="flex items-center justify-center rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+      >
+        <MoreVertical size={14} aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          data-testid="header-overflow-menu"
+          className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded border border-slate-700 bg-slate-900 py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="remove-mapping-btn"
+            aria-label={`Remove saved mapping for ${targetPath}`}
+            onClick={() => {
+              setOpen(false);
+              setConfirmingRemove(true);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-slate-800 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-red-500"
+          >
+            Remove mapping
+          </button>
+        </div>
+      )}
+
+      {/* Remove mapping confirmation dialog */}
+      {confirmingRemove && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="remove-mapping-dialog-title"
+          aria-describedby="remove-mapping-dialog-desc"
+          data-testid="remove-mapping-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        >
+          <div className="w-80 rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl">
+            <h2
+              id="remove-mapping-dialog-title"
+              className="mb-2 text-sm font-semibold text-slate-100"
+            >
+              Remove mapping
+            </h2>
+            <p
+              id="remove-mapping-dialog-desc"
+              className="mb-4 text-xs text-slate-400"
+            >
+              Remove mapping for <span className="font-mono text-slate-200">{targetPath}</span>? This will delete the saved rule.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                data-testid="remove-mapping-cancel"
+                onClick={() => { setConfirmingRemove(false); }}
+                className="rounded border border-slate-600 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="remove-mapping-confirm"
+                onClick={() => {
+                  setConfirmingRemove(false);
+                  onRemoveMapping();
+                }}
+                className="rounded border border-red-700 bg-red-900/40 px-3 py-1.5 text-xs text-red-300 transition-colors hover:border-red-600 hover:bg-red-900/60 hover:text-red-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Parse status badge for the editor mode surface.
+ */
+function ParseStatusBadge({
+  expression,
+  hasErrors,
+}: {
+  expression: string;
+  hasErrors: boolean;
+}) {
+  if (!expression.trim()) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-slate-500">
+        <span className="h-1.5 w-1.5 rounded-full bg-slate-600" aria-hidden="true" />
+        Empty
+      </span>
+    );
+  }
+  if (hasErrors) {
+    return (
+      <span
+        data-testid="parse-status-invalid"
+        className="inline-flex items-center gap-1 text-[10px] text-red-400"
+      >
+        <XCircle size={10} aria-hidden="true" />
+        Invalid expression
+      </span>
+    );
+  }
+  return (
+    <span
+      data-testid="parse-status-valid"
+      className="inline-flex items-center gap-1 text-[10px] text-green-400"
+    >
+      <CheckCircle size={10} aria-hidden="true" />
+      Valid expression
+    </span>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
+function SplitStringCollectionEditor({
+  collectionState,
+  parsedSourceSchema,
+  onCollectionStateChange,
+}: {
+  collectionState: SplitStringCollectionState;
+  parsedSourceSchema: ParsedSchema | null;
+  onCollectionStateChange: (next: SplitStringCollectionState) => void;
+}) {
+  const stringPaths = useMemo(() => {
+    if (!parsedSourceSchema) return [] as string[];
+    return flattenSchemaPaths(parsedSourceSchema)
+      .filter((entry) => entry.type === 'string')
+      .map((entry) => entry.path);
+  }, [parsedSourceSchema]);
+
+  return (
+    <div className="space-y-3" data-testid="split-string-collection-editor">
+      <div className="space-y-1">
+        <label className="text-xs font-semibold uppercase tracking-wide text-slate-400" htmlFor="split-string-source">
+          Source text field
+        </label>
+        <select
+          id="split-string-source"
+          value={collectionState.sourceStringPath}
+          onChange={(e) => {
+            onCollectionStateChange({ ...collectionState, sourceStringPath: e.target.value });
+          }}
+          className="w-full rounded border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          <option value="">Select a string field...</option>
+          {stringPaths.map((path) => (
+            <option key={path} value={path}>{path}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="space-y-1">
+          <span className="block text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Delimiter
+          </span>
+          <input
+            value={collectionState.delimiter}
+            onChange={(e) => {
+              onCollectionStateChange({ ...collectionState, delimiter: e.target.value });
+            }}
+            placeholder=","
+            className="w-full rounded border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+          />
+        </label>
+
+        <div className="space-y-2 rounded border border-slate-700 bg-slate-900/50 px-3 py-2">
+          <label className="flex items-center gap-2 text-xs text-slate-200">
+            <input
+              type="checkbox"
+              checked={collectionState.trimItems}
+              onChange={(e) => {
+                onCollectionStateChange({ ...collectionState, trimItems: e.target.checked });
+              }}
+              className="h-3.5 w-3.5 rounded border-slate-500 bg-slate-900 text-blue-500"
+            />
+            Trim each item
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-200">
+            <input
+              type="checkbox"
+              checked={collectionState.dropEmpty}
+              onChange={(e) => {
+                onCollectionStateChange({ ...collectionState, dropEmpty: e.target.checked });
+              }}
+              className="h-3.5 w-3.5 rounded border-slate-500 bg-slate-900 text-blue-500"
+            />
+            Drop empty items
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CollectionEditorSlot({
   mode,
   sourceArrayPath,
   filterPredicate,
+  splitStringState,
   buildFromValuesState,
   mergeBranchesState,
+  targetArrayNode,
+  validationState,
+  nestingDepth,
+  targetItemFields,
   rawExpression,
   isFromUnrecognized,
   canRestorePreviousDraft,
   parsedSourceSchema,
   onSourceArrayPathChange,
   onFilterPredicateChange,
+  onSplitStringStateChange,
   onBuildFromValuesStateChange,
   onMergeBranchesStateChange,
   onCustomExpressionChange,
@@ -191,14 +501,20 @@ function CollectionEditorSlot({
   mode: ArrayBuilderMode;
   sourceArrayPath: string;
   filterPredicate: import('../lib/array-builder-state').FilterPredicateState | null;
+  splitStringState: SplitStringCollectionState | null;
   buildFromValuesState: BuildFromValuesCollectionState | null;
   mergeBranchesState: MergeBranchesCollectionState | null;
+  targetArrayNode: SchemaTreeNode | null;
+  validationState: ArrayValidationState;
+  nestingDepth: number;
+  targetItemFields: readonly BuildFromValuesTargetField[];
   rawExpression: string;
   isFromUnrecognized: boolean;
   canRestorePreviousDraft: boolean;
   parsedSourceSchema: ParsedSchema | null;
   onSourceArrayPathChange: (path: string) => void;
   onFilterPredicateChange: (p: import('../lib/array-builder-state').FilterPredicateState) => void;
+  onSplitStringStateChange: (s: SplitStringCollectionState) => void;
   onBuildFromValuesStateChange: (s: BuildFromValuesCollectionState) => void;
   onMergeBranchesStateChange: (s: MergeBranchesCollectionState) => void;
   onCustomExpressionChange: (expr: string) => void;
@@ -230,8 +546,26 @@ function CollectionEditorSlot({
       return (
         <BuildFromValuesEditor
           collectionState={buildFromValuesState ?? { mode: 'buildFromValues', entries: [], nullFilteringEnabled: false }}
+          targetItemFields={targetItemFields}
           parsedSourceSchema={parsedSourceSchema}
           onCollectionStateChange={onBuildFromValuesStateChange}
+        />
+      );
+
+    case 'splitString':
+      return (
+        <SplitStringCollectionEditor
+          collectionState={
+            splitStringState ?? {
+              mode: 'splitString',
+              sourceStringPath: '',
+              delimiter: ',',
+              trimItems: true,
+              dropEmpty: false,
+            }
+          }
+          parsedSourceSchema={parsedSourceSchema}
+          onCollectionStateChange={onSplitStringStateChange}
         />
       );
 
@@ -245,62 +579,25 @@ function CollectionEditorSlot({
             }
           }
           parsedSourceSchema={parsedSourceSchema}
+          targetArrayNode={targetArrayNode}
+          validationState={validationState}
+          nestingDepth={nestingDepth}
           onCollectionStateChange={onMergeBranchesStateChange}
         />
       );
 
     case 'customExpression':
-      return (
-        <CustomExpressionEditor
-          value={rawExpression}
-          onChange={onCustomExpressionChange}
-          isFromUnrecognized={isFromUnrecognized}
-          canRestorePreviousDraft={canRestorePreviousDraft}
-          onResetToStructured={onResetToStructured}
-          onRestorePreviousDraft={onRestorePreviousDraft}
-          parsedSourceSchema={parsedSourceSchema}
-        />
-      );
+      // customExpression is now an internal backing store for editor mode.
+      // It is no longer rendered as a collection editor slot.
+      return null;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: ValidationSummaryRow (T-11)
 // ---------------------------------------------------------------------------
-
-function ValidationSummaryRow({ validation }: { validation: ArrayValidationState }) {
-  const { errorCount, warningCount, incompleteCount } = validation;
-
-  if (errorCount === 0 && warningCount === 0 && incompleteCount === 0) {
-    return null;
-  }
-
-  return (
-    <div
-      data-testid="array-validation-summary"
-      className="shrink-0 flex items-center gap-3 border-b border-slate-700 bg-slate-900/40 px-4 py-2"
-    >
-      {errorCount > 0 && (
-        <span className="inline-flex items-center gap-1 text-[10px] text-red-400">
-          <AlertCircle size={10} aria-hidden="true" />
-          {errorCount} error{errorCount !== 1 ? 's' : ''}
-        </span>
-      )}
-      {warningCount > 0 && (
-        <span className="inline-flex items-center gap-1 text-[10px] text-amber-400">
-          <AlertTriangle size={10} aria-hidden="true" />
-          {warningCount} warning{warningCount !== 1 ? 's' : ''}
-        </span>
-      )}
-      {incompleteCount > 0 && (
-        <span className="inline-flex items-center gap-1 text-[10px] text-slate-500">
-          <Circle size={10} aria-hidden="true" />
-          {incompleteCount} incomplete
-        </span>
-      )}
-    </div>
-  );
-}
+// ValidationSummaryRow — extracted to ValidationSummaryRow.tsx (FS-051 T-04)
+// ---------------------------------------------------------------------------
+// Imported above; used below as <ValidationSummaryRow ... />
 
 // ---------------------------------------------------------------------------
 // Sub-component: NestedArrayPanel (T-10)
@@ -314,6 +611,7 @@ function NestedArrayPanel({
   outerTargetPath,
   nestedTargetPath,
   nestedState,
+  parentSourceArrayPath,
   parsedSourceSchema,
   parsedTargetSchema,
   nestingDepth,
@@ -324,6 +622,7 @@ function NestedArrayPanel({
   outerTargetPath: string;
   nestedTargetPath: string;
   nestedState: ArrayBuilderState;
+  parentSourceArrayPath: string;
   parsedSourceSchema: ParsedSchema | null;
   parsedTargetSchema: ParsedSchema | null;
   nestingDepth: number;
@@ -372,9 +671,9 @@ function NestedArrayPanel({
           ? { mode: 'filterMap' as const, sourceArrayPath: '', filterPredicate: { kind: 'structured' as const, left: { kind: 'itemField' as const, fieldPath: '' }, operator: 'eq' as const, right: { kind: 'none' as const } } }
           : mode === 'buildFromValues'
             ? { mode: 'buildFromValues' as const, entries: [], nullFilteringEnabled: false }
-            : mode === 'mergeArrayBranches'
+              : mode === 'mergeArrayBranches'
               ? { mode: 'mergeArrayBranches' as const, branches: [] }
-              : { mode: 'customExpression' as const, rawExpression: '' };
+              : { mode: 'map' as const, sourceArrayPath: '' };
     onNestedStateChange({
       ...nestedState,
       mode,
@@ -384,9 +683,17 @@ function NestedArrayPanel({
 
   function handleNestedSourceArrayPathChange(path: string) {
     if (nestedState.collectionState.mode !== 'map' && nestedState.collectionState.mode !== 'filterMap') return;
+
+    let scopedPath = path;
+    // Nested collection paths that are children of the parent source array should
+    // be item-scoped (map(item("childArray"), ...)) rather than absolute source().
+    if (parentSourceArrayPath.trim() && path.startsWith(`${parentSourceArrayPath}.`)) {
+      scopedPath = `__item__:${path.slice(parentSourceArrayPath.length + 1)}`;
+    }
+
     onNestedStateChange({
       ...nestedState,
-      collectionState: { ...nestedState.collectionState, sourceArrayPath: path },
+      collectionState: { ...nestedState.collectionState, sourceArrayPath: scopedPath },
     });
   }
 
@@ -466,27 +773,6 @@ function NestedArrayPanel({
           />
         )}
 
-        {nestedState.mode === 'customExpression' && (
-          <CustomExpressionEditor
-            value={
-              nestedState.collectionState.mode === 'customExpression'
-                ? nestedState.collectionState.rawExpression
-                : ''
-            }
-            onChange={(expr) => {
-              if (nestedState.collectionState.mode !== 'customExpression') return;
-              onNestedStateChange({
-                ...nestedState,
-                collectionState: { ...nestedState.collectionState, rawExpression: expr },
-              });
-            }}
-            isFromUnrecognized={false}
-            canRestorePreviousDraft={false}
-            onResetToStructured={() => handleNestedModeChange('map')}
-            parsedSourceSchema={parsedSourceSchema}
-          />
-        )}
-
         {/* Nested item template */}
         {showNestedItemTemplate && (
           <>
@@ -496,6 +782,7 @@ function NestedArrayPanel({
               targetArrayNode={nestedTargetNode}
               parsedSourceSchema={parsedSourceSchema}
               sourceArrayPath={nestedSourceArrayPath}
+              parentSourceArrayPath={parentSourceArrayPath}
               nestingDepth={nestingDepth}
               nestedArrayStates={nestedState.itemTemplate.nestedArrays}
               onFieldMappingChange={onNestedFieldMappingChange}
@@ -522,6 +809,8 @@ export function ArrayBuilder({
   updateDraft,
   getDraftExpression,
   onExpressionChange,
+  onClearMapping,
+  revertDraft,
   nestingDepth = 0,
   className = '',
 }: ArrayBuilderProps) {
@@ -544,6 +833,7 @@ export function ArrayBuilder({
     expression,
     setSourceArrayPath,
     setFilterPredicate,
+    setSplitStringState,
     setBuildFromValuesState,
     setMergeBranchesState,
     setFieldMapping,
@@ -574,6 +864,88 @@ export function ArrayBuilder({
     targetArrayNode,
   });
 
+  // FS-051 T-01: Builder/Editor mode toggle
+  // Default to 'editor' when hydrated from an unrecognized expression.
+  const [builderEditorMode, setBuilderEditorMode] = useState<'builder' | 'editor'>(
+    () => (isFromUnrecognized ? 'editor' : 'builder'),
+  );
+  const [hasSelectedCollectionMode, setHasSelectedCollectionMode] = useState(
+    () => (getDraftExpression(selectedTargetPath) ?? currentExpression).trim().length > 0,
+  );
+
+  useEffect(() => {
+    const hydratedExpression = getDraftExpression(selectedTargetPath) ?? currentExpression;
+    setHasSelectedCollectionMode(hydratedExpression.trim().length > 0);
+  }, [getDraftExpression, selectedTargetPath, currentExpression]);
+
+  // Editor-mode DSL validation (separate from builder expression validation)
+  // Raw expression backing editor mode. Declared before editorRawExpression
+  // to avoid TDZ access during render.
+  const rawExpression =
+    state.collectionState.mode === 'customExpression'
+      ? state.collectionState.rawExpression
+      : '';
+
+  const editorRawExpression =
+    state.collectionState.mode === 'customExpression'
+      ? state.collectionState.rawExpression
+      : rawExpression;
+
+  const {
+    diagnostics: editorDiagnostics,
+    isValid: editorIsValid,
+    errorDecorations: editorErrorDecorations,
+  } = useDslValidation(editorRawExpression);
+  const editorHasErrors = !editorIsValid && editorDiagnostics.length > 0;
+
+  // Editor-mode autocomplete
+  const [editorCursorPosition, setEditorCursorPosition] = useState(0);
+  const editorAutocomplete = useDslAutocomplete({
+    expression: editorRawExpression,
+    cursorPosition: editorCursorPosition,
+    parsedSourceSchema,
+  });
+
+  // Decomposition warning: set when Editor→Builder switch fails
+  const [decompositionWarning, setDecompositionWarning] = useState<string | null>(null);
+
+  // Builder→Editor: generate current expression into editor, switch mode
+  const handleSwitchToEditor = useCallback(() => {
+    // expression is already up-to-date from the builder state
+    switchMode('customExpression');
+    setBuilderEditorMode('editor');
+    setDecompositionWarning(null);
+  }, [switchMode]);
+
+  // Editor→Builder: attempt decomposition; on failure stay in editor with warning
+  const handleSwitchToBuilder = useCallback(() => {
+    const result = decomposeArrayExpression(editorRawExpression);
+    if (!result.success) {
+      setDecompositionWarning(
+        result.reason ?? 'Expression could not be decomposed into builder mode.',
+      );
+      return;
+    }
+    // Hydrate builder state from decomposed result and switch
+    switchMode(result.state.mode);
+    setHasSelectedCollectionMode(true);
+    setBuilderEditorMode('builder');
+    setDecompositionWarning(null);
+  }, [editorRawExpression, switchMode]);
+
+  const handleCollectionModeSelect = useCallback((mode: ArrayBuilderMode) => {
+    setHasSelectedCollectionMode(true);
+    switchMode(mode);
+  }, [switchMode]);
+
+  const handleModeToggle = useCallback(
+    (m: 'builder' | 'editor') => {
+      if (m === 'editor') handleSwitchToEditor();
+      else handleSwitchToBuilder();
+    },
+    [handleSwitchToEditor, handleSwitchToBuilder],
+  );
+
   const { parseResult, isValid: isParseValid } = useDslValidation(expression);
 
   const previewCtx = useContext(PreviewContext);
@@ -598,7 +970,16 @@ export function ArrayBuilder({
   const sourceArrayPath =
     state.collectionState.mode === 'map' || state.collectionState.mode === 'filterMap'
       ? state.collectionState.sourceArrayPath
+      : state.collectionState.mode === 'splitString'
+        ? state.collectionState.sourceStringPath
       : '';
+
+  const normalizedSourceArrayPath =
+    sourceArrayPath.startsWith('__item__:')
+      ? sourceArrayPath.slice('__item__:'.length)
+      : sourceArrayPath.startsWith('__source__:')
+        ? sourceArrayPath.slice('__source__:'.length)
+        : sourceArrayPath;
 
   const filterPredicate =
     state.collectionState.mode === 'filterMap'
@@ -610,16 +991,15 @@ export function ArrayBuilder({
       ? state.collectionState
       : null;
 
+  const splitStringState =
+    state.collectionState.mode === 'splitString'
+      ? state.collectionState
+      : null;
+
   const mergeBranchesState =
     state.collectionState.mode === 'mergeArrayBranches'
       ? state.collectionState
       : null;
-
-  // T-12: raw expression for custom expression mode
-  const rawExpression =
-    state.collectionState.mode === 'customExpression'
-      ? state.collectionState.rawExpression
-      : '';
 
   // T-12: "Reset to structured mode" — switch to map (mode selector will be shown)
   const handleResetToStructured = useCallback(() => {
@@ -629,11 +1009,57 @@ export function ArrayBuilder({
   // Item template is shown for map, filterMap, and mergeArrayBranches modes
   const showItemTemplate =
     state.mode === 'map' ||
-    state.mode === 'filterMap' ||
-    state.mode === 'mergeArrayBranches';
+    state.mode === 'filterMap';
 
-  const completionLabel = COMPLETION_STATUS_LABELS[state.completionStatus] ?? state.completionStatus;
-  const completionClass = COMPLETION_STATUS_CLASSES[state.completionStatus] ?? 'text-slate-500';
+  const buildFromValuesTargetItemFields = useMemo(() => {
+    if (!targetArrayNode) return [] as BuildFromValuesTargetField[];
+    return targetArrayNode.children
+      .filter((child) => child.fieldName.trim().length > 0)
+      .map((child) => ({
+        name: child.fieldName,
+        type: child.type,
+        isRequired: child.isRequired,
+      }));
+  }, [targetArrayNode]);
+
+  // FS-051 T-05: Action row — Reset draft + Discard changes
+  const isDirty = getDraftExpression(selectedTargetPath) !== null;
+  const canResetDraft = expression.trim().length > 0;
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  const handleResetDraftRequest = useCallback(() => {
+    // For arrays, any non-empty expression requires confirmation
+    if (!canResetDraft) return;
+    if (expression.trim() === '') {
+      // Already empty — nothing to do
+      return;
+    }
+    setConfirmingReset(true);
+  }, [canResetDraft, expression]);
+
+  const handleResetDraftConfirm = useCallback(() => {
+    setConfirmingReset(false);
+    switchMode('map');
+    setHasSelectedCollectionMode(false);
+    setBuilderEditorMode('builder');
+    setDecompositionWarning(null);
+    // Clear the draft by writing an empty expression
+    updateDraft(selectedTargetPath, '');
+  }, [switchMode, updateDraft, selectedTargetPath]);
+
+  const handleResetDraftCancel = useCallback(() => {
+    setConfirmingReset(false);
+  }, []);
+
+  const handleDiscard = useCallback(() => {
+    revertDraft?.(selectedTargetPath);
+    // Re-hydrate from the saved (committed) expression
+    const savedExpression = currentExpression ?? '';
+    setHasSelectedCollectionMode(savedExpression.trim().length > 0);
+    switchMode('map');
+    setBuilderEditorMode(isFromUnrecognized ? 'editor' : 'builder');
+    setDecompositionWarning(null);
+  }, [revertDraft, selectedTargetPath, currentExpression, switchMode, isFromUnrecognized]);
 
   // ---------------------------------------------------------------------------
   // T-10: Nested panel — replaces outer content when active
@@ -649,6 +1075,7 @@ export function ArrayBuilder({
           outerTargetPath={selectedTargetPath}
           nestedTargetPath={activeNestedPath}
           nestedState={activeNestedState}
+          parentSourceArrayPath={normalizedSourceArrayPath}
           parsedSourceSchema={parsedSourceSchema}
           parsedTargetSchema={parsedTargetSchema}
           nestingDepth={nestingDepth + 1}
@@ -691,6 +1118,17 @@ export function ArrayBuilder({
           >
             {selectedTargetPath}
           </span>
+
+          {/* FS-051 T-01: Builder/Editor mode toggle */}
+          <ModeToggle mode={builderEditorMode} onSwitch={handleModeToggle} />
+
+          {/* FS-051 T-01: Overflow menu */}
+          {onClearMapping !== undefined && (
+            <HeaderOverflowMenu
+              targetPath={selectedTargetPath}
+              onRemoveMapping={() => { onClearMapping(selectedTargetPath); }}
+            />
+          )}
         </div>
 
         <div className="mt-1 flex items-center gap-3">
@@ -703,14 +1141,6 @@ export function ArrayBuilder({
               Required
             </span>
           )}
-
-          {/* Completion status */}
-          <span
-            className={`text-xs ${completionClass}`}
-            data-testid="header-completion-status"
-          >
-            {completionLabel}
-          </span>
         </div>
       </div>
 
@@ -739,60 +1169,249 @@ export function ArrayBuilder({
       />
 
       {/* T-11: Validation summary row */}
-      <ValidationSummaryRow validation={validationState} />
+      <ValidationSummaryRow
+        errorCount={validationState.errorCount}
+        warningCount={validationState.warningCount}
+        incompleteCount={validationState.incompleteCount}
+        testId="array-validation-summary"
+      />
 
       {/* ------------------------------------------------------------------ */}
       {/* Scrollable content                                                  */}
       {/* ------------------------------------------------------------------ */}
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {/* Mode selector — uses switchMode for subsequent changes (with preservation logic) */}
-        <ArrayModeSelector
-          selectedMode={state.mode}
-          onSelectMode={switchMode}
-        />
+        {builderEditorMode === 'editor' ? (
+          /* ---------------------------------------------------------------- */
+          /* Editor mode — FS-051 T-01                                        */
+          /* ---------------------------------------------------------------- */
+          <div className="space-y-3" data-testid="array-builder-editor-mode">
+            {/* Unrecognized expression amber banner */}
+            {isFromUnrecognized && (
+              <div
+                data-testid="unrecognized-expression-banner"
+                className="flex items-start gap-2 rounded border border-amber-700/60 bg-amber-900/20 px-3 py-2.5"
+                role="alert"
+              >
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
+                <p className="text-[11px] leading-snug text-amber-300">
+                  This expression was saved in a format the builder can't decompose. You can edit it
+                  directly here, or switch to Builder mode to start fresh.
+                </p>
+              </div>
+            )}
 
-        {/* Divider */}
-        <div className="h-px bg-slate-700/60" />
+            {/* Decomposition failure warning */}
+            {decompositionWarning !== null && (
+              <div
+                data-testid="decomposition-warning-banner"
+                className="flex items-start gap-2 rounded border border-amber-700/60 bg-amber-900/20 px-3 py-2.5"
+                role="alert"
+              >
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
+                <p className="text-[11px] leading-snug text-amber-300">
+                  {decompositionWarning} Switch to Builder mode will reset the expression.
+                </p>
+              </div>
+            )}
 
-        {/* Collection editor — mode-specific */}
-        <CollectionEditorSlot
-          mode={state.mode}
-          sourceArrayPath={sourceArrayPath}
-          filterPredicate={filterPredicate}
-          buildFromValuesState={buildFromValuesState}
-          mergeBranchesState={mergeBranchesState}
-          rawExpression={rawExpression}
-          isFromUnrecognized={isFromUnrecognized}
-          canRestorePreviousDraft={canRestorePreviousDraft}
-          parsedSourceSchema={parsedSourceSchema}
-          onSourceArrayPathChange={setSourceArrayPath}
-          onFilterPredicateChange={setFilterPredicate}
-          onBuildFromValuesStateChange={setBuildFromValuesState}
-          onMergeBranchesStateChange={setMergeBranchesState}
-          onCustomExpressionChange={setCustomExpression}
-          onResetToStructured={handleResetToStructured}
-          onRestorePreviousDraft={canRestorePreviousDraft ? restorePreviousDraft : undefined}
-        />
+            {/* Parse status + editor */}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                DSL Expression
+              </span>
+              <ParseStatusBadge
+                expression={editorRawExpression}
+                hasErrors={editorHasErrors}
+              />
+            </div>
 
-        {/* Item template layer — shown for map, filterMap, mergeArrayBranches */}
-        {showItemTemplate && (
-          <>
-            <div className="h-px bg-slate-700/60" />
-            <ItemTemplateEditor
-              itemTemplate={state.itemTemplate}
-              targetArrayNode={targetArrayNode}
-              parsedSourceSchema={parsedSourceSchema}
-              sourceArrayPath={sourceArrayPath}
-              nestingDepth={nestingDepth}
-              nestedArrayStates={state.itemTemplate.nestedArrays}
-              validationState={validationState}
-              onFieldMappingChange={(fieldPath: string, mapping: ItemFieldMapping) => {
-                setFieldMapping(fieldPath, mapping);
+            <div data-testid="array-raw-dsl-editor">
+              <RawDslEditor
+                value={editorRawExpression}
+                onChange={setCustomExpression}
+                onCursorChange={setEditorCursorPosition}
+                autocomplete={editorAutocomplete}
+                errorDecorations={editorErrorDecorations}
+              />
+            </div>
+
+            {/* Error list */}
+            {editorHasErrors && editorDiagnostics.length > 0 && (
+              <ul
+                data-testid="editor-error-list"
+                className="space-y-1"
+                aria-label="Expression errors"
+              >
+                {editorDiagnostics.map((err, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-1.5 text-[11px] text-red-400"
+                  >
+                    <AlertCircle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    {err.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* Restore previous draft action */}
+            {canRestorePreviousDraft && (
+              <button
+                type="button"
+                data-testid="restore-previous-draft-btn"
+                onClick={restorePreviousDraft}
+                className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              >
+                <History size={11} aria-hidden="true" />
+                Restore previous draft
+              </button>
+            )}
+
+            {/* Reset to builder action */}
+            <button
+              type="button"
+              data-testid="reset-to-builder-btn"
+              onClick={() => {
+                switchMode('map');
+                setHasSelectedCollectionMode(false);
+                setBuilderEditorMode('builder');
+                setDecompositionWarning(null);
               }}
-              onEnterNestedArray={enterNestedArray}
+              className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              <RotateCcw size={11} aria-hidden="true" />
+              Reset to builder mode
+            </button>
+          </div>
+        ) : (
+          /* ---------------------------------------------------------------- */
+          /* Builder mode                                                      */
+          /* ---------------------------------------------------------------- */
+          <>
+            {/* Mode selector — uses switchMode for subsequent changes (with preservation logic) */}
+            <ArrayModeSelector
+              selectedMode={hasSelectedCollectionMode && state.mode !== 'customExpression' ? state.mode : null}
+              onSelectMode={handleCollectionModeSelect}
             />
+
+            {hasSelectedCollectionMode && (
+              <>
+                {/* Divider */}
+                <div className="h-px bg-slate-700/60" />
+
+                {/* Collection editor — mode-specific */}
+                <CollectionEditorSlot
+                  mode={state.mode}
+                  sourceArrayPath={sourceArrayPath}
+                  filterPredicate={filterPredicate}
+                  splitStringState={splitStringState}
+                  buildFromValuesState={buildFromValuesState}
+                  mergeBranchesState={mergeBranchesState}
+                  targetArrayNode={targetArrayNode}
+                  validationState={validationState}
+                  nestingDepth={nestingDepth}
+                  targetItemFields={buildFromValuesTargetItemFields}
+                  rawExpression={rawExpression}
+                  isFromUnrecognized={isFromUnrecognized}
+                  canRestorePreviousDraft={canRestorePreviousDraft}
+                  parsedSourceSchema={parsedSourceSchema}
+                  onSourceArrayPathChange={setSourceArrayPath}
+                  onFilterPredicateChange={setFilterPredicate}
+                  onSplitStringStateChange={setSplitStringState}
+                  onBuildFromValuesStateChange={setBuildFromValuesState}
+                  onMergeBranchesStateChange={setMergeBranchesState}
+                  onCustomExpressionChange={setCustomExpression}
+                  onResetToStructured={handleResetToStructured}
+                  onRestorePreviousDraft={canRestorePreviousDraft ? restorePreviousDraft : undefined}
+                />
+
+                {/* Item template layer — shown for map, filterMap, mergeArrayBranches */}
+                {showItemTemplate && (
+                  <>
+                    <div className="h-px bg-slate-700/60" />
+                    <ItemTemplateEditor
+                      itemTemplate={state.itemTemplate}
+                      targetArrayNode={targetArrayNode}
+                      parsedSourceSchema={parsedSourceSchema}
+                      sourceArrayPath={sourceArrayPath}
+                      nestingDepth={nestingDepth}
+                      nestedArrayStates={state.itemTemplate.nestedArrays}
+                      validationState={validationState}
+                      onFieldMappingChange={(fieldPath: string, mapping: ItemFieldMapping) => {
+                        setFieldMapping(fieldPath, mapping);
+                      }}
+                      onEnterNestedArray={enterNestedArray}
+                    />
+                  </>
+                )}
+              </>
+            )}
           </>
         )}
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* FS-051 T-05: Action row — Reset draft + Discard changes             */}
+      {/* No AI buttons — intentionally omitted until array-level AI exists   */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="shrink-0 border-t border-slate-700 px-4 py-2" data-testid="array-builder-action-row">
+        {/* Reset draft confirmation prompt — inline, shown above action buttons */}
+        {confirmingReset && (
+          <div
+            data-testid="array-reset-draft-confirm-prompt"
+            className="mb-2 flex items-center gap-2 rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs"
+          >
+            <span className="flex-1 text-amber-300">Reset draft? Your current expression will be cleared.</span>
+            <button
+              type="button"
+              data-testid="array-reset-draft-confirm"
+              onClick={handleResetDraftConfirm}
+              className="rounded border border-amber-600 px-2 py-1 text-amber-300 transition-colors hover:border-amber-500 hover:text-amber-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              data-testid="array-reset-draft-cancel"
+              onClick={handleResetDraftCancel}
+              className="rounded border border-slate-600 px-2 py-1 text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          {/* Reset draft */}
+          <button
+            type="button"
+            data-testid="array-reset-draft-btn"
+            onClick={handleResetDraftRequest}
+            disabled={!canResetDraft}
+            aria-label="Reset current draft expression"
+            className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RotateCcw size={12} aria-hidden="true" />
+            Reset draft
+          </button>
+
+          {/* Spacer */}
+          <span className="flex-1" />
+
+          {/* Discard changes — visible when field has an unsaved draft */}
+          {isDirty && (
+            <button
+              type="button"
+              data-testid="array-discard-btn"
+              onClick={handleDiscard}
+              aria-label={`Discard changes for ${selectedTargetPath}`}
+              className="flex items-center gap-1.5 rounded border border-slate-600 px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:border-amber-500/60 hover:text-amber-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500"
+            >
+              <Undo2 size={12} aria-hidden="true" />
+              Discard changes
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Mode switch confirmation dialog */}

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -51,6 +51,80 @@ describe('ArgumentForm — rendering', () => {
   it('renders the argument-form container with function name testid', () => {
     renderForm('upper', [makeSourceSlot('')]);
     expect(screen.getByTestId('argument-form-upper')).toBeInTheDocument();
+  });
+
+  it('can hide the function header when embedded in another function card', () => {
+    render(
+      <ArgumentForm
+        functionName="upper"
+        slots={[makeSourceSlot('')]} 
+        onSlotsChange={vi.fn()}
+        hideFunctionHeader
+      />,
+    );
+
+    expect(screen.queryByTestId('argument-form-function-name')).not.toBeInTheDocument();
+  });
+});
+
+describe('ArgumentForm — filter/find condition editor', () => {
+  it('renders condition editor for filter second parameter without slot mode toggle', () => {
+    renderForm('filter', [makeSourceSlot('lineItemApprovals'), makeSourceSlot('')]);
+
+    expect(screen.getByTestId('argument-slot-input-1-condition-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('condition-row-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('argument-slot-input-1-mode-toggle')).not.toBeInTheDocument();
+  });
+
+  it('normalizes condition field selection to item-relative path for root array sources', async () => {
+    const user = userEvent.setup();
+    const onSlotsChange = vi.fn();
+
+    render(
+      <ArgumentForm
+        functionName="filter"
+        slots={[makeSourceSlot('Shipment.Trackings'), makeSourceSlot('')]}
+        onSlotsChange={onSlotsChange}
+        sourceOptions={[
+          { path: 'Shipment.Trackings.TrackingType', type: 'string' },
+          { path: 'Shipment.Trackings.TrackingNumber', type: 'string' },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByTestId('condition-left-1-field-input'));
+    await user.click(screen.getByTestId('condition-left-1-suggestion-TrackingType'));
+
+    const emitted = onSlotsChange.mock.calls[onSlotsChange.mock.calls.length - 1][0] as ArgumentSlot[];
+    expect(emitted[1]).toEqual(
+      makeExpressionSlot({
+        functionName: 'item',
+        slots: [makeLiteralSlot('TrackingType')],
+      }),
+    );
+  });
+
+  it('normalizes manually-entered absolute condition field path to item-relative path', async () => {
+    const onSlotsChange = vi.fn();
+
+    render(
+      <ArgumentForm
+        functionName="find"
+        slots={[makeSourceSlot('Shipment.Trackings'), makeSourceSlot('')]}
+        onSlotsChange={onSlotsChange}
+      />,
+    );
+
+    const fieldInput = screen.getByTestId('condition-left-1-field-input');
+    fireEvent.change(fieldInput, { target: { value: 'Shipment.Trackings.TrackingType' } });
+
+    const emitted = onSlotsChange.mock.calls[onSlotsChange.mock.calls.length - 1][0] as ArgumentSlot[];
+    expect(emitted[1]).toEqual(
+      makeExpressionSlot({
+        functionName: 'item',
+        slots: [makeLiteralSlot('TrackingType')],
+      }),
+    );
   });
 });
 
@@ -771,19 +845,21 @@ describe('ArgumentSlotInput — AE-07: nested transform', () => {
 
     expect(latestSlot).toEqual(
       makeSourceSlotWithTransform('mappings', {
-        functionName: 'filter',
-        args: [
-          makeExpressionSlot({
-            functionName: 'eq',
-            slots: [
-              makeExpressionSlot({
-                functionName: 'item',
-                slots: [makeLiteralSlot('enabled')],
-              }),
-              makeLiteralSlot('true'),
-            ],
-          }),
-        ],
+        steps: [{
+          functionName: 'filter',
+          args: [
+            makeExpressionSlot({
+              functionName: 'eq',
+              slots: [
+                makeExpressionSlot({
+                  functionName: 'item',
+                  slots: [makeLiteralSlot('enabled')],
+                }),
+                makeLiteralSlot('true'),
+              ],
+            }),
+          ],
+        }],
       }),
     );
   });

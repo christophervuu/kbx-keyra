@@ -42,6 +42,7 @@ import type {
   type FS039TransformStep,
   type FS039ValueMapEntry,
 } from './chain-builder-state';
+import type { ArgumentFormNode, InlineTransform } from './expression-builder-state';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -94,12 +95,32 @@ function literalToDsl(value: string): string {
 /**
  * Generates DSL for a single ArgumentSlotRef (additional arg beyond implicit first).
  */
+function generateArgumentFormNode(node: ArgumentFormNode): string {
+  const argStrings = node.slots.map(generateArgSlot).filter(Boolean);
+  return `${node.functionName}(${argStrings.join(', ')})`;
+}
+
+function generateInlineTransform(sourcePath: string, transform: InlineTransform): string {
+  let expression = `source(${quoteString(sourcePath)})`;
+  for (const step of transform.steps) {
+    const extraArgs = step.args.map(generateArgSlot).filter(Boolean);
+    expression = `${step.functionName}(${[expression, ...extraArgs].join(', ')})`;
+  }
+  return expression;
+}
+
 function generateArgSlot(slot: ArgumentSlotRef): string {
   switch (slot.mode) {
     case 'source':
-      return slot.path ? `source(${quoteString(slot.path)})` : '';
+      if (!slot.path) return '';
+      if (slot.transform !== undefined) {
+        return generateInlineTransform(slot.path, slot.transform);
+      }
+      return `source(${quoteString(slot.path)})`;
     case 'literal':
       return literalToDsl(slot.value);
+    case 'expression':
+      return generateArgumentFormNode(slot.node);
   }
 }
 

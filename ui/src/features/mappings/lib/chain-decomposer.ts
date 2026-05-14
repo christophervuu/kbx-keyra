@@ -51,6 +51,7 @@ import {
   createEmptyChainState,
 } from './chain-builder-state';
 import { CHAINABLE_TRANSFORMS } from './transform-chain-utils';
+import type { ArgumentFormNode } from './expression-builder-state';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -193,9 +194,23 @@ function tryWalkTransformChain(
   return null;
 }
 
+function nodeToArgumentFormNode(node: AstNode): ArgumentFormNode | null {
+  if (node.type !== 'FunctionCall') return null;
+  const slots: ArgumentSlotRef[] = [];
+  for (const arg of node.arguments) {
+    const slot = nodeToArgumentSlotRef(arg);
+    if (slot === null) return null;
+    slots.push(slot);
+  }
+  return {
+    functionName: node.name,
+    slots,
+  };
+}
+
 /**
  * Converts an AST node to an ArgumentSlotRef (for transform step additional args).
- * Only handles source("path") and literals — not nested function calls.
+ * Handles source("path"), literals, and nested function calls.
  */
 function nodeToArgumentSlotRef(node: AstNode): ArgumentSlotRef | null {
   if (isSourceCall(node)) {
@@ -205,7 +220,10 @@ function nodeToArgumentSlotRef(node: AstNode): ArgumentSlotRef | null {
   if (literal !== null) {
     return { mode: 'literal', value: literal };
   }
-  // Nested function calls in additional args are not supported in the chain model
+  const nested = nodeToArgumentFormNode(node);
+  if (nested !== null) {
+    return { mode: 'expression', node: nested };
+  }
   return null;
 }
 

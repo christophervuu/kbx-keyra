@@ -211,6 +211,18 @@ export function useTargetStatus(
       const leafPaths = getLeafDescendants(node);
       if (leafPaths.length === 0) continue;
 
+      // Array rules map an item template through the array target path itself.
+      // Mirror that mapping onto descendant leaves so worklist status/coverage
+      // reflects mapped array item fields even without direct per-leaf rules.
+      if (node.type === 'array' && mappedPaths.has(node.path) && !diagMap.has(node.path)) {
+        for (const leafPath of leafPaths) {
+          const leafStatus = statusMap.get(leafPath) ?? 'unmapped';
+          if (leafStatus === 'unmapped') {
+            statusMap.set(leafPath, 'mapped');
+          }
+        }
+      }
+
       let hasError = false;
       let hasWarning = false;
       let mappedCount = 0;

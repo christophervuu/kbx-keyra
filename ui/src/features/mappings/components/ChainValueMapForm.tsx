@@ -303,7 +303,7 @@ export function ChainValueMapForm({
     return (
       <div
         className={[
-          'rounded-lg border border-zinc-700 bg-zinc-800/60 overflow-hidden',
+          'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
           className ?? '',
         ]
           .filter(Boolean)
@@ -313,14 +313,14 @@ export function ChainValueMapForm({
         <button
           type="button"
           onClick={() => { setCollapsed(false); }}
-          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-700/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-800/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
           aria-label="Expand value map step"
           data-testid={`chain-value-map-summary-${stepIndex}`}
         >
-          <span className="text-[11px] font-mono text-zinc-400 flex-1 truncate">
+          <span className="flex-1 truncate font-mono text-[11px] text-slate-400">
             {summarizeValueMapStep(step)}
           </span>
-          <ChevronDown className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
         </button>
       </div>
     );
@@ -333,7 +333,7 @@ export function ChainValueMapForm({
   return (
     <div
       className={[
-        'rounded-lg border border-zinc-700 bg-zinc-800/60 overflow-hidden',
+        'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
         className ?? '',
       ]
         .filter(Boolean)
@@ -341,9 +341,9 @@ export function ChainValueMapForm({
       data-testid={`chain-value-map-form-${stepIndex}`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700 bg-zinc-800">
+      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-3 py-2">
         <div>
-          <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Value Map
           </span>
           <p
@@ -358,7 +358,7 @@ export function ChainValueMapForm({
             type="button"
             onClick={() => { setCollapsed(true); }}
             aria-label="Collapse value map step"
-            className="text-zinc-500 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded p-0.5 transition-colors"
+            className="rounded p-0.5 text-slate-500 transition-colors hover:text-slate-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
             data-testid={`chain-value-map-collapse-${stepIndex}`}
           >
             <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
@@ -367,7 +367,7 @@ export function ChainValueMapForm({
             type="button"
             onClick={handleRemove}
             aria-label="Remove value map step"
-            className="text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors"
+            className="rounded p-0.5 text-slate-500 transition-colors hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
             data-testid={`chain-value-map-remove-${stepIndex}`}
           >
             <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -378,9 +378,9 @@ export function ChainValueMapForm({
       <div className="p-3 space-y-2">
         {/* Column headers */}
         <div className="flex items-center gap-2 px-1">
-          <span className="text-[11px] text-zinc-500 flex-1">When equals</span>
-          <span className="text-[11px] text-zinc-500 w-4" aria-hidden="true">→</span>
-          <span className="text-[11px] text-zinc-500 flex-1">Output</span>
+          <span className="flex-1 text-[11px] text-slate-500">When equals</span>
+          <span className="w-4 text-[11px] text-slate-500" aria-hidden="true">→</span>
+          <span className="flex-1 text-[11px] text-slate-500">Output</span>
           <span className="w-5" aria-hidden="true" />
         </div>
 
@@ -407,7 +407,7 @@ export function ChainValueMapForm({
               />
 
               {/* Arrow */}
-              <span className="text-zinc-500 text-xs shrink-0" aria-hidden="true">→</span>
+              <span className="shrink-0 text-xs text-slate-500" aria-hidden="true">→</span>
 
               {/* Output value */}
               <OutputValueEditor
@@ -443,11 +443,11 @@ export function ChainValueMapForm({
 
         {/* Default row */}
         <div
-          className="border-t border-zinc-700/50 pt-2 space-y-1"
+          className="space-y-1 border-t border-slate-700/50 pt-2"
           data-testid={`chain-value-map-default-${stepIndex}`}
         >
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-zinc-400 shrink-0">Default →</span>
+            <span className="shrink-0 text-xs font-semibold text-slate-400">Default →</span>
             <OutputValueEditor
               branch={step.defaultValue}
               onChange={(b) => { update({ defaultValue: b }); }}
@@ -469,7 +469,7 @@ export function ChainValueMapForm({
         {/* Apply disabled notice */}
         {applyDisabled && (
           <p
-            className="text-[11px] text-zinc-500 italic"
+            className="text-[11px] italic text-slate-500"
             data-testid={`chain-value-map-apply-disabled-${stepIndex}`}
           >
             Set a default value to apply.

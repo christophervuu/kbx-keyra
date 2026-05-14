@@ -27,6 +27,7 @@ import {
   isMapCollectionState,
   isFilterMapCollectionState,
   isBuildFromValuesCollectionState,
+  isSplitStringCollectionState,
   isMergeBranchesCollectionState,
   isCustomExpressionCollectionState,
   isStructuredFilterPredicate,
@@ -97,6 +98,11 @@ describe('deriveCompletionStatus', () => {
       expect(state.completionStatus).toBe('notStarted');
     });
 
+    it('returns notStarted for splitString mode with empty source path', () => {
+      const state = createEmptyArrayBuilderState('splitString');
+      expect(state.completionStatus).toBe('notStarted');
+    });
+
     it('returns notStarted for mergeArrayBranches mode with fewer than 2 branches', () => {
       const state = makeState('mergeArrayBranches', {
         mode: 'mergeArrayBranches',
@@ -135,7 +141,12 @@ describe('deriveCompletionStatus', () => {
       const state = makeState('filterMap', {
         mode: 'filterMap',
         sourceArrayPath: 'items',
-        filterPredicate: createEmptyFilterPredicate(),
+        filterPredicate: {
+          kind: 'structured',
+          left: { kind: 'itemField', fieldPath: 'sku' },
+          operator: 'eq',
+          right: { kind: 'static', value: 'A' },
+        },
       } as FilterMapCollectionState);
       expect(state.completionStatus).toBe('inProgress');
     });
@@ -154,6 +165,38 @@ describe('deriveCompletionStatus', () => {
         mode: 'mergeArrayBranches',
         branches: [createEmptyMergeBranch(), createEmptyMergeBranch()],
       } as MergeBranchesCollectionState);
+      expect(state.completionStatus).toBe('inProgress');
+    });
+
+    it('returns inProgress for mergeArrayBranches when any branch has unmapped item fields', () => {
+      const mappedBranch = {
+        ...createEmptyMergeBranch(),
+        sourceArrayPath: 'domesticStops',
+        itemTemplate: {
+          fields: [
+            { kind: 'chain', targetFieldPath: 'city', chainState: createEmptyChain() },
+            { kind: 'chain', targetFieldPath: 'code', chainState: createEmptyChain() },
+          ],
+          nestedArrays: new Map(),
+        },
+      };
+      const incompleteBranch = {
+        ...createEmptyMergeBranch(),
+        sourceArrayPath: 'internationalStops',
+        itemTemplate: {
+          fields: [
+            { kind: 'chain', targetFieldPath: 'city', chainState: createEmptyChain() },
+            { kind: 'empty', targetFieldPath: 'code' },
+          ],
+          nestedArrays: new Map(),
+        },
+      };
+
+      const state = makeState('mergeArrayBranches', {
+        mode: 'mergeArrayBranches',
+        branches: [mappedBranch, incompleteBranch],
+      } as MergeBranchesCollectionState);
+
       expect(state.completionStatus).toBe('inProgress');
     });
   });
@@ -180,6 +223,17 @@ describe('deriveCompletionStatus', () => {
       expect(state.completionStatus).toBe('complete');
     });
 
+    it('returns complete for splitString mode when source path and delimiter are set', () => {
+      const state = makeState('splitString', {
+        mode: 'splitString',
+        sourceStringPath: 'tags',
+        delimiter: ',',
+        trimItems: true,
+        dropEmpty: false,
+      } as CollectionState);
+      expect(state.completionStatus).toBe('complete');
+    });
+
     it('returns complete for crossArrayLookup field mappings when all required fields are set', () => {
       const fields: ItemFieldMapping[] = [
         {
@@ -200,6 +254,27 @@ describe('deriveCompletionStatus', () => {
         { mode: 'map', sourceArrayPath: 'items' } as MapCollectionState,
         { fields, nestedArrays: new Map() },
       );
+      expect(state.completionStatus).toBe('complete');
+    });
+
+    it('returns complete for mergeArrayBranches when all branch item fields are mapped', () => {
+      const makeMappedBranch = (sourceArrayPath: string) => ({
+        ...createEmptyMergeBranch(),
+        sourceArrayPath,
+        itemTemplate: {
+          fields: [
+            { kind: 'chain', targetFieldPath: 'city', chainState: createEmptyChain() },
+            { kind: 'chain', targetFieldPath: 'code', chainState: createEmptyChain() },
+          ],
+          nestedArrays: new Map(),
+        },
+      });
+
+      const state = makeState('mergeArrayBranches', {
+        mode: 'mergeArrayBranches',
+        branches: [makeMappedBranch('domesticStops'), makeMappedBranch('internationalStops')],
+      } as MergeBranchesCollectionState);
+
       expect(state.completionStatus).toBe('complete');
     });
   });
@@ -273,6 +348,17 @@ describe('deriveCompletionStatus', () => {
       );
       expect(state.completionStatus).toBe('hasErrors');
     });
+
+    it('returns hasErrors for splitString mode when delimiter is empty', () => {
+      const state = makeState('splitString', {
+        mode: 'splitString',
+        sourceStringPath: 'tags',
+        delimiter: '',
+        trimItems: true,
+        dropEmpty: false,
+      } as CollectionState);
+      expect(state.completionStatus).toBe('hasErrors');
+    });
   });
 });
 
@@ -285,8 +371,8 @@ describe('isCompatibleModeSwitch', () => {
     const modes: ArrayBuilderMode[] = [
       'map',
       'filterMap',
+      'splitString',
       'buildFromValues',
-      'mergeArrayBranches',
       'customExpression',
     ];
     for (const mode of modes) {
@@ -445,7 +531,7 @@ describe('getModePreservationRules', () => {
   });
 
   it('any structured → customExpression: no confirmation, structured draft preserved', () => {
-    for (const from of ['map', 'filterMap', 'buildFromValues', 'mergeArrayBranches'] as ArrayBuilderMode[]) {
+    for (const from of ['map', 'filterMap', 'splitString', 'buildFromValues', 'mergeArrayBranches'] as ArrayBuilderMode[]) {
       const rules = getModePreservationRules(from, 'customExpression');
       expect(rules.requiresConfirmation).toBe(false);
       expect(rules.preserved.some((p) => p.includes('structured draft'))).toBe(true);
@@ -453,7 +539,7 @@ describe('getModePreservationRules', () => {
   });
 
   it('customExpression → any structured: requires confirmation', () => {
-    for (const to of ['map', 'filterMap', 'buildFromValues', 'mergeArrayBranches'] as ArrayBuilderMode[]) {
+    for (const to of ['map', 'filterMap', 'splitString', 'buildFromValues', 'mergeArrayBranches'] as ArrayBuilderMode[]) {
       const rules = getModePreservationRules('customExpression', to);
       expect(rules.requiresConfirmation).toBe(true);
     }
@@ -557,6 +643,17 @@ describe('createCollectionStateForMode', () => {
     }
   });
 
+  it('creates splitString collection state with default options', () => {
+    const s = createCollectionStateForMode('splitString');
+    expect(s.mode).toBe('splitString');
+    if (s.mode === 'splitString') {
+      expect(s.sourceStringPath).toBe('');
+      expect(s.delimiter).toBe(',');
+      expect(s.trimItems).toBe(true);
+      expect(s.dropEmpty).toBe(false);
+    }
+  });
+
   it('creates mergeArrayBranches collection state with 2 initial branches', () => {
     const s = createCollectionStateForMode('mergeArrayBranches');
     expect(s.mode).toBe('mergeArrayBranches');
@@ -586,8 +683,8 @@ describe('createEmptyArrayBuilderState', () => {
     const modes: ArrayBuilderMode[] = [
       'map',
       'filterMap',
+      'splitString',
       'buildFromValues',
-      'mergeArrayBranches',
       'customExpression',
     ];
     for (const mode of modes) {
@@ -623,6 +720,11 @@ describe('type guards', () => {
   it('isBuildFromValuesCollectionState', () => {
     expect(isBuildFromValuesCollectionState(createCollectionStateForMode('buildFromValues'))).toBe(true);
     expect(isBuildFromValuesCollectionState(createCollectionStateForMode('map'))).toBe(false);
+  });
+
+  it('isSplitStringCollectionState', () => {
+    expect(isSplitStringCollectionState(createCollectionStateForMode('splitString'))).toBe(true);
+    expect(isSplitStringCollectionState(createCollectionStateForMode('map'))).toBe(false);
   });
 
   it('isMergeBranchesCollectionState', () => {

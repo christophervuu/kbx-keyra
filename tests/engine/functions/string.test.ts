@@ -291,4 +291,36 @@ describe('string functions', () => {
     expect(empty.value).toBe(0);
     expect(unicode.value).toBe(4);
   });
+
+  it('split() splits a string by separator and preserves empty tokens', () => {
+    const context = createContext();
+
+    const csv = evaluate(
+      call('split', [
+        { type: 'StringLiteral', value: 'a,b,c', start: 0, end: 0 },
+        { type: 'StringLiteral', value: ',', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    const withSpaces = evaluate(
+      call('split', [
+        { type: 'StringLiteral', value: 'a, b, c', start: 0, end: 0 },
+        { type: 'StringLiteral', value: ',', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    const emptyTokens = evaluate(
+      call('split', [
+        { type: 'StringLiteral', value: 'a,,c,', start: 0, end: 0 },
+        { type: 'StringLiteral', value: ',', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(csv.value).toEqual(['a', 'b', 'c']);
+    expect(withSpaces.value).toEqual(['a', ' b', ' c']);
+    expect(emptyTokens.value).toEqual(['a', '', 'c', '']);
+  });
 });

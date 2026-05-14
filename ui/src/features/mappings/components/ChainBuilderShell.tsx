@@ -351,7 +351,10 @@ export function ChainBuilderShell({
 
   return (
     <div
-      className="flex flex-col h-full min-w-[300px] bg-zinc-900 text-zinc-100"
+      className={[
+        'flex h-full min-w-[300px] flex-col text-zinc-100',
+        showChrome ? 'bg-zinc-900' : 'bg-transparent',
+      ].join(' ')}
       data-testid="chain-builder-shell"
     >
       {showChrome && (

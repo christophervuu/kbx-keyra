@@ -65,6 +65,14 @@ const lengthSignature: FunctionSignature = {
   returnType: 'number',
 };
 
+const splitSignature: FunctionSignature = {
+  parameters: [
+    { name: 'value', type: 'string', required: true },
+    { name: 'separator', type: 'string', required: true },
+  ],
+  returnType: 'array',
+};
+
 const concatImplementation: FunctionImplementation = (args: readonly unknown[]): unknown => {
   return (args as readonly string[]).join('');
 };
@@ -119,6 +127,12 @@ const lengthImplementation: FunctionImplementation = (args: readonly unknown[]):
   return (args[0] as string).length;
 };
 
+const splitImplementation: FunctionImplementation = (args: readonly unknown[]): unknown => {
+  const value = args[0] as string;
+  const separator = args[1] as string;
+  return value.split(separator);
+};
+
 export function registerStringFunctions(registry: FunctionRegistry): void {
   registry.registerFunction('concat', concatSignature, concatImplementation);
   registry.registerFunction('substring', substringSignature, substringImplementation);
@@ -129,4 +143,5 @@ export function registerStringFunctions(registry: FunctionRegistry): void {
   registry.registerFunction('replaceAll', replaceAllSignature, replaceAllImplementation);
   registry.registerFunction('contains', containsSignature, containsImplementation);
   registry.registerFunction('length', lengthSignature, lengthImplementation);
+  registry.registerFunction('split', splitSignature, splitImplementation);
 }

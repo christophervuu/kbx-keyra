@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PreviewExecutionState } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -81,6 +81,8 @@ interface JsonNodeProps {
   onPathClick: ((path: string) => void) | undefined;
   /** Ref callback — called with the element when this node is the highlighted one. */
   onHighlightRef: (el: HTMLSpanElement | null) => void;
+  /** True when an ancestor already rendered the highlight wrapper. */
+  parentHighlighted?: boolean;
 }
 
 const INDENT_SIZE = 2;
@@ -114,6 +116,7 @@ function JsonNode({
   highlightPath,
   onPathClick,
   onHighlightRef,
+  parentHighlighted = false,
 }: JsonNodeProps) {
   const isHighlighted = highlightPath != null && highlightPath !== '' && path === highlightPath;
   const trailing = isLast ? '' : ',';
@@ -170,6 +173,7 @@ function JsonNode({
                 highlightPath={highlightPath}
                 onPathClick={onPathClick}
                 onHighlightRef={onHighlightRef}
+                parentHighlighted={childHighlighted}
               />
               {childIsLast ? '' : ','}
               {'\n'}
@@ -217,7 +221,7 @@ function JsonNode({
   }
 
   // Scalar — path-level highlight wraps the scalar when this node itself is highlighted
-  if (isHighlighted) {
+  if (isHighlighted && !parentHighlighted) {
     return (
       <span
         ref={onHighlightRef}
@@ -265,10 +269,12 @@ export interface OutputDisplayProps {
  */
 export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDisplayProps) {
   const highlightRef = useRef<HTMLSpanElement | null>(null);
+  type CopyState = 'idle' | 'copied' | 'failed';
+  const [copyState, setCopyState] = useState<CopyState>('idle');
 
   // Auto-scroll when highlightPath changes
   useEffect(() => {
-    if (highlightPath && highlightRef.current) {
+    if (highlightPath && highlightRef.current && typeof highlightRef.current.scrollIntoView === 'function') {
       highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [highlightPath]);
@@ -319,6 +325,23 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
 
   // status === 'success'
   const { output } = state.result;
+  const outputText = JSON.stringify(output, null, 2);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(outputText).then(
+      () => {
+        setCopyState('copied');
+        setTimeout(() => setCopyState('idle'), 1500);
+      },
+      () => {
+        setCopyState('failed');
+        setTimeout(() => setCopyState('idle'), 1500);
+      },
+    );
+  }
+
+  const copyLabel =
+    copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy';
 
   // For non-object/non-array output, fall back to the flat tokenizer (preserves
   // existing behavior for primitive top-level values).
@@ -326,10 +349,21 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
     output !== null && typeof output === 'object';
 
   if (!isStructured) {
-    const jsonString = JSON.stringify(output, null, 2);
+    const jsonString = outputText;
     const tokens = tokenizeJson(jsonString);
     return (
       <div className="h-full overflow-auto p-3" data-testid="output-success">
+        <div className="mb-2 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={handleCopy}
+            data-testid="output-copy-button"
+            aria-label="Copy output payload"
+            className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+          >
+            {copyLabel}
+          </button>
+        </div>
         <pre className="whitespace-pre font-mono text-xs" aria-label="Execution output">
           {tokens.length > 0
             ? tokens.map((tok, i) =>
@@ -349,6 +383,17 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
 
   return (
     <div className="h-full overflow-auto p-3" data-testid="output-success">
+      <div className="mb-2 flex items-center justify-end">
+        <button
+          type="button"
+          onClick={handleCopy}
+          data-testid="output-copy-button"
+          aria-label="Copy output payload"
+          className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          {copyLabel}
+        </button>
+      </div>
       <pre className="whitespace-pre font-mono text-xs" aria-label="Execution output">
         <JsonNode
           value={output}

@@ -80,7 +80,7 @@ export function CollapsibleStepContainer({
     <div
       className={[
         'rounded-lg border overflow-hidden transition-colors',
-        isExpanded ? 'border-blue-700/60 bg-zinc-800/60' : 'border-zinc-700 bg-zinc-800/40',
+        isExpanded ? 'border-blue-700/60 bg-transparent' : 'border-zinc-700 bg-transparent',
         className ?? '',
       ]
         .filter(Boolean)
@@ -91,7 +91,7 @@ export function CollapsibleStepContainer({
       <div
         className={[
           'flex items-center gap-2 px-3 py-2 cursor-pointer select-none group transition-colors',
-          isExpanded ? 'bg-zinc-800 border-b border-zinc-700' : 'hover:bg-zinc-700/40',
+          isExpanded ? 'border-b border-zinc-700' : 'hover:bg-zinc-900/40',
         ].join(' ')}
         onClick={handleToggle}
         role="button"

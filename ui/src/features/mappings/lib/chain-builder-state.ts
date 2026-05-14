@@ -110,9 +110,7 @@ export interface TransformLogicStep {
  *   - 'source'  — a source field reference
  *   - 'literal' — a raw literal value string
  */
-export type ArgumentSlotRef =
-  | { readonly mode: 'source'; readonly path: string }
-  | { readonly mode: 'literal'; readonly value: string };
+export type ArgumentSlotRef = ArgumentSlot;
 
 /**
  * A condition step in the chain.
@@ -407,9 +405,17 @@ function isLogicStepComplete(step: LogicStep): boolean {
 function isTransformStepComplete(step: TransformLogicStep): boolean {
   // Must have a function name selected
   if (!step.functionName || step.functionName.trim().length === 0) return false;
+
+  const allowsEmptyLiteralArg =
+    (step.functionName === 'replace' || step.functionName === 'replaceAll');
+
   // All literal args must be non-empty
-  return step.args.every((arg) => {
-    if (arg.mode === 'literal') return arg.value.trim().length > 0;
+  return step.args.every((arg, index) => {
+    if (arg.mode === 'literal') {
+      // replace/replaceAll: allow empty string literal only for replacement arg
+      if (allowsEmptyLiteralArg && index === 1) return true;
+      return arg.value.trim().length > 0;
+    }
     if (arg.mode === 'source') return arg.path.trim().length > 0;
     return true;
   });

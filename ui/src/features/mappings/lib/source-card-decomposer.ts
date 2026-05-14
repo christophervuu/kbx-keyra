@@ -90,15 +90,15 @@ const SINGLE_INPUT_TRANSFORMS = new Set([
 // of SINGLE_INPUT_TRANSFORMS — it adds math functions (add, subtract,
 // multiply, divide) and array single-input functions.
 //
-// Functions NOT in this set (multi-input, iterators, comparators, accessors):
-// concat, coalesce, map, filter, find, array, merge, join, eq, neq, gt, gte,
+// Functions NOT in this set (comparators, accessors):
+// array, merge, eq, neq, gt, gte,
 // lt, lte, contains, isNull, not, and, or, if, valueMap, source, item,
 // parent, constant, external, static.
 // ---------------------------------------------------------------------------
 
 export const CHAINABLE_TRANSFORMS = new Set([
   // String
-  'upper', 'lower', 'trim', 'replace', 'replaceAll', 'length', 'substring',
+  'concat', 'upper', 'lower', 'trim', 'replace', 'replaceAll', 'length', 'substring',
   // Date
   'formatDate', 'dateDiffSeconds',
   // Math
@@ -106,9 +106,11 @@ export const CHAINABLE_TRANSFORMS = new Set([
   // Type conversion
   'cast',
   // Null handling
-  'default',
+  'default', 'coalesce',
   // Array single-input
-  'flatten', 'first', 'count',
+  'flatten', 'first', 'count', 'filter', 'find', 'get', 'join', 'split',
+  // Array transforms that take an array first and configuration second
+  'map',
 ]);
 
 // ---------------------------------------------------------------------------

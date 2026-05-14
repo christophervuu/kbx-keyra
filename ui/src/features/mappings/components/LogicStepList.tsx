@@ -13,7 +13,7 @@
  * AE-10: collapsible step summaries with single-step expansion
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 
 import { CollapsibleStepContainer } from './CollapsibleStepContainer';
 import { AddLogicPicker } from './AddLogicPicker';
@@ -50,6 +50,8 @@ export interface LogicStepListProps {
   readonly sourceOptions?: readonly SchemaPathEntry[];
   /** Label for the current accumulated value (passed to condition/value map forms). */
   readonly currentValueLabel?: string;
+  /** Root source path context for transform steps that operate on arrays. */
+  readonly currentSourcePath?: string;
   /** Forces the add-logic picker open from external controls (e.g., SourceCard button). */
   readonly forcePickerOpen?: boolean;
   /** Fires when the list picker open state changes. */
@@ -73,14 +75,11 @@ export function LogicStepList({
   onAddStep,
   sourceOptions,
   currentValueLabel,
+  currentSourcePath,
   forcePickerOpen = false,
   onPickerOpenChange,
   className,
 }: LogicStepListProps) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-
-  const isPickerOpen = pickerOpen || forcePickerOpen;
-
   // -------------------------------------------------------------------------
   // Expansion management
   // -------------------------------------------------------------------------
@@ -106,6 +105,7 @@ export function LogicStepList({
             onStepChange={(i, s) => { onStepChange(i, s); }}
             onRemoveStep={onRemoveStep}
             sourceOptions={sourceOptions}
+            conditionArrayPath={currentSourcePath}
           />
         );
       }
@@ -133,7 +133,7 @@ export function LogicStepList({
       }
       return null;
     },
-    [onStepChange, onRemoveStep, sourceOptions, currentValueLabel],
+    [onStepChange, onRemoveStep, sourceOptions, currentValueLabel, currentSourcePath],
   );
 
   // -------------------------------------------------------------------------
@@ -142,7 +142,6 @@ export function LogicStepList({
 
   const handleAddStep = useCallback(
     (kind: LogicKind) => {
-      setPickerOpen(false);
       onPickerOpenChange?.(false);
       onAddStep(kind);
     },
@@ -195,31 +194,16 @@ export function LogicStepList({
         </div>
       )}
 
-      {/* Add logic picker */}
-      {isPickerOpen ? (
-        <div data-testid="logic-step-list-picker">
-          <AddLogicPicker
-            precedingStepKind={lastStep?.kind}
-            onSelectLogicKind={handleAddStep}
-            onDismiss={() => {
-              setPickerOpen(false);
-              onPickerOpenChange?.(false);
-            }}
-          />
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setPickerOpen(true);
-            onPickerOpenChange?.(true);
+      {/* Always-visible logic options */}
+      <div data-testid="logic-step-list-picker">
+        <AddLogicPicker
+          precedingStepKind={lastStep?.kind}
+          onSelectLogicKind={handleAddStep}
+          onDismiss={() => {
+            onPickerOpenChange?.(false);
           }}
-          className="w-full inline-flex items-center justify-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded-lg px-3 py-2 border border-dashed border-zinc-700 hover:border-zinc-500 transition-colors"
-          data-testid="logic-step-list-add-logic"
-        >
-          Add Transformation, conditional logic, or value mapping
-        </button>
-      )}
+        />
+      </div>
     </div>
   );
 }

@@ -114,6 +114,8 @@ export interface UseArrayBuilderStateResult {
   readonly updateBranch: (index: number, branch: MergeBranch) => void;
   /** Update the entire MergeBranches collection state at once. */
   readonly setMergeBranchesState: (state: import('../lib/array-builder-state').MergeBranchesCollectionState) => void;
+  /** Update the entire SplitString collection state at once. */
+  readonly setSplitStringState: (state: import('../lib/array-builder-state').SplitStringCollectionState) => void;
   /** Set or update the mapping for an item field. */
   readonly setFieldMapping: (targetFieldPath: string, mapping: ItemFieldMapping) => void;
   /** Clear the mapping for an item field (resets to empty). */
@@ -198,6 +200,120 @@ interface HydrateResult {
   isFromUnrecognized: boolean;
 }
 
+function leafSegment(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
+  const idx = trimmed.lastIndexOf('.');
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}
+
+function normalizeRelativePath(path: string, scopeCandidates: readonly string[]): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
+
+  for (const candidate of scopeCandidates) {
+    const scope = candidate.trim();
+    if (!scope) continue;
+    if (trimmed.startsWith(`${scope}.`)) {
+      return trimmed.slice(scope.length + 1);
+    }
+  }
+
+  return trimmed;
+}
+
+function toRelativeNestedArrayKey(targetFieldPath: string, parentScopePath: string): string {
+  const parentLeaf = leafSegment(parentScopePath);
+  const candidates = [parentScopePath, parentLeaf].filter(Boolean);
+  return normalizeRelativePath(targetFieldPath, candidates) || targetFieldPath;
+}
+
+function nestedArrayLookupKeys(targetFieldPath: string, parentScopePath: string): string[] {
+  const relative = toRelativeNestedArrayKey(targetFieldPath, parentScopePath);
+  const keys = [
+    relative,
+    targetFieldPath,
+    leafSegment(relative),
+    leafSegment(targetFieldPath),
+  ].filter(Boolean);
+  return Array.from(new Set(keys));
+}
+
+function resolveNestedArrayEntry(
+  nestedArrays: ReadonlyMap<string, ArrayBuilderState>,
+  targetFieldPath: string,
+  parentScopePath: string,
+): { key: string; state: ArrayBuilderState } | null {
+  const keys = nestedArrayLookupKeys(targetFieldPath, parentScopePath);
+  for (const key of keys) {
+    const value = nestedArrays.get(key);
+    if (value) return { key, state: value };
+  }
+  return null;
+}
+
+function remapFieldTargetPath(mapping: ItemFieldMapping, targetFieldPath: string): ItemFieldMapping {
+  switch (mapping.kind) {
+    case 'chain':
+      return { ...mapping, targetFieldPath };
+    case 'expression':
+      return { ...mapping, targetFieldPath };
+    case 'crossArrayLookup':
+      return { ...mapping, targetFieldPath };
+    case 'empty':
+      return { ...mapping, targetFieldPath };
+  }
+}
+
+function normalizeItemTemplatePaths(
+  template: import('../lib/array-builder-state').ItemTemplateState,
+  scopePath: string,
+): import('../lib/array-builder-state').ItemTemplateState {
+  const scopeLeaf = leafSegment(scopePath);
+  const baseCandidates = [scopePath, scopeLeaf].filter(Boolean);
+
+  const normalizedFields = template.fields.map((mapping) => {
+    const normalizedPath = normalizeRelativePath(mapping.targetFieldPath, baseCandidates);
+    return remapFieldTargetPath(mapping, normalizedPath || mapping.targetFieldPath);
+  });
+
+  const normalizedNestedArrays = new Map<string, ArrayBuilderState>();
+  for (const [rawNestedPath, nestedState] of template.nestedArrays) {
+    const normalizedNestedKey = toRelativeNestedArrayKey(rawNestedPath, scopePath);
+    const nestedScopeCandidates = [rawNestedPath, normalizedNestedKey, leafSegment(rawNestedPath), leafSegment(normalizedNestedKey)]
+      .filter(Boolean);
+
+    const normalizedNestedFields = nestedState.itemTemplate.fields.map((mapping) => {
+      const normalizedPath = normalizeRelativePath(mapping.targetFieldPath, nestedScopeCandidates);
+      return remapFieldTargetPath(mapping, normalizedPath || mapping.targetFieldPath);
+    });
+
+    const normalizedNestedTemplate = {
+      ...nestedState.itemTemplate,
+      fields: normalizedNestedFields,
+    };
+
+    const normalizedNestedState = {
+      ...nestedState,
+      itemTemplate: normalizeItemTemplatePaths(normalizedNestedTemplate, rawNestedPath),
+    };
+
+    normalizedNestedArrays.set(normalizedNestedKey, normalizedNestedState);
+  }
+
+  return {
+    ...template,
+    fields: normalizedFields,
+    nestedArrays: normalizedNestedArrays,
+  };
+}
+
+function normalizeArrayStatePaths(state: ArrayBuilderState, targetPath: string): ArrayBuilderState {
+  const normalizedTemplate = normalizeItemTemplatePaths(state.itemTemplate, targetPath);
+  const partial = { ...state, itemTemplate: normalizedTemplate };
+  return { ...partial, completionStatus: deriveCompletionStatus(partial) };
+}
+
 function hydrateFromExpression(expression: string): HydrateResult {
   if (!expression.trim()) {
     return { state: createEmptyArrayBuilderState('map'), isFromUnrecognized: false };
@@ -239,7 +355,7 @@ export function useArrayBuilderState({
   const [state, setState] = useState<ArrayBuilderState>(() => {
     const draft = getDraftExpression(targetPath);
     const expr = draft ?? currentExpression;
-    return hydrateFromExpression(expr).state;
+    return normalizeArrayStatePaths(hydrateFromExpression(expr).state, targetPath);
   });
 
   // T-12: Track whether the current customExpression state came from an unrecognized expression
@@ -266,7 +382,7 @@ export function useArrayBuilderState({
     const draft = getDraftExpression(targetPath);
     const expr = draft ?? currentExpression;
     const { state: hydratedState, isFromUnrecognized: fromUnrecognized } = hydrateFromExpression(expr);
-    setState(hydratedState);
+    setState(normalizeArrayStatePaths(hydratedState, targetPath));
     setIsFromUnrecognized(fromUnrecognized);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetPath, currentExpression]);
@@ -328,14 +444,31 @@ export function useArrayBuilderState({
 
   const setSourceArrayPath = useCallback((path: string) => {
     setState((prev) => {
-      if (prev.collectionState.mode !== 'map' && prev.collectionState.mode !== 'filterMap') {
+      if (
+        prev.collectionState.mode !== 'map' &&
+        prev.collectionState.mode !== 'filterMap' &&
+        prev.collectionState.mode !== 'splitString'
+      ) {
         return prev;
       }
-      const updatedCollection = { ...prev.collectionState, sourceArrayPath: path };
+      const updatedCollection =
+        prev.collectionState.mode === 'splitString'
+          ? { ...prev.collectionState, sourceStringPath: path }
+          : { ...prev.collectionState, sourceArrayPath: path };
       const partial = { ...prev, collectionState: updatedCollection };
       return { ...partial, completionStatus: deriveCompletionStatus(partial) };
     });
   }, []);
+
+  const setSplitStringState = useCallback(
+    (newCollectionState: import('../lib/array-builder-state').SplitStringCollectionState) => {
+      setState((prev) => {
+        const partial = { ...prev, collectionState: newCollectionState };
+        return { ...partial, completionStatus: deriveCompletionStatus(partial) };
+      });
+    },
+    [],
+  );
 
   const setFilterPredicate = useCallback((predicate: FilterPredicateState) => {
     setState((prev) => {
@@ -468,17 +601,24 @@ export function useArrayBuilderState({
 
   const setFieldMapping = useCallback((targetFieldPath: string, mapping: ItemFieldMapping) => {
     setState((prev) => {
+      const scopeCandidates = [targetPath, leafSegment(targetPath)].filter(Boolean);
+      const normalizedPath = normalizeRelativePath(targetFieldPath, scopeCandidates) || targetFieldPath;
+      const normalizedMapping = remapFieldTargetPath(
+        mapping,
+        normalizeRelativePath(mapping.targetFieldPath, scopeCandidates) || normalizedPath,
+      );
+
       const existingFields = prev.itemTemplate.fields;
-      const idx = existingFields.findIndex((f) => f.targetFieldPath === targetFieldPath);
+      const idx = existingFields.findIndex((f) => f.targetFieldPath === normalizedPath);
       const updatedFields =
         idx >= 0
-          ? existingFields.map((f, i) => (i === idx ? mapping : f))
-          : [...existingFields, mapping];
+          ? existingFields.map((f, i) => (i === idx ? normalizedMapping : f))
+          : [...existingFields, normalizedMapping];
       const updatedTemplate = { ...prev.itemTemplate, fields: updatedFields };
       const partial = { ...prev, itemTemplate: updatedTemplate };
       return { ...partial, completionStatus: deriveCompletionStatus(partial) };
     });
-  }, []);
+  }, [targetPath]);
 
   const removeFieldMapping = useCallback((targetFieldPath: string) => {
     setState((prev) => {
@@ -691,19 +831,19 @@ export function useArrayBuilderState({
   const enterNestedArray = useCallback((targetFieldPath: string) => {
     // Ensure a nested state exists for this path; create empty if not
     setState((prev) => {
-      const leafKey = targetFieldPath.includes('.') ? targetFieldPath.slice(targetFieldPath.lastIndexOf('.') + 1) : targetFieldPath;
-      const existing = prev.itemTemplate.nestedArrays.get(targetFieldPath)
-        ?? prev.itemTemplate.nestedArrays.get(leafKey);
+      const existing = resolveNestedArrayEntry(prev.itemTemplate.nestedArrays, targetFieldPath, targetPath);
       if (existing) return prev; // already exists — no state change needed
+
       const newNestedState = createEmptyArrayBuilderState('map');
       const updatedNestedArrays = new Map(prev.itemTemplate.nestedArrays);
-      updatedNestedArrays.set(targetFieldPath, newNestedState);
+      const storageKey = toRelativeNestedArrayKey(targetFieldPath, targetPath);
+      updatedNestedArrays.set(storageKey, newNestedState);
       const updatedTemplate = { ...prev.itemTemplate, nestedArrays: updatedNestedArrays };
       const partial = { ...prev, itemTemplate: updatedTemplate };
       return { ...partial, completionStatus: deriveCompletionStatus(partial) };
     });
     setActiveNestedPath(targetFieldPath);
-  }, []);
+  }, [targetPath]);
 
   const exitNestedArray = useCallback(() => {
     setActiveNestedPath(null);
@@ -713,18 +853,28 @@ export function useArrayBuilderState({
     (targetFieldPath: string, mapping: ItemFieldMapping) => {
       setState((prev) => {
         if (!activeNestedPath) return prev;
-        const nestedLeafKey = activeNestedPath.includes('.')
-          ? activeNestedPath.slice(activeNestedPath.lastIndexOf('.') + 1)
-          : activeNestedPath;
-        const nestedState = prev.itemTemplate.nestedArrays.get(activeNestedPath)
-          ?? prev.itemTemplate.nestedArrays.get(nestedLeafKey);
-        if (!nestedState) return prev;
+        const resolvedNested = resolveNestedArrayEntry(prev.itemTemplate.nestedArrays, activeNestedPath, targetPath);
+        if (!resolvedNested) return prev;
+
+        const nestedState = resolvedNested.state;
+        const nestedScopeCandidates = [
+          activeNestedPath,
+          resolvedNested.key,
+          leafSegment(activeNestedPath),
+          leafSegment(resolvedNested.key),
+        ].filter(Boolean);
+        const normalizedPath = normalizeRelativePath(targetFieldPath, nestedScopeCandidates) || targetFieldPath;
+        const normalizedMapping = remapFieldTargetPath(
+          mapping,
+          normalizeRelativePath(mapping.targetFieldPath, nestedScopeCandidates) || normalizedPath,
+        );
+
         const existingFields = nestedState.itemTemplate.fields;
-        const idx = existingFields.findIndex((f) => f.targetFieldPath === targetFieldPath);
+        const idx = existingFields.findIndex((f) => f.targetFieldPath === normalizedPath);
         const updatedFields =
           idx >= 0
-            ? existingFields.map((f, i) => (i === idx ? mapping : f))
-            : [...existingFields, mapping];
+            ? existingFields.map((f, i) => (i === idx ? normalizedMapping : f))
+            : [...existingFields, normalizedMapping];
         const updatedNestedTemplate = { ...nestedState.itemTemplate, fields: updatedFields };
         const updatedNestedState = {
           ...nestedState,
@@ -732,40 +882,37 @@ export function useArrayBuilderState({
           completionStatus: deriveCompletionStatus({ ...nestedState, itemTemplate: updatedNestedTemplate }),
         };
         const updatedNestedArrays = new Map(prev.itemTemplate.nestedArrays);
-        updatedNestedArrays.set(activeNestedPath, updatedNestedState);
+        updatedNestedArrays.set(resolvedNested.key, updatedNestedState);
         const updatedTemplate = { ...prev.itemTemplate, nestedArrays: updatedNestedArrays };
         const partial = { ...prev, itemTemplate: updatedTemplate };
         return { ...partial, completionStatus: deriveCompletionStatus(partial) };
       });
     },
      
-    [activeNestedPath],
+    [activeNestedPath, targetPath],
   );
 
   const setNestedArrayBuilderState = useCallback(
     (nestedState: ArrayBuilderState) => {
       setState((prev) => {
         if (!activeNestedPath) return prev;
+        const resolvedNested = resolveNestedArrayEntry(prev.itemTemplate.nestedArrays, activeNestedPath, targetPath);
+        const storageKey = resolvedNested?.key ?? toRelativeNestedArrayKey(activeNestedPath, targetPath);
         const updatedNestedArrays = new Map(prev.itemTemplate.nestedArrays);
-        updatedNestedArrays.set(activeNestedPath, nestedState);
+        updatedNestedArrays.set(storageKey, nestedState);
         const updatedTemplate = { ...prev.itemTemplate, nestedArrays: updatedNestedArrays };
         const partial = { ...prev, itemTemplate: updatedTemplate };
         return { ...partial, completionStatus: deriveCompletionStatus(partial) };
       });
     },
      
-    [activeNestedPath],
+    [activeNestedPath, targetPath],
   );
 
   const activeNestedState: ArrayBuilderState | null =
     activeNestedPath !== null
       ? (
-          state.itemTemplate.nestedArrays.get(activeNestedPath)
-          ?? state.itemTemplate.nestedArrays.get(
-            activeNestedPath.includes('.')
-              ? activeNestedPath.slice(activeNestedPath.lastIndexOf('.') + 1)
-              : activeNestedPath,
-          )
+          resolveNestedArrayEntry(state.itemTemplate.nestedArrays, activeNestedPath, targetPath)?.state
           ?? createEmptyArrayBuilderState('map')
         )
       : null;
@@ -797,6 +944,7 @@ export function useArrayBuilderState({
     removeBranch,
     updateBranch,
     setMergeBranchesState,
+    setSplitStringState,
     setFieldMapping,
     removeFieldMapping,
     pendingModeSwitch,

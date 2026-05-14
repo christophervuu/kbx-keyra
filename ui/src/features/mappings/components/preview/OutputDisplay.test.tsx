@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 
@@ -143,6 +143,60 @@ describe('OutputDisplay', () => {
     });
 
     expect(screen.getByTestId('output-success')).toBeInTheDocument();
+  });
+
+  it('renders copy button for success output', () => {
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ name: 'Alice' }),
+    });
+
+    expect(screen.getByTestId('output-copy-button')).toBeInTheDocument();
+  });
+
+  it('copy button writes output payload to clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ name: 'Alice' }),
+    });
+
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(JSON.stringify({ name: 'Alice' }, null, 2));
+    });
+  });
+
+  it('copy button shows copied feedback after success', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ name: 'Alice' }),
+    });
+
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('output-copy-button')).toHaveTextContent('Copied');
+    });
+  });
+
+  it('copy button shows failure feedback when clipboard write fails', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ name: 'Alice' }),
+    });
+
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('output-copy-button')).toHaveTextContent('Copy failed');
+    });
   });
 
   // -------------------------------------------------------------------------

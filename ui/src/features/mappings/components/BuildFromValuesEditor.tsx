@@ -19,7 +19,13 @@ import { useCallback, useRef, useState } from 'react';
 
 import { ValueEntryEditor } from './ValueEntryEditor';
 import type { ValueEntry, BuildFromValuesCollectionState } from '../lib/array-builder-state';
-import type { ParsedSchema } from '@/lib/types/domain';
+import type { ParsedSchema, SchemaNodeType } from '@/lib/types/domain';
+
+export interface BuildFromValuesTargetField {
+  readonly name: string;
+  readonly type?: SchemaNodeType;
+  readonly isRequired?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,7 +34,7 @@ import type { ParsedSchema } from '@/lib/types/domain';
 export interface BuildFromValuesEditorProps {
   readonly collectionState: BuildFromValuesCollectionState;
   /** Target item field names — drives object vs primitive entry shape. */
-  readonly targetItemFields?: readonly string[];
+  readonly targetItemFields?: readonly BuildFromValuesTargetField[];
   readonly parsedSourceSchema: ParsedSchema | null;
   readonly onCollectionStateChange: (state: BuildFromValuesCollectionState) => void;
   readonly className?: string;
@@ -55,7 +61,7 @@ function EntryRow({
   entry: ValueEntry;
   index: number;
   total: number;
-  targetItemFields: readonly string[];
+  targetItemFields: readonly BuildFromValuesTargetField[];
   parsedSourceSchema: ParsedSchema | null;
   onMove: (from: number, to: number) => void;
   onRemove: (index: number) => void;
@@ -172,7 +178,7 @@ export function BuildFromValuesEditor({
     if (targetItemFields.length > 0) {
       const fields: Record<string, { kind: 'empty' }> = {};
       for (const f of targetItemFields) {
-        fields[f] = { kind: 'empty' };
+        fields[f.name] = { kind: 'empty' };
       }
       return { kind: 'object', fields };
     }

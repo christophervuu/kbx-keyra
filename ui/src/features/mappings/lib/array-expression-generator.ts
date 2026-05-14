@@ -24,6 +24,7 @@ import type {
   ArrayBuilderState,
   MapCollectionState,
   FilterMapCollectionState,
+  SplitStringCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
   ItemTemplateState,
@@ -91,6 +92,74 @@ function toItemTemplateKey(targetFieldPath: string): string {
   return lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
 }
 
+type TemplateTree = Map<string, TemplateTree | string>;
+
+function splitPathSegments(path: string): string[] {
+  return path
+    .split('.')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function getCommonPrefixLength(paths: readonly string[][]): number {
+  if (paths.length === 0) return 0;
+
+  // Single-path templates must preserve nested object containers
+  // (e.g. compensation.baseSalary -> {"compensation": {"baseSalary": ...}}).
+  if (paths.length === 1) {
+    const only = paths[0];
+    return Math.max(0, (only?.length ?? 0) - 2);
+  }
+
+  const minLength = Math.min(...paths.map((segments) => segments.length));
+  // Never consume the final field segment.
+  const maxComparable = Math.max(0, minLength - 1);
+
+  let index = 0;
+  while (index < maxComparable) {
+    const expected = paths[0]?.[index];
+    if (expected === undefined) break;
+    if (paths.some((segments) => segments[index] !== expected)) break;
+    index += 1;
+  }
+
+  return index;
+}
+
+function insertTemplatePath(tree: TemplateTree, segments: readonly string[], expr: string): void {
+  if (segments.length === 0) return;
+
+  let current = tree;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const isLeaf = index === segments.length - 1;
+    if (!segment) continue;
+
+    if (isLeaf) {
+      current.set(segment, expr);
+      return;
+    }
+
+    const existing = current.get(segment);
+    if (existing instanceof Map) {
+      current = existing;
+      continue;
+    }
+
+    const child: TemplateTree = new Map();
+    current.set(segment, child);
+    current = child;
+  }
+}
+
+function serializeTemplateTree(tree: TemplateTree): string {
+  const entries = Array.from(tree.entries()).map(([key, value]) => {
+    const serializedValue = typeof value === 'string' ? value : serializeTemplateTree(value);
+    return `${quoteString(key)}: ${serializedValue}`;
+  });
+  return `{${entries.join(', ')}}`;
+}
+
 /**
  * Rewrites internal scoped source placeholders to valid DSL accessors.
  *
@@ -101,7 +170,28 @@ function toItemTemplateKey(targetFieldPath: string): string {
 function normalizeScopedSourceCalls(expression: string): string {
   return expression
     .replace(/source\("__item__:(.*?)"\)/g, 'item("$1")')
+    .replace(/source\("__parent__:(.*?)"\)/g, 'parent("$1")')
     .replace(/source\("__source__:(.*?)"\)/g, 'source("$1")');
+}
+
+/**
+ * Converts collection source paths into DSL iterables.
+ *
+ * Internal UI storage:
+ *   __item__:employees -> item("employees")
+ *   __source__:orders  -> source("orders")
+ *   orders             -> source("orders")
+ */
+function collectionSourceToDsl(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('__item__:')) {
+    return `item(${quoteString(trimmed.slice('__item__:'.length))})`;
+  }
+  if (trimmed.startsWith('__source__:')) {
+    return `source(${quoteString(trimmed.slice('__source__:'.length))})`;
+  }
+  return `source(${quoteString(trimmed)})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,20 +319,41 @@ function generateItemFieldExpression(mapping: ItemFieldMapping): string {
  * Pattern: { "targetField": <expr>, ... }
  */
 function generateObjectTemplate(template: ItemTemplateState): string {
-  const pairs: string[] = [];
+  const entries: Array<{ path: string; expr: string }> = [];
 
   for (const field of template.fields) {
     const expr = generateItemFieldExpression(field);
     if (expr) {
-      const key = toItemTemplateKey(field.targetFieldPath);
-      if (key) {
-        pairs.push(`${quoteString(key)}: ${expr}`);
-      }
+      entries.push({ path: field.targetFieldPath, expr });
     }
   }
 
-  if (pairs.length === 0) return '{}';
-  return `{${pairs.join(', ')}}`;
+  for (const [nestedFieldPath, nestedState] of template.nestedArrays) {
+    const nestedExpr = generateArrayExpression(nestedState).trim();
+    if (!nestedExpr) continue;
+    // Nested builders are first-class property values in the parent template.
+    entries.push({ path: nestedFieldPath, expr: nestedExpr });
+  }
+
+  if (entries.length === 0) return '{}';
+
+  const segmentedPaths = entries
+    .map((entry) => splitPathSegments(entry.path))
+    .filter((segments) => segments.length > 0);
+  const commonPrefixLength = getCommonPrefixLength(segmentedPaths);
+
+  const tree: TemplateTree = new Map();
+  for (const entry of entries) {
+    const fullSegments = splitPathSegments(entry.path);
+    if (fullSegments.length === 0) continue;
+
+    const relativeSegments = fullSegments.slice(commonPrefixLength);
+    const segments = relativeSegments.length > 0 ? relativeSegments : [toItemTemplateKey(entry.path)];
+    insertTemplatePath(tree, segments, entry.expr);
+  }
+
+  if (tree.size === 0) return '{}';
+  return serializeTemplateTree(tree);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +412,10 @@ function generateMapExpression(
   collection: MapCollectionState,
   template: ItemTemplateState,
 ): string {
-  if (!collection.sourceArrayPath.trim()) return '';
+  const sourceExpr = collectionSourceToDsl(collection.sourceArrayPath);
+  if (!sourceExpr) return '';
   const objectTemplate = generateObjectTemplate(template);
-  return `map(source(${quoteString(collection.sourceArrayPath)}), ${objectTemplate})`;
+  return `map(${sourceExpr}, ${objectTemplate})`;
 }
 
 /**
@@ -314,13 +426,14 @@ function generateFilterMapExpression(
   collection: FilterMapCollectionState,
   template: ItemTemplateState,
 ): string {
-  if (!collection.sourceArrayPath.trim()) return '';
+  const sourceExpr = collectionSourceToDsl(collection.sourceArrayPath);
+  if (!sourceExpr) return '';
 
   const predicate = generateFilterPredicate(collection.filterPredicate);
   if (!predicate) return '';
 
   const objectTemplate = generateObjectTemplate(template);
-  return `map(filter(source(${quoteString(collection.sourceArrayPath)}), ${predicate}), ${objectTemplate})`;
+  return `map(filter(${sourceExpr}, ${predicate}), ${objectTemplate})`;
 }
 
 /**
@@ -349,13 +462,40 @@ function generateBuildFromValuesExpression(collection: BuildFromValuesCollection
 }
 
 /**
+ * Pattern: map(split(source("path"), ","), trim(item("")))
+ * Optional variations:
+ *   - no trim: map(split(...), item(""))
+ *   - drop empty: filter(<mapExpr>, neq(item(""), ""))
+ */
+function generateSplitStringExpression(collection: SplitStringCollectionState): string {
+  const sourcePath = collection.sourceStringPath.trim();
+  if (!sourcePath) return '';
+  if (collection.delimiter.length === 0) return '';
+
+  const iterable = collectionSourceToDsl(sourcePath);
+  if (!iterable) return '';
+
+  const splitExpr = `split(${iterable}, ${quoteString(collection.delimiter)})`;
+  const mapExpr = collection.trimItems
+    ? `map(${splitExpr}, trim(item("")))`
+    : `map(${splitExpr}, item(""))`;
+
+  if (!collection.dropEmpty) {
+    return mapExpr;
+  }
+
+  return `filter(${mapExpr}, neq(item(""), ""))`;
+}
+
+/**
  * Generates DSL for a single merge branch.
  * Pattern: map(source("path"), { "field": <chain>, ... })
  */
 function generateMergeBranchExpression(branch: MergeBranch): string {
-  if (!branch.sourceArrayPath.trim()) return '';
+  const sourceExpr = collectionSourceToDsl(branch.sourceArrayPath);
+  if (!sourceExpr) return '';
   const objectTemplate = generateObjectTemplate(branch.itemTemplate);
-  return `map(source(${quoteString(branch.sourceArrayPath)}), ${objectTemplate})`;
+  return `map(${sourceExpr}, ${objectTemplate})`;
 }
 
 /**
@@ -407,6 +547,9 @@ export function generateArrayExpression(state: ArrayBuilderState): string {
       return generateBuildFromValuesExpression(
         collectionState as BuildFromValuesCollectionState,
       );
+
+    case 'splitString':
+      return generateSplitStringExpression(collectionState as SplitStringCollectionState);
 
     case 'mergeArrayBranches':
       return generateMergeBranchesExpression(collectionState as MergeBranchesCollectionState);

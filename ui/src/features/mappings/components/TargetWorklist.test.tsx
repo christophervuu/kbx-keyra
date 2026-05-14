@@ -149,6 +149,24 @@ describe('TargetWorklist', () => {
     expect(screen.getByTestId('coverage-text')).toHaveTextContent('1/2');
   });
 
+  it('shows mapped status for array item descendants when array target has a rule', () => {
+    const itemProductCode = makeNode('lineItems.productCode', 'productCode', 'string', 1, false);
+    const itemQty = makeNode('lineItems.qty', 'qty', 'number', 1, false);
+    const lineItems = makeNode('lineItems', 'lineItems', 'array', 0, false, [itemProductCode, itemQty]);
+    const nodesWithArray = [lineItems, itemProductCode, itemQty];
+
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={nodesWithArray}
+        rules={[makeRule('lineItems')]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
+    expect(screen.getAllByTestId('status-icon-mapped')).toHaveLength(3);
+  });
+
   it('renders target panel header title', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
     expect(screen.getByTestId('target-header-badge')).toHaveTextContent('TGT');

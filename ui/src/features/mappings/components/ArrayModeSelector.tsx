@@ -1,18 +1,21 @@
 /**
- * ArrayModeSelector.tsx — FS-043 T-04
+ * ArrayModeSelector.tsx — FS-043 T-04 / FS-051 T-01
  *
  * Mode picker for the Array Builder. Presents five mode cards:
  *   - Map source array
  *   - Filter + map
+ *   - Split text into items
  *   - Build from values
  *   - Merge branches
- *   - Custom expression (visually separated as advanced)
+ *
+ * FS-051 T-01: Removed "Custom expression" card and "Advanced" separator.
+ * Raw DSL editing is now accessed via the Builder/Editor toggle in the header.
  *
  * Fires onSelectMode when a card is clicked or activated via keyboard.
  */
 
-import { Filter, GitMerge, Layers, List, TerminalSquare } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronDown, ChevronRight, Filter, GitMerge, Layers, List, Scissors } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import type { ArrayBuilderMode } from '../lib/array-builder-state';
 
@@ -37,7 +40,6 @@ interface ModeOption {
   readonly label: string;
   readonly description: string;
   readonly icon: ReactNode;
-  readonly isAdvanced?: boolean;
 }
 
 const MODE_OPTIONS: ModeOption[] = [
@@ -54,6 +56,12 @@ const MODE_OPTIONS: ModeOption[] = [
     icon: <Filter size={16} aria-hidden="true" />,
   },
   {
+    mode: 'splitString',
+    label: 'Split text into items',
+    description: 'Split one string field into an array of values',
+    icon: <Scissors size={16} aria-hidden="true" />,
+  },
+  {
     mode: 'buildFromValues',
     label: 'Build from values',
     description: 'Construct array entries from individual fields',
@@ -65,17 +73,7 @@ const MODE_OPTIONS: ModeOption[] = [
     description: 'Combine multiple source arrays into one',
     icon: <GitMerge size={16} aria-hidden="true" />,
   },
-  {
-    mode: 'customExpression',
-    label: 'Custom expression',
-    description: 'Write raw DSL (advanced)',
-    icon: <TerminalSquare size={16} aria-hidden="true" />,
-    isAdvanced: true,
-  },
 ];
-
-const STANDARD_MODES = MODE_OPTIONS.filter((m) => !m.isAdvanced);
-const ADVANCED_MODES = MODE_OPTIONS.filter((m) => m.isAdvanced);
 
 // ---------------------------------------------------------------------------
 // Sub-component: ModeCard
@@ -144,6 +142,50 @@ export function ArrayModeSelector({
   onSelectMode,
   className = '',
 }: ArrayModeSelectorProps) {
+  const [isExpanded, setIsExpanded] = useState(selectedMode === null);
+  const selectedOption = MODE_OPTIONS.find((option) => option.mode === selectedMode);
+
+  useEffect(() => {
+    if (selectedMode === null) {
+      setIsExpanded(true);
+    }
+  }, [selectedMode]);
+
+  if (!isExpanded && selectedOption !== undefined) {
+    return (
+      <div
+        role="radiogroup"
+        aria-label="Array builder mode"
+        data-testid="array-mode-selector"
+        className={['space-y-2', className].filter(Boolean).join(' ')}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            How do you want to build this array?
+          </p>
+          <button
+            type="button"
+            data-testid="array-mode-selector-toggle"
+            aria-expanded={false}
+            onClick={() => { setIsExpanded(true); }}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+          >
+            <ChevronRight size={11} aria-hidden="true" />
+            Change
+          </button>
+        </div>
+
+        <div
+          className="rounded-lg border border-blue-500 bg-blue-950/40 px-3 py-2"
+          data-testid="array-mode-selected-summary"
+        >
+          <p className="text-xs font-semibold text-slate-100">{selectedOption.label}</p>
+          <p className="mt-0.5 text-[11px] text-slate-400">{selectedOption.description}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       role="radiogroup"
@@ -151,39 +193,32 @@ export function ArrayModeSelector({
       data-testid="array-mode-selector"
       className={['space-y-2', className].filter(Boolean).join(' ')}
     >
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-        How do you want to build this array?
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          How do you want to build this array?
+        </p>
+        <button
+          type="button"
+          data-testid="array-mode-selector-toggle"
+          aria-expanded={true}
+          onClick={() => { setIsExpanded(false); }}
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition-colors hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          <ChevronDown size={11} aria-hidden="true" />
+          Collapse
+        </button>
+      </div>
 
-      {/* Standard modes */}
       <div className="space-y-1.5">
-        {STANDARD_MODES.map((option) => (
+        {MODE_OPTIONS.map((option) => (
           <ModeCard
             key={option.mode}
             option={option}
             isSelected={selectedMode === option.mode}
-            onSelect={() => { onSelectMode(option.mode); }}
-          />
-        ))}
-      </div>
-
-      {/* Advanced separator */}
-      <div className="flex items-center gap-2 pt-1">
-        <div className="h-px flex-1 bg-slate-700" />
-        <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-          Advanced
-        </span>
-        <div className="h-px flex-1 bg-slate-700" />
-      </div>
-
-      {/* Advanced modes */}
-      <div className="space-y-1.5">
-        {ADVANCED_MODES.map((option) => (
-          <ModeCard
-            key={option.mode}
-            option={option}
-            isSelected={selectedMode === option.mode}
-            onSelect={() => { onSelectMode(option.mode); }}
+            onSelect={() => {
+              onSelectMode(option.mode);
+              setIsExpanded(false);
+            }}
           />
         ))}
       </div>
