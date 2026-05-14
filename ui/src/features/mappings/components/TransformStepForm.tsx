@@ -161,16 +161,11 @@ export function TransformStepForm({
 
   return (
     <div
-      className={[
-          'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
-        className ?? '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      className={['space-y-2', className ?? ''].filter(Boolean).join(' ')}
       data-testid={`transform-step-form-${stepIndex}`}
     >
       {/* Header: function name + description + remove button */}
-      <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900 px-3 py-2">
+      <div className="flex items-center gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span
@@ -214,17 +209,17 @@ export function TransformStepForm({
 
       {/* Implicit first arg notice */}
       <div
-        className="border-b border-slate-700/50 bg-slate-950/40 px-3 py-1.5"
+        className="text-[11px]"
         data-testid={`transform-step-implicit-arg-${stepIndex}`}
       >
-        <span className="text-[11px] italic text-slate-500">
+        <span className="italic text-slate-500">
           Operates on: <span className="not-italic text-slate-300">current value</span>
         </span>
       </div>
 
       {/* Additional parameter fields */}
       {hasAdditionalParams ? (
-        <div className="p-3" data-testid={`transform-step-params-${stepIndex}`}>
+        <div data-testid={`transform-step-params-${stepIndex}`}>
           <ArgumentForm
             functionName={step.functionName}
             slots={slots}
@@ -237,7 +232,7 @@ export function TransformStepForm({
         </div>
       ) : (
         <div
-          className="px-3 py-2 text-[11px] italic text-slate-500"
+          className="text-[11px] italic text-slate-500"
           data-testid={`transform-step-no-params-${stepIndex}`}
         >
           No additional parameters required.

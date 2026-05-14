@@ -263,3 +263,21 @@ describe('ChainStepCard — accent colors', () => {
     expect(screen.getByTestId('chain-step-card-0')).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Body layout — T-05 full-width parameter layout
+// ---------------------------------------------------------------------------
+
+describe('ChainStepCard — body layout (T-05)', () => {
+  it('expanded body container has reduced horizontal padding (px-2)', () => {
+    renderCard({ isExpanded: true });
+    const body = screen.getByTestId('chain-step-card-0-body');
+    expect(body).toHaveClass('px-2');
+    expect(body).not.toHaveClass('px-3');
+  });
+
+  it('body is not rendered when collapsed', () => {
+    renderCard({ isExpanded: false });
+    expect(screen.queryByTestId('chain-step-card-0-body')).not.toBeInTheDocument();
+  });
+});

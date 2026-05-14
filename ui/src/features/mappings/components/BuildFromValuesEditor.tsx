@@ -216,11 +216,17 @@ export function BuildFromValuesEditor({
   }, [collectionState, entries, onCollectionStateChange]);
 
   const handleNullFilterToggle = useCallback(() => {
+    const enabling = !nullFilteringEnabled;
     onCollectionStateChange({
       ...collectionState,
-      nullFilteringEnabled: !nullFilteringEnabled,
+      nullFilteringEnabled: enabling,
+      // Auto-populate with the first target field when enabling, if not already set
+      nullFilterField:
+        enabling && !collectionState.nullFilterField && targetItemFields.length > 0
+          ? targetItemFields[0]!.name
+          : collectionState.nullFilterField,
     });
-  }, [collectionState, nullFilteringEnabled, onCollectionStateChange]);
+  }, [collectionState, nullFilteringEnabled, targetItemFields, onCollectionStateChange]);
 
   const handleNullFilterFieldChange = useCallback((field: string) => {
     onCollectionStateChange({ ...collectionState, nullFilterField: field });
@@ -342,15 +348,31 @@ export function BuildFromValuesEditor({
             >
               Field to check
             </label>
-            <input
-              id="null-filter-field"
-              type="text"
-              value={nullFilterField ?? ''}
-              placeholder='e.g. id'
-              data-testid="null-filter-field-input"
-              onChange={(e) => { handleNullFilterFieldChange(e.target.value); }}
-              className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+            {targetItemFields.length > 0 ? (
+              <select
+                id="null-filter-field"
+                value={nullFilterField ?? ''}
+                data-testid="null-filter-field-input"
+                onChange={(e) => { handleNullFilterFieldChange(e.target.value); }}
+                className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {targetItemFields.map((f) => (
+                  <option key={f.name} value={f.name}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="null-filter-field"
+                type="text"
+                value={nullFilterField ?? ''}
+                placeholder='e.g. id'
+                data-testid="null-filter-field-input"
+                onChange={(e) => { handleNullFilterFieldChange(e.target.value); }}
+                className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            )}
           </div>
         )}
       </div>

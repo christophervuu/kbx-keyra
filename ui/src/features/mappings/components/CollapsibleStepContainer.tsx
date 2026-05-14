@@ -79,8 +79,8 @@ export function CollapsibleStepContainer({
   return (
     <div
       className={[
-        'rounded-lg border overflow-hidden transition-colors',
-        isExpanded ? 'border-blue-700/60 bg-transparent' : 'border-zinc-700 bg-transparent',
+        'rounded-lg border transition-colors',
+        isExpanded ? 'border-blue-700/60 bg-transparent overflow-visible' : 'border-zinc-700 bg-transparent overflow-hidden',
         className ?? '',
       ]
         .filter(Boolean)
@@ -162,7 +162,7 @@ export function CollapsibleStepContainer({
         data-testid={`collapsible-step-content-${index}`}
         aria-hidden={!isExpanded}
       >
-        <div className="overflow-hidden">
+        <div className={isExpanded ? 'min-h-0 overflow-visible' : 'overflow-hidden'}>
           {isExpanded && (
             <div className="p-2" data-testid={`collapsible-step-form-${index}`}>
               {renderForm()}

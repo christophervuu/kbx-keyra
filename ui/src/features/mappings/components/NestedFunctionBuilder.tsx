@@ -119,7 +119,12 @@ export function NestedFunctionBuilder({
         </button>
       </div>
 
-      {/* Argument configurator for the nested function */}
+      {/* Argument configurator for the nested function.
+          NOTE: This surface intentionally uses the legacy `ArgumentConfigurator`
+          pattern (Rules View / GuidedBuilder flow). It is not updated to use
+          `ParameterValueInput` because `NestedFunctionBuilder` is only consumed
+          by the deprecated `GuidedBuilder` / `ArgumentConfigurator` stack
+          (Rules View), which is out of scope for FS-053. */}
       <ArgumentConfigurator
         functionName={selectedFunction}
         parameters={functionEntry.parameters}

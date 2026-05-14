@@ -126,11 +126,11 @@ export const DSL_FUNCTION_CATALOG: readonly FunctionCatalogEntry[] = [
     name: 'replaceAll',
     category: 'String',
     description: 'Replaces all occurrences of a search string with a replacement.',
-    parameterCount: 3,
+    parameterCount: '2+',
     parameters: [
       { name: 'value', type: 'string', required: true },
       { name: 'search', type: 'string', required: true },
-      { name: 'replacement', type: 'string', required: true },
+      { name: 'replacement', type: 'string', required: false },
     ],
     returnType: 'string',
     example: 'replaceAll(source("text"), "-", "_")',

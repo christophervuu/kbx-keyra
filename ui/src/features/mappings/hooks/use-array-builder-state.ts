@@ -789,7 +789,8 @@ export function useArrayBuilderState({
     setState((prev) => {
       if (prev.mode === toMode) return prev;
       const rules = getModePreservationRules(prev.mode, toMode);
-      if (!rules.requiresConfirmation) {
+      // If nothing has been configured yet, skip confirmation — there is nothing to discard
+      if (!rules.requiresConfirmation || prev.completionStatus === 'notStarted') {
         return applyModeSwitch(prev, toMode);
       }
       // Incompatible — set pending for confirmation dialog

@@ -266,6 +266,17 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   const { testCases, saveTestCase, renameTestCase, duplicateTestCase, deleteTestCase } =
     useTestCases(mappingId);
 
+  // Auto-select the first test case on mount if one exists
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectedRef.current) return;
+    if (testCases.length > 0) {
+      autoSelectedRef.current = true;
+      handleSelectTestCase(testCases[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fire only once after first non-empty testCases
+  }, [testCases]);
+
   // Comparison snapshots
   const { saveSnapshot, deleteSnapshot, deleteSnapshotsForTestCase, snapshotsForTestCase } =
     useComparisonSnapshots(mappingId);

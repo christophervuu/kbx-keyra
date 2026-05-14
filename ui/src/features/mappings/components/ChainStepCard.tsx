@@ -239,7 +239,7 @@ export function ChainStepCard({
       {/* Body (expanded only) */}
       {isExpanded && (
         <div
-          className="px-3 pb-3 pt-0"
+          className="px-2 pb-2 pt-0"
           data-testid={`${rootTestId}-body`}
         >
           {children}

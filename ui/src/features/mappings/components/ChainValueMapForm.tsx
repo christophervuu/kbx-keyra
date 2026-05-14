@@ -14,8 +14,8 @@
  * AE-09: value map with required default and switch-statement UX
  */
 
-import { useCallback, useState } from 'react';
-import { X, Plus, ChevronDown, ChevronUp } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
+import { X, Plus } from 'lucide-react';
 
 import type {
   ValueMapLogicStep,
@@ -110,14 +110,24 @@ interface OutputValueEditorProps {
   readonly testIdPrefix: string;
 }
 
+function serializeBranchToText(branch: ChainBranch): string {
+  if (branch.kind === 'expression') return branch.raw;
+  if (branch.kind === 'source') return branch.path === '' ? '' : `source("${branch.path}")`;
+  const v = branch.value;
+  if (v.type === 'null') return 'null';
+  return String(v.value);
+}
+
 function OutputValueEditor({ branch, onChange, testIdPrefix }: OutputValueEditorProps) {
-  const handleStaticValueChange = useCallback(
-    (value: string) => {
-      if (branch.kind !== 'static') return;
-      onChange({ kind: 'static', value: { ...branch.value, value } as StaticValueBranch });
-    },
-    [branch, onChange],
+  // Remember the last non-expression mode for "Back to simple input"
+  const lastSimpleModeRef = useRef<'source' | 'static'>(
+    branch.kind === 'expression' ? 'static' : branch.kind === 'source' ? 'source' : 'static',
   );
+  if (branch.kind !== 'expression') {
+    lastSimpleModeRef.current = branch.kind === 'source' ? 'source' : 'static';
+  }
+
+  const isExpression = branch.kind === 'expression';
 
   const handleStaticTypeChange = useCallback(
     (type: StaticValueBranch['type']) => {
@@ -135,89 +145,157 @@ function OutputValueEditor({ branch, onChange, testIdPrefix }: OutputValueEditor
   );
 
   return (
-    <div className="flex items-center gap-1 flex-1 min-w-0" data-testid={testIdPrefix}>
-      <select
-        value={branch.kind}
-        onChange={(e) => {
-          const k = e.target.value as ChainBranch['kind'];
-          if (k === 'static') onChange({ kind: 'static', value: { type: 'string', value: '' } });
-          else if (k === 'source') onChange({ kind: 'source', path: '', steps: [] });
-          else onChange({ kind: 'expression', raw: '' });
-        }}
-        aria-label="Output value kind"
-        className="bg-zinc-800 border border-zinc-600 rounded px-1.5 py-1 text-xs text-zinc-300 focus:outline-none focus:border-blue-500 shrink-0"
-        data-testid={`${testIdPrefix}-kind`}
-      >
-        <option value="static">Value</option>
-        <option value="source">Field</option>
-        <option value="expression">Expr</option>
-      </select>
-
-      {branch.kind === 'static' && (
+    <div className="space-y-1.5" data-testid={testIdPrefix}>
+      {/* Primary mode toggle — hidden in expression mode */}
+      {!isExpression && (
         <>
-          <select
-            value={branch.value.type}
-            onChange={(e) => { handleStaticTypeChange(e.target.value as StaticValueBranch['type']); }}
-            aria-label="Output value type"
-            className="bg-zinc-800 border border-zinc-600 rounded px-1.5 py-1 text-xs text-zinc-300 focus:outline-none focus:border-blue-500 shrink-0"
-            data-testid={`${testIdPrefix}-static-type`}
+          <div
+            role="group"
+            aria-label="Output value mode"
+            className="inline-flex rounded border border-zinc-700 overflow-hidden text-xs"
+            data-testid={`${testIdPrefix}-mode-toggle`}
           >
-            <option value="string">Str</option>
-            <option value="number">Num</option>
-            <option value="boolean">Bool</option>
-            <option value="null">Null</option>
-          </select>
-          {branch.value.type === 'null' ? (
-            <span className="text-xs text-zinc-500 italic px-1">null</span>
-          ) : branch.value.type === 'boolean' ? (
-            <select
-              value={String(branch.value.value)}
-              onChange={(e) => {
-                onChange({ kind: 'static', value: { type: 'boolean', value: e.target.value === 'true' } });
-              }}
-              aria-label="Output boolean value"
-              className="flex-1 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
-              data-testid={`${testIdPrefix}-static-boolean`}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={branch.kind === 'source'}
+              onClick={() => { onChange({ kind: 'source', path: '', steps: [] }); }}
+              className={[
+                'px-2.5 py-1 font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                branch.kind === 'source'
+                  ? 'bg-blue-700 text-white'
+                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200',
+              ].join(' ')}
+              data-testid={`${testIdPrefix}-mode-source`}
             >
-              <option value="true">true</option>
-              <option value="false">false</option>
-            </select>
-          ) : (
+              Source
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={branch.kind === 'static'}
+              onClick={() => { onChange({ kind: 'static', value: { type: 'string', value: '' } }); }}
+              className={[
+                'px-2.5 py-1 font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                branch.kind === 'static'
+                  ? 'bg-blue-700 text-white'
+                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200',
+              ].join(' ')}
+              data-testid={`${testIdPrefix}-mode-static`}
+            >
+              Static
+            </button>
+            <span
+              role="radio"
+              aria-checked={false}
+              aria-disabled="true"
+              title="External data sources — available in a future release"
+              className="px-2.5 py-1 font-medium bg-zinc-800 text-zinc-600 opacity-50 cursor-not-allowed select-none"
+              data-testid={`${testIdPrefix}-mode-external`}
+            >
+              External
+            </span>
+          </div>
+
+          {/* Source mode input */}
+          {branch.kind === 'source' && (
             <input
-              type={branch.value.type === 'number' ? 'number' : 'text'}
-              value={String(branch.value.value)}
-              onChange={(e) => { handleStaticValueChange(e.target.value); }}
-              placeholder="Output value…"
-              aria-label="Output value"
-              className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
-              data-testid={`${testIdPrefix}-static-input`}
+              type="text"
+              value={branch.path}
+              onChange={(e) => { onChange({ kind: 'source', path: e.target.value, steps: [] }); }}
+              placeholder="Field path…"
+              aria-label="Output field path"
+              className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+              data-testid={`${testIdPrefix}-source-input`}
             />
           )}
+
+          {/* Static mode inputs */}
+          {branch.kind === 'static' && (
+            <div className="flex items-center gap-1">
+              <select
+                value={branch.value.type}
+                onChange={(e) => { handleStaticTypeChange(e.target.value as StaticValueBranch['type']); }}
+                aria-label="Output value type"
+                className="bg-zinc-800 border border-zinc-600 rounded px-1.5 py-1 text-xs text-zinc-300 focus:outline-none focus:border-blue-500 shrink-0"
+                data-testid={`${testIdPrefix}-static-type`}
+              >
+                <option value="string">Str</option>
+                <option value="number">Num</option>
+                <option value="boolean">Bool</option>
+                <option value="null">Null</option>
+              </select>
+              {branch.value.type === 'null' ? (
+                <span className="text-xs text-zinc-500 italic px-1">null</span>
+              ) : branch.value.type === 'boolean' ? (
+                <select
+                  value={String(branch.value.value)}
+                  onChange={(e) => {
+                    onChange({ kind: 'static', value: { type: 'boolean', value: e.target.value === 'true' } });
+                  }}
+                  aria-label="Output boolean value"
+                  className="flex-1 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+                  data-testid={`${testIdPrefix}-static-boolean`}
+                >
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              ) : (
+                <input
+                  type={branch.value.type === 'number' ? 'number' : 'text'}
+                  value={String(branch.value.value)}
+                  onChange={(e) => {
+                    if (branch.kind !== 'static') return;
+                    onChange({ kind: 'static', value: { ...branch.value, value: e.target.value } as StaticValueBranch });
+                  }}
+                  placeholder="Output value…"
+                  aria-label="Output value"
+                  className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+                  data-testid={`${testIdPrefix}-static-input`}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Use advanced expression link */}
+          <button
+            type="button"
+            onClick={() => { onChange({ kind: 'expression', raw: serializeBranchToText(branch) }); }}
+            className="text-[11px] text-zinc-500 hover:text-blue-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded"
+            data-testid={`${testIdPrefix}-expression-link`}
+          >
+            Use advanced expression
+          </button>
         </>
       )}
 
-      {branch.kind === 'source' && (
-        <input
-          type="text"
-          value={branch.path}
-          onChange={(e) => { onChange({ kind: 'source', path: e.target.value, steps: [] }); }}
-          placeholder="Field path…"
-          aria-label="Output field path"
-          className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
-          data-testid={`${testIdPrefix}-source-input`}
-        />
-      )}
-
-      {branch.kind === 'expression' && (
-        <input
-          type="text"
-          value={branch.raw}
-          onChange={(e) => { onChange({ kind: 'expression', raw: e.target.value }); }}
-          placeholder="DSL expression…"
-          aria-label="Output DSL expression"
-          className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
-          data-testid={`${testIdPrefix}-expression-input`}
-        />
+      {/* Expression mode */}
+      {isExpression && (
+        <div className="space-y-1">
+          <textarea
+            value={branch.raw}
+            onChange={(e) => { onChange({ kind: 'expression', raw: e.target.value }); }}
+            placeholder="Enter expression…"
+            aria-label="Output expression"
+            rows={2}
+            className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1.5 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 resize-none"
+            data-testid={`${testIdPrefix}-expression-input`}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (lastSimpleModeRef.current === 'source') {
+                onChange({ kind: 'source', path: '', steps: [] });
+              } else {
+                onChange({ kind: 'static', value: { type: 'string', value: '' } });
+              }
+            }}
+            className="text-[11px] text-zinc-500 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400 rounded px-1.5 py-0.5 border border-dashed border-zinc-700 hover:border-zinc-500"
+            data-testid={`${testIdPrefix}-back-to-simple`}
+          >
+            Back to simple input
+          </button>
+        </div>
       )}
     </div>
   );
@@ -234,12 +312,10 @@ export function ChainValueMapForm({
   stepIndex,
   step,
   onStepChange,
-  onRemoveStep,
+  onRemoveStep: _onRemoveStep,
   currentValueLabel = 'the current value',
   className,
 }: ChainValueMapFormProps) {
-  const [collapsed, setCollapsed] = useState(false);
-
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
@@ -250,10 +326,6 @@ export function ChainValueMapForm({
     },
     [stepIndex, step, onStepChange],
   );
-
-  const handleRemove = useCallback(() => {
-    onRemoveStep(stepIndex);
-  }, [stepIndex, onRemoveStep]);
 
   // -------------------------------------------------------------------------
   // Mapping row management
@@ -296,93 +368,26 @@ export function ChainValueMapForm({
   const applyDisabled = defaultEmpty;
 
   // -------------------------------------------------------------------------
-  // Collapsed summary
-  // -------------------------------------------------------------------------
-
-  if (collapsed) {
-    return (
-      <div
-        className={[
-          'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
-          className ?? '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-        data-testid={`chain-value-map-form-${stepIndex}`}
-      >
-        <button
-          type="button"
-          onClick={() => { setCollapsed(false); }}
-          className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-800/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
-          aria-label="Expand value map step"
-          data-testid={`chain-value-map-summary-${stepIndex}`}
-        >
-          <span className="flex-1 truncate font-mono text-[11px] text-slate-400">
-            {summarizeValueMapStep(step)}
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden="true" />
-        </button>
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Expanded form
+  // Render
   // -------------------------------------------------------------------------
 
   return (
     <div
-      className={[
-        'overflow-hidden rounded-lg border border-slate-700 bg-slate-900/60',
-        className ?? '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      className={['space-y-2', className ?? ''].filter(Boolean).join(' ')}
       data-testid={`chain-value-map-form-${stepIndex}`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-3 py-2">
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-            Value Map
-          </span>
-          <p
-            className="text-[11px] text-zinc-500 mt-0.5"
-            data-testid={`chain-value-map-header-label-${stepIndex}`}
-          >
-            When {currentValueLabel} equals:
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => { setCollapsed(true); }}
-            aria-label="Collapse value map step"
-            className="rounded p-0.5 text-slate-500 transition-colors hover:text-slate-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
-            data-testid={`chain-value-map-collapse-${stepIndex}`}
-          >
-            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={handleRemove}
-            aria-label="Remove value map step"
-            className="rounded p-0.5 text-slate-500 transition-colors hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
-            data-testid={`chain-value-map-remove-${stepIndex}`}
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
+      {/* Column headers */}
+      <div className="flex items-start gap-2 px-1">
+        <span
+          className="flex-1 text-xs font-semibold text-slate-300"
+          data-testid={`chain-value-map-header-label-${stepIndex}`}
+        >
+          When {currentValueLabel} equals:
+        </span>
+        <span className="w-4 text-[11px] text-slate-500 mt-0.5" aria-hidden="true">→</span>
+        <span className="flex-1 text-xs font-semibold text-slate-300">Output</span>
+        <span className="w-5" aria-hidden="true" />
       </div>
-
-      <div className="p-3 space-y-2">
-        {/* Column headers */}
-        <div className="flex items-center gap-2 px-1">
-          <span className="flex-1 text-[11px] text-slate-500">When equals</span>
-          <span className="w-4 text-[11px] text-slate-500" aria-hidden="true">→</span>
-          <span className="flex-1 text-[11px] text-slate-500">Output</span>
-          <span className="w-5" aria-hidden="true" />
-        </div>
 
         {/* Mapping rows */}
         <div
@@ -392,7 +397,7 @@ export function ChainValueMapForm({
           {step.mappings.map((mapping, i) => (
             <div
               key={i}
-              className="flex items-center gap-2"
+              className="flex items-start gap-2"
               data-testid={`chain-value-map-row-${stepIndex}-${i}`}
             >
               {/* Input value */}
@@ -402,26 +407,28 @@ export function ChainValueMapForm({
                 onChange={(e) => { handleRowWhenValueChange(i, e.target.value); }}
                 placeholder="Match value…"
                 aria-label={`Mapping ${i + 1} input value`}
-                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
+                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 mt-1"
                 data-testid={`chain-value-map-row-input-${stepIndex}-${i}`}
               />
 
               {/* Arrow */}
-              <span className="shrink-0 text-xs text-slate-500" aria-hidden="true">→</span>
+              <span className="shrink-0 text-xs text-slate-500 mt-2" aria-hidden="true">→</span>
 
               {/* Output value */}
-              <OutputValueEditor
-                branch={mapping.outputValue}
-                onChange={(b) => { handleRowOutputChange(i, b); }}
-                testIdPrefix={`chain-value-map-row-output-${stepIndex}-${i}`}
-              />
+              <div className="flex-1 min-w-0">
+                <OutputValueEditor
+                  branch={mapping.outputValue}
+                  onChange={(b) => { handleRowOutputChange(i, b); }}
+                  testIdPrefix={`chain-value-map-row-output-${stepIndex}-${i}`}
+                />
+              </div>
 
               {/* Remove row */}
               <button
                 type="button"
                 onClick={() => { handleRemoveRow(i); }}
                 aria-label={`Remove mapping row ${i + 1}`}
-                className="shrink-0 text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors"
+                className="shrink-0 text-zinc-500 hover:text-red-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded p-0.5 transition-colors mt-1"
                 data-testid={`chain-value-map-row-remove-${stepIndex}-${i}`}
               >
                 <X className="h-3 w-3" aria-hidden="true" />
@@ -446,13 +453,15 @@ export function ChainValueMapForm({
           className="space-y-1 border-t border-slate-700/50 pt-2"
           data-testid={`chain-value-map-default-${stepIndex}`}
         >
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 text-xs font-semibold text-slate-400">Default →</span>
-            <OutputValueEditor
-              branch={step.defaultValue}
-              onChange={(b) => { update({ defaultValue: b }); }}
-              testIdPrefix={`chain-value-map-default-output-${stepIndex}`}
-            />
+          <div className="flex items-start gap-2">
+            <span className="shrink-0 text-xs font-semibold text-slate-400 mt-1">Default →</span>
+            <div className="flex-1 min-w-0">
+              <OutputValueEditor
+                branch={step.defaultValue}
+                onChange={(b) => { update({ defaultValue: b }); }}
+                testIdPrefix={`chain-value-map-default-output-${stepIndex}`}
+              />
+            </div>
           </div>
           {defaultEmpty && (
             <p
@@ -475,7 +484,6 @@ export function ChainValueMapForm({
             Set a default value to apply.
           </p>
         )}
-      </div>
     </div>
   );
 }

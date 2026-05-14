@@ -341,8 +341,8 @@ export function createEmptyConditionStep(): ConditionLogicStep {
     customLeftOperand: undefined,
     operator: 'eq',
     rightOperand: { kind: 'literal', value: '' },
-    thenBranch: { kind: 'expression', raw: '' },
-    elseBranch: { kind: 'expression', raw: '' },
+    thenBranch: { kind: 'static', value: { type: 'string', value: '' } },
+    elseBranch: { kind: 'static', value: { type: 'string', value: '' } },
     elseIfSteps: [],
   };
 }
@@ -354,8 +354,8 @@ export function createEmptyConditionStep(): ConditionLogicStep {
 export function createEmptyValueMapStep(): ValueMapLogicStep {
   return {
     kind: 'valueMap',
-    mappings: [{ whenValue: '', outputValue: { kind: 'expression', raw: '' } }],
-    defaultValue: { kind: 'expression', raw: '' },
+    mappings: [{ whenValue: '', outputValue: { kind: 'static', value: { type: 'string', value: '' } } }],
+    defaultValue: { kind: 'static', value: { type: 'string', value: '' } },
   };
 }
 

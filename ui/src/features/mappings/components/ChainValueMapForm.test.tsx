@@ -108,13 +108,6 @@ describe('ChainValueMapForm — rendering', () => {
 // ---------------------------------------------------------------------------
 
 describe('ChainValueMapForm — interactions', () => {
-  it('remove button fires onRemoveStep with correct index', () => {
-    const onRemoveStep = vi.fn();
-    renderForm({ stepIndex: 2, onRemoveStep });
-    fireEvent.click(screen.getByTestId('chain-value-map-remove-2'));
-    expect(onRemoveStep).toHaveBeenCalledWith(2);
-  });
-
   it('AE-09: [+ Add case] adds a new mapping row', () => {
     const onStepChange = vi.fn();
     renderForm({ step: makeStep({ mappings: [] }), onStepChange });
@@ -156,18 +149,6 @@ describe('ChainValueMapForm — interactions', () => {
     );
   });
 
-  it('collapse button shows summary', () => {
-    renderForm({
-      step: makeStep({
-        mappings: [makeRow('A', 'Active')],
-        defaultValue: makeFilledBranch('Unknown'),
-      }),
-    });
-    fireEvent.click(screen.getByTestId('chain-value-map-collapse-0'));
-    expect(screen.getByTestId('chain-value-map-summary-0')).toBeInTheDocument();
-    expect(screen.queryByTestId('chain-value-map-rows-0')).not.toBeInTheDocument();
-  });
-
   it('AE-09: clicking collapsed summary expands', () => {
     renderForm({
       step: makeStep({
@@ -175,8 +156,7 @@ describe('ChainValueMapForm — interactions', () => {
         defaultValue: makeFilledBranch('Unknown'),
       }),
     });
-    fireEvent.click(screen.getByTestId('chain-value-map-collapse-0'));
-    fireEvent.click(screen.getByTestId('chain-value-map-summary-0'));
+    // CollapsibleStepContainer handles expand/collapse — form is always in expanded state
     expect(screen.getByTestId('chain-value-map-rows-0')).toBeInTheDocument();
   });
 });

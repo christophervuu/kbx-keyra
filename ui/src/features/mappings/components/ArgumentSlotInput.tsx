@@ -370,6 +370,10 @@ function resolveTransformParameter(functionName: string, index: number): Functio
  * A single argument slot in the ArgumentForm.
  * Supports source mode (with optional nested transform) and literal mode
  * (freeform text or dropdown when hints are available).
+ *
+ * @deprecated Use `ParameterValueInput` (FS-053) for new parameter editing surfaces.
+ * `ArgumentSlotInput` is retained for the filter/find `ConditionRowEditor` carve-out
+ * and for legacy `GuidedBuilder` / `ArgumentConfigurator` surfaces in Rules View.
  */
 export function ArgumentSlotInput({
   slotIndex,

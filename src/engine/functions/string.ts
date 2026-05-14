@@ -46,7 +46,7 @@ const replaceAllSignature: FunctionSignature = {
   parameters: [
     { name: 'value', type: 'string', required: true },
     { name: 'search', type: 'string', required: true },
-    { name: 'replacement', type: 'string', required: true },
+    { name: 'replacement', type: 'string', required: false },
   ],
   returnType: 'string',
 };
@@ -109,7 +109,7 @@ const replaceImplementation: FunctionImplementation = (args: readonly unknown[])
 };
 
 const replaceAllImplementation: FunctionImplementation = (args: readonly unknown[]): unknown => {
-  return (args[0] as string).replaceAll(args[1] as string, args[2] as string);
+  return (args[0] as string).replaceAll(args[1] as string, (args[2] as string | undefined) ?? '');
 };
 
 const containsImplementation: FunctionImplementation = (args: readonly unknown[]): unknown => {

@@ -149,8 +149,9 @@ ui/src/
         UnsavedChangesOverlay.tsx FS-039 T-10 right-side drawer: role="dialog", aria-modal, focus trap, Escape key close, backdrop dismiss; changes grouped Modified→Added→Removed; each entry: clickable field path (navigate + close), saved vs draft expression, Revert button; empty state
         SourceChipPicker.tsx  Value-mode source chip picker with search and static-value toggle (FS-023)
         SourceCard.tsx        FS-029/FS-030 Source Card builder surface: DirectCopy + SourceWithTransform chain pipeline, per-step argument rendering, add/remove step actions, and type-compatible add-step picker wiring
-        ArgumentForm.tsx      Parameter-driven argument editor used by FunctionCall and per-step SourceCard chain forms; supports implicit-first-arg offset and variadic slots
-        ArgumentSlotInput.tsx Single-slot editor (source/literal/expression) with optional nested source inline transform (single-step chain shape in slot transform)
+        ArgumentForm.tsx      Parameter-driven argument editor used by FunctionCall and per-step SourceCard chain forms; supports implicit-first-arg offset and variadic slots; delegates to ParameterValueInput per slot (FS-053); retains ArgumentSlotInput for forceConditionEditor carve-out (filter/find condition param)
+        ParameterValueInput.tsx Intent-based parameter value input (Source/Static/Item/Options/Expression-secondary); replaces ArgumentSlotInput for function parameter editing (FS-053); Options mode driven by PARAMETER_HINTS registry; emits same ArgumentSlot shapes as ArgumentSlotInput
+        ArgumentSlotInput.tsx DEPRECATED — retained for legacy GuidedBuilder/NestedFunctionBuilder and forceConditionEditor (filter/find condition param) carve-out; new surfaces use ParameterValueInput (FS-053)
         ConnectorPrompt.tsx   Pending-connector surface for 2+ selected sources awaiting a combining function (FunctionCall transition)
         BuilderEntryActions.tsx Empty-state entry actions ([+ Add Source] / [+ Add Transformation]) for Source Card flow
         TransformPipeline.tsx  Value-mode ordered transform chain (add/remove/reorder) (FS-023)
@@ -701,6 +702,42 @@ After FS-051, the only differences between the two builders are data-model-speci
 - Item template layer (array only)
 - Result preview (ArrayResultPreview vs scalar expression preview)
 - Action row AI buttons (scalar only, capability-driven)
+
+### Intent-Based Parameter Input Model (FS-053)
+
+`ParameterValueInput` is the canonical component for editing a single function parameter slot in the chain builder and mapping editor. It replaces the legacy `source | literal | expression` triple toggle with a user-facing intent model.
+
+#### Primary modes
+
+| Mode | Shown when | Emitted ArgumentSlot |
+|---|---|---|
+| **Source** | Always | `makeSourceSlot(path)` |
+| **Static** | Always | `makeLiteralSlot(value)` |
+| **Options** | `PARAMETER_HINTS` entry exists for this param | `makeLiteralSlot(selectedOption)` |
+| **Item** | Array context active | `makeExpressionSlot({ functionName: 'item', slots: [makeLiteralSlot(path)] })` |
+
+#### Secondary mode
+
+- **Expression** — advanced escape hatch; rendered as an inline link below the mode toggle, not a primary button. Emits `makeExpressionSlot(...)`.
+
+#### Options resolution
+
+Options mode is driven by the `PARAMETER_HINTS` registry (`ui/src/lib/data/parameter-hints.ts`):
+- `EnumParameterHint` → `allowCustom: false` (strict enum; Source/Static toggle suppressed)
+- `TokenParameterHint` → `allowCustom: hint.allowFreeform ?? true`
+- ≤6 values → chip list (`OptionsChipList`); >6 values → searchable dropdown (`OptionsDropdown`)
+- `parameterHintToOptions(hint)` converts a hint to `ParameterOptions`; exported from `ParameterValueInput.tsx`
+
+#### Empty string handling
+
+- Untouched required slot: amber "Required" badge (no validation noise before interaction)
+- Interacted + empty required slot: softer "Leave blank to use an empty string" hint
+- Optional empty slot: "Empty = blank text (empty string)" hint
+- `hasInteracted` state set on `onBlur` / `onChange`
+
+#### ArgumentForm integration
+
+`ArgumentForm` delegates to `ParameterValueInput` for each standard slot. The `forceConditionEditor` carve-out (filter/find `condition` parameter) continues to render via `ArgumentSlotInput` with `forceConditionEditor={true}` — condition parsing helpers are private to `ArgumentSlotInput`.
 
 ### Auto-Map Review Workspace Architecture (FS-046 → FS-048)
 

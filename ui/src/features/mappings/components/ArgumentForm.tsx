@@ -4,9 +4,10 @@
  *
  * Responsibilities:
  *   - Looks up the function in DSL_FUNCTION_CATALOG to get parameter definitions.
- *   - Renders one ArgumentSlotInput per slot.
- *   - Resolves PARAMETER_HINTS for known-value dropdowns (cast.targetType,
- *     formatDate format params, etc.) via the parameter-hints registry (T-04).
+ *   - Renders one ParameterValueInput per slot (FS-053 T-04).
+ *   - Resolves PARAMETER_HINTS for Options mode via parameterHintToOptions.
+ *   - For filter/find condition parameters, renders ConditionRowEditor directly
+ *     (forceConditionEditor carve-out — not routed through ParameterValueInput).
  *   - For variadic functions, renders a [+ Add value] button to append slots.
  *   - Emits the full updated ArgumentSlot[] on every change.
  *
@@ -21,15 +22,19 @@
 import { Plus } from 'lucide-react';
 import { useCallback } from 'react';
 
+import { ParameterValueInput, parameterHintToOptions } from './ParameterValueInput';
 import { ArgumentSlotInput } from './ArgumentSlotInput';
-import type { SlotHint } from './ArgumentSlotInput';
 import type { SchemaPathEntry } from '../lib/autocomplete-utils';
 import type { ArgumentSlot } from '../lib/expression-builder-state';
 import { makeExpressionSlot, makeSourceSlot, makeLiteralSlot } from '../lib/expression-builder-state';
 
 import { DSL_FUNCTION_CATALOG } from '@/lib/data/dsl-functions';
 import type { FunctionCatalogEntry, FunctionCatalogParameter } from '@/lib/data/dsl-functions';
-import { getParameterHint, hintToSlotOptions } from '@/lib/data/parameter-hints';
+import { getParameterHint } from '@/lib/data/parameter-hints';
+import type { ParameterOptions } from './ParameterValueInput';
+
+// Re-export for consumers that previously imported from here
+export type { ParameterOptions };
 
 type PreferredInputMode = 'source' | 'literal';
 
@@ -246,17 +251,13 @@ function getParameterPresentation(functionName: string, parameterName: string): 
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves a SlotHint for a given (functionName, parameterName) pair using
- * the PARAMETER_HINTS registry. Returns undefined when no hint is registered.
+ * Resolves a ParameterOptions for a given (functionName, parameterName) pair
+ * using the PARAMETER_HINTS registry. Returns undefined when no hint exists.
  */
-function getHint(functionName: string, paramName: string): SlotHint | undefined {
+function resolveOptions(functionName: string, paramName: string): ParameterOptions | undefined {
   const hint = getParameterHint(functionName, paramName);
   if (!hint) return undefined;
-  const options = hintToSlotOptions(hint);
-  return {
-    options,
-    allowFreeform: hint.type === 'tokens' ? (hint.allowFreeform ?? true) : false,
-  };
+  return parameterHintToOptions(hint);
 }
 
 // ---------------------------------------------------------------------------
@@ -451,27 +452,47 @@ export function ArgumentForm({
           const param = getParamForSlot(entry, index, parameterOffset);
           if (!param) return null;
 
-          const hint = getHint(functionName, param.name);
           const presentation = getParameterPresentation(functionName, param.name);
           const isVariadicExtra = index >= entry.parameters.length;
           const canRemove = hasVariadic && isVariadicExtra;
           const forceConditionEditor = isFilterConditionFunction && param.name === 'condition';
 
+          // forceConditionEditor carve-out: filter/find condition parameter uses
+          // ConditionRowEditor via ArgumentSlotInput — not routed through ParameterValueInput.
+          if (forceConditionEditor) {
+            return (
+              <ArgumentSlotInput
+                key={index}
+                slotIndex={index}
+                slot={slot}
+                parameter={param}
+                displayName={presentation.label}
+                description={presentation.description}
+                sourceOptions={sourceOptions}
+                forceConditionEditor
+                conditionArrayPath={conditionArrayPath}
+                onSlotChange={(updated) => { handleSlotChange(index, updated); }}
+                onRemove={canRemove ? () => { handleRemoveSlot(index); } : undefined}
+                exampleHint={entry.example}
+              />
+            );
+          }
+
+          const options = resolveOptions(functionName, param.name);
+
           return (
-            <ArgumentSlotInput
+            <ParameterValueInput
               key={index}
-              slotIndex={index}
               slot={slot}
               parameter={param}
-              displayName={presentation.label}
+              label={presentation.label}
               description={presentation.description}
-              hint={hint}
+              options={options}
               sourceOptions={sourceOptions}
-              forceConditionEditor={forceConditionEditor}
-              conditionArrayPath={conditionArrayPath}
               onSlotChange={(updated) => { handleSlotChange(index, updated); }}
               onRemove={canRemove ? () => { handleRemoveSlot(index); } : undefined}
-              exampleHint={entry.example}
+              placeholder={entry.example}
+              testIdPrefix={`argument-slot-input-${index}`}
             />
           );
         })}

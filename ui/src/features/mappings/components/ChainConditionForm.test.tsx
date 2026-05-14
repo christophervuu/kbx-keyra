@@ -91,21 +91,23 @@ describe('ChainConditionForm — rendering', () => {
   });
 
   it('left operand defaults to current value label', () => {
-    renderForm();
-    expect(screen.getByTestId('chain-condition-if-0-left-current-value')).toBeInTheDocument();
+    renderForm({ currentValueLabel: 'priority field' });
+    expect(screen.getByTestId('chain-condition-if-0-left-current-value')).toHaveTextContent('priority field');
   });
 
-  it('shows "Change input" affordance when using current value', () => {
+  it('does not show "Change input" affordance', () => {
     renderForm();
-    expect(screen.getByTestId('chain-condition-if-0-change-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('chain-condition-if-0-change-input')).not.toBeInTheDocument();
   });
 
-  it('branch value selector supports static, source, expression kinds', () => {
+  it('branch value selector supports source and static kinds (expression via link)', () => {
     renderForm();
     const thenToggle = screen.getByTestId('chain-condition-then-branch-0-kind-toggle');
-    expect(thenToggle.querySelector('[data-testid="chain-condition-then-branch-0-kind-static"]')).toBeInTheDocument();
     expect(thenToggle.querySelector('[data-testid="chain-condition-then-branch-0-kind-source"]')).toBeInTheDocument();
-    expect(thenToggle.querySelector('[data-testid="chain-condition-then-branch-0-kind-expression"]')).toBeInTheDocument();
+    expect(thenToggle.querySelector('[data-testid="chain-condition-then-branch-0-kind-static"]')).toBeInTheDocument();
+    // expression is a secondary link, not in the primary toggle
+    expect(thenToggle.querySelector('[data-testid="chain-condition-then-branch-0-kind-expression"]')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chain-condition-then-branch-0-expression-link')).toBeInTheDocument();
   });
 
   it('else supports null value type', () => {
@@ -143,36 +145,6 @@ describe('ChainConditionForm — rendering', () => {
 // ---------------------------------------------------------------------------
 
 describe('ChainConditionForm — interactions', () => {
-  it('remove button fires onRemoveStep with correct index', () => {
-    const onRemoveStep = vi.fn();
-    renderForm({ stepIndex: 1, onRemoveStep });
-    fireEvent.click(screen.getByTestId('chain-condition-remove-1'));
-    expect(onRemoveStep).toHaveBeenCalledWith(1);
-  });
-
-  it('"Change input" switches left operand from current value to custom', () => {
-    const onStepChange = vi.fn();
-    renderForm({ onStepChange });
-    fireEvent.click(screen.getByTestId('chain-condition-if-0-change-input'));
-    expect(onStepChange).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({ useCurrentValue: false }),
-    );
-  });
-
-  it('"Use current value" restores current value operand', () => {
-    const onStepChange = vi.fn();
-    renderForm({
-      step: makeStep({ useCurrentValue: false, customLeftOperand: { kind: 'source', path: 'x' } }),
-      onStepChange,
-    });
-    fireEvent.click(screen.getByTestId('chain-condition-if-0-use-current-value'));
-    expect(onStepChange).toHaveBeenCalledWith(
-      0,
-      expect.objectContaining({ useCurrentValue: true }),
-    );
-  });
-
   it('operator change fires onStepChange', () => {
     const onStepChange = vi.fn();
     renderForm({ onStepChange });
@@ -195,27 +167,14 @@ describe('ChainConditionForm — interactions', () => {
     );
   });
 
-  it('collapse button hides form and shows summary', () => {
+  it('form is always in expanded state (no collapse UI)', () => {
     renderForm({
       step: makeStep({
         thenBranch: makeFilledBranch('yes'),
         elseBranch: makeFilledBranch('no'),
       }),
     });
-    fireEvent.click(screen.getByTestId('chain-condition-collapse-0'));
-    expect(screen.getByTestId('chain-condition-summary-0')).toBeInTheDocument();
-    expect(screen.queryByTestId('chain-condition-if-0')).not.toBeInTheDocument();
-  });
-
-  it('AE-08: clicking collapsed summary expands for editing', () => {
-    renderForm({
-      step: makeStep({
-        thenBranch: makeFilledBranch('yes'),
-        elseBranch: makeFilledBranch('no'),
-      }),
-    });
-    fireEvent.click(screen.getByTestId('chain-condition-collapse-0'));
-    fireEvent.click(screen.getByTestId('chain-condition-summary-0'));
+    expect(screen.queryByTestId('chain-condition-collapse-0')).not.toBeInTheDocument();
     expect(screen.getByTestId('chain-condition-if-0')).toBeInTheDocument();
   });
 });
