@@ -15,6 +15,7 @@ import { ChevronDown, ChevronRight, Database, Minus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { ItemTemplateEditor } from './ItemTemplateEditor';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 import type { ItemFieldMapping } from '../lib/array-builder-state';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { MergeBranch } from '../lib/array-builder-state';
@@ -220,21 +221,16 @@ export function MergeBranchEditor({
                     data-testid={`branch-source-option-${branchIndex}-${path}`}
                     onClick={() => { handleSelect(path); }}
                     className={[
-                      'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs transition-colors',
+                      'flex w-full items-center rounded px-2.5 py-1.5 text-left text-xs transition-colors',
                       'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
                       path === branch.sourceArrayPath
-                        ? 'bg-blue-950/50 text-blue-300 ring-1 ring-inset ring-blue-700/60'
-                        : 'text-slate-300 hover:bg-slate-700/60 hover:text-slate-100',
+                        ? 'bg-blue-950/50 ring-1 ring-inset ring-blue-700/60'
+                        : 'hover:bg-slate-700/60',
                     ].join(' ')}
                   >
-                    <Database
-                      size={11}
-                      aria-hidden="true"
-                      className={path === branch.sourceArrayPath ? 'text-blue-400' : 'text-slate-500'}
-                    />
-                    <span className="min-w-0 flex-1 truncate font-mono">{path}</span>
+                    <SourceFieldOptionRow path={path} type="array" />
                     {path === branch.sourceArrayPath && (
-                      <span className="shrink-0 text-[10px] font-medium text-blue-400">Selected</span>
+                      <span className="ml-1 shrink-0 text-[10px] font-medium text-blue-400">Selected</span>
                     )}
                   </button>
                 ))

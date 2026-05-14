@@ -55,6 +55,7 @@ import { generateChainExpression } from '../lib/chain-expression-generator';
 import { decomposeToChain } from '../lib/chain-decomposer';
 import { getCompatibleChainableTransforms } from '../lib/transform-chain-utils';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import type { SchemaPathEntry } from '../lib/autocomplete-utils';
 import { summarizeStep } from '../lib/chain-summary';
 import type { ParsedSchema } from '@/lib/types/domain';
 import { DSL_FUNCTION_CATALOG } from '@/lib/data/dsl-functions';
@@ -223,7 +224,7 @@ function TransformStepBody({
   step: FS039TransformStep;
   index: number;
   onFunctionChange: (functionName: string) => void;
-  sourceOptions: readonly string[];
+  sourceOptions: readonly SchemaPathEntry[];
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const catalogEntry = DSL_FUNCTION_CATALOG.find((e) => e.name === step.functionName);
@@ -514,7 +515,7 @@ export function ChainBuilder({
   // Derived values
   // -------------------------------------------------------------------------
 
-  const sourceOptions = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema).map((e) => e.path) : [];
+  const sourceOptions = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [];
   const canAddStep = isSourceSet(chain) && isLastStepComplete(chain.steps);
   const outputType = getLastStepOutputType(chain);
   const compatibleTransforms = getCompatibleChainableTransforms(outputType);

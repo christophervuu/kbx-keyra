@@ -36,7 +36,7 @@ Rev: 1
 
 ## Summary
 
-Standardize every source-field dropdown/listbox option row across the mappings feature to a single shared layout: `[TYPE BADGE] [PROPERTY NAME] [TEST DATA] [SCOPE]`. The leading icon is replaced by a compact 3-letter type badge (e.g., STR, NUM, ARR). When test data is loaded (via PreviewContext), the resolved value for each field is shown inline in smaller/muted text. Scope labels (item, parent, root) remain right-aligned when applicable.
+Standardize every source-field dropdown/listbox option row across the mappings feature to a single shared layout: `[TYPE BADGE] [PROPERTY NAME] [TEST DATA] [SCOPE]`. The leading icon is replaced by a compact type badge using the existing abbreviation codes (`str`, `num`, `int`, `bool`, `obj`, `arr`, etc.) and per-type color scheme already established in `SourceSchemaPanel` / `TargetFieldRow`. When test data is loaded (via PreviewContext), the resolved value for each field is shown inline in smaller/muted text — objects and arrays are serialized as single-line JSON, truncated at ~30 chars with `...`. Scope labels (item, parent, root) remain right-aligned when applicable.
 
 ---
 
@@ -60,8 +60,8 @@ This makes it harder for users to distinguish field types at a glance, forces un
 After this change:
 
 1. Every source-field dropdown option row uses the same shared renderer component with a consistent 4-zone layout
-2. Type is communicated via a clear 3-letter uppercase badge (STR, NUM, INT, BOL, ARR, OBJ, NUL, ANY)
-3. When test/source data is loaded, the resolved value for each field path is shown inline in smaller muted text — giving immediate feedback about what data a field holds
+2. Type is communicated via a compact colored badge using the existing abbreviation codes and per-type color scheme (str=blue, num=green, bool=purple, arr=amber, obj=slate, etc.)
+3. When test/source data is loaded, the resolved value for each field path is shown inline in smaller muted text — giving immediate feedback about what data a field holds. Objects/arrays display as single-line JSON truncated with `...`.
 4. Scope information (item, parent, root) is right-aligned when applicable
 5. A single shared utility/component is the source of truth — no duplication
 
@@ -196,26 +196,28 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 ### User Flow
 
 1. User opens any source-field dropdown/listbox anywhere in the Mapping Editor
-2. Each option row displays: `[3-letter TYPE badge] [field path] [test data preview] [scope badge]`
-3. The TYPE badge is a compact colored pill (e.g., `STR` on blue, `NUM` on purple, `ARR` on amber)
-4. If test data is loaded (via PreviewContext), the resolved value for that field path appears in smaller, muted text to the right of the field path
+2. Each option row displays: `[type badge] [field path] [test data preview] [scope badge]`
+3. The TYPE badge is a compact colored pill using the existing per-type color scheme (e.g., `str` on blue, `num` on green, `arr` on amber) — same colors as SourceSchemaPanel and TargetFieldRow
+4. If test data is loaded (via PreviewContext), the resolved value for that field path appears in smaller, muted text to the right of the field path. Object/array values are serialized as single-line JSON, truncated with `...` at ~30 chars.
 5. If the field has a scope context (item, parent, root), it appears right-aligned
-6. Selected chips/pills in SourceFieldPicker and SourceChipPicker also use the 3-letter badge instead of single-char glyph
+6. Selected chips/pills in SourceFieldPicker and SourceChipPicker also use the type badge instead of single-char glyph
 7. Search continues to filter by field path (not by type badge text or test data)
 
 ### System Behavior
 
 - `SourceFieldOptionRow` receives: `{ path, type, testValue?, scope? }`
-- `SOURCE_TYPE_BADGES` maps schema types to 3-letter codes:
-  - `string` → `STR`
-  - `number` → `NUM`
-  - `integer` → `INT`
-  - `boolean` → `BOL`
-  - `object` → `OBJ`
-  - `array` → `ARR`
-  - `null` → `NUL`
-  - fallback → `ANY`
-- `resolveFieldTestValue(sourceData, path)` navigates dot-path into sourceData object and returns a display-ready string (truncated to ~30 chars if longer)
+- `SOURCE_TYPE_BADGES` reuses the existing color scheme from `SourceSchemaPanel` / `TargetFieldRow` / `ScalarFieldBuilder` (already consistent across the codebase) and the existing `TYPE_ABBREV` codes from `SourceSchemaPanel`:
+  - `string` → code: `str`, className: `bg-blue-900/60 text-blue-300`
+  - `number` → code: `num`, className: `bg-green-900/60 text-green-300`
+  - `integer` → code: `int`, className: `bg-green-900/60 text-green-300`
+  - `boolean` → code: `bool`, className: `bg-purple-900/60 text-purple-300`
+  - `object` → code: `obj`, className: `bg-slate-700/80 text-slate-300`
+  - `array` → code: `arr`, className: `bg-amber-900/60 text-amber-300`
+  - `null` → code: `null`, className: `bg-slate-800/60 text-slate-500`
+  - `enum` → code: `enum`, className: `bg-blue-900/60 text-blue-300`
+  - `any` / fallback → code: `any`, className: `bg-slate-700/80 text-slate-300`
+  - `union` → code: `|`, className: `bg-slate-700/80 text-slate-300`
+- `resolveFieldTestValue(sourceData, path)` navigates dot-path into sourceData object and returns a display-ready string (truncated to ~30 chars if longer). For object/array values, serializes inline as a single-line JSON string with `...` appended when truncated (e.g., `{"city":"SF","zip":"941...` or `[1,2,3,4,5,6,7,8,9,...`).
 - Components that render source options consume `PreviewContext` to get `sourceData`, then pass resolved test values to `SourceFieldOptionRow`
 - `SourceFieldOptionRow` renders nothing for `testValue` when it is `undefined` or `null`
 
@@ -223,15 +225,15 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ [STR]  address.city   "San Francisco"                   [item]  │
+│ [str]  address.city   "San Francisco"                   [item]  │
 │ badge  path           test data (smaller/muted)       scope     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- Badge: `inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-mono uppercase tracking-wider`
-- Path: `text-sm font-mono text-slate-200`
-- Test data: `text-xs text-slate-500 truncate max-w-[120px]` — only rendered when non-null
-- Scope: `ml-auto text-[10px] font-medium text-slate-500 uppercase`
+- Badge: `shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium` + per-type color class (matches existing `TYPE_BADGE_CLASSES` pattern used by TargetFieldRow, ScalarFieldBuilder, etc.)
+- Path: `text-sm font-mono text-slate-200 truncate`
+- Test data: `text-xs text-slate-500 truncate max-w-[140px]` — only rendered when non-null
+- Scope: `ml-auto text-[10px] font-medium text-slate-500 uppercase shrink-0`
 
 ### Failure / Edge Behavior
 
@@ -239,8 +241,8 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 - **Source data not loaded:** test data column is simply omitted (renders nothing) — option rows still show type + path + scope
 - **Field path not resolvable in source data:** test data shows nothing for that row (graceful fallback)
 - **Deeply nested paths:** dot-path resolution handles intermediate nulls by returning undefined
-- **Very long test data values:** truncated with ellipsis (max ~30 chars visible)
-- **Unknown type:** badge renders `ANY` with neutral gray styling
+- **Very long test data values:** truncated with `...` appended (max ~30 chars visible). Objects and arrays are serialized as single-line JSON then truncated.
+- **Unknown type:** badge renders `any` with neutral gray styling
 
 ---
 
@@ -255,10 +257,10 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 - User opens ChainSourceCard dropdown
 
 **Then**
-- Option for `name` shows badge `STR`
-- Option for `age` shows badge `NUM`
-- Option for `active` shows badge `BOL`
-- Option for `tags` shows badge `ARR`
+- Option for `name` shows badge `str`
+- Option for `age` shows badge `num`
+- Option for `active` shows badge `bool`
+- Option for `tags` shows badge `arr`
 - No single-char icons (S, #, ✓, []) are visible
 
 ### AE-02 — Test data displayed when loaded
@@ -271,7 +273,7 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 - User opens any source-field picker
 
 **Then**
-- Option for `email` shows: `[STR] email  "test@example.com"`
+- Option for `email` shows: `[str] email  "test@example.com"`
 - Test data text is visually smaller and muted compared to the field path
 
 ### AE-03 — Test data absent when not loaded
@@ -284,7 +286,7 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 - User opens any source-field picker
 
 **Then**
-- Option for `email` shows: `[STR] email`
+- Option for `email` shows: `[str] email`
 - No test data text is visible
 - Layout does not break or leave empty gaps
 
@@ -312,7 +314,7 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 - User opens source-field picker
 
 **Then**
-- Test data text shows approximately first 30 characters with ellipsis: `"This is a very long descript…"`
+- Test data text shows approximately first 30 characters with `...` appended: `"This is a very long descript...`
 - Layout does not overflow or wrap
 
 ### AE-06 — Chips/pills use 3-letter badge
@@ -321,7 +323,7 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 - User has selected field `email` (string) in SourceChipPicker
 
 **Then**
-- The selected chip shows `STR` badge, not `S` glyph
+- The selected chip shows `str` badge, not `S` glyph
 - Badge styling matches the dropdown option row badge
 
 ### AE-07 — Native select converted to custom dropdown
@@ -341,9 +343,12 @@ This is rendered as a `<span className="text-xs font-mono">` leading each option
 
 ## Open Questions
 
-- `Q1.` Should the 3-letter badge have per-type color coding (e.g., STR=blue, NUM=purple, ARR=amber) or a single neutral color? (Draft assumes per-type colors.)
-- `Q2.` Should test data for object/array types show a preview (e.g., `{3 keys}`, `[5 items]`) or just be omitted? (Draft assumes brief structural preview.)
-- `Q3.` For the `ConditionStepEditor` field pickers — are there additional scope contexts beyond item/parent that need labels? (Draft assumes only item/parent/root.)
+- none
+
+**Resolved:**
+- `Q1.` Per-type color coding — **YES**, reuse the existing `TYPE_BADGE_CLASSES` / `TYPE_COLORS` color scheme already established in `SourceSchemaPanel`, `TargetFieldRow`, `ScalarFieldBuilder`, and `ObjectSummaryPanel` (blue=string, green=number, purple=boolean, amber=array, slate=object/null).
+- `Q2.` Object/array test data display — serialize as single-line JSON string and truncate at ~30 chars with `...` appended (e.g., `{"city":"SF","zip":"941...` or `[1,2,3,4,5,6,...`). Do not use structural summaries like `{3 keys}`.
+- `Q3.` Additional scope contexts — **NO**, only item/parent/root scopes are applicable.
 
 ---
 
@@ -383,3 +388,6 @@ Tasks 2–5 depend on Task 1. Tasks 2–5 are parallelizable after Task 1 comple
 
 - Rev 1 — 2026-05-14
   - Initial draft
+  - Q1 resolved: use existing per-type colors from SourceSchemaPanel/TargetFieldRow
+  - Q2 resolved: serialize object/array test data as single-line JSON, truncate with `...`
+  - Q3 resolved: only item/parent/root scopes applicable

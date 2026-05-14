@@ -1,8 +1,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SourceFieldPicker } from './SourceFieldPicker';
+import { PreviewProvider, usePreviewSetters } from '../context/preview-context';
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -215,5 +217,88 @@ describe('SourceFieldPicker — static value mode', () => {
     renderPicker({ staticMode: true, onStaticModeChange });
     fireEvent.click(screen.getByRole('button', { name: /Use source field instead/i }));
     expect(onStaticModeChange).toHaveBeenCalledWith(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-052 T-02: type badges + test data
+// ---------------------------------------------------------------------------
+
+/** Seeds PreviewContext with a parsed sourceData value */
+function WithSourceData({
+  sourceData,
+  children,
+}: {
+  sourceData: unknown | null;
+  children: React.ReactNode;
+}) {
+  const { setSourceData } = usePreviewSetters();
+  useEffect(() => {
+    setSourceData(sourceData);
+  }, [sourceData, setSourceData]);
+  return <>{children}</>;
+}
+
+function renderPickerWithContext(
+  overrides: Partial<React.ComponentProps<typeof SourceFieldPicker>> = {},
+  sourceData: unknown | null = null,
+) {
+  const defaults: React.ComponentProps<typeof SourceFieldPicker> = {
+    parsedSourceSchema: MOCK_SCHEMA,
+    selectedFields: [],
+    onFieldSelect: vi.fn(),
+    onFieldRemove: vi.fn(),
+    staticMode: false,
+    onStaticModeChange: vi.fn(),
+    staticValue: '',
+    staticType: 'string',
+    onStaticValueChange: vi.fn(),
+    onStaticTypeChange: vi.fn(),
+  };
+  return render(
+    <PreviewProvider>
+      <WithSourceData sourceData={sourceData}>
+        <SourceFieldPicker {...defaults} {...overrides} />
+      </WithSourceData>
+    </PreviewProvider>,
+  );
+}
+
+describe('SourceFieldPicker — FS-052 T-02 type badges and test data', () => {
+  it('renders 3-letter type badge (str) in suggestion dropdown for string fields', async () => {
+    const user = userEvent.setup();
+    renderPickerWithContext();
+    await user.click(screen.getByRole('combobox', { name: 'Search source fields' }));
+    // customer.name is type string → badge code 'str'
+    expect(screen.getAllByText('str').length).toBeGreaterThan(0);
+  });
+
+  it('renders 3-letter type badge (num) in suggestion dropdown for number fields', async () => {
+    const user = userEvent.setup();
+    renderPickerWithContext();
+    await user.click(screen.getByRole('combobox', { name: 'Search source fields' }));
+    // customer.age is type number → badge code 'num'
+    expect(screen.getByText('num')).toBeInTheDocument();
+  });
+
+  it('shows resolved test value in dropdown when PreviewContext has sourceData', async () => {
+    const user = userEvent.setup();
+    renderPickerWithContext({}, { customer: { name: 'Alice', age: 30 }, orderId: 'ORD-1' });
+    await user.click(screen.getByRole('combobox', { name: 'Search source fields' }));
+    // customer.name resolves to "Alice" → displayed as '"Alice"'
+    expect(screen.getByText('"Alice"')).toBeInTheDocument();
+  });
+
+  it('does not show test data zone when PreviewContext sourceData is null', async () => {
+    const user = userEvent.setup();
+    renderPickerWithContext({}, null);
+    await user.click(screen.getByRole('combobox', { name: 'Search source fields' }));
+    expect(screen.queryByLabelText(/test value/)).toBeNull();
+  });
+
+  it('renders SourceFieldChipBadge (3-letter code) in selected field pills', () => {
+    renderPickerWithContext({ selectedFields: ['customer.name'] });
+    // customer.name is string → chip badge shows 'str'
+    expect(screen.getByText('str')).toBeInTheDocument();
   });
 });

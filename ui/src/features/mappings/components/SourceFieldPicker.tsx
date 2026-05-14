@@ -9,10 +9,13 @@
  * Reuses `flattenSchemaPaths` from T-03 utilities.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { SchemaPathEntry } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
+import { SourceFieldOptionRow, SourceFieldChipBadge } from './SourceFieldOptionRow';
 import type { ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -47,18 +50,6 @@ const STATIC_TYPE_OPTIONS: { value: StaticValueType; label: string }[] = [
   { value: 'null', label: 'Null' },
 ];
 
-// Type icon (lightweight — no external icon dependency)
-const TYPE_ICON: Record<string, string> = {
-  string: 'S',
-  number: '#',
-  integer: '#',
-  boolean: '✓',
-  object: '{}',
-  array: '[]',
-  null: '∅',
-  any: '?',
-};
-
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -70,18 +61,12 @@ interface FieldPillProps {
 }
 
 function FieldPill({ path, fieldType, onRemove }: FieldPillProps) {
-  const icon = TYPE_ICON[fieldType] ?? '?';
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-900/60 border border-blue-700 text-sm text-blue-100"
       data-testid="field-pill"
     >
-      <span
-        className="text-xs font-mono text-blue-400 shrink-0"
-        aria-label={`type: ${fieldType}`}
-      >
-        {icon}
-      </span>
+      <SourceFieldChipBadge type={fieldType} />
       <span className="font-mono text-xs">{path}</span>
       <button
         type="button"
@@ -118,6 +103,10 @@ export function SourceFieldPicker({
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
   // Flatten schema paths once per schema change
   const allPaths = useMemo<SchemaPathEntry[]>(() => {
@@ -254,15 +243,13 @@ export function SourceFieldPicker({
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); }} // prevent blur
                   onClick={() => { handleSelect(entry.path); }}
-                  className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
                 >
-                  <span className="text-xs font-mono text-zinc-400 shrink-0 w-4 text-center">
-                    {TYPE_ICON[entry.type] ?? '?'}
-                  </span>
-                  <span className="font-mono text-xs text-zinc-100 truncate">{entry.path}</span>
-                  {entry.description && (
-                    <span className="text-xs text-zinc-500 truncate ml-auto">{entry.description}</span>
-                  )}
+                  <SourceFieldOptionRow
+                    path={entry.path}
+                    type={entry.type}
+                    testValue={resolveFieldTestValue(sourceData, entry.path)}
+                  />
                 </button>
               </li>
             ))}
@@ -358,3 +345,4 @@ function StaticValueInput({ staticType, staticValue, onTypeChange, onValueChange
     </div>
   );
 }
+

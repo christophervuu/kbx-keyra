@@ -966,7 +966,7 @@ export function ScalarFieldBuilder({
                   <div className="space-y-2" data-testid="scalar-source-field-section">
                     <ChainSourceCard
                       sourcePath={chainState.sourcePath}
-                      sourceOptions={sourceOptions.map((option) => option.path)}
+                      sourceOptions={sourceOptions}
                       logicStepCount={chainState.logicSteps.length}
                       onSourceSelect={handleSourceSelect}
                       onAddLogic={() => { setAddLogicPickerOpen(true); }}

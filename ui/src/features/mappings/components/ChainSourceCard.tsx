@@ -16,11 +16,15 @@
  * is NOT modified — it remains for backward compatibility during migration.
  */
 
-import { Database, Plus } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useDropZone } from '../hooks/use-drop-zone';
+import type { SchemaPathEntry } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,7 +34,7 @@ export interface ChainSourceCardProps {
   /** Currently selected source field path. Undefined when no source is selected. */
   readonly sourcePath: string | undefined;
   /** Available source field options for typed dropdown selection. */
-  readonly sourceOptions?: readonly string[];
+  readonly sourceOptions?: readonly SchemaPathEntry[];
   /** Number of logic steps currently in the chain (for display). */
   readonly logicStepCount: number;
   /** Fires when a source field is selected (click or drop). */
@@ -72,11 +76,15 @@ export function ChainSourceCard({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
+
   const hasSource = typeof sourcePath === 'string' && sourcePath.trim().length > 0;
   const normalizedQuery = sourceInputValue.trim().toLowerCase();
 
   const filteredSourceOptions = useMemo(
-    () => sourceOptions.filter((path) => path.toLowerCase().includes(normalizedQuery)),
+    () => sourceOptions.filter((entry) => entry.path.toLowerCase().includes(normalizedQuery)),
     [sourceOptions, normalizedQuery],
   );
 
@@ -181,8 +189,8 @@ export function ChainSourceCard({
             if (event.key !== 'Enter') return;
             const value = event.currentTarget.value.trim();
             if (!value) return;
-            const exactMatch = sourceOptions.find((option) => option === value);
-            handleSelect(exactMatch ?? value);
+            const exactMatch = sourceOptions.find((option) => option.path === value);
+            handleSelect(exactMatch?.path ?? value);
           }}
           onChange={(event) => {
             setSourceInputValue(event.currentTarget.value);
@@ -208,28 +216,29 @@ export function ChainSourceCard({
                 {sourceOptions.length === 0 ? 'No source fields available.' : 'No matching fields.'}
               </p>
             ) : (
-              visibleSourceOptions.map((path) => (
+              visibleSourceOptions.map((entry) => (
                 <button
-                  key={path}
+                  key={entry.path}
                   type="button"
                   role="option"
-                  aria-selected={path === sourcePath}
+                  aria-selected={entry.path === sourcePath}
                   className={[
-                    'block w-full truncate rounded px-2 py-1.5 text-left font-mono text-xs transition-colors',
-                    path === sourcePath
-                      ? 'bg-blue-950/50 text-blue-300 ring-1 ring-inset ring-blue-700/60'
-                      : 'text-slate-200 hover:bg-slate-800 hover:text-slate-100',
+                    'block w-full rounded px-2 py-1.5 text-left transition-colors',
+                    entry.path === sourcePath
+                      ? 'bg-blue-950/50 ring-1 ring-inset ring-blue-700/60'
+                      : 'hover:bg-slate-800',
                   ].join(' ')}
-                  data-testid={`chain-source-card-option-${path}`}
+                  data-testid={`chain-source-card-option-${entry.path}`}
                   onMouseDown={(event) => {
                     event.preventDefault();
                   }}
-                  onClick={() => { handleSelect(path); }}
+                  onClick={() => { handleSelect(entry.path); }}
                 >
-                  <span className="flex items-center gap-2">
-                    <Database size={12} aria-hidden="true" className="shrink-0 text-slate-500" />
-                    <span className="min-w-0 flex-1 truncate">{path}</span>
-                  </span>
+                  <SourceFieldOptionRow
+                    path={entry.path}
+                    type={entry.type}
+                    testValue={resolveFieldTestValue(sourceData, entry.path)}
+                  />
                 </button>
               ))
             )}
@@ -257,3 +266,4 @@ export function ChainSourceCard({
     </div>
   );
 }
+

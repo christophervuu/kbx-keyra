@@ -15,7 +15,7 @@
  */
 
 import { Code2 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 
 import type {
   FilterPredicateState,
@@ -24,6 +24,9 @@ import type {
   FilterRightOperand,
 } from '../lib/array-builder-state';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 
 import type { ParsedSchema } from '@/lib/types/domain';
 
@@ -193,9 +196,22 @@ function RightOperandInput({
     right.kind === 'sourceField' ? 'sourceField' : 'static',
   );
 
-  const sourcePaths = parsedSourceSchema
-    ? flattenSchemaPaths(parsedSourceSchema).map((e) => e.path)
+  const sourceEntries = parsedSourceSchema
+    ? flattenSchemaPaths(parsedSourceSchema)
     : [];
+
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+  const [sourceQuery, setSourceQuery] = useState('');
+  const sourceInputRef = useRef<HTMLInputElement>(null);
+
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
+
+  const filteredSourceEntries = useMemo(() => {
+    const q = sourceQuery.trim().toLowerCase();
+    if (!q) return sourceEntries;
+    return sourceEntries.filter((e) => e.path.toLowerCase().includes(q));
+  }, [sourceEntries, sourceQuery]);
 
   function handleKindChange(kind: RightOperandKind) {
     if (kind === 'external') return;
@@ -253,18 +269,65 @@ function RightOperandInput({
           className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       ) : (
-        <select
-          value={right.kind === 'sourceField' ? right.path : ''}
-          aria-label="Filter right operand source field"
-          data-testid="filter-right-source"
-          onChange={(e) => { onChange({ kind: 'sourceField', path: e.target.value }); }}
-          className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">Select source field…</option>
-          {sourcePaths.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+        <div className="relative" data-testid="filter-right-source-picker">
+          <input
+            ref={sourceInputRef}
+            type="text"
+            value={sourcePickerOpen ? sourceQuery : (right.kind === 'sourceField' ? right.path : '')}
+            aria-label="Filter right operand source field"
+            aria-expanded={sourcePickerOpen}
+            aria-controls="filter-right-source-listbox"
+            data-testid="filter-right-source"
+            placeholder="Search source fields…"
+            onChange={(e) => {
+              setSourceQuery(e.target.value);
+              setSourcePickerOpen(true);
+            }}
+            onFocus={() => { setSourcePickerOpen(true); setSourceQuery(''); }}
+            onBlur={() => { setTimeout(() => { setSourcePickerOpen(false); }, 150); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { setSourcePickerOpen(false); sourceInputRef.current?.blur(); }
+            }}
+            className="w-full rounded border border-slate-600 bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {sourcePickerOpen && (
+            <ul
+              id="filter-right-source-listbox"
+              role="listbox"
+              aria-label="Filter right operand source field options"
+              data-testid="filter-right-source-listbox"
+              className="absolute left-0 right-0 top-full z-30 mt-0.5 max-h-48 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+            >
+              {filteredSourceEntries.length === 0 ? (
+                <li className="px-3 py-2 text-xs text-slate-500 italic">
+                  {sourceEntries.length === 0 ? 'No source schema loaded.' : 'No matching fields.'}
+                </li>
+              ) : (
+                filteredSourceEntries.map((entry) => (
+                  <li key={entry.path} role="option" aria-selected={right.kind === 'sourceField' && right.path === entry.path}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); }}
+                      onClick={() => {
+                        onChange({ kind: 'sourceField', path: entry.path });
+                        setSourcePickerOpen(false);
+                        setSourceQuery('');
+                      }}
+                      data-testid={`filter-right-source-option-${entry.path}`}
+                      className="w-full px-2.5 py-1.5 text-left text-xs hover:bg-slate-700 focus:bg-slate-700 focus:outline-none"
+                    >
+                      <SourceFieldOptionRow
+                        path={entry.path}
+                        type={entry.type}
+                        testValue={resolveFieldTestValue(sourceData, entry.path)}
+                      />
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </div>
       )}
       <p className="text-[10px] text-slate-500">
         External values are planned and will be enabled in a future release.

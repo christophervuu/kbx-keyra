@@ -16,11 +16,14 @@
  */
 
 import { Plus, X, Zap } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useContext, useRef, useState } from 'react';
 
 import { ConditionRowEditor } from './ConditionRowEditor';
 import { TransformFunctionPicker } from './TransformFunctionPicker';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 import type { SchemaPathEntry } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
 import type {
   ArgumentSlot,
   ComparisonOperator,
@@ -405,6 +408,10 @@ export function ArgumentSlotInput({
   const transformBtnRef = useRef<HTMLButtonElement>(null);
   const expressionBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
+
   // Current inline transform (only relevant in source mode)
   const currentTransform: InlineTransform | undefined =
     (() => {
@@ -698,11 +705,14 @@ export function ArgumentSlotInput({
                         handleSourcePathChange(opt.path);
                         setSourcePickerOpen(false);
                       }}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
+                      className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
                       data-testid={`${slotTestId}-source-option-${opt.path}`}
                     >
-                      <span className="truncate font-mono text-zinc-100">{opt.path}</span>
-                      <span className="ml-auto shrink-0 text-zinc-500">{opt.type}</span>
+                      <SourceFieldOptionRow
+                        path={opt.path}
+                        type={opt.type}
+                        testValue={resolveFieldTestValue(sourceData, opt.path)}
+                      />
                     </button>
                   ))
                 )}

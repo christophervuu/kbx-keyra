@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MergeBranchEditor } from './MergeBranchEditor';
 import { createEmptyMergeBranch } from '../lib/array-builder-state';
 import type { MergeBranch } from '../lib/array-builder-state';
-import type { SchemaTreeNode } from '@/lib/types/domain';
+import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 function makeNode(path: string, fieldName: string, type: SchemaTreeNode['type']): SchemaTreeNode {
   return {
@@ -135,5 +135,68 @@ describe('MergeBranchEditor', () => {
         }),
       ]),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-052 T-04: SourceFieldOptionRow in MergeBranchEditor array source picker
+// ---------------------------------------------------------------------------
+
+function makeArraySchema(): ParsedSchema {
+  return {
+    nodes: [
+      {
+        path: 'items',
+        fieldName: 'items',
+        type: 'array',
+        depth: 0,
+        isArray: true,
+        isRequired: false,
+        parentPath: null,
+        childCount: 0,
+        children: [],
+      },
+    ],
+    totalFieldCount: 1,
+    format: 'json-schema',
+    parseTimeMs: 1,
+    inferred: false,
+  };
+}
+
+describe('MergeBranchEditor — FS-052 T-04 SourceFieldOptionRow', () => {
+  it('renders type badge (arr) for array-type source options', () => {
+    const branch = createEmptyMergeBranch();
+    render(
+      <MergeBranchEditor
+        branch={branch}
+        branchIndex={0}
+        totalBranches={2}
+        parsedSourceSchema={makeArraySchema()}
+        targetArrayNode={makeTargetArrayNode()}
+        onBranchChange={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('branch-toggle-0'));
+    // 'arr' badge should appear for the 'items' array path option
+    expect(screen.getByText('arr')).toBeInTheDocument();
+  });
+
+  it('renders the array path in the source option row', () => {
+    const branch = createEmptyMergeBranch();
+    render(
+      <MergeBranchEditor
+        branch={branch}
+        branchIndex={0}
+        totalBranches={2}
+        parsedSourceSchema={makeArraySchema()}
+        targetArrayNode={makeTargetArrayNode()}
+        onBranchChange={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('branch-toggle-0'));
+    expect(screen.getByTestId('branch-source-option-0-items')).toBeInTheDocument();
   });
 });

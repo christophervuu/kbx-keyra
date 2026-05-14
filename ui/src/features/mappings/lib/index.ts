@@ -233,3 +233,11 @@ export {
 // FS-048 T-04 auto-map staleness detection
 export { detectStaleSuggestions } from './auto-map-staleness';
 export type { GetDraftExpression } from './auto-map-staleness';
+// FS-052 T-01 shared source-field display utilities
+export {
+  SOURCE_TYPE_BADGES,
+  getTypeBadge,
+  getTypeBadgeCode,
+  resolveFieldTestValue,
+} from './source-field-display';
+export type { TypeBadge } from './source-field-display';

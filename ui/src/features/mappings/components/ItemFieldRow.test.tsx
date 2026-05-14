@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
+import { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ItemFieldRow } from './ItemFieldRow';
 import type { ItemFieldMapping } from '../lib/array-builder-state';
-
+import { PreviewProvider, usePreviewSetters } from '../context/preview-context';
 import type { ParsedSchema } from '@/lib/types/domain';
 
 function createParsedSourceSchema(): ParsedSchema {
@@ -181,5 +182,70 @@ describe('ItemFieldRow', () => {
         steps: [],
       },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-052 T-04: SourceFieldOptionRow in ItemFieldRow dropdown
+// ---------------------------------------------------------------------------
+
+function WithSourceData({
+  sourceData,
+  children,
+}: {
+  sourceData: unknown | null;
+  children: React.ReactNode;
+}) {
+  const { setSourceData } = usePreviewSetters();
+  useEffect(() => { setSourceData(sourceData); }, [sourceData, setSourceData]);
+  return <>{children}</>;
+}
+
+function renderRowWithContext(
+  overrides: Partial<ComponentProps<typeof ItemFieldRow>> = {},
+  sourceData: unknown | null = null,
+) {
+  render(
+    <PreviewProvider>
+      <WithSourceData sourceData={sourceData}>
+        <ItemFieldRow
+          fieldName="hasDiscount"
+          fieldPath="hasDiscount"
+          fieldType="boolean"
+          isRequired={false}
+          isExpanded={true}
+          mapping={{ kind: 'empty', targetFieldPath: 'hasDiscount' }}
+          parsedSourceSchema={createParsedSourceSchema()}
+          itemFieldPaths={['orderId']}
+          onToggleExpand={vi.fn()}
+          onMappingChange={vi.fn()}
+          {...overrides}
+        />
+      </WithSourceData>
+    </PreviewProvider>,
+  );
+}
+
+describe('ItemFieldRow — FS-052 T-04 SourceFieldOptionRow', () => {
+  it('renders type badge (str) for string-typed item field in dropdown', async () => {
+    const user = userEvent.setup();
+    renderRowWithContext();
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    // orderId is type 'string' in parsedSourceSchema → badge code 'str'
+    expect(screen.getAllByText('str').length).toBeGreaterThan(0);
+  });
+
+  it('renders test value in dropdown when PreviewContext has sourceData', async () => {
+    const user = userEvent.setup();
+    renderRowWithContext({}, { orderId: 'ORD-42' });
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    expect(screen.getByText('"ORD-42"')).toBeInTheDocument();
+  });
+
+  it('does not render test value when sourceData is null', async () => {
+    const user = userEvent.setup();
+    renderRowWithContext({}, null);
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    expect(screen.queryByText('"ORD-42"')).not.toBeInTheDocument();
   });
 });

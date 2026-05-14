@@ -7,10 +7,13 @@
  *   - Fallback: "Return specific value" | "Return null"
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { X, Plus, AlertTriangle } from 'lucide-react';
 
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 import type { FallbackValue, StaticValue, ValueMapEntry, ValueMapModeState } from '../lib/expression-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 
@@ -46,6 +49,9 @@ function SourceFieldSelect({ parsedSourceSchema, value, onChange }: SourceFieldS
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
   const allPaths = useMemo(
     () => (parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : []),
@@ -117,10 +123,13 @@ function SourceFieldSelect({ parsedSourceSchema, value, onChange }: SourceFieldS
                   role="option"
                   aria-selected={entry.path === value}
                   onMouseDown={() => { handleSelect(entry.path); }}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-700"
+                  className="cursor-pointer px-3 py-1.5 hover:bg-zinc-700"
                 >
-                  <span className="text-xs text-zinc-500 font-mono">{entry.type ?? '?'}</span>
-                  <span>{entry.path}</span>
+                  <SourceFieldOptionRow
+                    path={entry.path}
+                    type={entry.type}
+                    testValue={resolveFieldTestValue(sourceData, entry.path)}
+                  />
                 </li>
               ))}
             </ul>

@@ -22,10 +22,13 @@
  *   />
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useContext, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 import type { ParsedSchema } from '@/lib/types/domain';
 import { TransformFunctionPicker } from './TransformFunctionPicker';
 
@@ -63,6 +66,10 @@ export function BuilderEntryActions({
 
   const addSourceBtnRef = useRef<HTMLButtonElement>(null);
   const addTransformBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
   // All flattened schema paths for the source search
   const allPaths = parsedSourceSchema !== null ? flattenSchemaPaths(parsedSourceSchema) : [];
@@ -183,13 +190,14 @@ export function BuilderEntryActions({
                       type="button"
                       onMouseDown={(e) => { e.preventDefault(); }}
                       onClick={() => { handleSourceSelect(entry.path); }}
-                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded text-sm hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
+                      className="w-full text-left flex items-center px-3 py-1.5 rounded text-sm hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
                       data-testid={`source-option-${entry.path}`}
                     >
-                      <span className="font-mono text-xs text-zinc-100 truncate">{entry.path}</span>
-                      {entry.type && (
-                        <span className="text-xs text-zinc-500 ml-auto shrink-0">{entry.type}</span>
-                      )}
+                      <SourceFieldOptionRow
+                        path={entry.path}
+                        type={entry.type}
+                        testValue={resolveFieldTestValue(sourceData, entry.path)}
+                      />
                     </button>
                   </li>
                 ))

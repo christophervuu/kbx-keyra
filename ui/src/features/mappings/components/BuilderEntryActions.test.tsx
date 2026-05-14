@@ -1,8 +1,10 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BuilderEntryActions } from './BuilderEntryActions';
+import { PreviewProvider, usePreviewSetters } from '../context/preview-context';
 import type { ParsedSchema } from '@/lib/types/domain';
 import type { SchemaTreeNode } from '@/lib/types/domain';
 
@@ -376,5 +378,65 @@ describe('BuilderEntryActions — mutual exclusion', () => {
     await user.click(screen.getByTestId('builder-add-transform-btn'));
     expect(screen.queryByTestId('source-picker-popover')).not.toBeInTheDocument();
     expect(screen.getByTestId('function-picker-popover')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FS-052 T-04: SourceFieldOptionRow in BuilderEntryActions source picker
+// ---------------------------------------------------------------------------
+
+function WithSourceData({
+  sourceData,
+  children,
+}: {
+  sourceData: unknown | null;
+  children: React.ReactNode;
+}) {
+  const { setSourceData } = usePreviewSetters();
+  useEffect(() => { setSourceData(sourceData); }, [sourceData, setSourceData]);
+  return <>{children}</>;
+}
+
+function renderActionsWithContext(sourceData: unknown | null = null) {
+  render(
+    <PreviewProvider>
+      <WithSourceData sourceData={sourceData}>
+        <BuilderEntryActions
+          parsedSourceSchema={MOCK_SCHEMA}
+          onSourceSelected={vi.fn()}
+          onFunctionSelected={vi.fn()}
+        />
+      </WithSourceData>
+    </PreviewProvider>,
+  );
+}
+
+describe('BuilderEntryActions — FS-052 T-04 SourceFieldOptionRow', () => {
+  it('renders type badge (str) for string fields in source picker', async () => {
+    const user = userEvent.setup();
+    renderActionsWithContext();
+    await user.click(screen.getByTestId('builder-add-source-btn'));
+    expect(screen.getAllByText('str').length).toBeGreaterThan(0);
+  });
+
+  it('renders type badge (num) for number fields in source picker', async () => {
+    const user = userEvent.setup();
+    renderActionsWithContext();
+    await user.click(screen.getByTestId('builder-add-source-btn'));
+    expect(screen.getByText('num')).toBeInTheDocument();
+  });
+
+  it('shows test value in source picker when PreviewContext has sourceData', async () => {
+    const user = userEvent.setup();
+    renderActionsWithContext({ order: { firstName: 'Bob', lastName: 'Smith', amount: 99, createdAt: '2024-01-01' } });
+    await user.click(screen.getByTestId('builder-add-source-btn'));
+    expect(screen.getByText('"Bob"')).toBeInTheDocument();
+  });
+
+  it('does not show test value when sourceData is null', async () => {
+    const user = userEvent.setup();
+    renderActionsWithContext(null);
+    await user.click(screen.getByTestId('builder-add-source-btn'));
+    expect(screen.queryByText('"Bob"')).not.toBeInTheDocument();
   });
 });

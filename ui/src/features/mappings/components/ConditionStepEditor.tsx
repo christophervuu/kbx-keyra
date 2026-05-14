@@ -19,7 +19,7 @@
  * This is a NEW component. ConditionalModeBuilder.tsx is NOT modified.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useContext, useState } from 'react';
 import { Plus, X, ChevronDown, GitBranch } from 'lucide-react';
 
 import {
@@ -38,6 +38,9 @@ import type {
 } from '../lib/chain-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -107,10 +110,14 @@ function OperandValueEditor({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const allPaths = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema).map((e) => e.path) : [];
-  const suggestions = allPaths.filter((p) =>
-    searchQuery === '' || p.toLowerCase().includes(searchQuery.toLowerCase()),
+  const allPaths = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [];
+  const suggestions = allPaths.filter((e) =>
+    searchQuery === '' || e.path.toLowerCase().includes(searchQuery.toLowerCase()),
   ).slice(0, 30);
+
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
   function handleKindChange(kind: OperandValue['kind']) {
     switch (kind) {
@@ -233,20 +240,24 @@ function OperandValueEditor({
               role="listbox"
               className="absolute left-0 right-0 top-full mt-0.5 z-30 bg-zinc-800 border border-zinc-600 rounded shadow-lg max-h-36 overflow-y-auto"
             >
-              {suggestions.map((path) => (
-                <li key={path}>
+              {suggestions.map((entry) => (
+                <li key={entry.path}>
                   <button
                     type="button"
                     onMouseDown={(e) => { e.preventDefault(); }}
                     onClick={() => {
-                      onChange({ kind: 'field', path });
+                      onChange({ kind: 'field', path: entry.path });
                       setSearchQuery('');
                       setShowSuggestions(false);
                     }}
-                    className="w-full text-left px-2 py-1 text-xs font-mono text-zinc-100 hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
-                    data-testid={`${testIdPrefix}-suggestion-${path}`}
+                    className="w-full text-left px-2 py-1 text-xs hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
+                    data-testid={`${testIdPrefix}-suggestion-${entry.path}`}
                   >
-                    {path}
+                    <SourceFieldOptionRow
+                      path={entry.path}
+                      type={entry.type}
+                      testValue={resolveFieldTestValue(sourceData, entry.path)}
+                    />
                   </button>
                 </li>
               ))}
@@ -402,10 +413,14 @@ function BranchChainEditor({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const allPaths = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema).map((e) => e.path) : [];
-  const suggestions = allPaths.filter((p) =>
-    searchQuery === '' || p.toLowerCase().includes(searchQuery.toLowerCase()),
+  const allPaths = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [];
+  const suggestions = allPaths.filter((e) =>
+    searchQuery === '' || e.path.toLowerCase().includes(searchQuery.toLowerCase()),
   ).slice(0, 30);
+
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
   const isField = chain.source.kind === 'field';
   const isStatic = chain.source.kind === 'static';
@@ -478,20 +493,24 @@ function BranchChainEditor({
               role="listbox"
               className="absolute left-0 right-0 top-full mt-0.5 z-30 bg-zinc-800 border border-zinc-600 rounded shadow-lg max-h-36 overflow-y-auto"
             >
-              {suggestions.map((path) => (
-                <li key={path}>
+              {suggestions.map((entry) => (
+                <li key={entry.path}>
                   <button
                     type="button"
                     onMouseDown={(e) => { e.preventDefault(); }}
                     onClick={() => {
-                      onChange({ ...chain, source: { kind: 'field', path } });
+                      onChange({ ...chain, source: { kind: 'field', path: entry.path } });
                       setSearchQuery('');
                       setShowSuggestions(false);
                     }}
-                    className="w-full text-left px-2 py-1 text-xs font-mono text-zinc-100 hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
-                    data-testid={`${testIdPrefix}-suggestion-${path}`}
+                    className="w-full text-left px-2 py-1 text-xs hover:bg-zinc-700 focus:bg-zinc-700 focus:outline-none"
+                    data-testid={`${testIdPrefix}-suggestion-${entry.path}`}
                   >
-                    {path}
+                    <SourceFieldOptionRow
+                      path={entry.path}
+                      type={entry.type}
+                      testValue={resolveFieldTestValue(sourceData, entry.path)}
+                    />
                   </button>
                 </li>
               ))}

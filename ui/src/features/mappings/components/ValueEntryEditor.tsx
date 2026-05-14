@@ -14,9 +14,12 @@
  *   - empty: not yet configured
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 
 import { ItemFieldRow } from './ItemFieldRow';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
 import type { ValueEntry, ValueEntryFieldValue } from '../lib/array-builder-state';
 import type { ParsedSchema } from '@/lib/types/domain';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
@@ -177,9 +180,22 @@ function FieldValueInput({
   const kind = getFieldValueKind(value);
   const text = getFieldValueText(value);
 
-  const sourcePaths = parsedSourceSchema
-    ? flattenSchemaPaths(parsedSourceSchema).map((e) => e.path)
+  const sourceEntries = parsedSourceSchema
+    ? flattenSchemaPaths(parsedSourceSchema)
     : [];
+
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+  const [sourceQuery, setSourceQuery] = useState('');
+  const sourceInputRef = useRef<HTMLInputElement>(null);
+
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
+
+  const filteredSourceEntries = useMemo(() => {
+    const q = sourceQuery.trim().toLowerCase();
+    if (!q) return sourceEntries;
+    return sourceEntries.filter((e) => e.path.toLowerCase().includes(q));
+  }, [sourceEntries, sourceQuery]);
 
   const KINDS: FieldValueKind[] = ['sourceField', 'static'];
   const KIND_LABELS: Record<FieldValueKind, string> = {
@@ -245,18 +261,65 @@ function FieldValueInput({
       </div>
 
       {kind === 'sourceField' ? (
-        <select
-          value={text}
-          aria-label={`Source field for ${label}`}
-          data-testid={`value-source-${testIdSuffix}`}
-          onChange={(e) => { onChange({ kind: 'sourceField', path: e.target.value }); }}
-          className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 font-mono text-xs text-slate-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">Select source field…</option>
-          {sourcePaths.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
+        <div className="relative" data-testid={`value-source-picker-${testIdSuffix}`}>
+          <input
+            ref={sourceInputRef}
+            type="text"
+            value={sourcePickerOpen ? sourceQuery : text}
+            aria-label={`Source field for ${label}`}
+            aria-expanded={sourcePickerOpen}
+            aria-controls={`value-source-listbox-${testIdSuffix}`}
+            data-testid={`value-source-${testIdSuffix}`}
+            placeholder="Search source fields…"
+            onChange={(e) => {
+              setSourceQuery(e.target.value);
+              setSourcePickerOpen(true);
+            }}
+            onFocus={() => { setSourcePickerOpen(true); setSourceQuery(''); }}
+            onBlur={() => { setTimeout(() => { setSourcePickerOpen(false); }, 150); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { setSourcePickerOpen(false); sourceInputRef.current?.blur(); }
+            }}
+            className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 font-mono text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {sourcePickerOpen && (
+            <ul
+              id={`value-source-listbox-${testIdSuffix}`}
+              role="listbox"
+              aria-label={`Source field options for ${label}`}
+              data-testid={`value-source-listbox-${testIdSuffix}`}
+              className="absolute left-0 right-0 top-full z-30 mt-0.5 max-h-48 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+            >
+              {filteredSourceEntries.length === 0 ? (
+                <li className="px-3 py-2 text-xs text-slate-500 italic">
+                  {sourceEntries.length === 0 ? 'No source schema loaded.' : 'No matching fields.'}
+                </li>
+              ) : (
+                filteredSourceEntries.map((entry) => (
+                  <li key={entry.path} role="option" aria-selected={entry.path === text}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); }}
+                      onClick={() => {
+                        onChange({ kind: 'sourceField', path: entry.path });
+                        setSourcePickerOpen(false);
+                        setSourceQuery('');
+                      }}
+                      data-testid={`value-source-option-${testIdSuffix}-${entry.path}`}
+                      className="w-full px-2 py-1.5 text-left text-xs hover:bg-slate-700 focus:bg-slate-700 focus:outline-none"
+                    >
+                      <SourceFieldOptionRow
+                        path={entry.path}
+                        type={entry.type}
+                        testValue={resolveFieldTestValue(sourceData, entry.path)}
+                      />
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </div>
       ) : (
         <>
           {showLegacyExpressionEditor && (

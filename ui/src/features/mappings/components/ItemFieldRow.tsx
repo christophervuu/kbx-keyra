@@ -20,17 +20,20 @@
  * DSL expression directly.
  */
 
-import { ChevronDown, ChevronRight, Check, Circle, AlertCircle, Database, Search, Plus } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Check, Circle, AlertCircle, Search, Plus } from 'lucide-react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { CrossArrayLookupEditor } from './CrossArrayLookupEditor';
 import { LogicStepList } from './LogicStepList';
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 import type { ItemFieldMapping, CrossArrayLookupState } from '../lib/array-builder-state';
 import { createEmptyCrossArrayLookup } from '../lib/array-builder-state';
 import type { ArrayValidationEntry } from '../lib/array-validation';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { SchemaPathEntry } from '../lib/autocomplete-utils';
+import { resolveFieldTestValue } from '../lib/source-field-display';
+import { PreviewContext } from '../context/preview-context';
 import {
   createEmptyChainState,
   createEmptyConditionStep,
@@ -156,6 +159,7 @@ function toMappingPrefix(scope: Exclude<ItemFieldScope, 'static'>): string {
 
 type UnifiedSourceOption = {
   readonly path: string;
+  readonly type: string;
   readonly scope: Exclude<ItemFieldScope, 'static'>;
 };
 
@@ -164,16 +168,20 @@ function buildUnifiedSourceOptions(
   parentPaths: readonly string[],
   sourcePaths: readonly string[],
   hasParentScope: boolean,
+  schemaEntries?: readonly SchemaPathEntry[],
 ): UnifiedSourceOption[] {
   const results: UnifiedSourceOption[] = [];
   const seen = new Set<string>();
+
+  const lookupType = (path: string): string =>
+    schemaEntries?.find((e) => e.path === path)?.type ?? 'any';
 
   for (const path of itemPaths) {
     if (!path.trim()) continue;
     const key = `item:${path}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    results.push({ path, scope: 'item' });
+    results.push({ path, type: lookupType(path), scope: 'item' });
   }
 
   if (hasParentScope) {
@@ -182,7 +190,7 @@ function buildUnifiedSourceOptions(
       const key = `parent:${path}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      results.push({ path, scope: 'parent' });
+      results.push({ path, type: lookupType(path), scope: 'parent' });
     }
   }
 
@@ -191,7 +199,7 @@ function buildUnifiedSourceOptions(
     const key = `source:${path}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    results.push({ path, scope: 'source' });
+    results.push({ path, type: lookupType(path), scope: 'source' });
   }
 
   return results;
@@ -403,9 +411,18 @@ export function ItemFieldRow({
     [parsedSourceSchema],
   );
 
+  const schemaEntries = useMemo(
+    () => parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [],
+    [parsedSourceSchema],
+  );
+
+  // Consume PreviewContext for test data — gracefully handles null (outside PreviewProvider)
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
+
   const unifiedSourceOptions = useMemo(
-    () => buildUnifiedSourceOptions(itemFieldPaths, parentFieldPaths, sourcePaths, hasParentScope),
-    [itemFieldPaths, parentFieldPaths, sourcePaths, hasParentScope],
+    () => buildUnifiedSourceOptions(itemFieldPaths, parentFieldPaths, sourcePaths, hasParentScope, schemaEntries),
+    [itemFieldPaths, parentFieldPaths, sourcePaths, hasParentScope, schemaEntries],
   );
 
   const filteredSourceOptions = useMemo(() => {
@@ -824,31 +841,21 @@ export function ItemFieldRow({
                           }}
                           onClick={() => { handleFieldSelect(option); }}
                           className={[
-                            'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors',
+                            'flex w-full items-center rounded px-2 py-1.5 text-left text-xs transition-colors',
                             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
                             isSelected
-                              ? 'bg-blue-950/50 text-blue-300 ring-1 ring-inset ring-blue-700/60'
-                              : 'text-slate-300 hover:bg-slate-700/60 hover:text-slate-100',
+                              ? 'bg-blue-950/50 ring-1 ring-inset ring-blue-700/60'
+                              : 'hover:bg-slate-700/60',
                           ].join(' ')}
                         >
-                          <Database
-                            size={10}
-                            aria-hidden="true"
-                            className={isSelected ? 'text-blue-400 shrink-0' : 'text-slate-500 shrink-0'}
+                          <SourceFieldOptionRow
+                            path={option.path}
+                            type={option.type}
+                            testValue={resolveFieldTestValue(sourceData, option.path)}
+                            scope={option.scope}
                           />
-                          <span className="min-w-0 flex-1 truncate font-mono">{option.path}</span>
-                          {option.scope === 'item' && (
-                            <span className="shrink-0 rounded bg-blue-950/50 px-1.5 py-0.5 text-[9px] font-medium text-blue-300">
-                              item
-                            </span>
-                          )}
-                          {option.scope === 'parent' && (
-                            <span className="shrink-0 rounded bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-medium text-amber-300">
-                              parent
-                            </span>
-                          )}
                           {isSelected && (
-                            <Check size={10} className="shrink-0 text-blue-400" aria-hidden="true" />
+                            <Check size={10} className="ml-1 shrink-0 text-blue-400" aria-hidden="true" />
                           )}
                         </button>
                       );

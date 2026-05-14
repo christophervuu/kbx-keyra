@@ -212,3 +212,6 @@ export type { RefreshConfirmBannerProps } from './RefreshConfirmBanner';
 // FS-048 suggestion preview
 export { WorkspaceSuggestionPreview, WorkspaceNoSourceDataCallout } from './WorkspaceSuggestionPreview';
 export type { WorkspaceSuggestionPreviewProps } from './WorkspaceSuggestionPreview';
+// FS-052 T-01 shared source-field option row
+export { SourceFieldOptionRow, SourceFieldChipBadge } from './SourceFieldOptionRow';
+export type { SourceFieldOptionRowProps, SourceFieldChipBadgeProps } from './SourceFieldOptionRow';
