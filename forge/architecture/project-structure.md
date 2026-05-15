@@ -15,6 +15,7 @@ tests/      Test files
 scripts/    Local tooling/runner scripts
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
+docker-compose.test.yml  Persistence integration local stack (DynamoDB Local + LocalStack S3)
 ```
 
 ---
@@ -88,6 +89,20 @@ src/
       model-client.ts   GitHub Models client wrapper (OpenAI SDK)
       output-parser.ts  Model output JSON parsing into AIResponse shape
       invoke-ai.ts      AI runtime orchestration entry point
+    persistence/      Shared Phase 1 persistence contracts and client setup (FS-058 T-01)
+      index.ts          Persistence barrel exports (types, clients, config)
+      types.ts          DynamoDB item types, input contracts, and domain converters
+      clients.ts        DynamoDB Document Client + S3 Client singletons from env config
+      config.ts         Table-name constants, bucket name, and S3 key builders
+      projects.ts       Projects table CRUD data-access module (create/get/list/update/delete)
+      mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate)
+      schema-metadata.ts SchemaMetadata table CRUD + status transition update operation
+      schema-nodes.ts   SchemaNodes partition query/batch-write/delete operations with retry/backoff
+      mapping-versions.ts MappingVersions save/list/get/getConfig with S3 snapshots and prune-to-50 logic
+      s3/               Shared S3 content helpers for schemas and mappings
+        index.ts          S3 helper barrel exports
+        schema-content.ts Schema original/processed content put/get/delete helpers
+        mapping-config.ts Mapping config put/get/delete helpers
     schema/           Schema ingestion shared contracts and utilities (FS-056 T-01)
       index.ts          Schema module barrel exports
       types.ts          Schema ingestion/query interfaces and unions
@@ -744,9 +759,30 @@ tests/
       opensearch/      Schema OpenSearch module tests (FS-056 T-05)
         indexer.test.ts OpenSearch indexer mapping/bulk/delete behavior tests
         query.test.ts   OpenSearch query construction/filter/limit tests
+    persistence/      Persistence module tests (FS-058 T-01)
+      types.test.ts    Type-compatibility and converter-shape tests
+      clients.test.ts  AWS client initialization tests (region + endpoint overrides)
+      config.test.ts   Table/bucket env defaults and S3 key-builder tests
+      projects.test.ts Projects CRUD command-shape and behavior tests with mocked Dynamo client
+      mappings.test.ts Mappings CRUD/GSI/version-increment/S3-config tests with mocked Dynamo+S3 clients
+      schema-metadata.test.ts SchemaMetadata CRUD + updateStatus expression/defaults tests
+      schema-nodes.test.ts SchemaNodes batch chunking/retry, partition query, contains-filter, and delete-by-schema tests
+      mapping-versions.test.ts MappingVersions save/prune/list/get/getConfig tests with mocked Dynamo+S3 clients
+      s3/               Persistence S3 helper tests
+        schema-content.test.ts Schema content helper tests (put/get/getOriginal/delete + NoSuchKey handling)
+        mapping-config.test.ts Mapping config helper tests (put/get/delete + NoSuchKey handling)
   integration/        Integration and performance test suites (Vitest)
     lambda/            Backend API integration tests against DynamoDB Local (FS-057 T-07)
       fs-057-api.test.ts End-to-end CRUD + error-envelope acceptance coverage using handler invocation
+    persistence/       FS-058 end-to-end persistence integration tests (DynamoDB Local + LocalStack S3)
+      README.md         Local run instructions, prerequisites, and emulator limitations
+      setup.ts          Local client/env wiring + table/bucket create/clear/delete helpers
+      projects.integration.test.ts Projects CRUD integration cycle
+      mappings.integration.test.ts Mappings create/get/list/update/duplicate/delete integration cycle
+      schema-metadata.integration.test.ts SchemaMetadata create/get/list/updateStatus/delete integration cycle
+      schema-nodes.integration.test.ts SchemaNodes batchWrite/list/queryContains/deleteBySchema integration cycle
+      mapping-versions.integration.test.ts MappingVersions save/list/get/getConfig + prune-to-50 integration cycle
+      s3-content.integration.test.ts Schema content + mapping config S3 helper integration cycle
     schema-ingestion/  FS-056 end-to-end ingestion/query orchestration tests
       inline-path.test.ts Inline path integration coverage (50/499/500 threshold behavior)
       step-functions-path.test.ts Step Functions parse/chunk + batch worker integration coverage

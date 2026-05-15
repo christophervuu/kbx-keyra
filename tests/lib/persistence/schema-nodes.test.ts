@@ -1,0 +1,193 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { SchemaNodeItem } from '../../../src/lib/persistence/types.js';
+
+const { sendMock } = vi.hoisted(() => ({
+  sendMock: vi.fn(),
+}));
+
+vi.mock('../../../src/lib/persistence/clients.js', () => ({
+  dynamoClient: {
+    send: sendMock,
+  },
+}));
+
+async function importModule() {
+  return import('../../../src/lib/persistence/schema-nodes.js');
+}
+
+function createNodes(count: number, schemaId = 'schema-1'): SchemaNodeItem[] {
+  return Array.from({ length: count }, (_, index) => ({
+    schemaId,
+    path: `Order.field${index + 1}`,
+    fieldName: `field${index + 1}`,
+    type: 'string',
+    description: `Description ${index + 1}`,
+    depth: 1,
+    isArray: false,
+    isRequired: false,
+    parentPath: 'Order',
+    childCount: 0,
+    subtreeFieldCount: 1,
+    embeddingText: `Order.field${index + 1} | field${index + 1}`,
+  }));
+}
+
+describe('persistence schema-nodes', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    sendMock.mockReset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('batchWrite with < 25 items sends one BatchWriteCommand', async () => {
+    sendMock.mockResolvedValue({ UnprocessedItems: {} });
+    const mod = await importModule();
+
+    const promise = mod.batchWrite('schema-1', createNodes(10));
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const command = sendMock.mock.calls[0]?.[0] as {
+      input: { RequestItems: Record<string, unknown[]> };
+    };
+    expect(command.input.RequestItems['keyra-schema-nodes']).toHaveLength(10);
+  });
+
+  it('batchWrite with 75 items sends 3 batch calls', async () => {
+    sendMock.mockResolvedValue({ UnprocessedItems: {} });
+    const mod = await importModule();
+
+    const promise = mod.batchWrite('schema-1', createNodes(75));
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(sendMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('batchWrite retries unprocessed items with exponential backoff', async () => {
+    const oneNode = createNodes(1)[0]!;
+    sendMock
+      .mockResolvedValueOnce({
+        UnprocessedItems: {
+          'keyra-schema-nodes': [{ PutRequest: { Item: oneNode } }],
+        },
+      })
+      .mockResolvedValueOnce({
+        UnprocessedItems: {
+          'keyra-schema-nodes': [{ PutRequest: { Item: oneNode } }],
+        },
+      })
+      .mockResolvedValueOnce({ UnprocessedItems: {} });
+
+    const mod = await importModule();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    const promise = mod.batchWrite('schema-1', [oneNode]);
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(sendMock).toHaveBeenCalledTimes(3);
+    expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 100);
+    expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 200);
+  });
+
+  it('batchWrite throws descriptive error after retry exhaustion', async () => {
+    const oneNode = createNodes(1)[0]!;
+    sendMock.mockResolvedValue({
+      UnprocessedItems: {
+        'keyra-schema-nodes': [{ PutRequest: { Item: oneNode } }],
+      },
+    });
+    const mod = await importModule();
+
+    const promise = mod.batchWrite('schema-1', [oneNode]);
+    const rejection = expect(promise).rejects.toThrow(/retry exhaustion/i);
+    await vi.runAllTimersAsync();
+    await rejection;
+    expect(sendMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('listBySchema uses Query and handles pagination', async () => {
+    sendMock
+      .mockResolvedValueOnce({
+        Items: createNodes(2),
+        LastEvaluatedKey: { schemaId: 'schema-1', path: 'Order.field2' },
+      })
+      .mockResolvedValueOnce({
+        Items: createNodes(1).map((node) => ({ ...node, path: 'Order.field3', fieldName: 'field3' })),
+        LastEvaluatedKey: undefined,
+      });
+    const mod = await importModule();
+
+    const result = await mod.listBySchema('schema-1');
+
+    expect(result).toHaveLength(3);
+    const firstCommand = sendMock.mock.calls[0]?.[0] as {
+      input: { KeyConditionExpression: string; ExpressionAttributeValues: Record<string, unknown> };
+    };
+    expect(firstCommand.input.KeyConditionExpression).toBe('schemaId = :sid');
+    expect(firstCommand.input.ExpressionAttributeValues[':sid']).toBe('schema-1');
+  });
+
+  it('queryContains applies filter expression and enforces limit', async () => {
+    sendMock
+      .mockResolvedValueOnce({
+        Items: createNodes(2),
+        LastEvaluatedKey: { schemaId: 'schema-1', path: 'Order.field2' },
+      })
+      .mockResolvedValueOnce({
+        Items: createNodes(2).map((node, index) => ({
+          ...node,
+          path: `Order.extra${index + 1}`,
+          fieldName: `extra${index + 1}`,
+        })),
+        LastEvaluatedKey: undefined,
+      });
+    const mod = await importModule();
+
+    const result = await mod.queryContains('schema-1', 'field', 3);
+
+    expect(result).toHaveLength(3);
+    const firstCommand = sendMock.mock.calls[0]?.[0] as {
+      input: {
+        FilterExpression: string;
+        Limit: number;
+        ExpressionAttributeValues: Record<string, unknown>;
+      };
+    };
+    expect(firstCommand.input.FilterExpression).toBe('contains(#path, :q) OR contains(#fieldName, :q)');
+    expect(firstCommand.input.Limit).toBe(3);
+    expect(firstCommand.input.ExpressionAttributeValues[':q']).toBe('field');
+  });
+
+  it('deleteBySchema performs query + batched deletes', async () => {
+    const items = createNodes(30).map((node) => ({ schemaId: node.schemaId, path: node.path }));
+    sendMock
+      .mockResolvedValueOnce({ Items: items, LastEvaluatedKey: undefined })
+      .mockResolvedValueOnce({ UnprocessedItems: {} })
+      .mockResolvedValueOnce({ UnprocessedItems: {} });
+    const mod = await importModule();
+
+    const promise = mod.deleteBySchema('schema-1');
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(sendMock).toHaveBeenCalledTimes(3);
+
+    const firstDeleteBatch = sendMock.mock.calls[1]?.[0] as {
+      input: { RequestItems: Record<string, unknown[]> };
+    };
+    const secondDeleteBatch = sendMock.mock.calls[2]?.[0] as {
+      input: { RequestItems: Record<string, unknown[]> };
+    };
+    expect(firstDeleteBatch.input.RequestItems['keyra-schema-nodes']).toHaveLength(25);
+    expect(secondDeleteBatch.input.RequestItems['keyra-schema-nodes']).toHaveLength(5);
+  });
+});
