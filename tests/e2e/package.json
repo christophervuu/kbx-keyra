@@ -1,0 +1,22 @@
+{
+  "name": "@keyra/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test --pass-with-no-tests",
+    "test:e2e:parity": "playwright test --project=localStorage --project=httpBackend",
+    "test:e2e:local": "playwright test --project=localStorage --pass-with-no-tests",
+    "test:e2e:backend": "playwright test --project=httpBackend --pass-with-no-tests",
+    "test:e2e:list": "playwright test --list --pass-with-no-tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.0",
+    "express": "^5.1.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

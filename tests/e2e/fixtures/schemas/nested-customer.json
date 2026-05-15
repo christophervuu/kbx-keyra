@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NestedCustomer",
+  "type": "object",
+  "properties": {
+    "customer": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "fullName": { "type": "string" },
+            "contact": {
+              "type": "object",
+              "properties": {
+                "email": { "type": "string", "format": "email" },
+                "phone": { "type": "string" }
+              },
+              "required": ["email"]
+            }
+          },
+          "required": ["fullName"]
+        },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "line1": { "type": "string" },
+              "city": { "type": "string" },
+              "postalCode": { "type": "string" }
+            },
+            "required": ["line1", "city"]
+          }
+        }
+      },
+      "required": ["id", "profile"]
+    },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["customer"]
+}

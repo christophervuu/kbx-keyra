@@ -18,6 +18,11 @@
   ],
   "scripts": {
     "build": "tsup",
+    "test:e2e": "pnpm --dir tests/e2e test:e2e",
+    "test:e2e:parity": "pnpm --dir tests/e2e test:e2e:parity",
+    "test:e2e:local": "pnpm --dir tests/e2e test:e2e:local",
+    "test:e2e:backend": "pnpm --dir tests/e2e test:e2e:backend",
+    "test:e2e:list": "pnpm --dir tests/e2e test:e2e:list",
     "build:auto-map": "npx esbuild src/lambda/ai/auto-map.ts --bundle --platform=node --target=node20 --format=cjs --outfile=build/auto-map/index.cjs",
     "zip:auto-map": "sh -c 'cd build/auto-map && rm -f function.zip && zip -q -r function.zip index.cjs'",
     "package:auto-map": "pnpm run build:auto-map && pnpm run zip:auto-map",

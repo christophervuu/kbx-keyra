@@ -8,6 +8,8 @@ node_modules/
 # Test outputs and caches
 /coverage/
 .vitest/
+/tests/e2e/test-results/
+/tests/e2e/playwright-report/
 
 # Logs
 *.log

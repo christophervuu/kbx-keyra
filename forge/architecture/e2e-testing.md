@@ -2,147 +2,162 @@
 
 ## Overview
 
-End-to-end tests exercise KeyRa through a real browser using Playwright. They verify that integrated user workflows function correctly from a user's perspective — navigation, form submission, data persistence, and multi-component interactions.
+End-to-end tests exercise KeyRa through a real browser using Playwright. They verify integrated user workflows from a user perspective (navigation, CRUD flows, validation/error states, and persistence behavior).
 
-Phase 0 status note: the E2E harness described below is an architecture target and is **not yet implemented in this repository** (`tests/e2e/` is currently absent).
-
-E2E tests complement the existing unit/component test layer (Vitest + React Testing Library) by catching integration issues that isolated tests miss: routing failures, localStorage serialization bugs, cross-component state propagation, and render lifecycle problems.
+The E2E harness is implemented in `tests/e2e/` and is used as an **adapter-parity gate**: the same spec files run in both `localStorage` and `httpBackend` modes.
 
 ## Scope
 
-- Full user journey tests (create project → upload schema → create mapping → map fields)
+- Adapter transparency validation for core CRUD flows
 - Route accessibility and navigation
-- Form validation and error handling
-- Data persistence across page reloads
-- Multi-panel editor interactions
+- Form validation and not-found/error handling
+- Save/reload persistence checks in both adapter modes
+- CI parity gate integration
 
-## Directory Structure
+## Directory Structure (implemented)
 
 ```
 tests/
   e2e/
-    playwright.config.ts       # Playwright configuration
+    README.md                  # Local/CI parity runbook
+    package.json               # E2E workspace scripts/dependencies
+    tsconfig.json              # E2E TypeScript config
+    playwright.config.ts       # Dual-project config + webServer lifecycle
     fixtures/
-      base.ts                 # Extended test with custom fixtures
-      storage.ts              # localStorage seed/clear helpers
-      test-data.ts            # Domain object factories
-      schemas/                # JSON Schema fixture files for upload tests
-      invalid/                # Invalid fixture files for error tests
+      base.ts                  # Extended test fixture (adapterMode, seed/reset, factories)
+      seed.ts                  # Adapter-agnostic seed/reset router
+      storage.ts               # localStorage seed/clear helpers
+      http-seed.ts             # mock-server seed/reset HTTP helpers
+      test-data.ts             # Deterministic domain factories
+      schemas/
+        simple-order.json
+        nested-customer.json
     pages/
-      app.page.ts             # Base page object (shell, nav)
-      project-list.page.ts    # Project list interactions
-      project-form.page.ts    # Project create/edit form
-      schema-list.page.ts     # Schema library
-      schema-detail.page.ts   # Schema viewer + tree
-      mapping-editor.page.ts  # Multi-panel mapping editor
+      app.page.ts
+      project-list.page.ts
+      project-form.page.ts
+      project-overview.page.ts
+      create-mapping.page.ts
+      schema-upload.page.ts
+      schema-detail.page.ts
+      mapping-editor.page.ts
     specs/
-      smoke.spec.ts           # Route loading & navigation
-      project-crud.spec.ts    # Project lifecycle
-      schema-upload.spec.ts   # Schema import & tree
-      mapping-creation.spec.ts # Mapping setup
-      mapping-editor.spec.ts  # Field mapping interactions
-      validation.spec.ts      # Error states & validation
-      persistence.spec.ts     # localStorage survival
-    test-results/             # (gitignored) Test run artifacts
-    playwright-report/        # (gitignored) HTML reports
+      fixtures-smoke.spec.ts
+      project-crud.spec.ts
+      mapping-crud.spec.ts
+      schema-flows.spec.ts
+      error-handling.spec.ts
+    mock-server/
+      index.ts
+      store.ts
+      response.ts
+      types.ts
+      routes/
+        projects.ts
+        mappings.ts
+        schemas.ts
+        test-control.ts
 ```
+
+## Dual-Mode Playwright Configuration
+
+`playwright.config.ts` defines two projects using the same spec set:
+
+- `localStorage` → app at `http://127.0.0.1:4173` with `VITE_API_URL` forced empty
+- `httpBackend` → app at `http://127.0.0.1:4174` with `VITE_API_URL=http://127.0.0.1:4100`
+
+The harness uses Playwright `webServer` entries so Vite and mock-server are started/stopped automatically for runs (local and CI).
+
+## Mock Server Architecture
+
+`tests/e2e/mock-server/` provides a deterministic Express server for backend-mode parity testing.
+
+### Characteristics
+
+- In-memory state only (non-persistent)
+- No auth
+- CRUD endpoints needed by parity suite
+- Standard success envelope + standardized error envelope
+- CORS enabled for local/CI browser runs
+
+### Control Endpoints
+
+- `GET /test/health` — readiness probe
+- `POST /test/seed` — bulk-seed deterministic state
+- `POST /test/reset` — clear state between tests
+
+## Seed/Reset Canonical Pattern
+
+The canonical pattern is `seedData()` / `resetData()` from `fixtures/base.ts`, which routes by adapter mode:
+
+- `localStorage` mode → `storage.ts` writes/removes `keyra:*` localStorage keys via `page.evaluate()`
+- `httpBackend` mode → `http-seed.ts` calls mock-server `/test/seed` and `/test/reset`
+
+All new E2E specs should follow:
+
+1. seed
+2. execute
+3. assert user-visible state
+4. teardown/reset (fixture-managed)
 
 ## Patterns
 
 ### Page Object Model
 
-Page objects encapsulate selectors and interactions for a route/component. They:
-- Are TypeScript classes accepting a Playwright `Page` in the constructor
-- Return `Locator` objects (not resolved values) for maximum flexibility
-- Never contain assertions — tests assert, page objects locate and interact
-- Have a `goto()` method for direct navigation
-
-```typescript
-export class ProjectListPage {
-  constructor(private page: Page) {}
-  async goto() { await this.page.goto('/'); }
-  getProjectByName(name: string) { return this.page.getByTestId(`project-${name}`); }
-  async clickCreateProject() { await this.page.getByTestId('create-project-btn').click(); }
-}
-```
-
-### Extended Test Fixtures
-
-All tests import from `fixtures/base.ts` rather than `@playwright/test` directly. The extended `test` provides:
-- Automatic localStorage cleanup (teardown)
-- Pre-bound storage helpers
-- Access to test data factories
-
-### Storage Helpers
-
-Phase 0 stores data in localStorage under `keyra:projects`, `keyra:schemas`, `keyra:mappings`. Helpers use `page.evaluate()` to manipulate storage:
-
-```typescript
-export async function seedStorage(page: Page, data: SeedData) {
-  await page.evaluate((d) => {
-    Object.entries(d).forEach(([key, value]) => {
-      localStorage.setItem(`keyra:${key}`, JSON.stringify(value));
-    });
-  }, data);
-}
-```
+- Page objects encapsulate selectors and interactions
+- Specs own assertions
+- Prefer semantic interactions (`data-testid`, role, text) in that priority order
 
 ### Test Data Factories
 
-Factories produce valid domain objects with sensible defaults. They accept partial overrides for test-specific customization:
-
-```typescript
-export function createTestProject(overrides?: Partial<Project>): Project {
-  return { id: 'test-project-1', name: 'Test Project', ...overrides };
-}
-```
+`fixtures/test-data.ts` is the source of deterministic project/mapping/schema factories and default seed payloads.
 
 ### Test Isolation
 
-Every test follows: **seed → execute → teardown**. Tests never depend on state from other tests. The fixture teardown ensures cleanup even when tests fail.
-
-### Fixture Files
-
-Dedicated `.json` schema files live in `tests/e2e/fixtures/schemas/`. These are preferred over in-memory generation because:
-- Reusable across multiple tests without copy-paste
-- Human-readable and reviewable (serve as documentation)
-- Decoupled from implementation details that may drift
-
-Keep fixtures small (10-15 fields). Include at least one deeply-nested schema (3+ levels) for tree interaction tests.
+Tests must not depend on execution order. Isolation is enforced via fixture reset semantics and deterministic seeding.
 
 ## Selector Strategy
 
 Priority order:
-1. `data-testid` — primary, most stable (`page.getByTestId()`)
-2. ARIA roles — for semantic elements (`page.getByRole()`)
-3. Text content — for user-visible labels (`page.getByText()`)
-4. Never use CSS classes, tag names, or DOM structure as selectors
 
-## Performance Budget
+1. `data-testid`
+2. ARIA roles
+3. User-visible text
+4. Never rely on CSS classes or DOM structure
 
-- Full suite: < 60 seconds
-- Individual test: < 10 seconds
-- Single browser (Chromium) in Phase 0
-- Parallelism: Playwright's default worker count
+## Performance & Runtime Budget
 
-## CI Configuration
-
-CI integration is deferred to a follow-up spec. When implemented, the intended approach:
-
-- Headless Chromium only
-- Retries: 1 on CI, 0 locally
+- Full suite target: `< 60s` per mode
+- Individual test target: `< 10s`
+- Browser target: Chromium only
+- Retries: `1` on CI, `0` locally
 - Reporter: `list` on CI, `html` locally
-- Artifacts: screenshots on failure, trace on first retry
-- `webServer` starts Vite dev server automatically
-- Possible Docker container for consistent font rendering
+
+Current config uses serial worker execution (`workers: 1`) for deterministic parity isolation against shared local mock/server ports.
+
+## CI Integration
+
+GitHub Actions parity gate:
+
+- Workflow: `.github/workflows/e2e-parity.yml`
+- Trigger: PR path filters for parity-relevant backend/adapter/bootstrap/E2E files
+- Command: `pnpm test:e2e:parity` (single invocation covering both projects)
+- Browser install: Chromium installed in CI before test run
+- Failure artifacts uploaded from:
+  - `tests/e2e/test-results`
+  - `tests/e2e/playwright-report`
+
+Parity gate behavior: failure in either project (`localStorage` or `httpBackend`) fails the workflow.
 
 ## Phase Evolution
 
-When Phase 1 introduces a real backend:
-- Storage helpers will be replaced by API seed functions (direct DB seeding or test API endpoints)
-- Network interception (`page.route()`) will be used for specific error simulation
-- Consider a test backend mode that resets between tests
-- Page objects remain unchanged — only fixture internals change
-- May add Firefox/WebKit projects for cross-browser coverage
+Phase 0.5/Phase 1 parity mode is now implemented (dual adapter projects + mock backend).
 
-Visual regression (screenshot comparison) is deferred until post-Phase 2 when the design system stabilizes and panel layouts are unlikely to change. Functional correctness is the Phase 0 priority.
+Future evolution candidates:
+
+- Extend coverage domains beyond CRUD parity
+- Add controlled error simulation via request interception where needed
+- Revisit worker parallelism if isolated environments/ports are introduced
+- Add optional cross-browser projects when parity scope requires it
+
+Visual regression remains deferred until design-system surfaces stabilize.

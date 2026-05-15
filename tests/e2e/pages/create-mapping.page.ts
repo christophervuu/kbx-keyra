@@ -1,0 +1,49 @@
+import type { Locator, Page } from '@playwright/test';
+
+export class CreateMappingPage {
+  constructor(private readonly page: Page) {}
+
+  getRoot(): Locator {
+    return this.page.getByTestId('page-create-mapping');
+  }
+
+  getNameInput(): Locator {
+    return this.page.locator('#mapping-name');
+  }
+
+  getNextButton(): Locator {
+    return this.page.getByTestId('next-button');
+  }
+
+  getCreateButton(): Locator {
+    return this.page.getByTestId('create-button');
+  }
+
+  getSourceSchemaSelect(): Locator {
+    return this.page.getByTestId('schema-select-source-schema');
+  }
+
+  getTargetSchemaSelect(): Locator {
+    return this.page.getByTestId('schema-select-target-schema');
+  }
+
+  async fillName(name: string): Promise<void> {
+    await this.getNameInput().fill(name);
+  }
+
+  async next(): Promise<void> {
+    await this.getNextButton().click();
+  }
+
+  async selectSourceSchema(schemaId: string): Promise<void> {
+    await this.getSourceSchemaSelect().selectOption(schemaId);
+  }
+
+  async selectTargetSchema(schemaId: string): Promise<void> {
+    await this.getTargetSchemaSelect().selectOption(schemaId);
+  }
+
+  async create(): Promise<void> {
+    await this.getCreateButton().click();
+  }
+}

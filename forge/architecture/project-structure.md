@@ -805,7 +805,53 @@ tests/
   ui/                 UI integration and hook tests
     features/         Tests mirroring ui/src/features/ structure
     hooks/            Tests for shared and feature-level hooks
+  e2e/                Playwright end-to-end test workspace package (FS-060)
+    package.json      Isolated E2E package scripts/dependencies (@playwright/test, express)
+    README.md         E2E parity runbook (local commands + CI gate behavior)
+    tsconfig.json     TypeScript config for E2E infrastructure files
+    playwright.config.ts  Dual-project Playwright config (localStorage + httpBackend), webServer lifecycle (Vite + mock server)
+    fixtures/
+      base.ts         Extended Playwright test fixture with adapter mode, factories, seed/reset helpers, and auto-reset teardown
+      test-data.ts    Deterministic domain factories (project/mapping/schema + default seed dataset)
+      storage.ts      LocalStorage seed/clear helpers for keyra:* keys (projects/schemas/mappings/version snapshots)
+      http-seed.ts    Mock-backend seed/reset client helpers (POST /test/seed, POST /test/reset)
+      seed.ts         Adapter-agnostic seed/reset router (localStorage vs httpBackend)
+      schemas/
+        simple-order.json  Flat JSON Schema fixture (8-10 fields) for upload/smoke tests
+        nested-customer.json  3-level nested JSON Schema fixture for tree rendering tests
+    pages/
+      app.page.ts            App-level route/shell page object
+      project-list.page.ts   Home/project-list page object
+      project-form.page.ts   Create project form page object
+      create-mapping.page.ts Create mapping wizard page object
+      project-overview.page.ts Project overview page object
+      schema-upload.page.ts  Schema upload dialog page object
+      schema-detail.page.ts  Schema detail page object
+      mapping-editor.page.ts Mapping editor page object (save/history/config interactions)
+    specs/
+      fixtures-smoke.spec.ts Seed/reset infrastructure smoke test validating localStorage/httpBackend routing
+      project-crud.spec.ts Project lifecycle parity spec (create/list/open/rename/delete) across both adapter modes
+      mapping-crud.spec.ts Mapping parity spec (create/editor rule persist/reopen/duplicate/delete) across both adapter modes
+      schema-flows.spec.ts Schema parity spec (upload/detail metadata+tree/reference) across both adapter modes
+      error-handling.spec.ts Error parity spec (project/mapping not-found surfaces + create-project validation feedback)
+    mock-server/
+      index.ts        Express mock backend entrypoint with full CRUD routes + /test/{health,seed,reset} control endpoints
+      store.ts        In-memory data store for projects/mappings/schemas/version entries (deterministic IDs, sync read-after-write)
+      response.ts     Envelope response helpers (success wrapper + standardized error envelope + CORS headers)
+      types.ts        Mock-server local transport/control endpoint type contracts
+      routes/
+        projects.ts   Project CRUD routes
+        mappings.ts   Mapping CRUD + duplicate + version routes
+        schemas.ts    Schema CRUD + query routes
+        test-control.ts Test control routes (health, seed, reset)
+      server.ts       Legacy bootstrap placeholder from T-01 (superseded by index.ts in T-02)
+    test-results/     Gitignored Playwright output artifacts
+    playwright-report/ Gitignored Playwright HTML report output
   # Note: most UI component tests are co-located under ui/src/**/*.test.{ts,tsx}
+
+.github/
+  workflows/
+    e2e-parity.yml    PR path-filtered E2E adapter parity gate (dual-mode Playwright run + failure artifact upload)
 ```
 
 **Rules:**
