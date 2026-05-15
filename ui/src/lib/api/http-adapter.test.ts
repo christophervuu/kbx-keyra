@@ -1,0 +1,353 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { HttpAdapter } from './http-adapter';
+import { httpRequest } from './http-client';
+import { AdapterMethodNotImplementedError } from './errors';
+
+import { toAppError } from '@/lib/state/app-error';
+
+import type {
+  CreateMappingInput,
+  CreateProjectInput,
+  CreateSchemaInput,
+  MappingConfig,
+  MappingVersionEntry,
+  UpdateProjectInput,
+  UpdateSchemaInput,
+} from '@/lib/types';
+
+vi.mock('./http-client', () => ({
+  httpRequest: vi.fn(),
+}));
+
+const API_URL = 'http://localhost:3001/api';
+
+describe('HttpAdapter (CRUD)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('throws when apiUrl is empty', () => {
+    expect(() => new HttpAdapter('')).toThrow('HttpAdapter requires a non-empty apiUrl.');
+  });
+
+  it('listSchemas maps to GET /schemas', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([{ schemaId: 's-1' }]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listSchemas()).resolves.toEqual([{ schemaId: 's-1' }]);
+    expect(httpRequest).toHaveBeenCalledWith({ baseUrl: API_URL, path: '/schemas', method: 'GET' });
+  });
+
+  it('getSchema maps to GET /schemas/:id', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ metadata: { schemaId: 's-1' }, content: {} });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getSchema('s-1')).resolves.toMatchObject({ metadata: { schemaId: 's-1' } });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1',
+      method: 'GET',
+    });
+  });
+
+  it('createSchema maps to POST /schemas with body', async () => {
+    const input: CreateSchemaInput = {
+      name: 'Schema A',
+      format: 'json-schema',
+      origin: 'local',
+      content: { type: 'object' },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 's-1', name: 'Schema A' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.createSchema(input)).resolves.toMatchObject({ schemaId: 's-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('updateSchema maps to PUT /schemas/:id with body', async () => {
+    const input: UpdateSchemaInput = { name: 'Schema B' };
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 's-1', name: 'Schema B' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.updateSchema('s-1', input)).resolves.toMatchObject({ schemaId: 's-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1',
+      method: 'PUT',
+      body: input,
+    });
+  });
+
+  it('deleteSchema maps to DELETE /schemas/:id and handles void', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.deleteSchema('s-1')).resolves.toBeUndefined();
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1',
+      method: 'DELETE',
+    });
+  });
+
+  it('listMappings maps to GET /projects/:projectId/mappings', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([{ mappingId: 'm-1' }]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listMappings('p-1')).resolves.toEqual([{ mappingId: 'm-1' }]);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/mappings',
+      method: 'GET',
+    });
+  });
+
+  it('getMapping maps to GET /mappings/:id', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'm-1', name: 'Map', version: 1, engineVersion: '2.0.0', config: {}, rules: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getMapping('m-1')).resolves.toMatchObject({ id: 'm-1' });
+    expect(httpRequest).toHaveBeenCalledWith({ baseUrl: API_URL, path: '/mappings/m-1', method: 'GET' });
+  });
+
+  it('createMapping maps to POST /mappings with body', async () => {
+    const input: CreateMappingInput = { projectId: 'p-1', name: 'Map A' };
+    vi.mocked(httpRequest).mockResolvedValueOnce({ mappingId: 'm-1', name: 'Map A' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.createMapping(input)).resolves.toMatchObject({ mappingId: 'm-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('updateMapping maps to PUT /mappings/:id with body', async () => {
+    const config: MappingConfig = {
+      id: 'm-1',
+      projectId: 'p-1',
+      name: 'Map B',
+      version: 2,
+      engineVersion: '2.0.0',
+      config: {},
+      rules: [],
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce({ mappingId: 'm-1', name: 'Map B' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.updateMapping('m-1', config)).resolves.toMatchObject({ mappingId: 'm-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1',
+      method: 'PUT',
+      body: config,
+    });
+  });
+
+  it('deleteMapping maps to DELETE /mappings/:id and handles void', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.deleteMapping('m-1')).resolves.toBeUndefined();
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1',
+      method: 'DELETE',
+    });
+  });
+
+  it('duplicateMapping maps to POST /mappings/:id/duplicate with name body', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ mappingId: 'm-2', name: 'Duplicated' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.duplicateMapping('m-1', 'Duplicated')).resolves.toMatchObject({ mappingId: 'm-2' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/duplicate',
+      method: 'POST',
+      body: { name: 'Duplicated' },
+    });
+  });
+
+  it('listMappingVersions maps to GET /mappings/:id/versions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([{ version: 1 }]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listMappingVersions('m-1')).resolves.toEqual([{ version: 1 }]);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/versions',
+      method: 'GET',
+    });
+  });
+
+  it('getMappingVersion maps to GET /mappings/:id/versions/:version', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ version: 2 });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getMappingVersion('m-1', 2)).resolves.toMatchObject({ version: 2 });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/versions/2',
+      method: 'GET',
+    });
+  });
+
+  it('saveMappingVersion maps to POST /mappings/:id/versions and handles void', async () => {
+    const entry: MappingVersionEntry = {
+      version: 3,
+      savedAt: '2026-05-01T00:00:00.000Z',
+      savedBy: 'You',
+      ruleCount: 0,
+      config: {
+        name: 'Map',
+        version: 3,
+        engineVersion: '2.0.0',
+        config: {},
+        rules: [],
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.saveMappingVersion('m-1', entry)).resolves.toBeUndefined();
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/versions',
+      method: 'POST',
+      body: entry,
+    });
+  });
+
+  it('listProjects maps to GET /projects', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([{ projectId: 'p-1' }]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listProjects()).resolves.toEqual([{ projectId: 'p-1' }]);
+    expect(httpRequest).toHaveBeenCalledWith({ baseUrl: API_URL, path: '/projects', method: 'GET' });
+  });
+
+  it('getProject maps to GET /projects/:id', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ projectId: 'p-1', mappings: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getProject('p-1')).resolves.toMatchObject({ projectId: 'p-1' });
+    expect(httpRequest).toHaveBeenCalledWith({ baseUrl: API_URL, path: '/projects/p-1', method: 'GET' });
+  });
+
+  it('createProject maps to POST /projects with body', async () => {
+    const input: CreateProjectInput = {
+      name: 'Project A',
+      description: 'desc',
+      slug: 'project-a',
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce({ projectId: 'p-1', name: 'Project A' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.createProject(input)).resolves.toMatchObject({ projectId: 'p-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('updateProject maps to PUT /projects/:id with body', async () => {
+    const input: UpdateProjectInput = { name: 'Project B' };
+    vi.mocked(httpRequest).mockResolvedValueOnce({ projectId: 'p-1', name: 'Project B' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.updateProject('p-1', input)).resolves.toMatchObject({ projectId: 'p-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1',
+      method: 'PUT',
+      body: input,
+    });
+  });
+
+  it('deleteProject maps to DELETE /projects/:id and handles void', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.deleteProject('p-1')).resolves.toBeUndefined();
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1',
+      method: 'DELETE',
+    });
+  });
+
+  it('propagates errors from httpRequest unchanged', async () => {
+    const error = new Error('boom');
+    vi.mocked(httpRequest).mockRejectedValueOnce(error);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listProjects()).rejects.toBe(error);
+  });
+
+  it.each([
+    ['listTemplates', (a: HttpAdapter) => a.listTemplates()],
+    ['getTemplate', (a: HttpAdapter) => a.getTemplate('t-1')],
+    ['getDeploymentContext', (a: HttpAdapter) => a.getDeploymentContext('m-1')],
+    ['deploy', (a: HttpAdapter) => a.deploy('m-1', 'DEV')],
+    ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'QA')],
+    ['rollback', (a: HttpAdapter) => a.rollback('m-1', 'DEV', 1)],
+    ['getDeploymentDiff', (a: HttpAdapter) => a.getDeploymentDiff('m-1', 1, 2)],
+    ['listCdmSchemas', (a: HttpAdapter) => a.listCdmSchemas()],
+    ['linkCdmSchema', (a: HttpAdapter) => a.linkCdmSchema({ repo: 'r', branch: 'b', path: '/a.xsd' })],
+    ['syncCdmSchema', (a: HttpAdapter) => a.syncCdmSchema('s-1')],
+    ['listPublishedSchemas', (a: HttpAdapter) => a.listPublishedSchemas()],
+    [
+      'publishSchemaToGitHub',
+      (a: HttpAdapter) => a.publishSchemaToGitHub('s-1', { repo: 'r', branch: 'b', path: '/a.xsd' }),
+    ],
+    [
+      'linkPublishedSchema',
+      (a: HttpAdapter) => a.linkPublishedSchema({ repo: 'r', branch: 'b', path: '/a.xsd' }),
+    ],
+    ['autoMap', (a: HttpAdapter) => a.autoMap({ projectId: 'p-1', mappingId: 'm-1' })],
+    ['autoMapSection', (a: HttpAdapter) => a.autoMapSection({ projectId: 'p-1', mappingId: 'm-1' })],
+    [
+      'suggestExpression',
+      (a: HttpAdapter) =>
+        a.suggestExpression({ instruction: 'copy', targetPath: 'Order.Total', targetType: 'string' }),
+    ],
+    ['explainRule', (a: HttpAdapter) => a.explainRule({ targetPath: 'Order.Total', expression: 'source("x")' })],
+    ['smartFix', (a: HttpAdapter) => a.smartFix({ mappingId: 'm-1', diagnostics: [] })],
+    ['validateMappings', (a: HttpAdapter) => a.validateMappings({ mappingIds: ['m-1'] })],
+    ['querySchemaNodes', (a: HttpAdapter) => a.querySchemaNodes('s-1', 'name')],
+    ['listActivity', (a: HttpAdapter) => a.listActivity()],
+    [
+      'previewOnServer',
+      (a: HttpAdapter) => a.previewOnServer('m-1', { environment: 'DEV', sourceData: {} }),
+    ],
+  ])('%s throws AdapterMethodNotImplementedError', async (_methodName, invoke) => {
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(invoke(adapter)).rejects.toBeInstanceOf(AdapterMethodNotImplementedError);
+    await expect(invoke(adapter)).rejects.toMatchObject({
+      code: 'NOT_IMPLEMENTED',
+      retryable: false,
+    });
+  });
+
+  it('toAppError compatibility for AdapterMethodNotImplementedError', () => {
+    const appError = toAppError(new AdapterMethodNotImplementedError('deploy'));
+
+    expect(appError).toMatchObject({
+      message: '"deploy" is not yet available in HTTP mode.',
+      code: 'NOT_IMPLEMENTED',
+      retryable: false,
+    });
+  });
+});

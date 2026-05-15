@@ -559,9 +559,14 @@ ui/
                           types.ts              ApiAdapter contract
                           local-storage-adapter.ts  Phase 0 localStorage implementation
                           hybrid-adapter.ts     FS-041/FS-042 HybridAdapter: extends LocalStorageAdapter, overrides explainRule() and suggestExpression() to call backend via HTTP
+                          http-adapter.ts       FS-055 HTTP CRUD adapter: extends LocalStorageAdapter and overrides schema/mapping/version/project CRUD to route through httpRequest
+                          http-adapter.test.ts  FS-055 unit tests for HttpAdapter CRUD endpoint mapping, void handling, and error propagation
+                          errors.ts             FS-055 API error types including AdapterMethodNotImplementedError (`code: NOT_IMPLEMENTED`, `retryable: false`)
                           ai-api-client.ts      FS-041/FS-042 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) + suggestExpressionHttp(apiUrl, input); endpoint-specific timeout, envelope parsing, error mapping
+                          http-client.ts        FS-055 reusable HTTP utility: typed fetch wrapper with timeout, envelope parsing, error normalization, and retry/backoff policy
+                          http-client.test.ts   FS-055 unit tests for HTTP utility success/error/retry/timeout/backoff/toAppError compatibility
                           adapter-provider.tsx  AdapterProvider + useAdapter() React context
-                          bootstrap.ts          createAdapter(): returns HybridAdapter when VITE_API_URL set, LocalStorageAdapter otherwise
+                          bootstrap.ts          createAdapter(): returns HttpAdapter when VITE_API_URL set, LocalStorageAdapter otherwise
       data/               Shared static data consumed cross-feature
         dsl-functions.ts  DSL_FUNCTION_CATALOG: all registered functions with categories, params, descriptions (T-01)
         dsl-functions.test.ts  Catalog tests (5 tests: coverage, required fields, valid categories, no duplicates)

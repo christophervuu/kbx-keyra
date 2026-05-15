@@ -10,11 +10,19 @@ import type {
   SuggestExpressionResult,
 } from '@/lib/types';
 
+/**
+ * @deprecated HybridAdapter is deprecated. Use HttpAdapter via VITE_API_URL instead.
+ */
 export class HybridAdapter extends LocalStorageAdapter {
   private readonly apiUrl: string;
 
   constructor(apiUrl: string) {
     super();
+
+    if (import.meta.env.DEV) {
+      console.warn('[KeyRa] HybridAdapter is deprecated. Use HttpAdapter via VITE_API_URL instead.');
+    }
+
     this.apiUrl = apiUrl;
   }
 

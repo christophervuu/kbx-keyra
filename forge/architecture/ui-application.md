@@ -12,7 +12,7 @@ The KeyRa UI is a React 18+ / TypeScript / Vite single-page application. It prov
 
 Phase model:
 - **Phase 0 (implemented in FS-008):** Local-only operation through `LocalStorageAdapter`.
-- **Phase 1+:** Backend communication via `HttpAdapter` (placeholder only in Phase 0).
+- **Phase 1 transition (FS-055):** Backend bootstrap now selects `HttpAdapter` when `VITE_API_URL` is configured; local fallback remains `LocalStorageAdapter`.
 
 Primary characteristics:
 - Desktop-first (minimum 1024px, optimized for 1280px+)
@@ -237,10 +237,13 @@ ui/src/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
-      hybrid-adapter.ts       HybridAdapter: LocalStorageAdapter + HTTP AI overrides (`explainRule`, `suggestExpression`, `autoMapSection`) (FS-041, FS-042, FS-046)
+      http-adapter.ts         FS-055 HTTP adapter: CRUD over HTTP for schemas/mappings/versions/projects; non-CRUD methods throw structured NOT_IMPLEMENTED placeholders
+      http-client.ts          FS-055 reusable HTTP utility (typed fetch wrapper: timeout, canonical envelope parsing, retry/backoff, error normalization)
+      errors.ts               FS-055 API errors (`AdapterMethodNotImplementedError`)
+      hybrid-adapter.ts       Legacy/deprecated adapter retained for compatibility; no longer bootstrap-selected (FS-055)
       ai-api-client.ts        HTTP client functions for AI endpoints (`explainRuleHttp`, `suggestExpressionHttp`) (FS-041, FS-042)
       adapter-provider.tsx
-      bootstrap.ts            Adapter selection using VITE_API_URL
+      bootstrap.ts            Adapter selection using VITE_API_URL (`HttpAdapter` when set, `LocalStorageAdapter` otherwise)
     engine/
       index.ts                Browser integration boundary for `@keyra/engine` (validate/execute/parse/evaluate/registry helpers)
     data/
@@ -280,8 +283,8 @@ This broad contract is intentionally stable for UI call sites; adapter implement
 ### Implementations
 
 - **Current (Phase 0):** `LocalStorageAdapter` — all operations use localStorage
-- **Current (Showcase/Phase 0.5):** `HybridAdapter` — extends `LocalStorageAdapter`; overrides `explainRule()`, `suggestExpression()`, and `autoMapSection()` to call backend HTTP endpoints; all CRUD operations remain localStorage-backed (introduced in FS-041, extended in FS-042, FS-046)
-- **Future (Phase 1+):** `HttpAdapter` — all operations via HTTP (intentionally not implemented)
+- **Current (Phase 1 transition / FS-055):** `HttpAdapter` — schema/mapping/version/project CRUD routes through shared HTTP client utility; non-CRUD methods currently throw structured `AdapterMethodNotImplementedError` placeholders (`code: "NOT_IMPLEMENTED"`, `retryable: false`)
+- **Legacy (retained):** `HybridAdapter` — earlier showcase adapter that extended `LocalStorageAdapter` and overrode selected AI methods; retained for compatibility but deprecated and no longer selected by bootstrap
 
 ### Bootstrap
 
@@ -289,9 +292,33 @@ Startup behavior is centralized in `createAdapter()`:
 
 1. Read `import.meta.env.VITE_API_URL`
 2. If unset/empty → return `new LocalStorageAdapter()`
-3. If set → return `new HybridAdapter(apiUrl)` — provides localStorage CRUD + HTTP-backed AI calls
+3. If set → return `new HttpAdapter(apiUrl)`
 
-Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced by `HybridAdapter` (FS-041).
+`HybridAdapter` is retained in the codebase with a dev-only deprecation warning and is not used by `createAdapter()`.
+
+### HTTP Client Utility and Error Normalization (FS-055)
+
+`ui/src/lib/api/http-client.ts` is the shared transport utility consumed by `HttpAdapter` CRUD methods.
+
+- Canonical response envelope contract:
+  - success: `{ success: true, data: T }`
+  - failure: `{ success: false, error: { code, message } }`
+- Timeout handling uses `AbortController` (default 10s)
+- Retry policy:
+  - retries status `429/502/503/504`
+  - retries network/timeout only for `GET`
+  - max attempts = 3, backoff = `500ms * attempt + jitter`
+- Errors are normalized to `HttpClientError` with `statusCode?`, `code?`, and `retryable`, intentionally compatible with `toAppError()` / `AppError` in async UI state
+
+### Placeholder Error Contract (FS-055)
+
+`AdapterMethodNotImplementedError` (`ui/src/lib/api/errors.ts`) is used by `HttpAdapter` non-CRUD placeholders.
+
+- `message`: `"{methodName}" is not yet available in HTTP mode.`
+- `code`: `NOT_IMPLEMENTED`
+- `retryable`: `false`
+
+This gives deterministic `toAppError()` output for unimplemented HTTP-mode adapter methods.
 
 ### AI API Client
 
@@ -311,7 +338,7 @@ Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides only implemented AI showcase slices (`explainRule`, `suggestExpression`, `autoMapSection`) to call the backend; unimplemented AI methods (for example `smartFix`) continue to throw offline-mode errors via inheritance.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. In `HttpAdapter`, non-CRUD methods throw structured `AdapterMethodNotImplementedError` placeholders; CRUD methods use the shared HTTP client utility and normalized `HttpClientError` semantics.
 
 Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Phase 0:
 - `listTemplates()` returns `[]`

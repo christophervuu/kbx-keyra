@@ -1,12 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { explainRuleHttp } from './ai-api-client';
+import { HttpAdapter } from './http-adapter';
 
 import { createAdapter, HybridAdapter, LocalStorageAdapter } from '@/lib/api';
-
-vi.mock('./ai-api-client', () => ({
-  explainRuleHttp: vi.fn(),
-}));
 
 describe('createAdapter', () => {
   it('returns LocalStorageAdapter when VITE_API_URL is unset', () => {
@@ -21,24 +17,35 @@ describe('createAdapter', () => {
     expect(adapter).toBeInstanceOf(LocalStorageAdapter);
   });
 
-  it('returns HybridAdapter when VITE_API_URL is set', () => {
+  it('returns HttpAdapter when VITE_API_URL is set', () => {
     const adapter = createAdapter('http://localhost:4000');
 
-    expect(adapter).toBeInstanceOf(HybridAdapter);
+    expect(adapter).toBeInstanceOf(HttpAdapter);
   });
 
-  it('returned HybridAdapter is wired with apiUrl for explainRule', async () => {
+  it('returned HttpAdapter uses NOT_IMPLEMENTED placeholder for explainRule', async () => {
     const adapter = createAdapter('http://localhost:4000');
-    vi.mocked(explainRuleHttp).mockResolvedValue({ explanation: 'ok' });
 
-    expect(adapter).toBeInstanceOf(HybridAdapter);
+    expect(adapter).toBeInstanceOf(HttpAdapter);
 
     const input = {
       targetPath: 'Order.Header.DocumentType',
       expression: 'source("InvoiceAmount")',
     };
 
-    await expect(adapter.explainRule(input)).resolves.toEqual({ explanation: 'ok' });
-    expect(explainRuleHttp).toHaveBeenCalledWith('http://localhost:4000', input);
+    await expect(adapter.explainRule(input)).rejects.toMatchObject({
+      code: 'NOT_IMPLEMENTED',
+      retryable: false,
+    });
+  });
+
+  it('HybridAdapter constructor warns in dev mode', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    new HybridAdapter('http://localhost:4000');
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[KeyRa] HybridAdapter is deprecated. Use HttpAdapter via VITE_API_URL instead.',
+    );
   });
 });

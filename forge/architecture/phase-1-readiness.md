@@ -227,14 +227,12 @@ Frontend implementation currently constrains backend design in these ways:
 ## 5) AI Showcase Transition Path
 
 ### Current state
-- `createAdapter()` selects:
+- `createAdapter()` now selects:
   - `LocalStorageAdapter` when `VITE_API_URL` is unset
-  - `HybridAdapter` when set
-- `HybridAdapter` overrides only:
-  - `explainRule`
-  - `suggestExpression`
-  - `autoMapSection`
-- Remaining AI methods still follow local offline behavior.
+  - `HttpAdapter` when set
+- `HttpAdapter` currently provides HTTP CRUD coverage for schemas/mappings/versions/projects via shared `httpRequest()` utility.
+- AI and other non-CRUD methods in `HttpAdapter` currently throw structured `AdapterMethodNotImplementedError` placeholders (`code: NOT_IMPLEMENTED`, `retryable: false`).
+- `HybridAdapter` remains in the repository for compatibility/reference but is deprecated and no longer bootstrap-selected.
 
 ### Backend assets already present
 - Lambda handlers under `src/lambda/ai/`:
