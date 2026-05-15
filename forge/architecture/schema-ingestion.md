@@ -201,6 +201,24 @@ The `querySchemaNodes` endpoint provides keyword-based schema node search:
 3. **Optional filters** on `type`, `isArray`, `depth`
 4. **Enriched** with parent chain from DynamoDB `parentPath-index` GSI
 
+### Query Contract
+
+- **Route:** `POST /schemas/:id/query`
+- **Request body:**
+  - `query: string` (required)
+  - `filters?: { type?: string[]; isArray?: boolean; depth?: number }`
+  - `includeParentChain?: boolean` (default `false`)
+  - `limit?: number` (default `20`, max `100`)
+- **Response shape:** `SchemaSearchResult[]` with
+  - `path`, `fieldName`, `type`, `depth`, `isArray`, `score`, `embeddingText`
+  - optional `parentChain` when `includeParentChain: true`
+
+### Query Error Semantics
+
+- `400` for invalid request body or missing `query`
+- `404` when schema metadata does not exist for the requested `schemaId`
+- `500` for unexpected runtime failures in query path
+
 ### Future: Hybrid Search
 
 When vector embeddings are populated:
@@ -244,3 +262,15 @@ When vector embeddings are populated:
 - **Schema deletion:** Clean up DynamoDB nodes + OpenSearch docs + S3 content
 - **Webhook-triggered ingestion:** GitHub webhook → re-ingest CDM schemas automatically
 - **Schema inference:** Accept sample JSON/XML, infer schema structure, then run normal pipeline
+
+---
+
+## 10) Verification Coverage
+
+Automated coverage for this subsystem is split across:
+
+- `tests/lib/schema/` — parser, storage, DynamoDB, OpenSearch modules
+- `tests/lambda/schema/` — ingest/query/worker/orchestration handlers
+- `tests/integration/schema-ingestion/` — end-to-end orchestration behavior and performance guardrails
+
+Integration coverage includes threshold behavior (50/499 inline, 500+ orchestrated), large-schema batching/chunking behavior, query filtering/enrichment, and benchmark assertions aligned to spec targets.

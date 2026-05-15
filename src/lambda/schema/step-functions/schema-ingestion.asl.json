@@ -1,0 +1,204 @@
+{
+  "Comment": "Large schema ingestion orchestration for FS-056",
+  "StartAt": "ParseSchema",
+  "TimeoutSeconds": 600,
+  "States": {
+    "ParseSchema": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "TimeoutSeconds": 120,
+      "Parameters": {
+        "FunctionName": "__PARSE_SCHEMA_LAMBDA_ARN__",
+        "Payload": {
+          "schemaId.$": "$.schemaId",
+          "s3Key.$": "$.s3Key",
+          "format.$": "$.format"
+        }
+      },
+      "ResultSelector": {
+        "batchReferences.$": "$.Payload.batchReferences",
+        "fieldCount.$": "$.Payload.fieldCount",
+        "processedContentS3Key.$": "$.Payload.processedContentS3Key"
+      },
+      "ResultPath": "$.parseResult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ],
+      "Next": "ChunkNodes"
+    },
+    "ChunkNodes": {
+      "Type": "Pass",
+      "Parameters": {
+        "schemaId.$": "$.schemaId",
+        "fieldCount.$": "$.parseResult.fieldCount",
+        "processedContentS3Key.$": "$.parseResult.processedContentS3Key",
+        "batchReferences.$": "$.parseResult.batchReferences"
+      },
+      "ResultPath": "$.chunked",
+      "Next": "HasBatches"
+    },
+    "HasBatches": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.chunked.batchReferences[0]",
+          "IsPresent": true,
+          "Next": "ProcessBatches"
+        }
+      ],
+      "Default": "InitializeEmptyBatchResults"
+    },
+    "InitializeEmptyBatchResults": {
+      "Type": "Pass",
+      "Parameters": {
+        "batchResults": []
+      },
+      "ResultPath": "$.processBatches",
+      "Next": "AggregateResults"
+    },
+    "ProcessBatches": {
+      "Type": "Map",
+      "ItemsPath": "$.chunked.batchReferences",
+      "MaxConcurrency": 10,
+      "ItemSelector": {
+        "schemaId.$": "$.schemaId",
+        "fieldCount.$": "$.chunked.fieldCount",
+        "processedContentS3Key.$": "$.chunked.processedContentS3Key",
+        "batch.$": "$$.Map.Item.Value"
+      },
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "ProcessBatch",
+        "States": {
+          "ProcessBatch": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "TimeoutSeconds": 120,
+            "Parameters": {
+              "FunctionName": "__PROCESS_BATCH_LAMBDA_ARN__",
+              "Payload": {
+                "schemaId.$": "$.schemaId",
+                "batch.$": "$.batch"
+              }
+            },
+            "ResultSelector": {
+              "batchIndex.$": "$.Payload.batchIndex",
+              "nodeCount.$": "$.Payload.nodeCount",
+              "written.$": "$.Payload.written",
+              "indexed.$": "$.Payload.indexed",
+              "failed.$": "$.Payload.failed"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.processBatches.batchResults",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ],
+      "Next": "AggregateResults"
+    },
+    "AggregateResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "TimeoutSeconds": 120,
+      "Parameters": {
+        "FunctionName": "__AGGREGATE_RESULTS_LAMBDA_ARN__",
+        "Payload": {
+          "schemaId.$": "$.schemaId",
+          "fieldCount.$": "$.chunked.fieldCount",
+          "processedContentS3Key.$": "$.chunked.processedContentS3Key",
+          "batchResults.$": "$.processBatches.batchResults"
+        }
+      },
+      "ResultSelector": {
+        "fieldCount.$": "$.Payload.fieldCount",
+        "written.$": "$.Payload.written",
+        "indexed.$": "$.Payload.indexed",
+        "failed.$": "$.Payload.failed"
+      },
+      "ResultPath": "$.aggregate",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ],
+      "Next": "UpdateMetadata"
+    },
+    "UpdateMetadata": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "TimeoutSeconds": 120,
+      "Parameters": {
+        "FunctionName": "__UPDATE_METADATA_LAMBDA_ARN__",
+        "Payload": {
+          "schemaId.$": "$.schemaId",
+          "status": "ready",
+          "fieldCount.$": "$.aggregate.fieldCount"
+        }
+      },
+      "ResultPath": "$.metadata",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "HandleError"
+        }
+      ],
+      "Next": "BuildSuccessOutput"
+    },
+    "BuildSuccessOutput": {
+      "Type": "Pass",
+      "Parameters": {
+        "schemaId.$": "$.schemaId",
+        "status": "ready",
+        "fieldCount.$": "$.aggregate.fieldCount"
+      },
+      "End": true
+    },
+    "HandleError": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "TimeoutSeconds": 120,
+      "Parameters": {
+        "FunctionName": "__HANDLE_ERROR_LAMBDA_ARN__",
+        "Payload": {
+          "schemaId.$": "$.schemaId",
+          "status": "error",
+          "error.$": "$.error"
+        }
+      },
+      "ResultPath": "$.handleError",
+      "Next": "BuildErrorOutput"
+    },
+    "BuildErrorOutput": {
+      "Type": "Pass",
+      "Parameters": {
+        "schemaId.$": "$.schemaId",
+        "status": "error",
+        "fieldCount": 0
+      },
+      "End": true
+    }
+  }
+}

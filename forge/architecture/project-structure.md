@@ -37,6 +37,15 @@ src/
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
+    schema/           Schema ingestion/query lambdas (FS-056)
+      ingest-schema.ts Ingestion entrypoint handler (inline + Step Functions delegation) (FS-056 T-06)
+      query-schema-nodes.ts Query endpoint handler (POST /schemas/:id/query) for keyword+structural search (FS-056 T-09)
+      process-batch.ts Step Functions worker for single batch read/write/index (FS-056 T-08)
+      orchestration-tasks.ts Parse/Aggregate/UpdateMetadata/HandleError tasks for Step Functions (FS-056 T-08)
+      index.ts         Schema lambda barrel exports
+      step-functions/  Step Functions orchestration artifacts (FS-056 T-07)
+        schema-ingestion.asl.json Large-schema ingestion state machine definition (ASL)
+        README.md       Manual deployment + IAM notes + state/input/output contracts
     # [planned — not yet implemented in this repository]
     # schema/         Schema CRUD lambdas
     # mapping/        Mapping CRUD lambdas
@@ -55,6 +64,29 @@ src/
       model-client.ts   GitHub Models client wrapper (OpenAI SDK)
       output-parser.ts  Model output JSON parsing into AIResponse shape
       invoke-ai.ts      AI runtime orchestration entry point
+    schema/           Schema ingestion shared contracts and utilities (FS-056 T-01)
+      index.ts          Schema module barrel exports
+      types.ts          Schema ingestion/query interfaces and unions
+      constants.ts      Ingestion threshold and batch sizing constants
+      embedding-text.ts Canonical embedding text generation utility
+      parser/           Pure schema parsing module (JSON Schema + XSD) (FS-056 T-02)
+        index.ts          Parser barrel exports
+        parse-json-schema.ts JSON Schema parser → SchemaNode[]
+        parse-xsd.ts      XSD parser → SchemaNode[]
+        utils.ts          Shared parse result + node accumulation helpers
+      dynamo/           DynamoDB metadata/node writer module (FS-056 T-04)
+        index.ts          Dynamo writer barrel exports
+        metadata-writer.ts SchemaMetadata put/update/get operations
+        node-writer.ts    SchemaNodes batch writer with retry/backoff
+        node-reader.ts    SchemaNodes parent-path query helpers (parent chain + children)
+      s3/               S3 schema content storage module (FS-056 T-03)
+        index.ts          S3 storage barrel exports
+        schema-storage.ts Original/processed schema S3 put/get helpers + domain errors
+      opensearch/       OpenSearch indexing module (FS-056 T-05)
+        index.ts          OpenSearch barrel exports
+        mapping.ts        Schema nodes index mapping definition
+        indexer.ts        Index ensure/bulk index/delete-by-query operations
+        query.ts          OpenSearch schema-node BM25 query module with filters
   # [planned — not yet implemented in this repository]
   # types/            Shared types across backend
 ```
@@ -626,6 +658,11 @@ tests/
           valid-concat-fields/ Valid NL→rule request fixture for concat use case
           invalid-missing-instruction/ Invalid request fixture missing instruction (400)
           invalid-empty-source-context/ Invalid request fixture with empty sourceContext (400)
+    schema/           Schema lambda handler tests (FS-056)
+      ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, parse errors, and OpenSearch warning behavior
+      query-schema-nodes.test.ts Query endpoint tests for validation, filters, and parent-chain enrichment (FS-056 T-09)
+      process-batch.test.ts Tests for per-batch S3 read + Dynamo/OpenSearch write behavior
+      orchestration-tasks.test.ts Tests for parse chunking, aggregation totals, and error metadata updates
   lib/                Shared backend utility tests
     ai/               AI runtime module tests
       types.test.ts    AI runtime type exports/importability tests
@@ -642,6 +679,29 @@ tests/
           explain-rule.json Prompt fixture for explain-rule pipeline
           nl-to-rule.json   Prompt fixture for nl-to-rule pipeline
           dsl-reference.md  DSL reference fixture content
+    schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
+      types.test.ts    Type contract tests and inline threshold env parsing tests
+      embedding-text.test.ts Embedding text formatting tests (AE-11, AE-12)
+      parser/          Schema parser tests (FS-056 T-02)
+        parse-json-schema.test.ts JSON Schema parser unit and performance tests
+        parse-xsd.test.ts XSD parser unit tests
+      dynamo/          Schema DynamoDB writer tests (FS-056 T-04)
+        metadata-writer.test.ts SchemaMetadata writer operation tests
+        node-writer.test.ts SchemaNodes batch chunk/retry tests
+        node-reader.test.ts SchemaNodes parent-path reader tests
+      s3/              Schema S3 storage tests (FS-056 T-03)
+        schema-storage.test.ts S3 key/content-type/error behavior with mocked client
+      opensearch/      Schema OpenSearch module tests (FS-056 T-05)
+        indexer.test.ts OpenSearch indexer mapping/bulk/delete behavior tests
+        query.test.ts   OpenSearch query construction/filter/limit tests
+  integration/        Integration and performance test suites (Vitest)
+    schema-ingestion/  FS-056 end-to-end ingestion/query orchestration tests
+      inline-path.test.ts Inline path integration coverage (50/499/500 threshold behavior)
+      step-functions-path.test.ts Step Functions parse/chunk + batch worker integration coverage
+      query.test.ts     Query endpoint integration coverage (keyword/filter/enrichment)
+      performance.test.ts Parse/query/chunking benchmark assertions
+      fixtures/
+        generate-schema.ts Deterministic JSON Schema fixture generator (50/499/500/23,000)
   ui/                 UI integration and hook tests
     features/         Tests mirroring ui/src/features/ structure
     hooks/            Tests for shared and feature-level hooks
