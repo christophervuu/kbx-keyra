@@ -399,6 +399,56 @@ describe('useMappingEditor', () => {
       expect(result.current.rules).toHaveLength(3);
     });
 
+    it('failed save rolls back optimistic merged rules and preserves draftRules', async () => {
+      let rejectUpdate!: (error: Error) => void;
+      const adapter = createMockAdapter({
+        updateMapping: vi.fn().mockImplementation(
+          () =>
+            new Promise((_, reject) => {
+              rejectUpdate = reject;
+            }),
+        ),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      // Draft change exists, but saved rules are not yet mutated.
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'static("draft")');
+      });
+      expect(result.current.rules).toHaveLength(2);
+      expect(result.current.draftRules.get('A.D')).toBe('static("draft")');
+
+      let pendingSave!: Promise<void>;
+      act(() => {
+        pendingSave = result.current.actions.save();
+      });
+
+      // Optimistic save applies merged rules immediately.
+      expect(result.current.rules).toHaveLength(3);
+
+      await act(async () => {
+        rejectUpdate(new Error('Save failed'));
+        await pendingSave;
+      });
+
+      await waitFor(() => {
+        expect(result.current.saveStatus).toBe('error');
+      });
+
+      // Rollback to pre-save snapshot.
+      expect(result.current.rules).toHaveLength(2);
+      // Draft work is preserved (not cleared prematurely).
+      expect(result.current.draftRules.get('A.D')).toBe('static("draft")');
+      expect(result.current.saveError).toBe('Save failed');
+    });
+
     it('does not save when there are no unsaved changes', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
@@ -1575,4 +1625,3 @@ describe('useMappingEditor', () => {
     });
   });
 });
-

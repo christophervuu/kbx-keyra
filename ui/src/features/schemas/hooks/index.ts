@@ -11,3 +11,5 @@ export { useSchemaUsage } from './use-schema-usage';
 export type { UseSchemaUsageResult, UsageProject, UsageMapping } from './use-schema-usage';
 export { useSchemaLibrary } from './use-schema-library';
 export type { UseSchemaLibraryResult } from './use-schema-library';
+export { useIngestionPolling } from './use-ingestion-polling';
+export type { UseIngestionPollingResult, UseIngestionPollingOptions, IngestionPollingStatus } from './use-ingestion-polling';

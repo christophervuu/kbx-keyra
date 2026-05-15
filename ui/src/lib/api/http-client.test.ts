@@ -6,15 +6,32 @@ import { toAppError } from '@/lib/state/app-error';
 
 type EnvelopeSuccess<T> = { success: true; data: T };
 type EnvelopeError = { success: false; error?: { code?: string; message?: string } };
+type ResponseInitLike = globalThis.ResponseInit;
+type BackendErrorEnvelope = {
+  error: {
+    code?: string;
+    message?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    requestId?: string;
+  };
+};
 
-function jsonResponse(body: EnvelopeSuccess<unknown> | EnvelopeError, init?: ResponseInit): Response {
+function jsonResponse(body: EnvelopeSuccess<unknown> | EnvelopeError, init?: ResponseInitLike): Response {
   return new Response(JSON.stringify(body), {
     status: init?.status ?? 200,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   });
 }
 
-function textResponse(body: string, init?: ResponseInit): Response {
+function backendErrorResponse(body: BackendErrorEnvelope, init?: ResponseInitLike): Response {
+  return new Response(JSON.stringify(body), {
+    status: init?.status ?? 500,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  });
+}
+
+function textResponse(body: string, init?: ResponseInitLike): Response {
   return new Response(body, {
     status: init?.status ?? 200,
     headers: { 'Content-Type': 'text/plain', ...(init?.headers ?? {}) },
@@ -149,7 +166,7 @@ describe('httpRequest', () => {
     });
   });
 
-  it.each([429, 502, 503, 504])(
+  it.each([500, 503, 504])(
     '%i retries to max attempts then throws retryable error',
     async (status) => {
       vi.useFakeTimers();
@@ -187,11 +204,11 @@ describe('httpRequest', () => {
     },
   );
 
-  it('500 response is retryable but does not retry', async () => {
+  it.each([429, 502])('%i response is non-retryable and does not retry', async (status) => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({ success: false, error: { code: 'SERVER_ERROR', message: 'boom' } }, { status: 500 }),
+        jsonResponse({ success: false, error: { code: 'SERVER_ERROR', message: 'boom' } }, { status }),
       );
 
     vi.stubGlobal('fetch', fetchMock);
@@ -203,8 +220,8 @@ describe('httpRequest', () => {
         method: 'GET',
       }),
     ).rejects.toMatchObject<HttpClientError>({
-      statusCode: 500,
-      retryable: true,
+      statusCode: status,
+      retryable: false,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -381,10 +398,10 @@ describe('httpRequest', () => {
       },
       {
         response: jsonResponse(
-          { success: false, error: { code: 'RATE_LIMITED', message: 'Busy' } },
-          { status: 429 },
+          { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Busy' } },
+          { status: 503 },
         ),
-        expected: { code: 'RATE_LIMITED', statusCode: 429, retryable: true },
+        expected: { code: 'SERVICE_UNAVAILABLE', statusCode: 503, retryable: true },
       },
       {
         response: jsonResponse(
@@ -454,6 +471,125 @@ describe('httpRequest', () => {
     expect(toAppError(malformedError)).toMatchObject({ code: 'MALFORMED_RESPONSE', retryable: false });
   });
 
+  it('parses backend error envelope with requestId', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          backendErrorResponse(
+            {
+              error: {
+                code: 'SERVICE_UNAVAILABLE',
+                message: 'DynamoDB throttled',
+                statusCode: 503,
+                retryable: true,
+                requestId: 'req-abc123',
+              },
+            },
+            { status: 503 },
+          ),
+        ),
+    );
+
+    const error = await httpRequest({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/projects/p-1',
+      method: 'GET',
+      retry: false,
+    }).catch((err: unknown) => err as HttpClientError);
+
+    expect(error).toMatchObject<HttpClientError>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'DynamoDB throttled',
+      statusCode: 503,
+      retryable: true,
+      requestId: 'req-abc123',
+    });
+
+    expect(toAppError(error)).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      statusCode: 503,
+      retryable: true,
+      requestId: 'req-abc123',
+    });
+  });
+
+  it('parses backend error envelope when requestId is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          backendErrorResponse(
+            {
+              error: {
+                code: 'RESOURCE_NOT_FOUND',
+                message: 'Mapping not found',
+                statusCode: 404,
+                retryable: false,
+              },
+            },
+            { status: 404 },
+          ),
+        ),
+    );
+
+    const error = await httpRequest({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/mappings/missing',
+      method: 'GET',
+      retry: false,
+    }).catch((err: unknown) => err as HttpClientError);
+
+    expect(error).toMatchObject<HttpClientError>({
+      code: 'RESOURCE_NOT_FOUND',
+      message: 'Mapping not found',
+      statusCode: 404,
+      retryable: false,
+    });
+    expect(error.requestId).toBeUndefined();
+  });
+
+  it('fallback classification still works for non-JSON error responses', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(textResponse('service unavailable', { status: 503 })));
+
+    const error = await httpRequest({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/projects',
+      method: 'GET',
+      retry: false,
+    }).catch((err: unknown) => err as HttpClientError);
+
+    expect(error).toMatchObject<HttpClientError>({
+      statusCode: 503,
+      retryable: true,
+      message: 'Server is temporarily unavailable. Please retry shortly.',
+    });
+    expect(error.code).toBeUndefined();
+    expect(error.requestId).toBeUndefined();
+  });
+
+  it('toAppError preserves requestId from enriched Error', () => {
+    const error = new Error('failed') as Error & {
+      code?: string;
+      statusCode?: number;
+      retryable?: boolean;
+      requestId?: string;
+    };
+    error.code = 'SERVICE_UNAVAILABLE';
+    error.statusCode = 503;
+    error.retryable = true;
+    error.requestId = 'req-inline-1';
+
+    expect(toAppError(error)).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      statusCode: 503,
+      retryable: true,
+      requestId: 'req-inline-1',
+    });
+  });
+
   it('retry backoff uses attempt-based delay plus jitter', async () => {
     vi.useFakeTimers();
 
@@ -465,7 +601,7 @@ describe('httpRequest', () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
-        jsonResponse({ success: false, error: { code: 'RATE_LIMIT', message: 'wait' } }, { status: 429 }),
+        jsonResponse({ success: false, error: { code: 'RATE_LIMIT', message: 'wait' } }, { status: 503 }),
       );
 
     vi.stubGlobal('fetch', fetchMock);
@@ -480,21 +616,71 @@ describe('httpRequest', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(499);
+    await vi.advanceTimersByTimeAsync(999);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    await vi.advanceTimersByTimeAsync(1042);
+    await vi.advanceTimersByTimeAsync(2105);
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
     const error = await errorPromise;
     expect(error).toMatchObject<HttpClientError>({
-      statusCode: 429,
+      statusCode: 503,
       retryable: true,
     });
 
     expect(randomSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('503 retries and succeeds on second attempt', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'try again' } }, { status: 503 }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: { id: 'p-2' } }, { status: 200 }));
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = httpRequest<{ id: string }>({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/projects/p-2',
+      method: 'GET',
+      retryConfig: { jitter: false },
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(promise).resolves.toEqual({ id: 'p-2' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('supports per-request retry maxAttempts override', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ success: false, error: { code: 'SERVER_ERROR', message: 'boom' } }, { status: 500 }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const requestPromise = httpRequest({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/projects',
+      method: 'GET',
+      retryConfig: { maxAttempts: 2, jitter: false },
+    });
+
+    const errorPromise = requestPromise.catch((err: unknown) => err as HttpClientError);
+    await vi.runAllTimersAsync();
+    await errorPromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

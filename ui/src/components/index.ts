@@ -1,3 +1,5 @@
+export { AsyncErrorBanner, ErrorBanner } from './ErrorBanner';
+export type { AsyncErrorBannerProps, ErrorBannerProps } from './ErrorBanner';
 export { Button } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant } from './Button';
 export { InlineEditableText } from './InlineEditableText';

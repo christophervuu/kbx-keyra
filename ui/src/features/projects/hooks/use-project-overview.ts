@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { MappingRowData, ProjectLoadState, SchemaCardData } from '../types';
+
+import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
+import type { AppError } from '@/lib/state/app-error';
 import type {
   MappingMetadata,
   ProjectDetail,
   SchemaDetail,
   SchemaRef,
 } from '@/lib/types/domain';
-
-import type { MappingRowData, ProjectLoadState, SchemaCardData } from '../types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,6 +62,8 @@ export interface UseProjectOverviewResult {
   project: ProjectDetail | null;
   schemas: SchemaCardData[];
   mappings: MappingRowData[];
+  mutationError: AppError | null;
+  clearMutationError: () => void;
 
   updateName: (name: string) => Promise<void>;
   updateDescription: (description: string) => Promise<void>;
@@ -95,7 +99,9 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   // Stable ref so action callbacks always see current project
   const projectRef = useRef<ProjectDetail | null>(null);
-  projectRef.current = project;
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
 
   // ---------------------------------------------------------------------------
   // Load
@@ -164,22 +170,55 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
   // Inline editing
   // ---------------------------------------------------------------------------
 
+  const nameMutation = useOptimisticMutation<string, string, Awaited<ReturnType<typeof adapter.updateProject>>>({
+    captureSnapshot: () => projectRef.current?.name ?? '',
+    applyOptimistic: (name) => {
+      setProject((prev) => (prev ? { ...prev, name } : prev));
+    },
+    rollback: (snapshot) => {
+      setProject((prev) => (prev ? { ...prev, name: snapshot } : prev));
+    },
+    mutate: (name) => adapter.updateProject(projectId, { name }),
+    onSuccess: (updated) => {
+      setProject((prev) => (prev ? { ...prev, name: updated.name } : prev));
+    },
+  });
+
+  const descriptionMutation = useOptimisticMutation<string, string, Awaited<ReturnType<typeof adapter.updateProject>>>({
+    captureSnapshot: () => projectRef.current?.description ?? '',
+    applyOptimistic: (description) => {
+      setProject((prev) => (prev ? { ...prev, description } : prev));
+    },
+    rollback: (snapshot) => {
+      setProject((prev) => (prev ? { ...prev, description: snapshot } : prev));
+    },
+    mutate: (description) => adapter.updateProject(projectId, { description }),
+    onSuccess: (updated) => {
+      setProject((prev) => (prev ? { ...prev, description: updated.description } : prev));
+    },
+  });
+
+  const mutationError = nameMutation.error ?? descriptionMutation.error;
+
+  const clearMutationError = useCallback(() => {
+    nameMutation.clearError();
+    descriptionMutation.clearError();
+  }, [nameMutation, descriptionMutation]);
+
   const updateName = useCallback(
     async (name: string) => {
       if (!projectRef.current) return;
-      const updated = await adapter.updateProject(projectId, { name });
-      setProject((prev) => (prev ? { ...prev, name: updated.name } : prev));
+      await nameMutation.run(name);
     },
-    [adapter, projectId],
+    [nameMutation],
   );
 
   const updateDescription = useCallback(
     async (description: string) => {
       if (!projectRef.current) return;
-      const updated = await adapter.updateProject(projectId, { description });
-      setProject((prev) => (prev ? { ...prev, description: updated.description } : prev));
+      await descriptionMutation.run(description);
     },
-    [adapter, projectId],
+    [descriptionMutation],
   );
 
   const updateTags = useCallback(
@@ -300,6 +339,8 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
     project,
     schemas,
     mappings,
+    mutationError,
+    clearMutationError,
     updateName,
     updateDescription,
     updateTags,

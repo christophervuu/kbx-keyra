@@ -14,10 +14,18 @@ describe('lambda shared response', () => {
     expect(response.body).toBe('{"ok":true}');
   });
 
+  it('jsonResponse adds x-request-id when provided (FS-059 AE-07)', () => {
+    const response = jsonResponse(200, { ok: true }, 'req-123');
+
+    expect(response.headers).toMatchObject({
+      'x-request-id': 'req-123',
+    });
+  });
+
   it('errorResponse returns standardized error envelope (AE-05)', () => {
-    const response = errorResponse('RESOURCE_NOT_FOUND', "Project with id 'missing' not found", 404, false);
+    const response = errorResponse('RESOURCE_NOT_FOUND', "Project with id 'missing' not found", 404, false, 'req-abc');
     const parsed = JSON.parse(response.body) as {
-      error: { code: string; message: string; statusCode: number; retryable: boolean };
+      error: { code: string; message: string; statusCode: number; retryable: boolean; requestId: string };
     };
 
     expect(parsed.error).toEqual({
@@ -25,6 +33,21 @@ describe('lambda shared response', () => {
       message: "Project with id 'missing' not found",
       statusCode: 404,
       retryable: false,
+      requestId: 'req-abc',
+    });
+    expect(response.headers).toMatchObject({
+      'x-request-id': 'req-abc',
+    });
+  });
+
+  it('errorResponse auto-generates requestId when missing', () => {
+    const response = errorResponse('INTERNAL_ERROR', 'oops', 500, true);
+    const parsed = JSON.parse(response.body) as { error: { requestId: string } };
+
+    expect(typeof parsed.error.requestId).toBe('string');
+    expect(parsed.error.requestId).not.toBe('');
+    expect(response.headers).toMatchObject({
+      'x-request-id': parsed.error.requestId,
     });
   });
 });

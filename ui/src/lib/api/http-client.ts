@@ -1,3 +1,5 @@
+import { retryWithBackoff, type RetryConfig } from './retry';
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 export interface HttpRequestConfig {
@@ -7,11 +9,22 @@ export interface HttpRequestConfig {
   body?: unknown;
   timeout?: number;
   retry?: boolean;
+  retryConfig?: Partial<RetryConfig>;
+  signal?: AbortSignal;
 }
+
+type RequestInitLike = globalThis.RequestInit;
 
 interface ErrorDetails {
   code?: unknown;
   message?: unknown;
+  statusCode?: unknown;
+  retryable?: unknown;
+  requestId?: unknown;
+}
+
+interface BackendErrorEnvelope {
+  error: ErrorDetails;
 }
 
 interface SuccessEnvelope<T> {
@@ -26,11 +39,12 @@ interface ErrorEnvelope {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 3;
-const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
+const RETRYABLE_STATUS_CODES = new Set([500, 503, 504]);
 
 export class HttpClientError extends Error {
   readonly statusCode?: number;
   readonly code?: string;
+  readonly requestId?: string;
   readonly retryable: boolean;
 
   constructor(
@@ -38,6 +52,7 @@ export class HttpClientError extends Error {
     options: {
       statusCode?: number;
       code?: string;
+      requestId?: string;
       retryable: boolean;
       cause?: unknown;
     },
@@ -46,6 +61,7 @@ export class HttpClientError extends Error {
     this.name = 'HttpClientError';
     this.statusCode = options.statusCode;
     this.code = options.code;
+    this.requestId = options.requestId;
     this.retryable = options.retryable;
 
     if (options.cause !== undefined) {
@@ -60,36 +76,34 @@ export function trimTrailingSlash(url: string): string {
 
 export async function httpRequest<T>(config: HttpRequestConfig): Promise<T> {
   const retryEnabled = config.retry ?? true;
-  let attempt = 1;
+  const requestMethod = config.method;
 
-  while (attempt <= MAX_ATTEMPTS) {
-    try {
-      return await sendRequest<T>(config);
-    } catch (error) {
-      const normalizedError = normalizeHttpError(error);
-
-      if (!shouldRetry(normalizedError, config.method, retryEnabled, attempt)) {
-        throw normalizedError;
-      }
-
-      await wait(getRetryDelayMs(attempt));
-      attempt += 1;
-    }
+  if (!retryEnabled) {
+    return sendRequest<T>(config);
   }
 
-  throw new HttpClientError('Request failed after all retry attempts.', {
-    retryable: true,
-    code: 'RETRY_EXHAUSTED',
-  });
+  return retryWithBackoff(
+    async () => sendRequest<T>(config),
+    {
+      maxAttempts: MAX_ATTEMPTS,
+      signal: config.signal,
+      ...config.retryConfig,
+      shouldRetry: (error: unknown) => {
+        const normalized = normalizeHttpError(error);
+        return shouldRetry(normalized, requestMethod);
+      },
+    },
+  );
 }
 
 async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
   const controller = new AbortController();
   const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT_MS;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const cleanupExternalAbort = wireAbortSignals(config.signal, controller);
 
   const url = buildUrl(config.baseUrl, config.path);
-  const requestInit: RequestInit = {
+  const requestInit: RequestInitLike = {
     method: config.method,
     headers: {
       'Content-Type': 'application/json',
@@ -144,6 +158,7 @@ async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
       cause: error,
     });
   } finally {
+    cleanupExternalAbort();
     clearTimeout(timeoutId);
   }
 }
@@ -179,11 +194,30 @@ async function parseSuccessResponse<T>(response: Response): Promise<T> {
 async function parseErrorResponse(response: Response): Promise<HttpClientError> {
   const parsed = await tryParseJson(response);
 
+  const backendEnvelope = toBackendErrorEnvelope(parsed);
+  if (backendEnvelope) {
+    const envelopeStatusCode =
+      typeof backendEnvelope.error.statusCode === 'number' ? backendEnvelope.error.statusCode : response.status;
+    const envelopeRetryable =
+      typeof backendEnvelope.error.retryable === 'boolean'
+        ? backendEnvelope.error.retryable
+        : isRetryableStatus(envelopeStatusCode);
+
+    return new HttpClientError(getErrorMessage(backendEnvelope.error, mapStatusToMessage(envelopeStatusCode)), {
+      statusCode: envelopeStatusCode,
+      code: getErrorCode(backendEnvelope.error),
+      requestId: getRequestId(backendEnvelope.error),
+      retryable: envelopeRetryable,
+    });
+  }
+
   if (isErrorEnvelope(parsed)) {
+    const statusCode = response.status;
+    const retryable = isRetryableStatus(statusCode);
     return new HttpClientError(getErrorMessage(parsed.error, mapStatusToMessage(response.status)), {
-      statusCode: response.status,
+      statusCode,
       code: getErrorCode(parsed.error),
-      retryable: isRetryableStatus(response.status),
+      retryable,
     });
   }
 
@@ -231,6 +265,25 @@ function getErrorMessage(error: ErrorDetails | undefined, fallback: string): str
   return typeof error?.message === 'string' ? error.message : fallback;
 }
 
+function getRequestId(error: ErrorDetails | undefined): string | undefined {
+  return typeof error?.requestId === 'string' ? error.requestId : undefined;
+}
+
+function toBackendErrorEnvelope(value: unknown): BackendErrorEnvelope | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as { error?: unknown };
+  if (!candidate.error || typeof candidate.error !== 'object') {
+    return null;
+  }
+
+  return {
+    error: candidate.error as ErrorDetails,
+  };
+}
+
 function malformedResponseError(): HttpClientError {
   return new HttpClientError('Received malformed response envelope from server.', {
     code: 'MALFORMED_RESPONSE',
@@ -238,17 +291,8 @@ function malformedResponseError(): HttpClientError {
   });
 }
 
-function shouldRetry(
-  error: HttpClientError,
-  method: HttpMethod,
-  retryEnabled: boolean,
-  attempt: number,
-): boolean {
-  if (!retryEnabled || attempt >= MAX_ATTEMPTS) {
-    return false;
-  }
-
-  if (error.statusCode !== undefined) {
+function shouldRetry(error: HttpClientError, method: HttpMethod): boolean {
+  if (typeof error.statusCode === 'number') {
     return RETRYABLE_STATUS_CODES.has(error.statusCode);
   }
 
@@ -256,15 +300,15 @@ function shouldRetry(
     return false;
   }
 
+  if (typeof error.retryable === 'boolean') {
+    return error.retryable;
+  }
+
   return error.code === 'NETWORK_ERROR' || error.code === 'REQUEST_TIMEOUT';
 }
 
 function isRetryableStatus(status: number): boolean {
-  if (status === 429) {
-    return true;
-  }
-
-  return status >= 500;
+  return RETRYABLE_STATUS_CODES.has(status);
 }
 
 function mapStatusToMessage(status: number): string {
@@ -348,13 +392,22 @@ function normalizeHttpError(error: unknown): HttpClientError {
   });
 }
 
-function getRetryDelayMs(attempt: number): number {
-  const jitterMs = Math.floor(Math.random() * 101);
-  return 500 * attempt + jitterMs;
-}
+function wireAbortSignals(signal: AbortSignal | undefined, controller: AbortController): () => void {
+  if (!signal) {
+    return () => undefined;
+  }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  if (signal.aborted) {
+    controller.abort();
+    return () => undefined;
+  }
+
+  const onAbort = () => {
+    controller.abort();
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+
+  return () => {
+    signal.removeEventListener('abort', onAbort);
+  };
 }

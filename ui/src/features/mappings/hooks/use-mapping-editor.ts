@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useEngineValidation } from './use-engine-validation';
 import type { EngineValidationState } from './use-engine-validation';
+import type { SaveStatus } from '../components/EditorTopBar';
+import type { UnsavedChangeSummary } from '../types';
 
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
 import { useAdapter } from '@/lib/api';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
-import type { SaveStatus } from '../components/EditorTopBar';
-import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
-import type { UnsavedChangeSummary } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -394,6 +394,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
   useEffect(() => {
     mountedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadData intentionally kicks off async request lifecycle on mount
     void loadData();
     return () => {
       mountedRef.current = false;
@@ -511,6 +512,14 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     setSaveState('saving');
     setSaveError(null);
 
+    // Snapshot before optimistic application so failed saves can rollback.
+    const snapshot = {
+      config,
+      rules,
+      version,
+      draftRules,
+    };
+
     const newVersion = version + 1;
 
     // Merge draftRules into the current rules array before saving
@@ -525,15 +534,17 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       config: configOptions,
     };
 
+    // Optimistically reflect the pending save immediately.
+    setConfig(updatedConfig);
+    setRules(mergedRules);
+    setVersion(newVersion);
+
     try {
       await adapter.updateMapping(mappingId, updatedConfig);
       if (!mountedRef.current) return;
 
-      setConfig(updatedConfig);
-      setRules(mergedRules);
       setLastSavedRules(mergedRules);
       setLastSavedConfigOptions(configOptions);
-      setVersion(newVersion);
       setSaveState('saved');
       // Clear all drafts — they've been committed to saved rules
       setDraftRules(new Map());
@@ -551,6 +562,14 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       });
     } catch (err) {
       if (!mountedRef.current) return;
+
+      // Rollback optimistic state to exact pre-save snapshot.
+      setConfig(snapshot.config);
+      setRules(snapshot.rules);
+      setVersion(snapshot.version);
+      // Preserve in-session draft work on failure.
+      setDraftRules(snapshot.draftRules);
+
       setSaveError(err instanceof Error ? err.message : 'Save failed');
       setSaveState('error');
     } finally {
@@ -559,7 +578,9 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   }, [config, version, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId]);
 
   // Keep ref up to date for keyboard handler
-  saveRef.current = save;
+  useEffect(() => {
+    saveRef.current = save;
+  }, [save]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

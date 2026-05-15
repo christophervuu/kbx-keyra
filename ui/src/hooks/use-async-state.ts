@@ -1,14 +1,17 @@
-import { useCallback, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 
 import type { AsyncState } from '@/lib/state';
 import { toAppError } from '@/lib/state';
 
 export interface AsyncActions<T> {
-  execute: (promise: Promise<T>) => void;
-  refresh: (promise: Promise<T>) => void;
+  execute: (operation: AsyncOperation<T>) => void;
+  refresh: (operation: AsyncOperation<T>) => void;
+  retry: () => void;
   reset: () => void;
   markStale: () => void;
 }
+
+export type AsyncOperation<T> = Promise<T> | (() => Promise<T>);
 
 type AsyncReducerAction<T> =
   | { type: 'loading' }
@@ -64,9 +67,24 @@ function asyncReducer<T>(state: AsyncState<T>, action: AsyncReducerAction<T>): A
 export function useAsyncState<T>(): [AsyncState<T>, AsyncActions<T>] {
   const [state, dispatch] = useReducer(asyncReducer<T>, { status: 'idle' });
   const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+  const stateRef = useRef<AsyncState<T>>(state);
+  const lastOperationRef = useRef<(() => Promise<T>) | null>(null);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+      requestIdRef.current += 1;
+    },
+    [],
+  );
 
   const applySuccess = useCallback((requestId: number, data: T) => {
-    if (requestId !== requestIdRef.current) {
+    if (!isMountedRef.current || requestId !== requestIdRef.current) {
       return;
     }
 
@@ -74,7 +92,7 @@ export function useAsyncState<T>(): [AsyncState<T>, AsyncActions<T>] {
   }, []);
 
   const applyError = useCallback((requestId: number, error: unknown) => {
-    if (requestId !== requestIdRef.current) {
+    if (!isMountedRef.current || requestId !== requestIdRef.current) {
       return;
     }
 
@@ -82,7 +100,8 @@ export function useAsyncState<T>(): [AsyncState<T>, AsyncActions<T>] {
   }, []);
 
   const execute = useCallback(
-    (promise: Promise<T>) => {
+    (operation: AsyncOperation<T>) => {
+      const promise = resolveOperation(operation, lastOperationRef);
       const requestId = ++requestIdRef.current;
       dispatch({ type: 'loading' });
 
@@ -95,7 +114,8 @@ export function useAsyncState<T>(): [AsyncState<T>, AsyncActions<T>] {
   );
 
   const refresh = useCallback(
-    (promise: Promise<T>) => {
+    (operation: AsyncOperation<T>) => {
+      const promise = resolveOperation(operation, lastOperationRef);
       const requestId = ++requestIdRef.current;
       dispatch({ type: 'refreshing' });
 
@@ -107,6 +127,17 @@ export function useAsyncState<T>(): [AsyncState<T>, AsyncActions<T>] {
     [applyError, applySuccess],
   );
 
+  const retry = useCallback(() => {
+    const currentState = stateRef.current;
+    const lastOperation = lastOperationRef.current;
+
+    if (currentState.status !== 'error' || !currentState.retryable || !lastOperation) {
+      return;
+    }
+
+    execute(lastOperation);
+  }, [execute]);
+
   const reset = useCallback(() => {
     requestIdRef.current += 1;
     dispatch({ type: 'reset' });
@@ -116,5 +147,18 @@ export function useAsyncState<T>(): [AsyncState<T>, AsyncActions<T>] {
     dispatch({ type: 'mark-stale' });
   }, []);
 
-  return [state, { execute, refresh, reset, markStale }];
+  return [state, { execute, refresh, retry, reset, markStale }];
+}
+
+function resolveOperation<T>(
+  operation: AsyncOperation<T>,
+  lastOperationRef: { current: (() => Promise<T>) | null },
+): Promise<T> {
+  if (typeof operation === 'function') {
+    lastOperationRef.current = operation;
+    return operation();
+  }
+
+  lastOperationRef.current = null;
+  return operation;
 }

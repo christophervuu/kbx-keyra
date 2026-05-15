@@ -5,11 +5,13 @@ export {
   internalError,
   notFound,
   serviceUnavailable,
+  timeout,
   validationError,
   type AppErrorDetails,
   type AppErrorResponse,
   type ErrorCode,
 } from './errors.js';
+export { generateRequestId } from './request-id.js';
 export { parseBody, parsePathParam, parseQueryParam } from './request.js';
 export { JSON_HEADERS, errorResponse, jsonResponse } from './response.js';
 export { deleteObject, getObject, putObject, s3Client, S3ServiceError } from './s3.js';

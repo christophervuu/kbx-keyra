@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
+import { useIngestionPolling } from '@/features/schemas/hooks/use-ingestion-polling';
+
 import { useAdapter } from '@/lib/api';
 import { Button } from '@/components/Button';
 import type { SchemaRef } from '@/lib/types/domain';
@@ -210,6 +212,11 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Ingestion polling (202 async flow)
+  const polling = useIngestionPolling();
+  // Ref to the SchemaRef produced after createSchema, used by polling success handler
+  const pendingSchemaRefRef = useRef<SchemaRef | null>(null);
+
   // Reset all state when dialog closes
   useEffect(() => {
     if (!open) {
@@ -228,7 +235,10 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       setScope('project-level');
       setUploading(false);
       setUploadError(null);
+      polling.reset();
+      pendingSchemaRefRef.current = null;
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- polling.reset is stable; including `polling` object would cause infinite loop
   }, [open]);
 
   // Focus management
@@ -440,9 +450,18 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         source: { type: 'upload' },
       });
 
-      const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
-      await onSchemaCreated(ref);
-      onClose();
+      if (created.status === 'ingesting') {
+        // 202 async ingestion path — start polling
+        const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
+        pendingSchemaRefRef.current = ref;
+        polling.startPolling(created.schemaId);
+        // Don't close yet — wait for polling to resolve
+      } else {
+        // 201 immediate success path
+        const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
+        await onSchemaCreated(ref);
+        onClose();
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Upload failed. Please try again.';
       setUploadError(msg);
@@ -451,12 +470,25 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     }
   }
 
+  // Handle polling resolution
+  useEffect(() => {
+    if (polling.status === 'ready' && pendingSchemaRefRef.current) {
+      const ref = pendingSchemaRefRef.current;
+      pendingSchemaRefRef.current = null;
+      void onSchemaCreated(ref).then(() => onClose());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- onSchemaCreated/onClose are stable props; polling.status is the trigger
+  }, [polling.status]);
+
   // -------------------------------------------------------------------------
   // Derived state
   // -------------------------------------------------------------------------
 
   const activeInfo = inputMode === 'file' ? fileInfo : pasteInfo;
-  const isSubmitEnabled = activeInfo !== null && schemaName.trim().length > 0 && !uploading;
+  const isSubmitEnabled = activeInfo !== null && schemaName.trim().length > 0 && !uploading && polling.status === 'idle';
+  const isPolling = polling.status === 'polling';
+  const isPollingError = polling.status === 'error';
+  const isPollingTimeout = polling.status === 'timeout';
 
   // -------------------------------------------------------------------------
   // Render
@@ -642,6 +674,62 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
           </div>
         </fieldset>
 
+        {/* Polling: processing state */}
+        {isPolling && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-4 flex items-center gap-3 rounded-md border border-blue-800 bg-blue-950 px-3 py-3"
+            data-testid="ingestion-processing"
+          >
+            <svg
+              className="h-4 w-4 animate-spin text-blue-400"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+            </svg>
+            <p className="text-xs text-blue-300">Processing schema… This may take a moment.</p>
+          </div>
+        )}
+
+        {/* Polling: error state */}
+        {isPollingError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-md border border-red-800 bg-red-950 px-3 py-3"
+            data-testid="ingestion-error"
+          >
+            <p className="mb-2 text-xs text-red-400">
+              {polling.error?.message ?? 'Schema processing failed. Please try uploading again.'}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => polling.reset()}
+              data-testid="ingestion-retry-button"
+            >
+              Try uploading again
+            </Button>
+          </div>
+        )}
+
+        {/* Polling: timeout state */}
+        {isPollingTimeout && (
+          <div
+            role="alert"
+            className="mb-4 rounded-md border border-yellow-800 bg-yellow-950 px-3 py-3"
+            data-testid="ingestion-timeout"
+          >
+            <p className="text-xs text-yellow-400">
+              Processing is taking longer than expected. Refresh to check status.
+            </p>
+          </div>
+        )}
+
         {/* Upload error */}
         {uploadError && (
           <p
@@ -666,7 +754,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
           <Button
             variant="primary"
             size="sm"
-            loading={uploading}
+            loading={uploading || isPolling}
             disabled={!isSubmitEnabled}
             onClick={() => void handleUpload()}
             data-testid="upload-button"

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '../lib';
+
+import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
 import type { AppError } from '@/lib/state/app-error';
 import { toAppError } from '@/lib/state/app-error';
 import type { ParsedSchema, SchemaDetail, UpdateSchemaInput } from '@/lib/types';
-
-import { parseInferredSchema, parseJsonSchema, parseXsd } from '../lib';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -18,8 +19,10 @@ export interface UseSchemaDetailResult {
   setParsedSchema: (parsed: ParsedSchema) => void;
   isLoading: boolean;
   error: AppError | null;
+  mutationError: AppError | null;
   notFound: boolean;
   retry: () => void;
+  clearMutationError: () => void;
   updateMetadata: (input: Partial<UpdateSchemaInput>) => Promise<void>;
 }
 
@@ -48,6 +51,7 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
 
   useEffect(() => {
     cancelledRef.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset/load state is intentionally synchronized at effect start before async fetch
     setIsLoading(true);
     setError(null);
     setNotFound(false);
@@ -104,13 +108,42 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
 
   const retry = useCallback(() => setRetryCount((c) => c + 1), []);
 
-  const updateMetadata = useCallback(
-    async (input: Partial<UpdateSchemaInput>) => {
-      const updated = await adapter.updateSchema(schemaId, input as UpdateSchemaInput);
+  const metadataMutation = useOptimisticMutation<
+    Partial<UpdateSchemaInput>,
+    SchemaDetail['metadata'] | null,
+    Awaited<ReturnType<typeof adapter.updateSchema>>
+  >({
+    captureSnapshot: () => schema?.metadata ?? null,
+    applyOptimistic: (input) => {
+      setSchema((prev) => (prev ? { ...prev, metadata: { ...prev.metadata, ...input } } : prev));
+    },
+    rollback: (snapshot) => {
+      if (!snapshot) return;
+      setSchema((prev) => (prev ? { ...prev, metadata: snapshot } : prev));
+    },
+    mutate: (input) => adapter.updateSchema(schemaId, input as UpdateSchemaInput),
+    onSuccess: (updated) => {
       setSchema((prev) => (prev ? { ...prev, metadata: updated } : prev));
     },
-    [schemaId, adapter],
+  });
+
+  const updateMetadata = useCallback(
+    async (input: Partial<UpdateSchemaInput>) => {
+      await metadataMutation.run(input);
+    },
+    [metadataMutation],
   );
 
-  return { schema, parsedSchema, setParsedSchema, isLoading, error, notFound, retry, updateMetadata };
+  return {
+    schema,
+    parsedSchema,
+    setParsedSchema,
+    isLoading,
+    error,
+    mutationError: metadataMutation.error,
+    notFound,
+    retry,
+    clearMutationError: metadataMutation.clearError,
+    updateMetadata,
+  };
 }

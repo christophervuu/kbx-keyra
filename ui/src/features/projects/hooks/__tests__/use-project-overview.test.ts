@@ -1,12 +1,12 @@
-import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+import { useProjectOverview } from '../use-project-overview';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
-
-import { useProjectOverview } from '../use-project-overview';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -175,6 +175,69 @@ describe('useProjectOverview', () => {
 
     expect(adapter.updateProject).toHaveBeenCalledWith('project-1', { name: 'New Name' });
     expect(result.current.project?.name).toBe('New Name');
+  });
+
+  it('optimistically updates name immediately before mutation resolves', async () => {
+    let resolveUpdate!: (value: ProjectDetail) => void;
+    const adapter = createMockAdapter({
+      updateProject: vi.fn().mockImplementation(
+        () =>
+          new Promise<ProjectDetail>((resolve) => {
+            resolveUpdate = resolve;
+          }),
+      ),
+    });
+
+    const { result } = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+    expect(result.current.project?.name).toBe('Project One');
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.updateName('Optimistic Name');
+    });
+
+    // Optimistic value is visible immediately.
+    expect(result.current.project?.name).toBe('Optimistic Name');
+
+    await act(async () => {
+      resolveUpdate({ ...PROJECT_DETAIL, name: 'Optimistic Name' });
+      await pending;
+    });
+
+    expect(result.current.project?.name).toBe('Optimistic Name');
+  });
+
+  it('rolls back name on failed update and surfaces mutationError', async () => {
+    const adapter = createMockAdapter({
+      updateProject: vi.fn().mockRejectedValue(new Error('Update failed')),
+    });
+
+    const { result } = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+    expect(result.current.project?.name).toBe('Project One');
+
+    await act(async () => {
+      await expect(result.current.updateName('Bad Name')).rejects.toMatchObject({
+        message: 'Update failed',
+      });
+    });
+
+    // Rolled back to snapshot
+    expect(result.current.project?.name).toBe('Project One');
+    // Error surfaced for UI error banner composition
+    expect(result.current.mutationError?.message).toBe('Update failed');
+
+    act(() => {
+      result.current.clearMutationError();
+    });
+    expect(result.current.mutationError).toBeNull();
   });
 
   it('removeSchema removes from schemaRefs and calls adapter', async () => {

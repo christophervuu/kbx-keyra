@@ -814,3 +814,173 @@ describe('SchemaUploadDialog — mode toggle state preservation (AE-07)', () => 
     expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON Schema');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Ingestion polling UI tests (AE-05, AE-06)
+// ---------------------------------------------------------------------------
+
+const INGESTING_SCHEMA: SchemaMetadata = {
+  schemaId: 'schema-async',
+  name: 'async-schema',
+  format: 'json-schema',
+  fieldCount: 0,
+  origin: 'local',
+  status: 'ingesting',
+  scope: 'project',
+  syncStatus: 'synced',
+  source: { type: 'upload' },
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+};
+
+const READY_DETAIL = {
+  metadata: { ...INGESTING_SCHEMA, status: 'ready' as const },
+  content: {},
+};
+
+const ERROR_DETAIL = {
+  metadata: { ...INGESTING_SCHEMA, status: 'error' as const },
+  content: {},
+};
+
+describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function setupAndUpload(
+    adapter: ApiAdapter,
+    opts: { onSchemaCreated?: (ref: SchemaRef) => Promise<void>; onClose?: () => void } = {},
+  ) {
+    mockFileReaderWith(VALID_JSON_SCHEMA);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderDialog(adapter, opts);
+
+    const file = new File([VALID_JSON_SCHEMA], 'my-schema.json', { type: 'application/json' });
+    await user.upload(screen.getByTestId('file-input'), file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByTestId('upload-button'));
+  }
+
+  it('AE-05: shows processing indicator when createSchema returns ingesting status', async () => {
+    const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
+    const getSchema = vi.fn().mockResolvedValue(READY_DETAIL);
+    const adapter = createMockAdapter({ createSchema, getSchema });
+
+    await setupAndUpload(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ingestion-processing')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/processing schema/i)).toBeInTheDocument();
+  });
+
+  it('AE-05: calls onSchemaCreated and closes when polling resolves to ready', async () => {
+    const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
+    const getSchema = vi.fn().mockResolvedValue(READY_DETAIL);
+    const onSchemaCreated = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const adapter = createMockAdapter({ createSchema, getSchema });
+
+    await setupAndUpload(adapter, { onSchemaCreated, onClose });
+
+    // Wait for polling to start
+    await waitFor(() => {
+      expect(screen.getByTestId('ingestion-processing')).toBeInTheDocument();
+    });
+
+    // First poll fires immediately and resolves to ready
+    await waitFor(() => {
+      expect(onSchemaCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ schemaId: 'schema-async' }),
+      );
+    });
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('AE-06: shows error state with re-upload button when polling resolves to error', async () => {
+    const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
+    const getSchema = vi.fn().mockResolvedValue(ERROR_DETAIL);
+    const adapter = createMockAdapter({ createSchema, getSchema });
+
+    await setupAndUpload(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ingestion-error')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('ingestion-retry-button')).toBeInTheDocument();
+  });
+
+  it('AE-06: clicking "Try uploading again" resets to idle form state', async () => {
+    const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
+    const getSchema = vi.fn().mockResolvedValue(ERROR_DETAIL);
+    const adapter = createMockAdapter({ createSchema, getSchema });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+
+    await setupAndUpload(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ingestion-error')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('ingestion-retry-button'));
+
+    // Error panel should be gone; form should be usable again
+    expect(screen.queryByTestId('ingestion-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('upload-button')).not.toBeDisabled();
+  });
+
+  it('shows timeout message after configured timeout elapses', async () => {
+    const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
+    // getSchema always returns ingesting — never resolves
+    const getSchema = vi.fn().mockResolvedValue({ metadata: { ...INGESTING_SCHEMA }, content: {} });
+    const adapter = createMockAdapter({ createSchema, getSchema });
+
+    await setupAndUpload(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ingestion-processing')).toBeInTheDocument();
+    });
+
+    // Advance past 5-minute timeout
+    await act(async () => {
+      vi.advanceTimersByTime(301_000);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ingestion-timeout')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/processing is taking longer than expected/i)).toBeInTheDocument();
+  });
+
+  it('201 immediate success path: no polling indicator shown', async () => {
+    // createSchema returns ready immediately (201 path)
+    const createSchema = vi.fn().mockResolvedValue(CREATED_SCHEMA);
+    const onSchemaCreated = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const adapter = createMockAdapter({ createSchema });
+
+    await setupAndUpload(adapter, { onSchemaCreated, onClose });
+
+    await waitFor(() => {
+      expect(onSchemaCreated).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByTestId('ingestion-processing')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ingestion-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ingestion-timeout')).not.toBeInTheDocument();
+  });
+});

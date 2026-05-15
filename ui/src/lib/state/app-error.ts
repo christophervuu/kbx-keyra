@@ -2,6 +2,7 @@ export interface AppError {
   message: string;
   code?: string;
   statusCode?: number;
+  requestId?: string;
   retryable: boolean;
   cause?: unknown;
 }
@@ -15,6 +16,7 @@ export function toAppError(error: unknown): AppError {
     const errorWithExtras = error as Error & {
       code?: string;
       statusCode?: number;
+      requestId?: string;
       retryable?: boolean;
     };
 
@@ -22,6 +24,7 @@ export function toAppError(error: unknown): AppError {
       message: error.message,
       code: errorWithExtras.code,
       statusCode: errorWithExtras.statusCode,
+      requestId: errorWithExtras.requestId,
       retryable: errorWithExtras.retryable ?? true,
       cause: error,
     };

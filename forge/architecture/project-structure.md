@@ -214,8 +214,10 @@ ui/
           use-schema-editor.ts        Edit-mode state + all tree operations + save flow wired to adapter (FS-015 T-05)
           use-schema-usage.ts         Derives referencing projects and mappings for a schema; returns UsageProject[], UsageMapping[], isLoading (FS-015 T-06)
           use-schema-library.ts       Loads all schemas+projects, enriches into SchemaLibraryItem[], exposes filter/sort state and actions (FS-016 T-01)
+          use-ingestion-polling.ts    Polls getSchema every 2s after 202 response; returns status (polling/ready/error/timeout/idle), schema, error; cleans up on unmount (FS-059 T-07)
           __tests__/
             use-schema-library.test.ts  Hook tests: loading/success/error states, enrichment, project usage counts, sync status derivation, filter/sort state updates (FS-016 T-01)
+            use-ingestion-polling.test.ts  Hook tests: idle→polling→ready, error, timeout, unmount cleanup, reset (FS-059 T-07)
         lib/              Schema parsing logic and utilities
           index.ts        Lib barrel
           tree-filter.ts  Pure filter function (case-insensitive substring, ancestor propagation)
@@ -298,7 +300,7 @@ ui/
           ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states; section order: Header → Summary Row → Mappings → Schemas (FS-050 T-02)
           CreateProjectPage.tsx     Create Project form: name/description/tags fields, slug derivation, createProject() call, navigate to new project on success (FS-013 T-09)
           CreateMappingPage.tsx     Create Mapping 3-step wizard: name → source schema → target schema; skip option; createMapping() call; navigate to editor on success (FS-013 T-10)
-          SchemaUploadDialog.tsx    Modal dialog: file picker (.json/.xsd/.xml), format detection, field count, inferred warning, scope selection, createSchema() + addSchemaRef() on confirm (FS-013 T-11)
+          SchemaUploadDialog.tsx    Modal dialog: file picker (.json/.xsd/.xml), format detection, field count, inferred warning, scope selection, createSchema() + addSchemaRef() on confirm; handles 202 ingesting response with polling UI (FS-013 T-11, FS-059 T-07)
           ProjectOverviewSkeleton.tsx  Animated pulse skeleton: header area + summary row + mappings table + schemas grid; role="status" + sr-only "Loading project..." (FS-013 T-13, FS-050 T-06 AE-15)
           ProjectErrorState.tsx     Error state: alert icon, "Failed to load project", optional error detail, Retry button (FS-013 T-13)
           ProjectNotFoundState.tsx  Not-found state: icon, "Project not found", "Go to Dashboard" link (FS-013 T-13)
@@ -315,7 +317,7 @@ ui/
             ProjectOverviewPage.test.tsx        Component tests (30+ tests: AE-01–AE-06, AE-15, AE-16 layout checks, breadcrumb integration, overflow menu, section order)
             CreateProjectPage.test.tsx          Component tests (10 tests: fields, required indicator, validation, createProject call, navigation, cancel, submit error, tag parsing)
             CreateMappingPage.test.tsx          Component tests (12 tests: step navigation, name validation, schema dropdowns, skip option, schema refs, navigate to editor, cancel, submit error)
-            SchemaUploadDialog.test.tsx         Component tests (11 tests: open/closed, file input extensions, upload disabled before file, format badge, inferred warning, empty file error, FileReader error, createSchema+addSchemaRef, cancel, scope radios)
+            SchemaUploadDialog.test.tsx         Component tests (11 tests + 6 polling tests: open/closed, file input extensions, upload disabled before file, format badge, inferred warning, empty file error, FileReader error, createSchema+addSchemaRef, cancel, scope radios; 202 processing indicator, ready/error/timeout polling states) (FS-013 T-11, FS-059 T-07)
             ProjectStateComponents.test.tsx     Component tests (19 tests: AE-15 skeleton layout/role/sr-only/section testids/no-tab-bar, error state heading/detail/retry/role, not-found heading/message/link)
             ProjectSummaryRow.test.tsx          Component tests (11 tests: AE-05 counts, AE-18 neutral error styling, scaffold placeholders, deployments link)
         hooks/
@@ -614,6 +616,8 @@ ui/
       index.ts            Barrel export for all shared components
       Button.tsx          Button with variants (primary/secondary/ghost/danger) and sizes
       Card.tsx            Container component with optional title/description header
+      ErrorBanner.tsx     Inline error banner: red (non-retryable) or amber (retryable) with optional Retry button + spinner; AsyncErrorBanner convenience wrapper accepts AsyncState directly; "Recovered" flash on successful retry (FS-059 T-05)
+      ErrorBanner.test.tsx Component tests: message render, role=alert, retry button visibility/interaction, retrying spinner, Recovered flash + auto-dismiss, AsyncErrorBanner state variants (FS-059 T-05)
       ConfirmDialog.tsx   Focus-trapped confirmation dialog (modal overlay, Escape to close, message: string|ReactNode) — lifted from mappings feature (FS-013 T-07)
       InlineEditableText.tsx  Click-to-edit text/textarea: saves on Enter or blur, Escape cancels, display/edit mode toggle (lifted from projects feature in FS-015 T-02)
       PageHeader.tsx      Page title + optional description + action slot
@@ -625,6 +629,10 @@ ui/
         NavBar.tsx        Top navigation bar with app name + nav links
         index.ts          Barrel export
     hooks/                Shared React hooks
+      use-async-state.ts   Shared async lifecycle hook (execute/refresh/reset/markStale/retry with race protection)
+      use-async-state.test.ts Hook tests for retry behavior, race protection, unmount safety, and backward compatibility
+      use-optimistic-mutation.ts Shared optimistic mutation utility: snapshot capture, optimistic apply, rollback on failure, mutation-id guard for stale completion safety, surfaced AppError state (FS-059 T-06)
+      use-optimistic-mutation.test.ts Unit tests: success confirmation, rollback + error surfacing, latest-only rollback under rapid overlapping mutations (FS-059 T-06)
     lib/
       api/                ApiAdapter interface + LocalStorageAdapter + HybridAdapter + AI API client
                           types.ts              ApiAdapter contract
@@ -636,6 +644,10 @@ ui/
                           ai-api-client.ts      FS-041/FS-042 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) + suggestExpressionHttp(apiUrl, input); endpoint-specific timeout, envelope parsing, error mapping
                           http-client.ts        FS-055 reusable HTTP utility: typed fetch wrapper with timeout, envelope parsing, error normalization, and retry/backoff policy
                           http-client.test.ts   FS-055 unit tests for HTTP utility success/error/retry/timeout/backoff/toAppError compatibility
+                          retry.ts              FS-059 reusable retryWithBackoff utility (exponential backoff, jitter, abort signal support)
+                          retry.test.ts         FS-059 unit tests for retryWithBackoff timing, abort, and retry classification
+                          dev-logger.ts         FS-059 developer diagnostics utility: structured dev-only console logging for API error/retry/success events (error/warn/info)
+                          dev-logger.test.ts    FS-059 unit tests for devLogger: dev console output, production no-op behavior, full-field logging, optional-field safety
                           adapter-provider.tsx  AdapterProvider + useAdapter() React context
                           bootstrap.ts          createAdapter(): returns HttpAdapter when VITE_API_URL set, LocalStorageAdapter otherwise
       data/               Shared static data consumed cross-feature

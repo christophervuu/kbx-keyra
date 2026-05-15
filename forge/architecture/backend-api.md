@@ -102,8 +102,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 Each handler file implements exactly one route surface and is independently deployable.
 
 ### Response helpers
-- Success: `jsonResponse(statusCode, body)`
-- Error: `errorResponse(code, message, statusCode, retryable)`
+- Success: `jsonResponse(statusCode, body, requestId?)`
+- Error: `errorResponse(code, message, statusCode, retryable, requestId?)`
 
 ---
 
@@ -117,10 +117,23 @@ All non-success responses must follow:
     "code": "RESOURCE_NOT_FOUND",
     "message": "Project with id 'abc-123' not found",
     "statusCode": 404,
-    "retryable": false
+    "retryable": false,
+    "requestId": "req-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
   }
 }
 ```
+
+### Request Correlation ID
+
+All handlers generate a `requestId` (UUID) at invocation start or resolve one in shared error helpers when missing. Correlation is surfaced in both error and success paths:
+
+- Error envelope body: `error.requestId`
+- Success response header: `x-request-id`
+
+Purpose:
+- correlate user-visible failures with backend logs and traces
+- support diagnosis of transient failures across retries
+- preserve request lineage from API Gateway/Lambda to UI `AppError`
 
 ### Standard codes
 
@@ -131,8 +144,44 @@ All non-success responses must follow:
 | `CONFLICT` | 409 | false | referential integrity block, optimistic concurrency mismatch |
 | `INTERNAL_ERROR` | 500 | true | unexpected handler failure |
 | `SERVICE_UNAVAILABLE` | 503 | true | transient DynamoDB/S3 service issue (e.g., throttling) |
+| `TIMEOUT` | 504 | true | lambda/downstream timeout condition |
 
 This envelope matches FS-057 spec behavior and is consumed by `HttpAdapter` error normalization.
+
+### Error Resilience Flow (FS-059)
+
+Phase 1 resilience spans backend handlers and UI async state, with the following end-to-end flow:
+
+1. **Handler failure path**
+   - Handler catches/constructs an app error and returns `errorResponse(...)`.
+   - Envelope includes `code`, `message`, `statusCode`, `retryable`, `requestId`.
+
+2. **Transport path (API Gateway → HTTP client)**
+   - `ui/src/lib/api/http-client.ts` parses backend error envelope.
+   - Envelope fields normalize to `HttpClientError` (`statusCode`, `code`, `retryable`, `requestId`).
+   - Fallback classification is applied only when envelope fields are missing/malformed.
+
+3. **Retry orchestration**
+   - `retryWithBackoff` in `ui/src/lib/api/retry.ts` wraps HTTP calls.
+   - Bounded retries: max attempts = 3, exponential delay from 500ms base + jitter, max delay 5000ms.
+   - Current client auto-retry status set: `500`, `503`, `504`; network/timeout retries are constrained to `GET`.
+   - Non-retryable failures (`400`, `404`, `409`, etc.) surface immediately.
+
+4. **UI error normalization and state**
+   - `toAppError()` maps thrown client errors into `AppError` (including optional `requestId`).
+   - `useAsyncState` enters `{ status: 'error', error, retryable }` and exposes `retry()` for the last operation.
+
+5. **User recovery surface**
+   - `ErrorBanner` renders retry affordance when `retryable: true`.
+   - Retry re-executes the prior async operation; on success, state returns to success and error UI clears.
+
+6. **Optimistic mutation contract**
+   - Mutations capture a pre-change snapshot.
+   - Apply optimistic UI update immediately.
+   - On success, optimistic state is confirmed.
+   - On failure after retries, rollback restores exact snapshot; error surfaces to user.
+
+This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 
 ---
 
