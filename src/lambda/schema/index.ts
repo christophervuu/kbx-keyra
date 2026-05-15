@@ -1,4 +1,8 @@
+export { handler as createSchemaHandler } from './create-schema.js';
+export { handler as deleteSchemaHandler } from './delete-schema.js';
+export { handler as getSchemaHandler } from './get-schema.js';
 export { handler as ingestSchemaHandler } from './ingest-schema.js';
+export { handler as listSchemasHandler } from './list-schemas.js';
 export { handler as querySchemaNodesHandler } from './query-schema-nodes.js';
 export { handler as processBatchHandler } from './process-batch.js';
 export { aggregateResultsTask, handleErrorTask, parseSchemaTask, updateMetadataTask } from './orchestration-tasks.js';

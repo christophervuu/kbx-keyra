@@ -38,21 +38,45 @@ src/
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
     schema/           Schema ingestion/query lambdas (FS-056)
+      create-schema.ts  POST /schemas handler (FS-057 T-05)
+      get-schema.ts     GET /schemas/:id handler (FS-057 T-05)
+      list-schemas.ts   GET /schemas handler (FS-057 T-05)
+      delete-schema.ts  DELETE /schemas/:id handler with reference guard (FS-057 T-05)
       ingest-schema.ts Ingestion entrypoint handler (inline + Step Functions delegation) (FS-056 T-06)
-      query-schema-nodes.ts Query endpoint handler (POST /schemas/:id/query) for keyword+structural search (FS-056 T-09)
+      query-schema-nodes.ts Query endpoint handler (POST /schemas/:id/query) for DynamoDB-backed substring search (FS-057 T-06)
       process-batch.ts Step Functions worker for single batch read/write/index (FS-056 T-08)
       orchestration-tasks.ts Parse/Aggregate/UpdateMetadata/HandleError tasks for Step Functions (FS-056 T-08)
       index.ts         Schema lambda barrel exports
       step-functions/  Step Functions orchestration artifacts (FS-056 T-07)
         schema-ingestion.asl.json Large-schema ingestion state machine definition (ASL)
         README.md       Manual deployment + IAM notes + state/input/output contracts
-    # [planned — not yet implemented in this repository]
-    # schema/         Schema CRUD lambdas
-    # mapping/        Mapping CRUD lambdas
-    # project/        Project CRUD lambdas
-    # deploy/         Deployment lambdas
-    # github/         GitHub API lambdas
-    # preview/        Preview lambda
+    project/          Project CRUD lambdas (FS-057 T-02)
+      create-project.ts POST /projects handler
+      get-project.ts    GET /projects/:id handler (includes mappings + schemas)
+      list-projects.ts  GET /projects handler (includes mapping/schema counts)
+      update-project.ts PUT /projects/:id handler
+      delete-project.ts DELETE /projects/:id handler (conflict when mappings exist)
+      index.ts          Project lambda barrel exports
+    mapping/          Mapping CRUD lambdas (FS-057 T-03)
+      create-mapping.ts POST /mappings handler
+      get-mapping.ts    GET /mappings/:id handler (returns MappingConfig from S3)
+      update-mapping.ts PUT /mappings/:id handler (optimistic concurrency + version increment)
+      delete-mapping.ts DELETE /mappings/:id handler (removes Dynamo metadata + S3 config)
+      duplicate-mapping.ts POST /mappings/:id/duplicate handler (new mappingId + version reset)
+      list-mappings.ts  GET /projects/:projectId/mappings handler (projectId-index query)
+      list-versions.ts  GET /mappings/:mappingId/versions handler (descending by version)
+      get-version.ts    GET /mappings/:mappingId/versions/:version handler
+      save-version.ts   POST /mappings/:mappingId/versions handler (save + prune to 50)
+      index.ts          Mapping lambda barrel exports
+    shared/           Shared Lambda handler utilities (FS-057 T-01)
+      index.ts         Shared lambda utilities barrel export
+      types.ts         Shared API Gateway event/response types
+      response.ts      JSON/CORS response and standardized error envelope builders
+      request.ts       Request parsing helpers (body/path/query)
+      validation.ts    Required-field validation helper
+      errors.ts        Standard backend API error codes and constructors
+      dynamo.ts        DynamoDB DocumentClient wrappers with throttle mapping
+      s3.ts            S3 client wrappers with NoSuchKey mapping
   lib/                Shared utilities used across lambdas
     ai/               Shared AI runtime modules (types, config, adapters, orchestration)
       index.ts          AI runtime public barrel exports
@@ -93,7 +117,7 @@ src/
 
 **Rules:**
 - The engine (`src/engine/`) has zero imports from `src/lambda/`, `ui/`, or any cloud SDK. It is a pure library.
-- Current Phase 0 Lambda footprint is `src/lambda/ai/`; additional lambda concerns are planned but not yet implemented.
+- Current Lambda footprint includes `src/lambda/{ai,shared,project,mapping,schema}/`.
 - Lambda handlers import from `src/engine/` and `src/lib/` only — not from each other.
 - Types shared between engine and UI are defined in `src/engine/types/` and imported by both.
 - `src/lib/ai/` is backend-only and must not import from `src/engine/` or `ui/`.
@@ -659,10 +683,36 @@ tests/
           invalid-missing-instruction/ Invalid request fixture missing instruction (400)
           invalid-empty-source-context/ Invalid request fixture with empty sourceContext (400)
     schema/           Schema lambda handler tests (FS-056)
+      create-schema.test.ts CRUD create tests (ready vs ingesting + validation) (FS-057 T-05)
+      get-schema.test.ts CRUD get tests (content fetch + 404) (FS-057 T-05)
+      list-schemas.test.ts CRUD list tests (multiple + empty) (FS-057 T-05)
+      delete-schema.test.ts CRUD delete tests (204 + 409 references + 404) (FS-057 T-05)
       ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, parse errors, and OpenSearch warning behavior
-      query-schema-nodes.test.ts Query endpoint tests for validation, filters, and parent-chain enrichment (FS-056 T-09)
+      query-schema-nodes.test.ts Query endpoint tests for validation, schema existence, and 50-result cap (FS-057 T-06)
       process-batch.test.ts Tests for per-batch S3 read + Dynamo/OpenSearch write behavior
       orchestration-tasks.test.ts Tests for parse chunking, aggregation totals, and error metadata updates
+    project/          Project lambda handler tests (FS-057 T-02)
+      create-project.test.ts Create project validation/201 response tests
+      get-project.test.ts Get project detail tests (mappings/schemas embedding + 404)
+      list-projects.test.ts List projects tests (counts + empty state)
+      update-project.test.ts Update project tests (partial update + 404)
+      delete-project.test.ts Delete project tests (204 success + 409 conflict)
+    mapping/          Mapping lambda handler tests (FS-057 T-03)
+      create-mapping.test.ts Create mapping tests (201 + required fields)
+      get-mapping.test.ts Get mapping tests (S3 config read + 404)
+      update-mapping.test.ts Update mapping tests (version increment + conflict)
+      delete-mapping.test.ts Delete mapping tests (204 + S3 delete + 404)
+      duplicate-mapping.test.ts Duplicate mapping tests (new id/version + 404)
+      list-mappings.test.ts List mappings tests (project-scoped query)
+      list-versions.test.ts List mapping versions tests (descending order + empty)
+      get-version.test.ts Get mapping version tests (200 + 404)
+      save-version.test.ts Save mapping version tests (204 + validation + prune)
+    shared/           Shared lambda utility tests (FS-057 T-01)
+      response.test.ts Response/error envelope and CORS header tests
+      request.test.ts  Request body/path/query parsing tests
+      validation.test.ts Required-field validation formatting tests
+      dynamo.test.ts   DynamoDB throttle-to-503 mapping tests
+      s3.test.ts       S3 NoSuchKey-to-404 mapping tests
   lib/                Shared backend utility tests
     ai/               AI runtime module tests
       types.test.ts    AI runtime type exports/importability tests
@@ -695,6 +745,8 @@ tests/
         indexer.test.ts OpenSearch indexer mapping/bulk/delete behavior tests
         query.test.ts   OpenSearch query construction/filter/limit tests
   integration/        Integration and performance test suites (Vitest)
+    lambda/            Backend API integration tests against DynamoDB Local (FS-057 T-07)
+      fs-057-api.test.ts End-to-end CRUD + error-envelope acceptance coverage using handler invocation
     schema-ingestion/  FS-056 end-to-end ingestion/query orchestration tests
       inline-path.test.ts Inline path integration coverage (50/499/500 threshold behavior)
       step-functions-path.test.ts Step Functions parse/chunk + batch worker integration coverage

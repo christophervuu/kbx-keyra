@@ -1,0 +1,9 @@
+export { handler as createMappingHandler } from './create-mapping.js';
+export { handler as deleteMappingHandler } from './delete-mapping.js';
+export { handler as duplicateMappingHandler } from './duplicate-mapping.js';
+export { handler as getMappingHandler } from './get-mapping.js';
+export { handler as getMappingVersionHandler } from './get-version.js';
+export { handler as listMappingsHandler } from './list-mappings.js';
+export { handler as listMappingVersionsHandler } from './list-versions.js';
+export { handler as saveMappingVersionHandler } from './save-version.js';
+export { handler as updateMappingHandler } from './update-mapping.js';
