@@ -4,6 +4,8 @@
 
 End-to-end tests exercise KeyRa through a real browser using Playwright. They verify that integrated user workflows function correctly from a user's perspective — navigation, form submission, data persistence, and multi-component interactions.
 
+Phase 0 status note: the E2E harness described below is an architecture target and is **not yet implemented in this repository** (`tests/e2e/` is currently absent).
+
 E2E tests complement the existing unit/component test layer (Vitest + React Testing Library) by catching integration issues that isolated tests miss: routing failures, localStorage serialization bugs, cross-component state propagation, and render lifecycle problems.
 
 ## Scope

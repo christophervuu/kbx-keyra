@@ -43,13 +43,13 @@ Primary characteristics:
 ```text
 ui/src/
   main.tsx                    App bootstrap: createAdapter() + AdapterProvider + render
-  App.tsx                     BrowserRouter + layout route + page routes
+  App.tsx                     createBrowserRouter/RouterProvider + layout route + page routes
   vite-env.d.ts               Vite env typings (includes VITE_API_URL)
 
-  routes/                     Route constants + route placeholder pages
+  routes/                     Route constants + route page wrappers
     index.ts                  Route barrel
     paths.ts                  PATHS route constants
-    pages/                    One placeholder page component per route
+    pages/                    One route page wrapper per route (wires route params to feature pages)
 
   components/                 Shared reusable components
     index.ts                  Shared component barrel
@@ -67,6 +67,18 @@ ui/src/
     use-async-state.ts        Async state lifecycle hook
 
   features/
+    home/                     Home dashboard feature module (metrics, list modes, recent activity, attention summary)
+      index.ts                Feature barrel
+      components/             Dashboard page composition and state UI (skeleton/error/empty/loaded)
+      hooks/                  Dashboard data + view mode + recent-activity orchestration
+      lib/                    Filter/sort utilities for project list surfaces
+
+    projects/                 Project management feature module (overview, create project/mapping, schema management)
+      index.ts                Feature barrel
+      components/             ProjectOverviewPage + section components + create flows
+      hooks/                  Project overview orchestration hooks
+      lib/                    Feature-local utilities (e.g., schema format detection)
+
     schemas/                  Schema Library + Schema Detail feature module (FS-009, FS-015)
       index.ts                Feature barrel (types + parsers + hooks + components)
       types.ts                Feature-specific tree/editing types (SchemaTreeViewProps, EditNodeCallbacks, SchemaParseError)
@@ -225,7 +237,7 @@ ui/src/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
-      hybrid-adapter.ts       HybridAdapter: LocalStorageAdapter + HTTP AI overrides (`explainRule`, `suggestExpression`) (FS-041, FS-042)
+      hybrid-adapter.ts       HybridAdapter: LocalStorageAdapter + HTTP AI overrides (`explainRule`, `suggestExpression`, `autoMapSection`) (FS-041, FS-042, FS-046)
       ai-api-client.ts        HTTP client functions for AI endpoints (`explainRuleHttp`, `suggestExpressionHttp`) (FS-041, FS-042)
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL
@@ -247,6 +259,23 @@ ui/src/
 ### Contract
 
 `ApiAdapter` is the only supported interface for data operations. UI components must not call `fetch()` directly.
+
+### Current Contract Surface (Phase 0 Snapshot)
+
+`ApiAdapter` currently groups methods across these domains:
+- schemas
+- mappings
+- mapping versions
+- projects
+- templates
+- deployment
+- GitHub integrations (CDM + published)
+- AI methods
+- schema search
+- activity feed
+- server preview
+
+This broad contract is intentionally stable for UI call sites; adapter implementations can vary by phase.
 
 ### Implementations
 
@@ -283,6 +312,12 @@ Note: the previous behavior (throw when `VITE_API_URL` is set) has been replaced
 ### Offline-Only Enforcement
 
 In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. `HybridAdapter` overrides only implemented AI showcase slices (`explainRule`, `suggestExpression`, `autoMapSection`) to call the backend; unimplemented AI methods (for example `smartFix`) continue to throw offline-mode errors via inheritance.
+
+Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Phase 0:
+- `listTemplates()` returns `[]`
+- `querySchemaNodes(schemaId, query)` returns `[]`
+
+These stubs keep interface shape stable while backend-backed implementations are deferred.
 
 ### Showcase AI Integration Pattern (FS-041 / FS-042)
 
@@ -336,6 +371,8 @@ type AsyncState<T> =
 
 `useAsyncState()` standardizes transitions (`execute`, `reset`, `markStale`, `refresh`) and includes race-protection semantics.
 
+Concurrency note: `useAsyncState()` uses a request-id guard (`requestIdRef`) so stale promise completions cannot overwrite newer request state.
+
 ### Error Shape
 
 `AppError` is the normalized error model for UI async failures.
@@ -354,7 +391,10 @@ The UI consumes the mapping engine through a browser integration layer in `ui/sr
   - `defaultRegistry` and related registry/types for DSL metadata consumers
   - UI adapters (`validateMapping`, `executeMapping`) that convert UI `MappingConfig` to engine-native config shape
   - helper `evaluateExpression()` for single-expression preview evaluation
+  - helper `inferExpressionType()` for lightweight UI-side expression output typing
   - engine result/types used by hooks and feature components
+
+Normalization note: `validateMapping()` / `executeMapping()` adapt UI rule types to engine-compatible types. UI `MappingRule.type` values `null | any` are normalized to `'string'` before engine invocation.
 
 ### Import + Bundling Pattern (Vite)
 
@@ -406,6 +446,7 @@ Contract:
   - short-circuits to empty preview state when expression is empty or sourceData is null
   - debounces parse/evaluate by 300ms after expression changes
   - uses `evaluateExpression()` from `ui/src/lib/engine/`
+  - `evaluateExpression()` returns `{ value: null, error: null }` for empty expressions and null/undefined source data, and maps parse/eval failures to a single user-facing `error` string
   - catches parser/evaluator integration failures and maps to `error` state
 - Outputs:
   - `result: unknown | null`
@@ -442,6 +483,10 @@ This pattern is the canonical single-expression engine usage for UI surfaces tha
 - `/settings` → Settings
 - `*` → Not Found
 
+Router runtime config (`App.tsx`):
+- `createBrowserRouter(..., { future: { v7_startTransition: true, v7_relativeSplatPath: true } })`
+- `<RouterProvider future={{ v7_startTransition: true }} />`
+
 ### Layout Route Pattern
 
 All pages render inside a single shell route:
@@ -456,7 +501,8 @@ Breadcrumbs are derived from `location.pathname` segments:
 - Home is always first
 - Intermediate segments are links
 - Last segment is current-page text
-- Dynamic IDs display raw parameter values
+- Dynamic IDs display raw parameter values by default
+- `BreadcrumbContext` allows route pages/features to register human-readable labels for dynamic segments (e.g., project/mapping/schema names)
 
 ### Route Constants
 
@@ -471,7 +517,7 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 1. Shared, reusable UI primitives/utilities belong in `ui/src/components/`
 2. App-shell components belong in `ui/src/components/layout/`
 3. Feature-specific UI belongs in `ui/src/features/{feature}/`
-4. No cross-feature direct imports; shared code must be lifted into `components/`, `hooks/`, or `lib/`
+4. Cross-feature imports are allowed when the imported module is a stable, reuse-oriented feature surface and no clearer shared home exists yet; shared extraction remains preferred for broadly reused logic.
 
 ### Shared Primitives (FS-008)
 
@@ -491,7 +537,7 @@ FS-020 redesigns the Mapping Editor from an 8-panel grid into a **three-column f
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────┐
 │ Row 1: NavBar (global navigation)                                                 │
-│ Row 2: EditorTopBar (mapping context + save/deploy + Auto-map placeholder)       │
+│ Row 2: EditorTopBar (mapping context + save/deploy + Auto-Map workspace re-entry) │
 ├──────────────────────┬┬──────────────────────────────┬┬───────────────────────────┤
 │ Source Panel         ││ Builder / Workspace Panel    ││ Target Panel              │
 │ SourceSchemaPanel    ││ Node-type builder (target)   ││ TargetWorklist (target)   │
@@ -1045,7 +1091,7 @@ Props contract:
 - `sourceSchemaName`, `targetSchemaName` — schema context labels
 - `onSave` — save callback; Save button disabled when `unsavedChangeCount === 0 || isSaving`
 - `onHistoryToggle` — optional; when provided, renders "History" button (clock icon) for version history drawer
-- Auto-map placeholder action is rendered in this top bar as a disabled control (feature intentionally not implemented)
+- Auto-Map re-entry indicator is rendered as a subtle pill when workspace suggestions are pending for the current mapping/section; clicking re-enters workspace context.
 
 ### Auto-Draft Save Model (FS-039, replaces Two-Tier Save Model from FS-021)
 

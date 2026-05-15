@@ -21,7 +21,7 @@ The engine implements the KeyRa DSL as specified in `specs/KEYRA-DSL-SPECIFICATI
 
 ## Public API
 
-The engine exposes two primary entry points:
+The engine root barrel (`src/engine/index.ts`) exports two primary entry points plus supporting APIs:
 
 | Function | Purpose |
 |----------|---------|
@@ -36,13 +36,21 @@ Both functions are pure — same inputs always produce same outputs.
 - `evaluate(node, context)` — Evaluate a parsed AST node against runtime context and return value + diagnostics (+ optional trace).
 - `resolvePath(obj, path)` — Resolve DSL dot/bracket paths against runtime objects (used by context-reading functions).
 
+### Additional Root Exports (Current Implementation)
+
+- `registerAllFunctions` — Register all built-in DSL functions into a registry instance.
+- `SUPPORTED_FORMAT_TOKENS`, `FORMAT_PRESETS` — date formatting metadata exported from engine functions.
+- `types/*` — all exported engine public types.
+- `diagnostics/*` — `DIAGNOSTIC_CODES`, `formatDiagnosticMessage`.
+- `registry/*` — registry APIs (`createRegistry`, `defaultRegistry`, `FunctionRegistry`, etc.).
+
 ---
 
 ## Module Structure
 
 ```
 src/engine/
-  index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, registerAllFunctions, types, registry
+  index.ts              Public API entry point — exports validate, execute, parse, evaluate, resolvePath, registerAllFunctions, SUPPORTED_FORMAT_TOKENS, FORMAT_PRESETS, types, diagnostics, registry
   execute.ts            execute() implementation
   execute/
     index.ts            Barrel export for execute utilities
@@ -65,7 +73,7 @@ src/engine/
     config.ts           MappingConfig, MappingRule, SchemaRef, MappingConfigBlock
     results.ts          ExecutionResult, ValidationResult, Diagnostic, TraceEntry, ExecutionStats
     registry.ts         FunctionSignature, FunctionImplementation, RegisteredFunction
-    options.ts          EngineOptions, TraceVerbosity, Environment, UnmappedTargetStrategy, ValueType, externalSources, validateBeforeExecute
+    options.ts          EngineOptions, TraceVerbosity, Environment, UnmappedTargetStrategy, ValueType
   diagnostics/
     index.ts            Barrel export for diagnostics
     codes.ts            All KEYRA-E### and KEYRA-W### constants with message templates
@@ -88,8 +96,8 @@ src/engine/
     null-handling.ts    default, coalesce, isNull
     conditional.ts      if, eq, neq, gt, gte, lt, lte, and, or, not
     lookup.ts           valueMap
-    string.ts           concat, substring, upper, lower, trim, replace, replaceAll, contains, length
-    date.ts             formatDate
+    string.ts           concat, substring, upper, lower, trim, replace, replaceAll, contains, length, split
+    date.ts             formatDate, dateDiffSeconds
     math.ts             add, subtract, multiply, divide, round, abs
 ```
 
@@ -356,14 +364,19 @@ Output: ValidationResult { valid, diagnostics, coverage? }
 ### Pass Behavior
 
 1. **Parse** — parses every rule expression and preserves parse diagnostics with rule location metadata (`ruleIndex`, `targetPath`, `expression`). Rules with no AST are excluded from downstream AST-based passes.
-2. **Paths** — checks source path references against source schema and rule targets against target schema. Duplicate targets are emitted as warnings.
-3. **Types** — infers expression output type and compares with target field type for static compatibility checks.
-4. **Context** — enforces array-context rules for `item()`, `parent()`, and boolean requirements for `filter()/find()` predicates.
+2. **Paths** — checks source path references against source schema (when source schema is provided) and rule targets against target schema (when target schema is provided). Duplicate targets are emitted as warnings regardless of schema availability.
+3. **Types** — infers expression output type and compares with target field type for static compatibility checks (only when both source and target schemas are available).
+4. **Context** — enforces array-context rules for `item()`, `parent()`, and boolean requirements for `filter()/find()` predicates (requires source schema context).
 5. **References** — validates `constant()` and `external()` names against mapping config declarations.
-6. **Coverage** — computes required-leaf target coverage statistics.
+6. **Coverage** — computes required-leaf target coverage statistics when target schema is available.
 7. **Aggregate** — concatenates pass diagnostics and computes `valid` from severity (`false` if any `error`, warnings/info do not invalidate).
 
 Passes are intentionally independent: a failure in one pass does not short-circuit the rest. This improves editor feedback density by surfacing all detectable issues from a single validate call.
+
+Conditional execution note:
+- If `sourceSchema` is absent, source-dependent passes are skipped.
+- If `targetSchema` is absent, target-dependent passes are skipped.
+- `References` and duplicate-target detection still run without schema inputs.
 
 ### SchemaTree (Validation Schema Abstraction)
 
@@ -386,6 +399,8 @@ What it represents:
 How it is built:
 - **JSON Schema adapter** builds a traversable tree for object/array structure, required fields, and path/type checks.
 - **XSD adapter (current stub)** returns a permissive tree (`hasPath() => true`, unknown types, no required leaves) plus an info diagnostic to avoid false-positive schema errors while XSD parsing is not implemented.
+
+Phase 0 simplification: XSD validation is intentionally permissive (structure accepted, types/requireds not enforced) to keep editor/runtime workflows unblocked before full XSD structural parsing. Phase 1 expansion would require a real XSD-to-SchemaTree adapter with path/type/required extraction parity to JSON Schema.
 
 Boundary (explicit): **the validator uses schemas for static checks; it does not parse, ingest, store, version, or manage schemas.** Schema lifecycle ownership remains outside the engine (backend/domain services).
 
@@ -559,7 +574,7 @@ Type mismatch behavior is strict and deterministic:
 - Recursion depth is bounded by `options.maxRecursionDepth` (default `32`)
 - Depth exceed emits `KEYRA-E004` and returns `null` at overflow node
 - Diagnostics accumulate across recursive sub-evaluations; evaluator never throws for data errors
-- Function implementation throws are caught and converted to diagnostics
+- Function implementation throws are caught and converted to diagnostics (`KEYRA-E002` with implementation-error message context)
 
 Trace collection:
 
@@ -707,10 +722,13 @@ Behavior:
 | Type | Description |
 |------|-------------|
 | `MappingConfig` | Complete mapping document (name, version, schemas, config, rules) |
-| `MappingRule` | Single rule (target path, expected type, DSL expression, description) |
+| `MappingRule` | Single rule (target path, declared rule type, DSL expression, description) |
 | `SchemaRef` | Reference to a schema (id, type, optional commitSha) |
 | `MappingConfigBlock` | Mapping-level settings (unmapped strategy, constants, externals) |
 | `EngineOptions` | Runtime options (trace mode, max depth, etc.) |
+
+`MappingRule.type` uses `RuleType = 'string' | 'number' | 'boolean' | 'array' | 'object'`.
+It does not include `'null'` or `'any'`.
 
 ### Core Output Types
 
@@ -718,6 +736,7 @@ Behavior:
 |------|-------------|
 | `ExecutionResult` | Transformed data + diagnostics + optional trace |
 | `ValidationResult` | Validity boolean + diagnostics |
+| `CoverageResult` | Coverage metrics (`total`, `mapped`, `percentage`, optional `unmappedFields`) |
 | `Diagnostic` | Individual error/warning (code, severity, message, location) |
 | `TraceEntry` | Per-rule execution record (input, expression, output) |
 
@@ -726,14 +745,14 @@ Behavior:
 | Type | Description |
 |------|-------------|
 | `FunctionSignature` | Parameter definitions + return type for a DSL function |
-| `FunctionImplementation` | Callable that executes the function logic |
+| `FunctionImplementation` | Callable that executes function logic with `EvaluationContext` |
 | `RegisteredFunction` | Complete registration entry (name + signature + implementation) |
 
 ---
 
 ## Constraints
 
-- **Zero runtime dependencies** — the engine must never add a runtime dependency. All logic is hand-written TypeScript.
+- **Zero runtime dependencies (engine boundary)** — `src/engine/**` must not depend on cloud/UI/runtime SDKs. This constraint applies to the engine module boundary, not the repository package as a whole.
 - **Pure functions** — no I/O, no globals mutated, no network calls. Same inputs → same outputs.
 - **TypeScript strict mode** — `strict: true`, no `any` in public API types.
 - **Dual format** — builds to ESM (primary) and CJS (Node compat).
@@ -748,6 +767,7 @@ Behavior:
 - Every diagnostic has a stable code (`KEYRA-E###` or `KEYRA-W###`), severity, human-readable message, and location info.
 - Errors halt the individual rule (target field gets `null` or is omitted). They do not halt the entire execution.
 - Warnings are informational — execution continues normally.
+- Note: `KEYRA-E012` intentionally uses an `E`-prefixed code with `warning` severity (external source unavailable); severity is authoritative for validity decisions.
 - The only exceptions that throw are programming errors (e.g., duplicate function registration) — not data errors.
 
 ---
@@ -755,7 +775,7 @@ Behavior:
 ## Testing Strategy
 
 - **Unit tests** — `tests/engine/` mirrors `src/engine/` structure
-- **Fixture tests** — `tests/engine/fixtures/` will contain JSON mapping configs + sample data + expected output for integration-style testing
+- **Fixture tests** — `tests/engine/fixtures/` contains JSON mapping configs + sample data + expected output for integration-style testing
 - **Test isolation** — use `createRegistry()` for isolated registry instances in tests
 - **No mocking of engine internals** — test through the public API where possible
 

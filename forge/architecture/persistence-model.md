@@ -1,0 +1,287 @@
+# Persistence Model
+
+This document defines the Phase 1 persistence layer architecture for KeyRa — DynamoDB table schemas, S3 object layout, access patterns, and the `src/lib/persistence/` module structure.
+
+This is the authoritative reference for storage model decisions. If other specs (FS-056, FS-057) conflict with this document, this document governs.
+
+---
+
+## 1) Purpose and Scope
+
+Purpose:
+- Define the DynamoDB table schemas and key structures for Phase 1 entities
+- Establish S3 object layout conventions for bulk content
+- Document all access patterns and their DynamoDB operation mappings
+- Codify metadata-vs-blob storage rules
+- Describe the versioning model for mappings
+- Define the `src/lib/persistence/` module architecture
+
+Scope:
+- Projects, Mappings, SchemaMetadata, SchemaNodes, MappingVersions tables
+- S3 key patterns for schema content and mapping configs
+- Shared data-access module structure
+
+Out of scope:
+- Deployments table (future spec)
+- Templates table (future spec)
+- MappingMemory table (future AI/RAG spec)
+- PromptRegistry table (already implemented in `src/lib/ai/prompt-registry.ts`)
+- OpenSearch Serverless (covered by FS-056 architecture)
+- IaC / CloudFormation / CDK definitions
+
+---
+
+## 2) DynamoDB Table Definitions
+
+### Projects
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `projectId` | PK | String (UUID) | Unique project identifier |
+| `name` | — | String | Display name |
+| `description` | — | String | Project description |
+| `slug` | — | String | URL-safe identifier |
+| `schemaRefs` | — | List | `[{ schemaId, type, commitSha? }]` |
+| `tags` | — | List | String tags for filtering |
+| `createdAt` | — | String | ISO 8601 |
+| `updatedAt` | — | String | ISO 8601 |
+
+No GSIs. List operation uses Scan (acceptable for Phase 1 scale).
+
+---
+
+### Mappings
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `mappingId` | PK | String (UUID) | Unique mapping identifier |
+| `projectId` | — | String (UUID) | Parent project |
+| `name` | — | String | Display name |
+| `version` | — | Number | Auto-incremented on save |
+| `sourceSchemaId` | — | String (UUID) | Source schema reference |
+| `targetSchemaId` | — | String (UUID) | Target schema reference |
+| `status` | — | String | `draft` / `ready` / `has-errors` |
+| `ruleCount` | — | Number | Count of mapping rules |
+| `coverage` | — | Number | Percentage (0–100) of required target fields mapped |
+| `configS3Key` | — | String | S3 key for full mapping config JSON |
+| `createdAt` | — | String | ISO 8601 |
+| `updatedAt` | — | String | ISO 8601 |
+
+GSI: `projectId-index` — PK=`projectId`, projects all attributes. Used by `listByProject`.
+
+---
+
+### SchemaMetadata
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `schemaId` | PK | String (UUID) | Unique schema identifier |
+| `name` | — | String | Display name |
+| `format` | — | String | `json-schema` / `xsd` |
+| `fieldCount` | — | Number | Total leaf fields |
+| `origin` | — | String | `cdm` / `published` / `local` |
+| `status` | — | String | `ingesting` / `ready` / `error` |
+| `scope` | — | String | `global` / `project` |
+| `description` | — | String | Optional description |
+| `inferred` | — | Boolean | Whether schema was inferred from sample |
+| `syncStatus` | — | String | `synced` / `not-synced` / `local-changes` |
+| `source` | — | Map | `{ type: 'upload' }` or `{ type: 'github', repo, branch, path, commitSha? }` |
+| `createdAt` | — | String | ISO 8601 |
+| `updatedAt` | — | String | ISO 8601 |
+
+No GSIs. List operation uses Scan (acceptable for Phase 1 scale).
+
+---
+
+### SchemaNodes
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `schemaId` | PK | String (UUID) | Parent schema |
+| `path` | SK | String | Full dot-notation path |
+| `fieldName` | — | String | Leaf field name |
+| `type` | — | String | Data type |
+| `description` | — | String | From schema or AI-generated |
+| `depth` | — | Number | Nesting level |
+| `isArray` | — | Boolean | Whether node is an array |
+| `isRequired` | — | Boolean | Whether parent marks required |
+| `parentPath` | — | String | Path of parent node |
+| `childCount` | — | Number | Direct children count |
+| `subtreeFieldCount` | — | Number | Total leaf fields in subtree |
+| `embeddingText` | — | String | Natural-language description for embedding |
+
+GSIs:
+- `fieldName-index` — PK=`fieldName`, SK=`schemaId#path`
+- `parentPath-index` — PK=`schemaId`, SK=`parentPath`
+
+---
+
+### MappingVersions
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `mappingId` | PK | String (UUID) | Parent mapping |
+| `version` | SK | Number | Version number |
+| `savedAt` | — | String | ISO 8601 |
+| `savedBy` | — | String | User who saved |
+| `ruleCount` | — | Number | Rule count at this version |
+| `configS3Key` | — | String | S3 key for version config snapshot |
+
+---
+
+## 3) S3 Object Layout
+
+Bucket: configured via `STORAGE_BUCKET` environment variable.
+
+| Key Pattern | Content | Content-Type |
+|-------------|---------|--------------|
+| `schemas/{schemaId}/original.json` | Original JSON Schema file | `application/json` |
+| `schemas/{schemaId}/original.xsd` | Original XSD file | `application/xml` |
+| `schemas/{schemaId}/content.json` | Processed/normalized schema | `application/json` |
+| `mappings/{mappingId}/config.json` | Current mapping config | `application/json` |
+| `mappings/{mappingId}/versions/v{N}.json` | Version N config snapshot | `application/json` |
+
+Rules:
+- Schema content is always stored in S3 (may exceed DynamoDB's 400KB limit).
+- Mapping configs are always stored in S3 (full `MappingConfig` with rules can be large).
+- DynamoDB items reference S3 objects via `configS3Key` fields.
+- Version snapshots are immutable once written (never modified, only deleted during prune).
+
+---
+
+## 4) Access Patterns
+
+| Pattern | Operation | Table/Index | Method |
+|---------|-----------|-------------|--------|
+| List all projects | Scan | Projects | `projects.list()` |
+| Get project by ID | GetItem | Projects | `projects.get(id)` |
+| Create project | PutItem | Projects | `projects.create(input)` |
+| Update project fields | UpdateItem | Projects | `projects.update(id, fields)` |
+| Delete project | DeleteItem | Projects | `projects.delete(id)` |
+| List mappings by project | Query | Mappings / `projectId-index` | `mappings.listByProject(projectId)` |
+| Get mapping by ID | GetItem | Mappings | `mappings.get(id)` |
+| Create mapping | PutItem + S3 Put | Mappings | `mappings.create(input)` |
+| Update mapping (version++) | UpdateItem + S3 Put | Mappings | `mappings.update(id, fields, config)` |
+| Delete mapping | DeleteItem + S3 Delete | Mappings | `mappings.delete(id)` |
+| Duplicate mapping | GetItem + PutItem + S3 | Mappings | `mappings.duplicate(id, name)` |
+| List schemas | Scan | SchemaMetadata | `schemaMetadata.list()` |
+| Get schema metadata | GetItem | SchemaMetadata | `schemaMetadata.get(id)` |
+| Create schema metadata | PutItem | SchemaMetadata | `schemaMetadata.create(input)` |
+| Update schema status | UpdateItem | SchemaMetadata | `schemaMetadata.updateStatus(id, status)` |
+| Delete schema metadata | DeleteItem | SchemaMetadata | `schemaMetadata.delete(id)` |
+| Batch write schema nodes | BatchWriteItem | SchemaNodes | `schemaNodes.batchWrite(id, nodes)` |
+| List nodes by schema | Query (PK) | SchemaNodes | `schemaNodes.listBySchema(id)` |
+| Query nodes (text search) | Query (PK) + Filter | SchemaNodes | `schemaNodes.queryContains(id, q)` |
+| Delete all nodes for schema | Query + BatchWrite(Delete) | SchemaNodes | `schemaNodes.deleteBySchema(id)` |
+| Save mapping version | PutItem + S3 Put + Prune | MappingVersions | `mappingVersions.save(id, entry)` |
+| List versions (descending) | Query (desc) | MappingVersions | `mappingVersions.list(id)` |
+| Get specific version | GetItem | MappingVersions | `mappingVersions.get(id, version)` |
+
+---
+
+## 5) Metadata vs Blob Rules
+
+| Data Category | Storage | Rationale |
+|---|---|---|
+| Entity metadata (names, IDs, dates, counts, status) | DynamoDB | Small, queryable, indexed |
+| Schema content (JSON/XSD body) | S3 | May exceed 400KB; not queried directly |
+| Mapping config (rules, schema refs, options) | S3 | Can be large; only loaded on demand |
+| Version snapshots | S3 | Immutable bulk content |
+| Schema tree nodes | DynamoDB | Individual items for query/filter support |
+| Version metadata (version#, date, ruleCount) | DynamoDB | Small, queryable by mapping+version |
+
+Decision rule: if the data is < 1KB and needs to be queried/filtered, it goes in DynamoDB. If it's potentially large or only loaded as a whole, it goes in S3 with a key reference in DynamoDB.
+
+---
+
+## 6) Versioning Model
+
+### Mapping Version Auto-Increment
+
+- `mappings.update()` uses `SET version = version + :one` in the UpdateExpression.
+- This is not conditional (no optimistic concurrency) — last-write-wins for Phase 1.
+- Version numbers are monotonically increasing per mapping and never reused.
+
+### Version Snapshot Storage
+
+- When a version is explicitly saved, the full `MappingConfig` is written to S3 at `mappings/{mappingId}/versions/v{N}.json`.
+- The DynamoDB `MappingVersions` item stores a `configS3Key` reference, not the config itself.
+- To retrieve a full version entry (matching `MappingVersionEntry` from domain types), the handler reads the DynamoDB item + S3 content.
+
+### Prune Behavior
+
+- Maximum 50 versions retained per mapping.
+- On save, if version count exceeds 50, the oldest (lowest version number) is deleted: DynamoDB item + S3 object.
+- Prune failure is logged but does not fail the save operation.
+
+---
+
+## 7) Module Architecture
+
+```
+src/lib/persistence/
+  index.ts              Barrel exports
+  types.ts              DynamoDB item type definitions + input types + converters
+  clients.ts            DynamoDB Document Client + S3 Client singletons
+  config.ts             Table names, bucket name, S3 key builders
+  projects.ts           Projects entity operations
+  mappings.ts           Mappings entity operations (includes S3 config I/O)
+  schema-metadata.ts    SchemaMetadata entity operations
+  schema-nodes.ts       SchemaNodes batch/query operations
+  mapping-versions.ts   MappingVersions operations (includes S3 + prune)
+  s3/
+    index.ts            S3 helper barrel
+    schema-content.ts   Schema original + processed content helpers
+    mapping-config.ts   Mapping config put/get/delete helpers
+```
+
+Rules:
+- No imports from `ui/` — persistence module is backend-only.
+- Import from `src/engine/types/` is allowed for shared type definitions.
+- Import from `src/lib/persistence/` by Lambda handlers and other `src/lib/` modules.
+- Each entity module is independently importable.
+- Clients are singletons (reused across Lambda invocations within the same container).
+- Item types are supersets of domain types with internal-only fields (e.g., `configS3Key`). Explicit converter functions (`toProjectMetadata()`, `toMappingMetadata()`, etc.) strip internal fields to produce exact domain shapes.
+- Entity delete methods are narrow (single entity only). Cascade orchestration (e.g., deleting version history when deleting a mapping) is the calling handler's responsibility.
+
+---
+
+## 8) Environment Configuration
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `AWS_REGION` | AWS region for SDK clients | `us-east-1` |
+| `DYNAMODB_ENDPOINT` | Override endpoint (DynamoDB Local) | none (use AWS default) |
+| `S3_ENDPOINT` | Override endpoint (LocalStack) | none (use AWS default) |
+| `PROJECTS_TABLE` | Projects table name | `keyra-projects` |
+| `MAPPINGS_TABLE` | Mappings table name | `keyra-mappings` |
+| `SCHEMA_METADATA_TABLE` | SchemaMetadata table name | `keyra-schema-metadata` |
+| `SCHEMA_NODES_TABLE` | SchemaNodes table name | `keyra-schema-nodes` |
+| `MAPPING_VERSIONS_TABLE` | MappingVersions table name | `keyra-mapping-versions` |
+| `STORAGE_BUCKET` | S3 bucket name | `keyra-storage` |
+
+For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_ENDPOINT=http://localhost:4566`.
+
+---
+
+## 9) Constraints and Limits
+
+- DynamoDB item size limit: 400KB. All bulk content stored in S3.
+- `BatchWriteItem` limit: 25 items per call. Module handles chunking.
+- `BatchWriteItem` unprocessed items: retry with exponential backoff (3 attempts).
+- Scan-based list operations: acceptable for Phase 1 scale (< 100 projects, < 500 schemas). Must be revisited if scale increases.
+- Schema query (`queryContains`): uses DynamoDB Query + FilterExpression. Maximum 50 results. Future: OpenSearch for full-text and vector search.
+- All timestamps: ISO 8601 strings.
+- All IDs: UUID v4.
+- No multi-tenant isolation at table level for Phase 1.
+
+---
+
+## 10) Cross-References
+
+- Product spec data model: `specs/PRODUCT-TECHNICAL.md` Section 15
+- Backend API handlers: FS-057
+- Schema ingestion pipeline: FS-056
+- HttpAdapter (client): FS-055
+- Phase 1 readiness baseline: `forge/architecture/phase-1-readiness.md`
+- Project structure: `forge/architecture/project-structure.md`

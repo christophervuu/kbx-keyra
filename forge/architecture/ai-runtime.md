@@ -38,6 +38,7 @@ src/
     ai/
       explain-rule.ts       First consumer Lambda — thin handler shell
       suggest-expression.ts Second consumer Lambda — NL to rule handler
+      auto-map.ts           Auto-map Lambda handler for section-level suggestion generation
 ```
 
 ---

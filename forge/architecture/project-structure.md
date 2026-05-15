@@ -12,6 +12,8 @@ This is a living document. Update it when the project structure changes. Do not 
 src/        Backend and shared source code
 ui/         Frontend source code (React / TypeScript / Vite)
 tests/      Test files
+scripts/    Local tooling/runner scripts
+specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
 ```
 
@@ -30,17 +32,18 @@ src/
     diagnostics/      Error codes, diagnostic formatting, trace output
     registry/         Function registration and lookup mechanism
     functions/        Built-in DSL function implementations (grouped by category)
-  lambda/             AWS Lambda function handlers
-    schema/           Schema CRUD lambdas (ingestSchema, getSchema, deleteSchema, querySchemaNodes)
-    mapping/          Mapping CRUD lambdas
-    project/          Project CRUD lambdas
-    deploy/           Deployment lambdas (deployMapping, promoteDeploy, rollbackDeploy)
-    github/           GitHub API lambdas (listCdmFiles, publishSchema, syncSchema)
-    ai/               AI lambdas (aiAutoMap, aiSuggestExpression, aiSmartFix, etc.)
+  lambda/             AWS Lambda function handlers (current Phase 0 implementation)
+    ai/               AI lambdas (showcase slices)
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
-    preview/          Preview lambda (previewMapping)
+    # [planned — not yet implemented in this repository]
+    # schema/         Schema CRUD lambdas
+    # mapping/        Mapping CRUD lambdas
+    # project/        Project CRUD lambdas
+    # deploy/         Deployment lambdas
+    # github/         GitHub API lambdas
+    # preview/        Preview lambda
   lib/                Shared utilities used across lambdas
     ai/               Shared AI runtime modules (types, config, adapters, orchestration)
       index.ts          AI runtime public barrel exports
@@ -52,11 +55,13 @@ src/
       model-client.ts   GitHub Models client wrapper (OpenAI SDK)
       output-parser.ts  Model output JSON parsing into AIResponse shape
       invoke-ai.ts      AI runtime orchestration entry point
-  types/              Shared types across backend
+  # [planned — not yet implemented in this repository]
+  # types/            Shared types across backend
 ```
 
 **Rules:**
 - The engine (`src/engine/`) has zero imports from `src/lambda/`, `ui/`, or any cloud SDK. It is a pure library.
+- Current Phase 0 Lambda footprint is `src/lambda/ai/`; additional lambda concerns are planned but not yet implemented.
 - Lambda handlers import from `src/engine/` and `src/lib/` only — not from each other.
 - Types shared between engine and UI are defined in `src/engine/types/` and imported by both.
 - `src/lib/ai/` is backend-only and must not import from `src/engine/` or `ui/`.
@@ -599,6 +604,7 @@ tests/
     functions/        DSL function implementation tests
     execute/          Engine execution tests with fixture mapping configs
     validate/         Engine validation tests
+    fixtures/         Integration fixture corpus (mapping configs, source/target schemas, expected outputs)
   lambda/             Lambda handler tests
     ai/               AI lambda handler tests
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
@@ -631,9 +637,10 @@ tests/
           explain-rule.json Prompt fixture for explain-rule pipeline
           nl-to-rule.json   Prompt fixture for nl-to-rule pipeline
           dsl-reference.md  DSL reference fixture content
-  ui/                 UI component and integration tests
+  ui/                 UI integration and hook tests
     features/         Tests mirroring ui/src/features/ structure
-    components/       Tests for shared components
+    hooks/            Tests for shared and feature-level hooks
+  # Note: most UI component tests are co-located under ui/src/**/*.test.{ts,tsx}
 ```
 
 **Rules:**
@@ -659,7 +666,7 @@ When writing a new file, use this to decide where it goes:
 | Global state | `ui/src/lib/state/` |
 | Engine test | `tests/engine/` |
 | Lambda test | `tests/lambda/` |
-| UI component test | `tests/ui/features/{feature}/` |
+| UI integration/hook test | `tests/ui/features/{feature}/` or `tests/ui/hooks/` |
 | Workflow artifact (spec, task, architecture doc) | `forge/` |
 
 **Nothing workflow-related goes in `src/`, `ui/`, or `tests/`. Nothing application-related goes in `forge/`.**
