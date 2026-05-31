@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: KeyRa Phase 1 infrastructure scaffold (FS-062 T-01)
+Description: KeyRa Phase 1 infrastructure scaffold (FS-062 T-01/T-04)
 
 Parameters:
   Stage:
@@ -12,15 +12,23 @@ Parameters:
       - prod
     Description: Deployment stage used for naming and configuration.
 
+  Org:
+    Type: String
+    Default: kbx
+    Description: Organization prefix used for globally unique resource names.
+
   StorageBucketName:
     Type: String
     Default: kbx-keyra-dev-local
-    Description: S3 bucket name for mapping/schema content storage.
+    Description: Legacy scaffold parameter from T-01 (superseded by StorageBucket resource naming).
 
   OpenSearchEndpoint:
     Type: String
     Default: https://example-opensearch.local
     Description: OpenSearch endpoint for schema-node indexing and query.
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
 
 Globals:
   Function:
@@ -30,48 +38,861 @@ Globals:
     Environment:
       Variables:
         STAGE: !Ref Stage
-        # Placeholder table names until T-02 creates DynamoDB resources.
-        PROJECTS_TABLE: !Sub '${Stage}-keyra-projects'
-        MAPPINGS_TABLE: !Sub '${Stage}-keyra-mappings'
-        SCHEMA_METADATA_TABLE: !Sub '${Stage}-keyra-schema-metadata'
-        SCHEMA_NODES_TABLE: !Sub '${Stage}-keyra-schema-nodes'
-        MAPPING_VERSIONS_TABLE: !Sub '${Stage}-keyra-mapping-versions'
-        STORAGE_BUCKET: !Ref StorageBucketName
+        PROJECTS_TABLE: !Ref ProjectsTable
+        MAPPINGS_TABLE: !Ref MappingsTable
+        SCHEMA_METADATA_TABLE: !Ref SchemaMetadataTable
+        SCHEMA_NODES_TABLE: !Ref SchemaNodesTable
+        MAPPING_VERSIONS_TABLE: !Ref MappingVersionsTable
+        STORAGE_BUCKET: !Ref StorageBucket
+        # Compatibility aliases used by existing handlers/tests.
+        SCHEMAS_TABLE: !Ref SchemaMetadataTable
+        CONTENT_BUCKET: !Ref StorageBucket
+        SCHEMA_BUCKET: !Ref StorageBucket
         OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
 
-Resources: {}
-# T-02 through T-07 will add resources in this section:
-# - DynamoDB tables
-# - S3 bucket
-# - API Gateway + Lambda functions
-# - OpenSearch Serverless resources
-# - Step Functions state machine
+Resources:
+  ProjectsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: !Sub '${Stage}-keyra-projects'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: projectId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: projectId
+          KeyType: HASH
+
+  MappingsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: !Sub '${Stage}-keyra-mappings'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mappingId
+          AttributeType: S
+        - AttributeName: projectId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mappingId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: projectId-index
+          KeySchema:
+            - AttributeName: projectId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  SchemaMetadataTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: !Sub '${Stage}-keyra-schema-metadata'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: schemaId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: schemaId
+          KeyType: HASH
+
+  SchemaNodesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: !Sub '${Stage}-keyra-schema-nodes'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: schemaId
+          AttributeType: S
+        - AttributeName: path
+          AttributeType: S
+        - AttributeName: fieldName
+          AttributeType: S
+        - AttributeName: schemaIdPath
+          AttributeType: S
+        - AttributeName: parentPath
+          AttributeType: S
+      KeySchema:
+        - AttributeName: schemaId
+          KeyType: HASH
+        - AttributeName: path
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: fieldName-index
+          KeySchema:
+            - AttributeName: fieldName
+              KeyType: HASH
+            - AttributeName: schemaIdPath
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: parentPath-index
+          KeySchema:
+            - AttributeName: schemaId
+              KeyType: HASH
+            - AttributeName: parentPath
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  MappingVersionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: !Sub '${Stage}-keyra-mapping-versions'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mappingId
+          AttributeType: S
+        - AttributeName: version
+          AttributeType: N
+      KeySchema:
+        - AttributeName: mappingId
+          KeyType: HASH
+        - AttributeName: version
+          KeyType: RANGE
+
+  StorageBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${Org}-keyra-${Stage}-${AWS::AccountId}'
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - DELETE
+            AllowedHeaders:
+              - Content-Type
+              - Authorization
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireSchemaBatchArtifacts
+            Status: Enabled
+            Prefix: schemas/*/batches/
+            ExpirationInDays: 7
+
+  KeyraApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${Stage}-keyra-api'
+      StageName: !Ref Stage
+      Cors:
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+
+  CreateProjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/project/create-project.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProjectsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects
+            Method: post
+
+  ListProjectsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/project/list-projects.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects
+            Method: get
+
+  GetProjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/project/get-project.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}
+            Method: get
+
+  UpdateProjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/project/update-project.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProjectsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}
+            Method: put
+
+  DeleteProjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/project/delete-project.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}
+            Method: delete
+
+  CreateMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/create-mapping.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings
+            Method: post
+
+  GetMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/get-mapping.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{id}
+            Method: get
+
+  UpdateMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/update-mapping.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{id}
+            Method: put
+
+  DeleteMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/delete-mapping.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{id}
+            Method: delete
+
+  DuplicateMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/duplicate-mapping.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{id}/duplicate
+            Method: post
+
+  ListMappingsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/list-mappings.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/mappings
+            Method: get
+
+  ListVersionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/list-versions.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingVersionsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/versions
+            Method: get
+
+  GetVersionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/get-version.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingVersionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/versions/{version}
+            Method: get
+
+  SaveVersionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/mapping/save-version.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingVersionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/versions
+            Method: post
+
+  CreateSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/create-schema.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref SchemaIngestionStateMachine
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas
+            Method: post
+
+  ListSchemasFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/list-schemas.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas
+            Method: get
+
+  GetSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/get-schema.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}
+            Method: get
+
+  DeleteSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/delete-schema.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProjectsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}
+            Method: delete
+
+  QuerySchemaNodesFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/query-schema-nodes.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/query
+            Method: post
+
+  IngestSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/ingest-schema.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref SchemaIngestionStateMachine
+          INGESTION_STATE_MACHINE_ARN: !Ref SchemaIngestionStateMachine
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${Stage}-keyra-schema-ingestion'
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/ingest
+            Method: post
+
+  ProcessBatchFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/process-batch.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          SCHEMA_BUCKET: !Ref StorageBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+
+  OrchestrationTasksFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      CodeUri: .
+      Handler: src/lambda/schema/orchestration-tasks.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          SCHEMA_BUCKET: !Ref StorageBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+
+  SchemaNodesEncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub '${Stage}-keyra-schema-nodes-encryption'
+      Type: encryption
+      Description: Encryption policy for schema nodes collection.
+      Policy: !Sub >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/${Stage}-keyra-schema-nodes"]}],"AWSOwnedKey":true}
+
+  SchemaNodesNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub '${Stage}-keyra-schema-nodes-network'
+      Type: network
+      Description: Network policy allowing public access for Phase 1.
+      Policy: !Sub >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/${Stage}-keyra-schema-nodes"]},{"ResourceType":"dashboard","Resource":["collection/${Stage}-keyra-schema-nodes"]}],"AllowFromPublic":true}]
+
+  SchemaNodesCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    DependsOn:
+      - SchemaNodesEncryptionPolicy
+      - SchemaNodesNetworkPolicy
+    Properties:
+      Name: !Sub '${Stage}-keyra-schema-nodes'
+      Type: SEARCH
+      Description: Schema node index for keyword and structural queries.
+
+  SchemaNodesAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub '${Stage}-keyra-schema-nodes-access'
+      Type: data
+      Description: Data access policy for schema query/index Lambda roles.
+      Policy: !Sub
+        - >-
+          [{"Rules":[{"ResourceType":"collection","Resource":["collection/${Stage}-keyra-schema-nodes"],"Permission":["aoss:CreateCollectionItems","aoss:UpdateCollectionItems","aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/${Stage}-keyra-schema-nodes/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument","aoss:DeleteDocument"]}],"Principal":["${QuerySchemaNodesFunctionRoleArn}","${IngestSchemaFunctionRoleArn}","${ProcessBatchFunctionRoleArn}","${OrchestrationTasksFunctionRoleArn}"]}]
+        - QuerySchemaNodesFunctionRoleArn: !GetAtt QuerySchemaNodesFunctionRole.Arn
+          IngestSchemaFunctionRoleArn: !GetAtt IngestSchemaFunctionRole.Arn
+          ProcessBatchFunctionRoleArn: !GetAtt ProcessBatchFunctionRole.Arn
+          OrchestrationTasksFunctionRoleArn: !GetAtt OrchestrationTasksFunctionRole.Arn
+
+  SchemaIngestionStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub '${Stage}-keyra-schema-ingestion'
+      DefinitionUri: src/lambda/schema/step-functions/schema-ingestion.asl.json
+      DefinitionSubstitutions:
+        ProcessBatchFunctionArn: !GetAtt ProcessBatchFunction.Arn
+        OrchestrationTasksFunctionArn: !GetAtt OrchestrationTasksFunction.Arn
+        StorageBucket: !Ref StorageBucket
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProcessBatchFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref OrchestrationTasksFunction
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+
+# T-07 will add remaining resources in this section:
 
 Outputs:
   ApiUrl:
-    Description: Placeholder API URL scaffold output (to be replaced by API resource output in T-04).
-    Value: !Sub 'https://example.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+    Description: API Gateway invoke URL.
+    Value: !Sub 'https://${KeyraApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
 
   StorageBucketName:
     Description: Content storage bucket name.
-    Value: !Ref StorageBucketName
+    Value: !Ref StorageBucket
+
+  StorageBucketArn:
+    Description: Content storage bucket ARN.
+    Value: !GetAtt StorageBucket.Arn
 
   ProjectsTableArn:
-    Description: Placeholder Projects table ARN output until table resource is added.
-    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-projects'
+    Description: Projects table ARN.
+    Value: !GetAtt ProjectsTable.Arn
 
   MappingsTableArn:
-    Description: Placeholder Mappings table ARN output until table resource is added.
-    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-mappings'
+    Description: Mappings table ARN.
+    Value: !GetAtt MappingsTable.Arn
 
   SchemaMetadataTableArn:
-    Description: Placeholder SchemaMetadata table ARN output until table resource is added.
-    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-schema-metadata'
+    Description: SchemaMetadata table ARN.
+    Value: !GetAtt SchemaMetadataTable.Arn
 
   SchemaNodesTableArn:
-    Description: Placeholder SchemaNodes table ARN output until table resource is added.
-    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-schema-nodes'
+    Description: SchemaNodes table ARN.
+    Value: !GetAtt SchemaNodesTable.Arn
 
   MappingVersionsTableArn:
-    Description: Placeholder MappingVersions table ARN output until table resource is added.
-    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-mapping-versions'
+    Description: MappingVersions table ARN.
+    Value: !GetAtt MappingVersionsTable.Arn
+
+  OpenSearchCollectionEndpoint:
+    Description: OpenSearch Serverless collection endpoint.
+    Value: !GetAtt SchemaNodesCollection.CollectionEndpoint

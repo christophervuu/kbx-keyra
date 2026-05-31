@@ -214,3 +214,26 @@ export async function handleErrorTask(event: HandleErrorEvent): Promise<{ schema
     errorDetails,
   };
 }
+
+type OrchestrationEvent =
+  | ({ readonly action: 'parse' } & ParseSchemaEvent)
+  | ({ readonly action: 'aggregate' } & AggregateResultsEvent)
+  | ({ readonly action: 'updateMetadata' } & UpdateMetadataEvent)
+  | ({ readonly action: 'handleError' } & HandleErrorEvent);
+
+export async function handler(event: OrchestrationEvent): Promise<unknown> {
+  switch (event.action) {
+    case 'parse':
+      return parseSchemaTask(event);
+    case 'aggregate':
+      return aggregateResultsTask(event);
+    case 'updateMetadata':
+      return updateMetadataTask(event);
+    case 'handleError':
+      return handleErrorTask(event);
+    default: {
+      const neverAction: never = event.action;
+      throw new Error(`Unsupported orchestration action: ${String(neverAction)}`);
+    }
+  }
+}

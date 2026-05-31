@@ -89,11 +89,15 @@ Rationale:
 | `SCHEMA_METADATA_TABLE` | `dev-keyra-schema-metadata` | `dev-keyra-schema-metadata` | `prod-keyra-schema-metadata` |
 | `SCHEMA_NODES_TABLE` | `dev-keyra-schema-nodes` | `dev-keyra-schema-nodes` | `prod-keyra-schema-nodes` |
 | `MAPPING_VERSIONS_TABLE` | `dev-keyra-mapping-versions` | `dev-keyra-mapping-versions` | `prod-keyra-mapping-versions` |
-| `STORAGE_BUCKET` | `kbx-keyra-dev-local` | `kbx-keyra-dev-{AccountId}` | `kbx-keyra-prod-{AccountId}` |
+| `STORAGE_BUCKET` | `dev-keyra-storage-local` | `kbx-keyra-dev-{AccountId}` | `kbx-keyra-prod-{AccountId}` |
+| `CONTENT_BUCKET` | `dev-keyra-storage-local` | `kbx-keyra-dev-{AccountId}` | `kbx-keyra-prod-{AccountId}` |
+| `SCHEMA_BUCKET` | `dev-keyra-storage-local` | `kbx-keyra-dev-{AccountId}` | `kbx-keyra-prod-{AccountId}` |
+| `SCHEMAS_TABLE` | `dev-keyra-schema-metadata` | `dev-keyra-schema-metadata` | `prod-keyra-schema-metadata` |
 | `DYNAMODB_ENDPOINT` | `http://localhost:8000` | *(not set)* | *(not set)* |
 | `S3_ENDPOINT` | `http://localhost:4566` | *(not set)* | *(not set)* |
 | `OPENSEARCH_ENDPOINT` | *(not set — mock in tests)* | Collection endpoint | Collection endpoint |
 | `STATE_MACHINE_ARN` | *(not set)* | State machine ARN | State machine ARN |
+| `INGESTION_STATE_MACHINE_ARN` | *(not set)* | State machine ARN | State machine ARN |
 
 ### Endpoint Override Pattern
 
@@ -121,8 +125,8 @@ OpenSearch is not emulated locally. Tests that touch OpenSearch use mocked clien
 
 ### Setup Flow
 
-1. `docker-compose up -d` — start local services
-2. `scripts/setup-local.sh` — create tables and bucket (idempotent)
+1. `docker compose up -d` — start local services
+2. `scripts/setup-local.sh` — create tables and bucket (idempotent; requires AWS CLI)
 3. `sam local start-api --env-vars env.local.json` — start API locally
 4. Integration tests run against `http://localhost:3000`
 
@@ -190,6 +194,8 @@ These get 512MB memory. Provisioned concurrency is a parameter that can be enabl
 ```
 sam validate          → Lint template syntax and references
 sam build             → esbuild each function, package artifacts
+scripts/check-bundle-sizes.sh
+                     → Enforce <5MB function bundle size threshold
 sam deploy            → Upload to S3, create/update CloudFormation stack
                         --config-env {stage}
                         --parameter-overrides Stage={stage}
