@@ -64,4 +64,57 @@ export default [
       ],
     },
   },
+  {
+    files: [
+      'src/lib/api/http-adapter.ts',
+      'src/lib/api/bootstrap.ts',
+      'src/lib/api/http-client.ts',
+      'src/lib/api/ai-api-client.ts',
+    ],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'localStorage',
+          property: 'getItem',
+          message: 'HTTP adapter path must not read from localStorage.',
+        },
+        {
+          object: 'localStorage',
+          property: 'setItem',
+          message: 'HTTP adapter path must not write to localStorage.',
+        },
+        {
+          object: 'localStorage',
+          property: 'removeItem',
+          message: 'HTTP adapter path must not mutate localStorage.',
+        },
+        {
+          object: 'sessionStorage',
+          property: 'getItem',
+          message: 'HTTP adapter path must not read from sessionStorage.',
+        },
+        {
+          object: 'sessionStorage',
+          property: 'setItem',
+          message: 'HTTP adapter path must not write to sessionStorage.',
+        },
+        {
+          object: 'sessionStorage',
+          property: 'removeItem',
+          message: 'HTTP adapter path must not mutate sessionStorage.',
+        },
+        {
+          object: 'window',
+          property: 'localStorage',
+          message: 'HTTP adapter path must not access window.localStorage.',
+        },
+        {
+          object: 'window',
+          property: 'sessionStorage',
+          message: 'HTTP adapter path must not access window.sessionStorage.',
+        },
+      ],
+    },
+  },
 ];

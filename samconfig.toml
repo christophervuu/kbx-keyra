@@ -1,0 +1,25 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "keyra-dev"
+resolve_s3 = true
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=dev StorageBucketName=kbx-keyra-dev-local OpenSearchEndpoint=https://dev-opensearch.example.com"
+
+[dev.deploy.parameters]
+stack_name = "keyra-dev"
+resolve_s3 = true
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=dev StorageBucketName=kbx-keyra-dev-local OpenSearchEndpoint=https://dev-opensearch.example.com"
+
+[prod.deploy.parameters]
+stack_name = "keyra-prod"
+resolve_s3 = true
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=prod StorageBucketName=kbx-keyra-prod-local OpenSearchEndpoint=https://prod-opensearch.example.com"

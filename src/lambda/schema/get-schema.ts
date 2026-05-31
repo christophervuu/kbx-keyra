@@ -1,4 +1,5 @@
 import {
+  contentUnavailable,
   ERROR_CODES,
   errorResponse,
   getItem,
@@ -7,6 +8,7 @@ import {
   jsonResponse,
   notFound,
   parsePathParam,
+  S3ServiceError,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
@@ -89,7 +91,14 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     };
 
     return jsonResponse(200, detail);
-  } catch {
+  } catch (error) {
+    if (error instanceof S3ServiceError && error.appError.code === ERROR_CODES.RESOURCE_NOT_FOUND) {
+      const appError = contentUnavailable(
+        `Schema '${schemaId}' metadata exists but schema content is unavailable in storage`,
+      );
+      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
+    }
+
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);
   }

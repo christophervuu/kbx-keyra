@@ -16,6 +16,8 @@ scripts/    Local tooling/runner scripts
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
 docker-compose.test.yml  Persistence integration local stack (DynamoDB Local + LocalStack S3)
+template.yaml            AWS SAM template (Phase 1 infrastructure scaffold)
+samconfig.toml           AWS SAM deploy configuration environments
 ```
 
 ---
@@ -694,6 +696,20 @@ tests/
     validate/         Engine validation tests
     fixtures/         Integration fixture corpus (mapping configs, source/target schemas, expected outputs)
   lambda/             Lambda handler tests
+    integration/      Lambda-level integration suites
+      persistence/    FS-061 cross-session persistence harness + scenarios (DynamoDB Local + LocalStack S3)
+        helpers/
+          setup.ts       Table/bucket lifecycle + env wiring helpers
+          cleanup.ts     Table/bucket cleanup helpers
+          fixtures.ts    Deterministic fixture inputs/IDs for persistence tests
+          session-factories.ts Fresh-session module factories with explicit clients/config
+          session.ts     createFreshSession() facade returning isolated module instances
+          full-stack.ts  Lambda handler invocation + test lifecycle helpers
+        harness.smoke.test.ts Harness smoke checks (table/bucket setup + fresh-session + full-stack invocation)
+        project-persistence.test.ts Project cross-session persistence tests (create/get/list/update/delete + schemaRefs/tags)
+        mapping-persistence.test.ts Mapping + version cross-session persistence tests (metadata/config/version snapshots)
+        schema-persistence.test.ts Schema metadata + content cross-session persistence tests (including large content)
+        error-modes.test.ts Orphaned-storage error-mode integration tests (CONTENT_UNAVAILABLE envelope + non-orphan baselines)
     ai/               AI lambda handler tests
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
       suggest-expression.test.ts Tests for ai suggest-expression lambda request validation, mapping, and status handling

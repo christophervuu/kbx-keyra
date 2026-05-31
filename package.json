@@ -32,6 +32,7 @@
     "suggest-expression:run": "tsx scripts/run-suggest-expression.ts",
     "test:integration": "RUN_DYNAMODB_LOCAL_INTEGRATION=1 vitest run --passWithNoTests tests/lambda/integration",
     "test:integration:persistence": "RUN_PERSISTENCE_INTEGRATION=1 vitest run --passWithNoTests tests/integration/persistence",
+    "test:integration:persistence:cross-session": "RUN_PERSISTENCE_INTEGRATION=1 vitest run --passWithNoTests tests/lambda/integration/persistence",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests"

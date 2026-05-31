@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: KeyRa Phase 1 infrastructure scaffold (FS-062 T-01)
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment stage used for naming and configuration.
+
+  StorageBucketName:
+    Type: String
+    Default: kbx-keyra-dev-local
+    Description: S3 bucket name for mapping/schema content storage.
+
+  OpenSearchEndpoint:
+    Type: String
+    Default: https://example-opensearch.local
+    Description: OpenSearch endpoint for schema-node indexing and query.
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    MemorySize: 256
+    Timeout: 29
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        # Placeholder table names until T-02 creates DynamoDB resources.
+        PROJECTS_TABLE: !Sub '${Stage}-keyra-projects'
+        MAPPINGS_TABLE: !Sub '${Stage}-keyra-mappings'
+        SCHEMA_METADATA_TABLE: !Sub '${Stage}-keyra-schema-metadata'
+        SCHEMA_NODES_TABLE: !Sub '${Stage}-keyra-schema-nodes'
+        MAPPING_VERSIONS_TABLE: !Sub '${Stage}-keyra-mapping-versions'
+        STORAGE_BUCKET: !Ref StorageBucketName
+        OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+
+Resources: {}
+# T-02 through T-07 will add resources in this section:
+# - DynamoDB tables
+# - S3 bucket
+# - API Gateway + Lambda functions
+# - OpenSearch Serverless resources
+# - Step Functions state machine
+
+Outputs:
+  ApiUrl:
+    Description: Placeholder API URL scaffold output (to be replaced by API resource output in T-04).
+    Value: !Sub 'https://example.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+
+  StorageBucketName:
+    Description: Content storage bucket name.
+    Value: !Ref StorageBucketName
+
+  ProjectsTableArn:
+    Description: Placeholder Projects table ARN output until table resource is added.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-projects'
+
+  MappingsTableArn:
+    Description: Placeholder Mappings table ARN output until table resource is added.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-mappings'
+
+  SchemaMetadataTableArn:
+    Description: Placeholder SchemaMetadata table ARN output until table resource is added.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-schema-metadata'
+
+  SchemaNodesTableArn:
+    Description: Placeholder SchemaNodes table ARN output until table resource is added.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-schema-nodes'
+
+  MappingVersionsTableArn:
+    Description: Placeholder MappingVersions table ARN output until table resource is added.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Stage}-keyra-mapping-versions'

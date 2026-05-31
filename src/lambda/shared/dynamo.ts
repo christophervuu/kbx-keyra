@@ -11,7 +11,22 @@ import {
 
 import { serviceUnavailable, type AppErrorDetails } from './errors.js';
 
-export const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+function getEnvValue(key: string): string | undefined {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return env?.[key];
+}
+
+function createDynamoClient(): DynamoDBDocumentClient {
+  const endpoint = getEnvValue('DYNAMODB_ENDPOINT') ?? getEnvValue('AWS_ENDPOINT_URL_DYNAMODB');
+
+  const base = new DynamoDBClient({
+    ...(endpoint ? { endpoint } : {}),
+  });
+
+  return DynamoDBDocumentClient.from(base);
+}
+
+export const dynamoClient = createDynamoClient();
 
 export class DynamoServiceError extends Error {
   constructor(

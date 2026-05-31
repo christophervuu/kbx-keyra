@@ -2,7 +2,40 @@ import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } fro
 
 import { notFound, serviceUnavailable, type AppErrorDetails } from './errors.js';
 
-export const s3Client = new S3Client({});
+function getEnvValue(key: string): string | undefined {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return env?.[key];
+}
+
+function isNoSuchKey(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const typed = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+  return typed.name === 'NoSuchKey' || typed.Code === 'NoSuchKey' || typed.$metadata?.httpStatusCode === 404;
+}
+
+function createS3Client(): S3Client {
+  const endpoint = getEnvValue('S3_ENDPOINT');
+  const region = getEnvValue('AWS_REGION') ?? 'us-east-1';
+
+  return new S3Client({
+    region,
+    ...(endpoint
+      ? {
+          endpoint,
+          forcePathStyle: true,
+          credentials: {
+            accessKeyId: getEnvValue('AWS_ACCESS_KEY_ID') ?? 'test',
+            secretAccessKey: getEnvValue('AWS_SECRET_ACCESS_KEY') ?? 'test',
+          },
+        }
+      : {}),
+  });
+}
+
+export const s3Client = createS3Client();
 
 interface S3BodyLike {
   transformToString?: () => Promise<string>;
@@ -20,12 +53,9 @@ export class S3ServiceError extends Error {
 }
 
 function mapS3Error(error: unknown, operation: string, key?: string): never {
-  if (error && typeof error === 'object') {
-    const typed = error as { name?: string };
-    if (typed.name === 'NoSuchKey') {
-      const mapped = notFound('S3 object', key ?? 'unknown');
-      throw new S3ServiceError(mapped.message, mapped, error);
-    }
+  if (isNoSuchKey(error)) {
+    const mapped = notFound('S3 object', key ?? 'unknown');
+    throw new S3ServiceError(mapped.message, mapped, error);
   }
 
   const mapped = serviceUnavailable(`S3 transient failure during ${operation}`);

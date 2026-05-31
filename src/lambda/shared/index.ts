@@ -1,5 +1,6 @@
 export { deleteItem, dynamoClient, getItem, putItem, query, scan, updateItem, DynamoServiceError } from './dynamo.js';
 export {
+  contentUnavailable,
   ERROR_CODES,
   conflict,
   internalError,

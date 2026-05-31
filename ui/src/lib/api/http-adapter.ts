@@ -1,6 +1,6 @@
+import { AdapterMethodNotImplementedError } from './errors';
 import { httpRequest } from './http-client';
 import { LocalStorageAdapter } from './local-storage-adapter';
-import { AdapterMethodNotImplementedError } from './errors';
 
 import type {
   ActivityEntry,
@@ -43,6 +43,13 @@ import type {
   ValidateMappingsInput,
   ValidationReport,
 } from '@/lib/types';
+
+/**
+ * HttpAdapter MUST remain HTTP-only for data reconstruction.
+ *
+ * Code review convention (FS-061 T-05): do not add localStorage/sessionStorage
+ * reads or writes in HttpAdapter, bootstrap, or HTTP transport helpers.
+ */
 
 export class HttpAdapter extends LocalStorageAdapter {
   private readonly apiUrl: string;

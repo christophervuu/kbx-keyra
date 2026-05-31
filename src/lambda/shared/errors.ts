@@ -1,6 +1,7 @@
 export const ERROR_CODES = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
+  CONTENT_UNAVAILABLE: 'CONTENT_UNAVAILABLE',
   CONFLICT: 'CONFLICT',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
@@ -44,6 +45,16 @@ export function conflict(message: string, requestId?: string): AppErrorDetails {
     code: ERROR_CODES.CONFLICT,
     message,
     statusCode: 409,
+    retryable: false,
+    requestId: resolveRequestId(requestId),
+  };
+}
+
+export function contentUnavailable(message: string, requestId?: string): AppErrorDetails {
+  return {
+    code: ERROR_CODES.CONTENT_UNAVAILABLE,
+    message,
+    statusCode: 500,
     retryable: false,
     requestId: resolveRequestId(requestId),
   };
