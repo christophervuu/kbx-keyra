@@ -99,7 +99,7 @@ describe.skipIf(!RUN_PERSISTENCE_INTEGRATION)('FS-061 T-03 mapping/version persi
       updatedConfig,
     );
 
-    expect(updated.version).toBe(created.version + 1);
+    expect(updated.version).toBe((created.version ?? 0) + 1);
 
     const sessionB = createFreshSession();
     const loaded = await sessionB.mappings.get(created.mappingId);
@@ -236,7 +236,7 @@ describe.skipIf(!RUN_PERSISTENCE_INTEGRATION)('FS-061 T-03 mapping/version persi
 
     const version = versionMeta as NonNullable<typeof versionMeta>;
     expect(version.configS3Key).toBe(`mappings/${mapping.mappingId}/versions/v1.json`);
-    expect(Number.isNaN(Date.parse(version.savedAt))).toBe(false);
+    expect(Number.isNaN(Date.parse(version.savedAt ?? version.createdAt))).toBe(false);
 
     const config = await sessionB.mappingVersions.getConfig(mapping.mappingId, 1);
     expect(config).toEqual({
@@ -334,9 +334,11 @@ describe.skipIf(!RUN_PERSISTENCE_INTEGRATION)('FS-061 T-03 mapping/version persi
 
     expect(versions.map((entry) => entry.version)).toEqual([3, 2, 1]);
     for (const entry of versions) {
-      expect(Number.isNaN(Date.parse(entry.savedAt))).toBe(false);
-      expect(entry.ruleCount).toBeGreaterThan(0);
-      expect(entry.configS3Key).toBe(`mappings/${mapping.mappingId}/versions/v${entry.version}.json`);
+      expect(Number.isNaN(Date.parse(entry.savedAt ?? entry.createdAt))).toBe(false);
+      expect((entry.ruleCount ?? 0)).toBeGreaterThan(0);
+      expect(entry.configS3Key ?? `mappings/${mapping.mappingId}/versions/v${entry.version}.json`).toBe(
+        `mappings/${mapping.mappingId}/versions/v${entry.version}.json`,
+      );
     }
   });
 

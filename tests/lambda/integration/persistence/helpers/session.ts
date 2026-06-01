@@ -54,6 +54,7 @@ interface PersistenceTableNames {
   readonly mappings: string;
   readonly schemaMetadata: string;
   readonly schemaNodes: string;
+  readonly mappingRevisions: string;
   readonly mappingVersions: string;
 }
 
@@ -80,6 +81,7 @@ export function createFreshSession(): FreshSession {
       mappings: TEST_TABLES.mappings,
       schemaMetadata: TEST_TABLES.schemaMetadata,
       schemaNodes: TEST_TABLES.schemaNodes,
+      mappingRevisions: TEST_TABLES.mappingRevisions,
       mappingVersions: TEST_TABLES.mappingVersions,
     },
     bucketName: TEST_BUCKET,

@@ -57,9 +57,19 @@ describe('EditorTopBar', () => {
     expect(screen.getByText('Order Transform')).toBeInTheDocument();
   });
 
-  it('renders version badge', () => {
+  it('renders revision badge', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.getByText('v3')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 3');
+  });
+
+  it('renders version badge as "—" when no currentVersion', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.getByTestId('version-badge')).toHaveTextContent('—');
+  });
+
+  it('renders version badge with number when currentVersion is set', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} currentVersion={2} />);
+    expect(screen.getByTestId('version-badge')).toHaveTextContent('v2');
   });
 
   it('renders save status "Saved ✓"', () => {
@@ -213,7 +223,8 @@ describe('EditorTopBar', () => {
     );
 
     const breadcrumb = screen.getByTestId('editor-breadcrumb');
-    const version = screen.getByTestId('version-badge');
+    const revisionBadge = screen.getByTestId('revision-badge');
+    const versionBadge = screen.getByTestId('version-badge');
     const deployBadge = screen.getByTestId('deploy-badge');
     const saveStatus = screen.getByTestId('save-status');
     const autoMap = screen.getByTestId('automap-button');
@@ -222,8 +233,9 @@ describe('EditorTopBar', () => {
     const deploy = screen.getByTestId('deploy-page-link');
     const save = screen.getByTestId('save-button');
 
-    expect(breadcrumb.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(version.compareDocumentPosition(deployBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(breadcrumb.compareDocumentPosition(revisionBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(revisionBadge.compareDocumentPosition(versionBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(versionBadge.compareDocumentPosition(deployBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(deployBadge.compareDocumentPosition(saveStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(saveStatus.compareDocumentPosition(autoMap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(autoMap.compareDocumentPosition(config) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -246,6 +258,85 @@ describe('EditorTopBar', () => {
 
     expect(separator).toBeDefined();
     expect(saveStatus.compareDocumentPosition(separator as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // ---------------------------------------------------------------------------
+  // FS-063 T-06: revision/version badges, canSave, draft indicator, Version button
+  // ---------------------------------------------------------------------------
+
+  it('shows currentRevision in revision badge when provided', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} currentRevision={7} />);
+    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 7');
+  });
+
+  it('falls back to version in revision badge when currentRevision is absent', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} version={4} />);
+    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 4');
+  });
+
+  it('Save button is disabled when canSave=false regardless of unsavedChangeCount', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={false} unsavedChangeCount={5} />,
+    );
+    expect(screen.getByTestId('save-button')).toBeDisabled();
+  });
+
+  it('Save button is enabled when canSave=true', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={true} unsavedChangeCount={0} />,
+    );
+    expect(screen.getByTestId('save-button')).not.toBeDisabled();
+  });
+
+  it('draft indicator is not rendered when hasDraft=false', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} hasDraft={false} />);
+    expect(screen.queryByTestId('draft-indicator')).not.toBeInTheDocument();
+  });
+
+  it('draft indicator is rendered when hasDraft=true', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} hasDraft={true} />);
+    expect(screen.getByTestId('draft-indicator')).toBeInTheDocument();
+  });
+
+  it('Version button is not rendered when onCreateVersion is absent', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.queryByTestId('version-button')).not.toBeInTheDocument();
+  });
+
+  it('Version button is rendered when onCreateVersion is provided', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onCreateVersion={vi.fn()} />,
+    );
+    expect(screen.getByTestId('version-button')).toBeInTheDocument();
+  });
+
+  it('Version button calls onCreateVersion when clicked', () => {
+    const onCreateVersion = vi.fn();
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onCreateVersion={onCreateVersion} />,
+    );
+    fireEvent.click(screen.getByTestId('version-button'));
+    expect(onCreateVersion).toHaveBeenCalledTimes(1);
+  });
+
+  it('Version button is disabled while saving', () => {
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        saveStatus="saving"
+        onCreateVersion={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('version-button')).toBeDisabled();
+  });
+
+  it('Version button appears before Save button in document order', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={true} onCreateVersion={vi.fn()} />,
+    );
+    const versionBtn = screen.getByTestId('version-button');
+    const saveBtn = screen.getByTestId('save-button');
+    expect(versionBtn.compareDocumentPosition(saveBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -284,11 +375,11 @@ describe('MappingEditorPage', () => {
     expect(screen.getByText('Test Mapping')).toBeInTheDocument();
   });
 
-  it('renders version badge in top bar', () => {
+  it('renders revision badge in top bar', () => {
     renderWithRouter(
       <MappingEditorPage projectId="proj-1" mappingId="mapping-1" version={5} />,
     );
-    expect(screen.getByText('v5')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 5');
   });
 
   it('renders placeholder in source panel when no sourceContent provided', () => {

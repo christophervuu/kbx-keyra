@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { BookMarked, Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
@@ -29,8 +29,36 @@ export interface EditorTopBarProps {
   mappingName: string;
   /** Mapping ID — used to build the deploy page link */
   mappingId: string;
-  /** Current saved version number */
+  /**
+   * Current saved version number (legacy compat — used as fallback for `currentRevision`).
+   * @deprecated Use `currentRevision` instead.
+   */
   version: number;
+  /**
+   * Current revision number (FS-063). When provided, shown as "Rev N" in the badge.
+   * Falls back to `version` when absent.
+   */
+  currentRevision?: number;
+  /**
+   * Current version (milestone) number, or null when no version has been created.
+   * Shown alongside the revision badge as "vN" or "—".
+   */
+  currentVersion?: number | null;
+  /**
+   * Whether there is a local autosaved draft in localStorage.
+   * When true, a small draft indicator is shown next to the revision badge.
+   */
+  hasDraft?: boolean;
+  /**
+   * Whether the Save button should be enabled.
+   * Falls back to `unsavedChangeCount > 0` when absent (backward compat).
+   */
+  canSave?: boolean;
+  /**
+   * Callback for the Version button. When provided, the Version button is rendered.
+   * On click calls `createVersion()` from the editor hook.
+   */
+  onCreateVersion?: () => void;
   /**
    * Highest deployed environment info.
    * Null when the mapping has never been deployed.
@@ -142,6 +170,11 @@ export function EditorTopBar({
   mappingName,
   mappingId,
   version,
+  currentRevision,
+  currentVersion = null,
+  hasDraft = false,
+  canSave,
+  onCreateVersion,
   deployStatus,
   saveStatus,
   unsavedChangeCount,
@@ -160,6 +193,12 @@ export function EditorTopBar({
   const saveConfig = saveStatusConfig[saveStatus];
   const saveLabel = saveConfig.label(unsavedChangeCount);
   const isSaving = saveStatus === 'saving';
+
+  // Save is enabled when canSave is explicitly set; else fall back to unsavedChangeCount > 0
+  const isSaveEnabled = canSave ?? unsavedChangeCount > 0;
+
+  const displayRevision = currentRevision ?? version;
+
   const hasChanges = unsavedChangeCount > 0;
   const canViewChanges = hasChanges && onViewUnsavedChanges !== undefined;
 
@@ -169,14 +208,14 @@ export function EditorTopBar({
   );
   const projectPath = PATHS.PROJECT_OVERVIEW.replace(':projectId', projectId);
 
-  const { label: deployLabel, dotClass } = getDeployBadgeContent(deployStatus, version);
+  const { label: deployLabel, dotClass } = getDeployBadgeContent(deployStatus, displayRevision);
 
   return (
     <header
       className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-700 bg-slate-900 px-4 py-2"
       data-testid="editor-top-bar"
     >
-      {/* Left: project / mapping breadcrumb + version */}
+      {/* Left: project / mapping breadcrumb + revision + version */}
       <div className="flex items-center gap-1.5 text-sm" data-testid="editor-breadcrumb">
         <Link
           to={projectPath}
@@ -189,12 +228,34 @@ export function EditorTopBar({
         <span className="font-semibold text-slate-100" data-testid="mapping-name">
           {mappingName}
         </span>
+        {/* Revision badge */}
         <span
           className="rounded bg-slate-700 px-1.5 py-0.5 text-xs font-medium text-slate-300"
-          data-testid="version-badge"
+          data-testid="revision-badge"
+          title={`Current revision: ${displayRevision}`}
         >
-          v{version}
+          Rev {displayRevision}
         </span>
+        {/* Version badge */}
+        <span
+          className="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-400 border border-slate-600"
+          data-testid="version-badge"
+          title={currentVersion != null ? `Latest version: ${currentVersion}` : 'No version created yet'}
+        >
+          {currentVersion != null ? `v${currentVersion}` : '—'}
+        </span>
+        {/* Draft indicator — shown when there is an autosaved local draft */}
+        {hasDraft && (
+          <span
+            className="inline-flex items-center gap-1 rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-700/40"
+            data-testid="draft-indicator"
+            title="You have an autosaved local draft"
+            aria-label="Unsaved local draft"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+            Draft
+          </span>
+        )}
       </div>
 
       {/* Deploy badge */}
@@ -350,11 +411,26 @@ export function EditorTopBar({
         <ExternalLink size={12} aria-hidden="true" />
       </Link>
 
+      {/* Version button — shown when onCreateVersion is provided */}
+      {onCreateVersion && (
+        <button
+          type="button"
+          onClick={onCreateVersion}
+          disabled={isSaving}
+          className="inline-flex items-center gap-1.5 rounded border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:border-slate-500 hover:bg-slate-700 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          data-testid="version-button"
+          aria-label="Create a new version milestone"
+        >
+          <BookMarked size={12} aria-hidden="true" />
+          Version
+        </button>
+      )}
+
       {/* Save button */}
       <button
         type="button"
         onClick={onSave}
-        disabled={!hasChanges || isSaving}
+        disabled={!isSaveEnabled || isSaving}
         className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
         data-testid="save-button"
         aria-label="Save mapping"

@@ -16,7 +16,7 @@ Purpose:
 Scope:
 - Project CRUD endpoints
 - Mapping CRUD + duplicate endpoints
-- Mapping version endpoints
+- Mapping revision + version endpoints
 - Schema create/get/list/delete + schema query endpoints
 - Shared handler module conventions under `src/lambda/shared/`
 
@@ -29,7 +29,7 @@ Out of scope:
 
 ## 2) Route Table (Phase 1)
 
-Phase 1 exposes 19 routes. Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
+Phase 1 exposes 21 routes. Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
 
 | Method | Path | Handler File | Lambda Name (logical) | Description |
 |---|---|---|---|---|
@@ -44,9 +44,11 @@ Phase 1 exposes 19 routes. Logical Lambda names follow the naming conventions do
 | DELETE | `/mappings/:id` | `src/lambda/mapping/delete-mapping.ts` | `DeleteMappingFunction` | Delete mapping |
 | POST | `/mappings/:id/duplicate` | `src/lambda/mapping/duplicate-mapping.ts` | `DuplicateMappingFunction` | Duplicate mapping |
 | GET | `/projects/:projectId/mappings` | `src/lambda/mapping/list-mappings.ts` | `ListMappingsFunction` | List mappings for project |
+| GET | `/mappings/:mappingId/revisions` | `src/lambda/mapping/list-revisions.ts` | `ListMappingRevisionsFunction` | List mapping revisions (desc) |
+| GET | `/mappings/:mappingId/revisions/:revision` | `src/lambda/mapping/get-revision.ts` | `GetMappingRevisionFunction` | Get specific mapping revision (includes config) |
 | GET | `/mappings/:mappingId/versions` | `src/lambda/mapping/list-versions.ts` | `ListMappingVersionsFunction` | List mapping versions (desc) |
 | GET | `/mappings/:mappingId/versions/:version` | `src/lambda/mapping/get-version.ts` | `GetMappingVersionFunction` | Get specific mapping version |
-| POST | `/mappings/:mappingId/versions` | `src/lambda/mapping/save-version.ts` | `SaveMappingVersionFunction` | Save mapping version entry (prune >50) |
+| POST | `/mappings/:mappingId/versions` | `src/lambda/mapping/create-version.ts` (`save-version.ts` shim) | `CreateMappingVersionFunction` | Create version milestone from latest revision (supports implicit save) |
 | POST | `/schemas` | `src/lambda/schema/create-schema.ts` | `CreateSchemaFunction` | Create schema (inline or ingesting kickoff) |
 | GET | `/schemas` | `src/lambda/schema/list-schemas.ts` | `ListSchemasFunction` | List schemas |
 | GET | `/schemas/:id` | `src/lambda/schema/get-schema.ts` | `GetSchemaFunction` | Get schema detail |
@@ -211,7 +213,11 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 #### `MAPPINGS_TABLE`
 - PK: `mappingId` (String)
 - GSI: `projectId-index` (PK=`projectId`)
-- Main fields: `projectId`, `name`, `version`, `status`, `sourceSchemaId`, `targetSchemaId`, `ruleCount`, `coverage`, `configS3Key`, timestamps
+- Main fields: `projectId`, `name`, `revision`, `latestVersion`, `configHash`, legacy `version` alias, `status`, `sourceSchemaId`, `targetSchemaId`, `ruleCount`, `coverage`, `configS3Key`, timestamps
+
+#### `MAPPING_REVISIONS_TABLE`
+- PK: `mappingId` (String), SK: `revision` (Number)
+- Main fields: `savedAt`, `savedBy`, `ruleCount`, `configS3Key`, `configHash`
 
 #### `SCHEMAS_TABLE`
 - PK: `schemaId` (String)
@@ -223,7 +229,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 
 #### `MAPPING_VERSIONS_TABLE`
 - PK: `mappingId` (String), SK: `version` (Number)
-- Main fields: `savedAt`, `savedBy`, `ruleCount`, `config`
+- Main fields: `revisionNumber`, `createdAt`, `createdBy`
 
 ### 7.2 Handler-to-table mapping
 
@@ -240,9 +246,12 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 | `mapping/delete-mapping` | delete mapping metadata |
 | `mapping/duplicate-mapping` | get source + put duplicated metadata |
 | `mapping/list-mappings` | query by `projectId-index` |
+| `mapping/list-revisions` | query revisions by `mappingId` descending |
+| `mapping/get-revision` | get revision item by `mappingId` + `revision` |
 | `mapping/list-versions` | query by `mappingId` descending |
 | `mapping/get-version` | get item by `mappingId` + `version` |
-| `mapping/save-version` | put version + query versions + prune oldest beyond 50 |
+| `mapping/create-version` | query latest version + put milestone item (optional implicit save path writes revision + mapping metadata) |
+| `mapping/save-version` | compatibility shim delegating to `create-version` |
 | `schema/create-schema` | put schema metadata; inline mode puts schema nodes |
 | `schema/list-schemas` | scan schemas |
 | `schema/get-schema` | get schema metadata |
@@ -258,11 +267,14 @@ Bucket is configured by `CONTENT_BUCKET`.
 | Content | Key pattern | Content-Type |
 |---|---|---|
 | Mapping config | `mappings/{mappingId}/config.json` | `application/json` |
+| Mapping revision snapshot | `mappings/{mappingId}/revisions/r{revision}.json` | `application/json` |
 | Schema content | `schemas/{schemaId}/content.json` (json-schema) | `application/json` |
 | Schema content | `schemas/{schemaId}/content.xsd` (xsd) | `application/xml` |
 
 Notes:
 - Mapping metadata stores `configS3Key` to locate current config.
+- Revision items store `configS3Key` for immutable revision snapshots.
+- Version items reference revisions via `revisionNumber` (no separate version S3 blob).
 - Schema detail reads metadata from DynamoDB and content from S3.
 
 ---
@@ -277,6 +289,7 @@ Notes:
 | `MAPPINGS_TABLE` | Mappings table name |
 | `SCHEMAS_TABLE` | Schema metadata table name |
 | `SCHEMA_NODES_TABLE` | Schema nodes table name |
+| `MAPPING_REVISIONS_TABLE` | Mapping revisions table name |
 | `MAPPING_VERSIONS_TABLE` | Mapping versions table name |
 | `CONTENT_BUCKET` | S3 bucket for mapping/schema content |
 

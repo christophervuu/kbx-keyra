@@ -64,6 +64,30 @@ export interface MappingVersionEntry {
   readonly config: MappingConfig;
 }
 
+export interface MappingSaveResult {
+  readonly revision: number;
+  readonly noChange: boolean;
+}
+
+export interface MappingRevision {
+  readonly revision: number;
+  readonly savedAt: string;
+  readonly savedBy: string;
+  readonly ruleCount: number;
+}
+
+export interface MappingRevisionDetail extends MappingRevision {
+  readonly mappingId: string;
+  readonly config: MappingConfig;
+}
+
+export interface MappingVersion {
+  readonly version: number;
+  readonly revisionNumber: number;
+  readonly createdAt: string;
+  readonly createdBy: string;
+}
+
 export interface Project {
   readonly projectId: string;
   readonly name: string;

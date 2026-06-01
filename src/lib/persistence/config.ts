@@ -15,6 +15,7 @@ export const TABLE_NAMES = {
   mappings: getEnvValueOrDefault('MAPPINGS_TABLE', 'keyra-mappings'),
   schemaMetadata: getEnvValueOrDefault('SCHEMA_METADATA_TABLE', 'keyra-schema-metadata'),
   schemaNodes: getEnvValueOrDefault('SCHEMA_NODES_TABLE', 'keyra-schema-nodes'),
+  mappingRevisions: getEnvValueOrDefault('MAPPING_REVISIONS_TABLE', 'keyra-mapping-revisions'),
   mappingVersions: getEnvValueOrDefault('MAPPING_VERSIONS_TABLE', 'keyra-mapping-versions'),
 } as const;
 
@@ -34,4 +35,8 @@ export function mappingConfigKey(mappingId: string): string {
 
 export function mappingVersionKey(mappingId: string, version: number): string {
   return `mappings/${mappingId}/versions/v${version}.json`;
+}
+
+export function mappingRevisionKey(mappingId: string, revision: number): string {
+  return `mappings/${mappingId}/revisions/r${revision}.json`;
 }

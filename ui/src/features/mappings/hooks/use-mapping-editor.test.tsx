@@ -124,6 +124,7 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     getMapping: vi.fn().mockResolvedValue(MOCK_CONFIG),
     createMapping: vi.fn(),
     updateMapping: vi.fn().mockResolvedValue({ mappingId: 'mapping-1', projectId: 'project-1', name: 'Test Mapping', version: 4, status: 'draft', sourceSchemaId: 'source-schema-1', targetSchemaId: 'target-schema-1', ruleCount: 2, coverage: 100, updatedAt: '2024-01-01T00:00:00Z' }),
+    saveMapping: vi.fn().mockResolvedValue({ revision: 4, noChange: false }),
     deleteMapping: vi.fn(),
     duplicateMapping: vi.fn(),
     listProjects: vi.fn(),
@@ -155,6 +156,14 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     listMappingVersions: vi.fn().mockResolvedValue([]),
     getMappingVersion: vi.fn(),
     saveMappingVersion: vi.fn().mockResolvedValue(undefined),
+    listVersions: vi.fn().mockResolvedValue([]),
+    getVersion: vi.fn(),
+    listRevisions: vi.fn().mockResolvedValue([]),
+    getRevision: vi.fn(),
+    createVersion: vi.fn().mockResolvedValue({ version: 1, revisionNumber: 4, createdAt: '2024-01-01T00:00:00Z', createdBy: 'You' }),
+    createMappingVersion: vi.fn().mockResolvedValue({ version: 1, revisionNumber: 4, createdAt: '2024-01-01T00:00:00Z', createdBy: 'You' }),
+    getMappingRevision: vi.fn(),
+    listMappingRevisions: vi.fn().mockResolvedValue([]),
     ...overrides,
   } as ApiAdapter;
 }
@@ -328,7 +337,7 @@ describe('useMappingEditor', () => {
   });
 
   describe('Save', () => {
-    it('save increments version and calls adapter.updateMapping (AE-07)', async () => {
+    it('save increments version and calls adapter.saveMapping (AE-01)', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -355,7 +364,7 @@ describe('useMappingEditor', () => {
         expect(result.current.saveStatus).toBe('saved');
       });
 
-      expect(adapter.updateMapping).toHaveBeenCalledWith(
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
         'mapping-1',
         expect.objectContaining({
           version: 4,
@@ -365,12 +374,13 @@ describe('useMappingEditor', () => {
         }),
       );
       expect(result.current.version).toBe(4);
+      expect(result.current.currentRevision).toBe(4);
       expect(result.current.hasUnsavedChanges).toBe(false);
     });
 
     it('save error preserves local state and shows error status', async () => {
       const adapter = createMockAdapter({
-        updateMapping: vi.fn().mockRejectedValue(new Error('Save failed')),
+        saveMapping: vi.fn().mockRejectedValue(new Error('Save failed')),
       });
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -402,7 +412,7 @@ describe('useMappingEditor', () => {
     it('failed save rolls back optimistic merged rules and preserves draftRules', async () => {
       let rejectUpdate!: (error: Error) => void;
       const adapter = createMockAdapter({
-        updateMapping: vi.fn().mockImplementation(
+        saveMapping: vi.fn().mockImplementation(
           () =>
             new Promise((_, reject) => {
               rejectUpdate = reject;
@@ -465,7 +475,7 @@ describe('useMappingEditor', () => {
         result.current.actions.save();
       });
 
-      expect(adapter.updateMapping).not.toHaveBeenCalled();
+      expect(adapter.saveMapping).not.toHaveBeenCalled();
     });
   });
 
@@ -546,7 +556,7 @@ describe('useMappingEditor', () => {
       });
 
       await waitFor(() => {
-        expect(adapter.updateMapping).toHaveBeenCalled();
+        expect(adapter.saveMapping).toHaveBeenCalled();
       });
     });
 
@@ -575,7 +585,7 @@ describe('useMappingEditor', () => {
       });
 
       await waitFor(() => {
-        expect(adapter.updateMapping).toHaveBeenCalled();
+        expect(adapter.saveMapping).toHaveBeenCalled();
       });
     });
   });
@@ -806,7 +816,7 @@ describe('useMappingEditor', () => {
     it('saveStatus transitions through "saving" during save', async () => {
       let resolveUpdate!: (val: unknown) => void;
       const adapter = createMockAdapter({
-        updateMapping: vi.fn().mockImplementation(
+        saveMapping: vi.fn().mockImplementation(
           () => new Promise((resolve) => { resolveUpdate = resolve; }),
         ),
       });
@@ -831,7 +841,7 @@ describe('useMappingEditor', () => {
 
       // Resolve
       await act(async () => {
-        resolveUpdate({ mappingId: 'mapping-1' });
+        resolveUpdate({ revision: 4, noChange: false });
       });
 
       await waitFor(() => {
@@ -945,7 +955,7 @@ describe('useMappingEditor', () => {
         expect(result.current.saveStatus).toBe('saved');
       });
 
-      expect(adapter.updateMapping).toHaveBeenCalledWith(
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
         'mapping-1',
         expect.objectContaining({
           config: expect.objectContaining({
@@ -1059,9 +1069,9 @@ describe('useMappingEditor', () => {
       consoleWarnSpy.mockRestore();
     });
 
-    it('saveMappingVersion is NOT called when updateMapping fails', async () => {
+    it('saveMappingVersion is NOT called when saveMapping fails', async () => {
       const adapter = createMockAdapter({
-        updateMapping: vi.fn().mockRejectedValue(new Error('network error')),
+        saveMapping: vi.fn().mockRejectedValue(new Error('network error')),
       });
 
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
@@ -1465,7 +1475,7 @@ describe('useMappingEditor', () => {
       // The new rule should be in saved rules
       expect(result.current.rules.find((r) => r.target === 'A.D')?.expression).toBe('static("new")');
       // adapter should have been called with the merged rules
-      expect(adapter.updateMapping).toHaveBeenCalledWith(
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
         'mapping-1',
         expect.objectContaining({
           rules: expect.arrayContaining([
@@ -1622,6 +1632,379 @@ describe('useMappingEditor', () => {
       act(() => { result.current.actions.updateDraft('A.B', 'source("x")'); });
 
       expect(result.current.actions.getUnsavedChangeSummary()).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FS-063 T-05: draft autosave, restore prompt, canSave, createVersion
+  // ---------------------------------------------------------------------------
+
+  // Helper: set up an in-memory localStorage mock for tests that need it.
+  function createLocalStorageMock() {
+    const store: Map<string, string> = new Map();
+    return {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+      clear: () => { store.clear(); },
+      get length() { return store.size; },
+      key: (index: number) => [...store.keys()][index] ?? null,
+    } satisfies Storage;
+  }
+
+  describe('canSave', () => {
+    it('is false when no unsaved changes', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      expect(result.current.canSave).toBe(false);
+    });
+
+    it('is true after making changes', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+
+      expect(result.current.canSave).toBe(true);
+    });
+
+    it('is false after successful save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.canSave).toBe(false);
+    });
+  });
+
+  describe('currentRevision', () => {
+    it('initialises from loaded config version', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      expect(result.current.currentRevision).toBe(3); // MOCK_CONFIG.version
+    });
+
+    it('updates to server-returned revision after save', async () => {
+      const adapter = createMockAdapter({
+        saveMapping: vi.fn().mockResolvedValue({ revision: 7, noChange: false }),
+      });
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.currentRevision).toBe(7);
+    });
+
+    it('does not change revision when noChange=true', async () => {
+      const adapter = createMockAdapter({
+        saveMapping: vi.fn().mockResolvedValue({ revision: 3, noChange: true }),
+      });
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // Force hasUnsavedChanges=true by mutating rules
+      act(() => { result.current.actions.updateRule(0, { target: 'A.B', expression: 'static("x")' }); });
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      // Revision is what the server returned
+      expect(result.current.currentRevision).toBe(3);
+    });
+  });
+
+  describe('autosave draft to localStorage', () => {
+    let mockStorage: Storage;
+
+    beforeEach(() => {
+      mockStorage = createLocalStorageMock();
+      vi.stubGlobal('localStorage', mockStorage);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    it('writes draft to localStorage after 5 s when there are unsaved changes (AE-06)', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      // Load with real timers so waitFor works
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // Switch to fake timers before making the rule change (so the debounced setTimeout uses fake clock)
+      vi.useFakeTimers();
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+
+      // Before timer fires — no draft
+      expect(localStorage.getItem('keyra:draft:mapping-1')).toBeNull();
+
+      // Advance timer past 5 s
+      await act(async () => { vi.advanceTimersByTime(5100); });
+
+      const raw = localStorage.getItem('keyra:draft:mapping-1');
+      expect(raw).not.toBeNull();
+      const stored = JSON.parse(raw!) as { baseRevision: number; savedAt: string; config: unknown };
+      expect(stored.baseRevision).toBe(3); // MOCK_CONFIG.version
+      expect(stored.savedAt).toBeTruthy();
+    });
+
+    it('does not write draft when there are no unsaved changes', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      vi.useFakeTimers();
+
+      await act(async () => { vi.advanceTimersByTime(5100); });
+
+      expect(localStorage.getItem('keyra:draft:mapping-1')).toBeNull();
+      expect(result.current.hasDraft).toBe(false);
+    });
+
+    it('sets hasDraft=true once draft is written', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      vi.useFakeTimers();
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+
+      await act(async () => { vi.advanceTimersByTime(5100); });
+
+      expect(result.current.hasDraft).toBe(true);
+    });
+
+    it('clears draft from localStorage after successful save', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // Write a draft with fake timers
+      vi.useFakeTimers();
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+      await act(async () => { vi.advanceTimersByTime(5100); });
+      expect(localStorage.getItem('keyra:draft:mapping-1')).not.toBeNull();
+
+      // Switch back to real timers for save
+      vi.useRealTimers();
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(localStorage.getItem('keyra:draft:mapping-1')).toBeNull();
+      expect(result.current.hasDraft).toBe(false);
+    });
+  });
+
+  describe('draft restore prompt', () => {
+    let mockStorage: Storage;
+
+    beforeEach(() => {
+      mockStorage = createLocalStorageMock();
+      vi.stubGlobal('localStorage', mockStorage);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('draftRestoreState is "none" when no draft in localStorage', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      expect(result.current.draftRestoreState.status).toBe('none');
+      expect(result.current.hasDraft).toBe(false);
+    });
+
+    it('draftRestoreState is "same-revision" when draft baseRevision matches server (FS-063 Q4)', async () => {
+      const draft = {
+        config: { ...MOCK_CONFIG, rules: [{ target: 'X', type: 'string', expression: 'static("draft")' }] },
+        baseRevision: 3, // matches MOCK_CONFIG.version
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem('keyra:draft:mapping-1', JSON.stringify(draft));
+
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.draftRestoreState.status).toBe('same-revision');
+      expect(result.current.hasDraft).toBe(true);
+    });
+
+    it('draftRestoreState is "stale-revision" when server has newer revision (FS-063 Q5)', async () => {
+      const draft = {
+        config: { ...MOCK_CONFIG, rules: [] },
+        baseRevision: 1, // older than MOCK_CONFIG.version (3)
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem('keyra:draft:mapping-1', JSON.stringify(draft));
+
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.draftRestoreState.status).toBe('stale-revision');
+      if (result.current.draftRestoreState.status === 'stale-revision') {
+        expect(result.current.draftRestoreState.serverRevision).toBe(3);
+      }
+    });
+
+    it('acceptDraftRestore applies draft rules to editor and clears prompt', async () => {
+      const draftRules = [{ target: 'X', type: 'string', expression: 'static("draft")' }];
+      const draft = {
+        config: { ...MOCK_CONFIG, rules: draftRules },
+        baseRevision: 3,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem('keyra:draft:mapping-1', JSON.stringify(draft));
+
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      expect(result.current.draftRestoreState.status).toBe('same-revision');
+
+      act(() => { result.current.actions.acceptDraftRestore(); });
+
+      expect(result.current.draftRestoreState.status).toBe('none');
+      expect(result.current.rules).toEqual(draftRules);
+    });
+
+    it('discardDraftRestore clears localStorage draft and prompt', async () => {
+      const draft = {
+        config: { ...MOCK_CONFIG, rules: [] },
+        baseRevision: 3,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem('keyra:draft:mapping-1', JSON.stringify(draft));
+
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      expect(result.current.draftRestoreState.status).toBe('same-revision');
+
+      act(() => { result.current.actions.discardDraftRestore(); });
+
+      expect(result.current.draftRestoreState.status).toBe('none');
+      expect(localStorage.getItem('keyra:draft:mapping-1')).toBeNull();
+      expect(result.current.hasDraft).toBe(false);
+    });
+  });
+
+  describe('createVersion', () => {
+    it('calls adapter.createVersion and updates currentVersion (AE-03)', async () => {
+      const adapter = createMockAdapter({
+        createVersion: vi.fn().mockResolvedValue({ version: 1, revisionNumber: 3, createdAt: '2024-01-01T00:00:00Z', createdBy: 'You' }),
+      });
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      // No unsaved changes — createVersion goes straight to adapter
+      await act(async () => { await result.current.actions.createVersion(); });
+
+      expect(adapter.createVersion).toHaveBeenCalledWith('mapping-1');
+      expect(result.current.currentVersion).toBe(1);
+    });
+
+    it('implicitly saves first when there are unsaved changes (AE-04)', async () => {
+      const adapter = createMockAdapter({
+        saveMapping: vi.fn().mockResolvedValue({ revision: 4, noChange: false }),
+        createVersion: vi.fn().mockResolvedValue({ version: 1, revisionNumber: 4, createdAt: '2024-01-01T00:00:00Z', createdBy: 'You' }),
+      });
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+      expect(result.current.hasUnsavedChanges).toBe(true);
+
+      await act(async () => { await result.current.actions.createVersion(); });
+
+      expect(adapter.saveMapping).toHaveBeenCalledWith('mapping-1', expect.any(Object));
+      expect(adapter.createVersion).toHaveBeenCalledWith('mapping-1');
+      expect(result.current.currentVersion).toBe(1);
+      // Draft is cleared after implicit save
+      expect(result.current.hasUnsavedChanges).toBe(false);
+    });
+
+    it('does not create version if implicit save fails', async () => {
+      const adapter = createMockAdapter({
+        saveMapping: vi.fn().mockRejectedValue(new Error('save failed')),
+        createVersion: vi.fn().mockResolvedValue({ version: 1, revisionNumber: 4, createdAt: '2024-01-01T00:00:00Z', createdBy: 'You' }),
+      });
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+
+      await act(async () => { await result.current.actions.createVersion(); });
+
+      expect(adapter.createVersion).not.toHaveBeenCalled();
+      expect(result.current.currentVersion).toBeNull();
     });
   });
 });

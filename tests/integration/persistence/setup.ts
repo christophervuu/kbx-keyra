@@ -28,6 +28,7 @@ export const TEST_TABLES = {
   mappings: `keyra-mappings-it-${SUFFIX}`,
   schemaMetadata: `keyra-schema-metadata-it-${SUFFIX}`,
   schemaNodes: `keyra-schema-nodes-it-${SUFFIX}`,
+  mappingRevisions: `keyra-mapping-revisions-it-${SUFFIX}`,
   mappingVersions: `keyra-mapping-versions-it-${SUFFIX}`,
 } as const;
 
@@ -72,6 +73,7 @@ export function applyPersistenceTestEnvironment(): void {
   processRef.env.MAPPINGS_TABLE = TEST_TABLES.mappings;
   processRef.env.SCHEMA_METADATA_TABLE = TEST_TABLES.schemaMetadata;
   processRef.env.SCHEMA_NODES_TABLE = TEST_TABLES.schemaNodes;
+  processRef.env.MAPPING_REVISIONS_TABLE = TEST_TABLES.mappingRevisions;
   processRef.env.MAPPING_VERSIONS_TABLE = TEST_TABLES.mappingVersions;
   processRef.env.STORAGE_BUCKET = TEST_BUCKET;
 }
@@ -167,6 +169,19 @@ export async function createTables(): Promise<void> {
   }));
 
   await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.mappingRevisions,
+    AttributeDefinitions: [
+      { AttributeName: 'mappingId', AttributeType: 'S' },
+      { AttributeName: 'revision', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'mappingId', KeyType: 'HASH' },
+      { AttributeName: 'revision', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
     TableName: TEST_TABLES.mappingVersions,
     AttributeDefinitions: [
       { AttributeName: 'mappingId', AttributeType: 'S' },
@@ -207,6 +222,7 @@ async function clearTable(tableName: string, keyNames: readonly string[]): Promi
 }
 
 export async function clearTablesData(): Promise<void> {
+  await clearTable(TEST_TABLES.mappingRevisions, ['mappingId', 'revision']);
   await clearTable(TEST_TABLES.mappingVersions, ['mappingId', 'version']);
   await clearTable(TEST_TABLES.schemaNodes, ['schemaId', 'path']);
   await clearTable(TEST_TABLES.mappings, ['mappingId']);

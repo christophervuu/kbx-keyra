@@ -5,6 +5,10 @@ import type {
   SchemaRef as EngineSchemaRef,
 } from '../../engine/types/index.js';
 import {
+  computeConfigHash,
+  type MappingConfig as PersistenceMappingConfig,
+} from '../../lib/persistence/index.js';
+import {
   ERROR_CODES,
   conflict,
   errorResponse,
@@ -15,6 +19,7 @@ import {
   parseBody,
   parsePathParam,
   putObject,
+  query,
   requireFields,
   updateItem,
   type APIGatewayProxyEvent,
@@ -58,6 +63,9 @@ interface MappingMetadata {
   readonly projectId: string;
   readonly name: string;
   readonly version: number;
+  readonly revision?: number;
+  readonly latestVersion?: number | null;
+  readonly configHash?: string;
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
@@ -68,18 +76,38 @@ interface MappingMetadata {
   readonly updatedAt: string;
 }
 
+interface MappingRevisionItem {
+  readonly mappingId: string;
+  readonly revision: number;
+  readonly savedAt: string;
+  readonly savedBy: string;
+  readonly ruleCount: number;
+  readonly configS3Key: string;
+  readonly configHash: string;
+}
+
 function getEnvValue(key: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.[key];
 }
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
+const MAPPING_REVISIONS_TABLE = getEnvValue('MAPPING_REVISIONS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 
 function getMappingsTableOrThrow(): string {
   const table = MAPPINGS_TABLE?.trim();
   if (!table) {
     throw new Error('Missing required environment variable: MAPPINGS_TABLE');
+  }
+
+  return table;
+}
+
+function getMappingRevisionsTableOrThrow(): string {
+  const table = MAPPING_REVISIONS_TABLE?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: MAPPING_REVISIONS_TABLE');
   }
 
   return table;
@@ -146,6 +174,14 @@ function deriveStatusAndCoverage(config: MappingConfig): { status: MappingMetada
   };
 }
 
+function getCurrentRevision(metadata: MappingMetadata): number {
+  return metadata.revision ?? metadata.version;
+}
+
+function toRevisionS3Key(mappingId: string, revision: number): string {
+  return `mappings/${mappingId}/revisions/r${revision}.json`;
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const mappingId = parsePathParam(event, 'id');
   if (!mappingId) {
@@ -153,15 +189,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   const body = parseBody(event);
-  const required = requireFields(body, ['projectId', 'name', 'version']);
+  const required = requireFields(body, ['projectId', 'name', 'expectedRevision']);
   if (!required.ok) {
     const err = required.error;
     return errorResponse(err?.code ?? ERROR_CODES.VALIDATION_ERROR, err?.message ?? 'Validation failed', err?.statusCode ?? 400, err?.retryable ?? false);
   }
 
-  const requestVersion = body?.version;
-  if (typeof requestVersion !== 'number') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: version', 400, false);
+  const expectedRevision = body?.expectedRevision;
+  if (typeof expectedRevision !== 'number') {
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: expectedRevision', 400, false);
   }
 
   try {
@@ -175,17 +211,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
 
-    if (requestVersion !== existing.version) {
-      const err = conflict(`Version mismatch: expected ${existing.version}, got ${requestVersion}. Reload and retry.`);
+    const currentRevision = getCurrentRevision(existing);
+    if (expectedRevision !== currentRevision) {
+      const err = conflict(`Revision mismatch: expected ${currentRevision}, got ${expectedRevision}. Reload and retry.`);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
 
-    const nextVersion = existing.version + 1;
+    const nextRevision = currentRevision + 1;
     const config: MappingConfig = {
       id: mappingId,
       projectId: typeof body?.projectId === 'string' ? body.projectId : existing.projectId,
       name: typeof body?.name === 'string' ? body.name : existing.name,
-      version: nextVersion,
+      version: nextRevision,
       engineVersion: typeof body?.engineVersion === 'string' ? body.engineVersion : '1.0.0',
       sourceSchemaRef: (body?.sourceSchemaRef as SchemaRef | undefined) ?? undefined,
       targetSchemaRef: (body?.targetSchemaRef as SchemaRef | undefined) ?? undefined,
@@ -193,8 +230,39 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       rules: Array.isArray(body?.rules) ? (body.rules as MappingRule[]) : [],
     };
 
+    const configHash = await computeConfigHash({ ...config, version: 0 } as PersistenceMappingConfig);
+    const latestRevisionEntries = await query<MappingRevisionItem>({
+      TableName: getMappingRevisionsTableOrThrow(),
+      KeyConditionExpression: '#mappingId = :mappingId',
+      ExpressionAttributeNames: {
+        '#mappingId': 'mappingId',
+      },
+      ExpressionAttributeValues: {
+        ':mappingId': mappingId,
+      },
+      ScanIndexForward: false,
+      Limit: 1,
+    });
+
+    const latestRevision = latestRevisionEntries[0] ?? null;
+    if (latestRevision?.configHash === configHash) {
+      return jsonResponse(200, {
+        mappingId,
+        revision: currentRevision,
+        noChange: true,
+      });
+    }
+
     const derivation = deriveStatusAndCoverage(config);
     const updatedAt = new Date().toISOString();
+
+    const revisionConfigS3Key = toRevisionS3Key(mappingId, nextRevision);
+    await putObject({
+      Bucket: getContentBucketOrThrow(),
+      Key: revisionConfigS3Key,
+      Body: JSON.stringify(config),
+      ContentType: 'application/json',
+    });
 
     await putObject({
       Bucket: getContentBucketOrThrow(),
@@ -203,27 +271,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ContentType: 'application/json',
     });
 
-    const updatedMetadata: MappingMetadata = {
-      ...existing,
-      projectId: config.projectId ?? existing.projectId,
-      name: config.name,
-      version: nextVersion,
-      status: derivation.status,
-      sourceSchemaId: config.sourceSchemaRef?.schemaId,
-      targetSchemaId: config.targetSchemaRef?.schemaId,
-      ruleCount: derivation.ruleCount,
-      coverage: derivation.coverage,
-      updatedAt,
-    };
-
     await updateItem({
       TableName: getMappingsTableOrThrow(),
       Key: { mappingId },
       UpdateExpression:
-        'SET #projectId = :projectId, #name = :name, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt',
+        'SET #projectId = :projectId, #name = :name, #revision = :revision, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt, #configHash = :configHash',
       ExpressionAttributeNames: {
         '#projectId': 'projectId',
         '#name': 'name',
+        '#revision': 'revision',
         '#version': 'version',
         '#status': 'status',
         '#sourceSchemaId': 'sourceSchemaId',
@@ -231,22 +287,55 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         '#ruleCount': 'ruleCount',
         '#coverage': 'coverage',
         '#updatedAt': 'updatedAt',
+        '#configHash': 'configHash',
       },
       ExpressionAttributeValues: {
-        ':projectId': updatedMetadata.projectId,
-        ':name': updatedMetadata.name,
-        ':version': updatedMetadata.version,
-        ':status': updatedMetadata.status,
-        ':sourceSchemaId': updatedMetadata.sourceSchemaId,
-        ':targetSchemaId': updatedMetadata.targetSchemaId,
-        ':ruleCount': updatedMetadata.ruleCount,
-        ':coverage': updatedMetadata.coverage,
-        ':updatedAt': updatedMetadata.updatedAt,
+        ':projectId': config.projectId ?? existing.projectId,
+        ':name': config.name,
+        ':revision': nextRevision,
+        ':version': nextRevision,
+        ':status': derivation.status,
+        ':sourceSchemaId': config.sourceSchemaRef?.schemaId ?? existing.sourceSchemaId ?? null,
+        ':targetSchemaId': config.targetSchemaRef?.schemaId ?? existing.targetSchemaId ?? null,
+        ':ruleCount': derivation.ruleCount,
+        ':coverage': derivation.coverage,
+        ':updatedAt': updatedAt,
+        ':configHash': configHash,
       },
       ReturnValues: 'ALL_NEW',
     });
 
-    return jsonResponse(200, updatedMetadata);
+    await updateItem({
+      TableName: getMappingRevisionsTableOrThrow(),
+      Key: { mappingId, revision: nextRevision },
+      UpdateExpression:
+        'SET #savedAt = :savedAt, #savedBy = :savedBy, #ruleCount = :ruleCount, #configS3Key = :configS3Key, #configHash = :configHash',
+      ExpressionAttributeNames: {
+        '#savedAt': 'savedAt',
+        '#savedBy': 'savedBy',
+        '#ruleCount': 'ruleCount',
+        '#configS3Key': 'configS3Key',
+        '#configHash': 'configHash',
+      },
+      ExpressionAttributeValues: {
+        ':savedAt': updatedAt,
+        ':savedBy': 'system',
+        ':ruleCount': derivation.ruleCount,
+        ':configS3Key': revisionConfigS3Key,
+        ':configHash': configHash,
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    return jsonResponse(200, {
+      mappingId,
+      revision: nextRevision,
+      noChange: false,
+      status: derivation.status,
+      ruleCount: derivation.ruleCount,
+      coverage: derivation.coverage,
+      updatedAt,
+    });
   } catch {
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);

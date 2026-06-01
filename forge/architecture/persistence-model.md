@@ -17,7 +17,7 @@ Purpose:
 - Define the `src/lib/persistence/` module architecture
 
 Scope:
-- Projects, Mappings, SchemaMetadata, SchemaNodes, MappingVersions tables
+- Projects, Mappings, SchemaMetadata, SchemaNodes, MappingRevisions, MappingVersions tables
 - S3 key patterns for schema content and mapping configs
 - Shared data-access module structure
 
@@ -57,7 +57,10 @@ No GSIs. List operation uses Scan (acceptable for Phase 1 scale).
 | `mappingId` | PK | String (UUID) | Unique mapping identifier |
 | `projectId` | — | String (UUID) | Parent project |
 | `name` | — | String | Display name |
-| `version` | — | Number | Auto-incremented on save |
+| `revision` | — | Number | Current latest saved revision number (monotonic per mapping) |
+| `latestVersion` | — | Number \\| Null | Latest milestone version number; null when no version exists |
+| `configHash` | — | String | SHA-256 hash of latest saved config (normalized for no-op detection) |
+| `version` | — | Number | Legacy compatibility alias mirroring `revision` |
 | `sourceSchemaId` | — | String (UUID) | Source schema reference |
 | `targetSchemaId` | — | String (UUID) | Target schema reference |
 | `status` | — | String | `draft` / `ready` / `has-errors` |
@@ -116,16 +119,29 @@ GSIs:
 
 ---
 
+### MappingRevisions
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `mappingId` | PK | String (UUID) | Parent mapping |
+| `revision` | SK | Number | Revision number |
+| `savedAt` | — | String | ISO 8601 |
+| `savedBy` | — | String | User who saved |
+| `ruleCount` | — | Number | Rule count at this version |
+| `configS3Key` | — | String | S3 key for revision config snapshot |
+| `configHash` | — | String | SHA-256 config hash used for no-op detection |
+
+---
+
 ### MappingVersions
 
 | Attribute | Key | Type | Description |
 |-----------|-----|------|-------------|
 | `mappingId` | PK | String (UUID) | Parent mapping |
-| `version` | SK | Number | Version number |
-| `savedAt` | — | String | ISO 8601 |
-| `savedBy` | — | String | User who saved |
-| `ruleCount` | — | Number | Rule count at this version |
-| `configS3Key` | — | String | S3 key for version config snapshot |
+| `version` | SK | Number | Milestone version number |
+| `revisionNumber` | — | Number | Revision pointer this version references |
+| `createdAt` | — | String | ISO 8601 |
+| `createdBy` | — | String | User who created the version |
 
 ---
 
@@ -139,13 +155,14 @@ Bucket: configured via `STORAGE_BUCKET` environment variable.
 | `schemas/{schemaId}/original.xsd` | Original XSD file | `application/xml` |
 | `schemas/{schemaId}/content.json` | Processed/normalized schema | `application/json` |
 | `mappings/{mappingId}/config.json` | Current mapping config | `application/json` |
-| `mappings/{mappingId}/versions/v{N}.json` | Version N config snapshot | `application/json` |
+| `mappings/{mappingId}/revisions/r{N}.json` | Revision N config snapshot | `application/json` |
 
 Rules:
 - Schema content is always stored in S3 (may exceed DynamoDB's 400KB limit).
 - Mapping configs are always stored in S3 (full `MappingConfig` with rules can be large).
 - DynamoDB items reference S3 objects via `configS3Key` fields.
-- Version snapshots are immutable once written (never modified, only deleted during prune).
+- Revision snapshots are immutable once written.
+- Versions do not store separate config blobs; versions reference revisions by `revisionNumber`.
 
 ---
 
@@ -161,7 +178,7 @@ Rules:
 | List mappings by project | Query | Mappings / `projectId-index` | `mappings.listByProject(projectId)` |
 | Get mapping by ID | GetItem | Mappings | `mappings.get(id)` |
 | Create mapping | PutItem + S3 Put | Mappings | `mappings.create(input)` |
-| Update mapping (version++) | UpdateItem + S3 Put | Mappings | `mappings.update(id, fields, config)` |
+| Update mapping (revision++) | UpdateItem + S3 Put | Mappings | `mappings.update(id, fields, config)` |
 | Delete mapping | DeleteItem + S3 Delete | Mappings | `mappings.delete(id)` |
 | Duplicate mapping | GetItem + PutItem + S3 | Mappings | `mappings.duplicate(id, name)` |
 | List schemas | Scan | SchemaMetadata | `schemaMetadata.list()` |
@@ -173,7 +190,11 @@ Rules:
 | List nodes by schema | Query (PK) | SchemaNodes | `schemaNodes.listBySchema(id)` |
 | Query nodes (text search) | Query (PK) + Filter | SchemaNodes | `schemaNodes.queryContains(id, q)` |
 | Delete all nodes for schema | Query + BatchWrite(Delete) | SchemaNodes | `schemaNodes.deleteBySchema(id)` |
-| Save mapping version | PutItem + S3 Put + Prune | MappingVersions | `mappingVersions.save(id, entry)` |
+| Save mapping revision | PutItem + S3 Put + no-op hash check + selective prune | MappingRevisions | `mappingRevisions.save(id, entry)` |
+| List revisions (descending) | Query (desc) | MappingRevisions | `mappingRevisions.list(id)` |
+| Get specific revision | GetItem | MappingRevisions | `mappingRevisions.get(id, revision)` |
+| Get revision config | GetItem + S3 Get | MappingRevisions | `mappingRevisions.getConfig(id, revision)` |
+| Create mapping version | PutItem | MappingVersions | `mappingVersions.create(id, { revisionNumber, createdBy })` |
 | List versions (descending) | Query (desc) | MappingVersions | `mappingVersions.list(id)` |
 | Get specific version | GetItem | MappingVersions | `mappingVersions.get(id, version)` |
 
@@ -186,33 +207,43 @@ Rules:
 | Entity metadata (names, IDs, dates, counts, status) | DynamoDB | Small, queryable, indexed |
 | Schema content (JSON/XSD body) | S3 | May exceed 400KB; not queried directly |
 | Mapping config (rules, schema refs, options) | S3 | Can be large; only loaded on demand |
-| Version snapshots | S3 | Immutable bulk content |
+| Revision snapshots | S3 | Immutable bulk content, loaded by revision lookup |
 | Schema tree nodes | DynamoDB | Individual items for query/filter support |
-| Version metadata (version#, date, ruleCount) | DynamoDB | Small, queryable by mapping+version |
+| Revision metadata (revision#, date, hash, S3 key) | DynamoDB | Small, queryable by mapping+revision |
+| Version metadata (version#, revision pointer, date) | DynamoDB | Small, queryable by mapping+version |
 
 Decision rule: if the data is < 1KB and needs to be queried/filtered, it goes in DynamoDB. If it's potentially large or only loaded as a whole, it goes in S3 with a key reference in DynamoDB.
 
 ---
 
-## 6) Versioning Model
+## 6) Draft / Revision / Version Model
 
-### Mapping Version Auto-Increment
+### Three-tier semantics
 
-- `mappings.update()` uses `SET version = version + :one` in the UpdateExpression.
-- This is not conditional (no optimistic concurrency) — last-write-wins for Phase 1.
-- Version numbers are monotonically increasing per mapping and never reused.
+- **Draft**: client-side autosave only (not persisted in backend tables).
+- **Revision**: explicit save checkpoint, stored as metadata in `MappingRevisions` + immutable snapshot in S3.
+- **Version**: explicit milestone, stored in `MappingVersions`, referencing one revision via `revisionNumber`.
 
-### Version Snapshot Storage
+### Revision creation and no-op detection
 
-- When a version is explicitly saved, the full `MappingConfig` is written to S3 at `mappings/{mappingId}/versions/v{N}.json`.
-- The DynamoDB `MappingVersions` item stores a `configS3Key` reference, not the config itself.
-- To retrieve a full version entry (matching `MappingVersionEntry` from domain types), the handler reads the DynamoDB item + S3 content.
+- `PUT /mappings/:id` creates a new revision only when the config hash differs from the latest revision hash.
+- Hash is SHA-256 over normalized config JSON (`computeConfigHash`), enabling no-op save suppression.
+- On successful revision save:
+  - `Mappings.revision` (and legacy `version`) increments
+  - `Mappings.configHash` updates
+  - snapshot written to `mappings/{mappingId}/revisions/r{N}.json`
 
-### Prune Behavior
+### Version creation semantics
 
-- Maximum 50 versions retained per mapping.
-- On save, if version count exceeds 50, the oldest (lowest version number) is deleted: DynamoDB item + S3 object.
-- Prune failure is logged but does not fail the save operation.
+- `POST /mappings/:id/versions` creates a version row with monotonic `version` and pointer `revisionNumber`.
+- Version creation may perform an implicit save first (creating a new revision) when unsaved changes exist.
+- Versions do not duplicate config in S3; reads resolve through the pointed revision.
+
+### Revision prune behavior
+
+- Retain newest 50 **unversioned** revisions per mapping.
+- Revisions referenced by any version are never pruned.
+- Prune failures are logged and do not fail the save path.
 
 ---
 
@@ -224,11 +255,13 @@ src/lib/persistence/
   types.ts              DynamoDB item type definitions + input types + converters
   clients.ts            DynamoDB Document Client + S3 Client singletons
   config.ts             Table names, bucket name, S3 key builders
+  hash.ts               Stable JSON SHA-256 hashing utility for config no-op detection
   projects.ts           Projects entity operations
   mappings.ts           Mappings entity operations (includes S3 config I/O)
   schema-metadata.ts    SchemaMetadata entity operations
   schema-nodes.ts       SchemaNodes batch/query operations
-  mapping-versions.ts   MappingVersions operations (includes S3 + prune)
+  mapping-revisions.ts  MappingRevisions operations (save/list/get/getConfig + selective prune)
+  mapping-versions.ts   MappingVersions operations (create/list/get + compatibility shims)
   s3/
     index.ts            S3 helper barrel
     schema-content.ts   Schema original + processed content helpers
@@ -257,6 +290,7 @@ Rules:
 | `MAPPINGS_TABLE` | Mappings table name | `keyra-mappings` |
 | `SCHEMA_METADATA_TABLE` | SchemaMetadata table name | `keyra-schema-metadata` |
 | `SCHEMA_NODES_TABLE` | SchemaNodes table name | `keyra-schema-nodes` |
+| `MAPPING_REVISIONS_TABLE` | MappingRevisions table name | `keyra-mapping-revisions` |
 | `MAPPING_VERSIONS_TABLE` | MappingVersions table name | `keyra-mapping-versions` |
 | `STORAGE_BUCKET` | S3 bucket name | `keyra-storage` |
 
@@ -281,6 +315,7 @@ For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_END
 
 - Product spec data model: `specs/PRODUCT-TECHNICAL.md` Section 15
 - Backend API handlers: FS-057
+- Revision/version model update: FS-063
 - Schema ingestion pipeline: FS-056
 - HttpAdapter (client): FS-055
 - Phase 1 readiness baseline: `forge/architecture/phase-1-readiness.md`

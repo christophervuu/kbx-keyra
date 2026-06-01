@@ -1,14 +1,11 @@
 import {
-  contentUnavailable,
   ERROR_CODES,
   errorResponse,
   getItem,
-  getObject,
   internalError,
   jsonResponse,
   notFound,
   parsePathParam,
-  S3ServiceError,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
@@ -16,20 +13,9 @@ import {
 interface MappingVersionEntry {
   readonly mappingId: string;
   readonly version: number;
-  readonly savedAt: string;
-  readonly savedBy: string;
-  readonly ruleCount: number;
-  readonly config?: Record<string, unknown>;
-  readonly configS3Key?: string;
-}
-
-interface MappingVersionResponse {
-  readonly mappingId: string;
-  readonly version: number;
-  readonly savedAt: string;
-  readonly savedBy: string;
-  readonly ruleCount: number;
-  readonly config: Record<string, unknown>;
+  readonly revisionNumber: number;
+  readonly createdAt: string;
+  readonly createdBy: string;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -38,7 +24,6 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const MAPPING_VERSIONS_TABLE = getEnvValue('MAPPING_VERSIONS_TABLE');
-const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 
 function getMappingVersionsTableOrThrow(): string {
   const table = MAPPING_VERSIONS_TABLE?.trim();
@@ -47,15 +32,6 @@ function getMappingVersionsTableOrThrow(): string {
   }
 
   return table;
-}
-
-function getContentBucketOrThrow(): string {
-  const bucket = CONTENT_BUCKET?.trim();
-  if (!bucket) {
-    throw new Error('Missing required environment variable: CONTENT_BUCKET');
-  }
-
-  return bucket;
 }
 
 function parseVersion(versionParam: string | null): number | null {
@@ -69,10 +45,6 @@ function parseVersion(versionParam: string | null): number | null {
   }
 
   return value;
-}
-
-function isConfigObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -97,41 +69,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
 
-    let config: Record<string, unknown>;
-
-    if (isConfigObject(entry.config)) {
-      config = entry.config;
-    } else if (typeof entry.configS3Key === 'string' && entry.configS3Key.trim() !== '') {
-      const rawConfig = await getObject({
-        Bucket: getContentBucketOrThrow(),
-        Key: entry.configS3Key,
-      });
-      config = JSON.parse(rawConfig) as Record<string, unknown>;
-    } else {
-      const appError = contentUnavailable(
-        `Mapping version '${mappingId}:${version}' metadata exists but version content is unavailable in storage`,
-      );
-      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
-    }
-
-    const response: MappingVersionResponse = {
-      mappingId: entry.mappingId,
-      version: entry.version,
-      savedAt: entry.savedAt,
-      savedBy: entry.savedBy,
-      ruleCount: entry.ruleCount,
-      config,
-    };
-
-    return jsonResponse(200, response);
-  } catch (error) {
-    if (error instanceof S3ServiceError && error.appError.code === ERROR_CODES.RESOURCE_NOT_FOUND) {
-      const appError = contentUnavailable(
-        `Mapping version '${mappingId}:${version}' metadata exists but version content is unavailable in storage`,
-      );
-      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
-    }
-
+    return jsonResponse(200, entry);
+  } catch {
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);
   }

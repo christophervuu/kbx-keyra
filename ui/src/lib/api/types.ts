@@ -17,6 +17,10 @@ import type {
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
   MappingConfig,
+  MappingRevision,
+  MappingRevisionDetail,
+  MappingSaveResult,
+  MappingVersion,
   MappingVersionEntry,
   MappingMetadata,
   ProjectDetail,
@@ -53,12 +57,21 @@ export interface ApiAdapter {
   getMapping(id: string): Promise<MappingConfig>;
   createMapping(input: CreateMappingInput): Promise<MappingMetadata>;
   updateMapping(id: string, config: MappingConfig): Promise<MappingMetadata>;
+  saveMapping(id: string, config: MappingConfig): Promise<MappingSaveResult>;
   deleteMapping(id: string): Promise<void>;
   duplicateMapping(id: string, newName: string): Promise<MappingMetadata>;
 
   // Version History
   listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]>;
   getMappingVersion(mappingId: string, version: number): Promise<MappingVersionEntry>;
+  listVersions(mappingId: string): Promise<MappingVersion[]>;
+  getVersion(mappingId: string, version: number): Promise<MappingVersion>;
+  listMappingRevisions(mappingId: string): Promise<MappingRevision[]>;
+  getMappingRevision(mappingId: string, revision: number): Promise<MappingRevisionDetail>;
+  createMappingVersion(mappingId: string): Promise<MappingVersion>;
+  listRevisions(mappingId: string): Promise<MappingRevision[]>;
+  getRevision(mappingId: string, revision: number): Promise<MappingRevisionDetail>;
+  createVersion(mappingId: string): Promise<MappingVersion>;
   saveMappingVersion(mappingId: string, entry: MappingVersionEntry): Promise<void>;
 
   // Projects

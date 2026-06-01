@@ -221,6 +221,10 @@ type OrchestrationEvent =
   | ({ readonly action: 'updateMetadata' } & UpdateMetadataEvent)
   | ({ readonly action: 'handleError' } & HandleErrorEvent);
 
+function assertNever(value: never): never {
+  throw new Error(`Unsupported orchestration action: ${String(value)}`);
+}
+
 export async function handler(event: OrchestrationEvent): Promise<unknown> {
   switch (event.action) {
     case 'parse':
@@ -231,9 +235,7 @@ export async function handler(event: OrchestrationEvent): Promise<unknown> {
       return updateMetadataTask(event);
     case 'handleError':
       return handleErrorTask(event);
-    default: {
-      const neverAction: never = event.action;
-      throw new Error(`Unsupported orchestration action: ${String(neverAction)}`);
-    }
   }
+
+  return assertNever(event);
 }

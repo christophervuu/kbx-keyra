@@ -22,6 +22,10 @@ import type {
   LinkPublishedSchemaInput,
   MappingConfig,
   MappingMetadata,
+  MappingRevision,
+  MappingRevisionDetail,
+  MappingSaveResult,
+  MappingVersion,
   MappingVersionEntry,
   PublishSchemaInput,
   ProjectDetail,
@@ -140,6 +144,18 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
+  override async saveMapping(id: string, config: MappingConfig): Promise<MappingSaveResult> {
+    return httpRequest<MappingSaveResult>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(id)}`,
+      method: 'PUT',
+      body: {
+        ...config,
+        expectedRevision: config.version,
+      },
+    });
+  }
+
   override async deleteMapping(id: string): Promise<void> {
     await httpRequest<void>({
       baseUrl: this.apiUrl,
@@ -173,12 +189,66 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
+  override async listVersions(mappingId: string): Promise<MappingVersion[]> {
+    return httpRequest<MappingVersion[]>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/versions`,
+      method: 'GET',
+    });
+  }
+
+  override async getVersion(mappingId: string, version: number): Promise<MappingVersion> {
+    return httpRequest<MappingVersion>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/versions/${encodeURIComponent(String(version))}`,
+      method: 'GET',
+    });
+  }
+
+  override async listMappingRevisions(mappingId: string): Promise<MappingRevision[]> {
+    return httpRequest<MappingRevision[]>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/revisions`,
+      method: 'GET',
+    });
+  }
+
+  override async getMappingRevision(mappingId: string, revision: number): Promise<MappingRevisionDetail> {
+    return httpRequest<MappingRevisionDetail>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/revisions/${encodeURIComponent(String(revision))}`,
+      method: 'GET',
+    });
+  }
+
+  override async createMappingVersion(mappingId: string): Promise<MappingVersion> {
+    return httpRequest<MappingVersion>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/versions`,
+      method: 'POST',
+      body: {},
+    });
+  }
+
+  override async listRevisions(mappingId: string): Promise<MappingRevision[]> {
+    return this.listMappingRevisions(mappingId);
+  }
+
+  override async getRevision(mappingId: string, revision: number): Promise<MappingRevisionDetail> {
+    return this.getMappingRevision(mappingId, revision);
+  }
+
+  override async createVersion(mappingId: string): Promise<MappingVersion> {
+    return this.createMappingVersion(mappingId);
+  }
+
   override async saveMappingVersion(mappingId: string, entry: MappingVersionEntry): Promise<void> {
+    void entry;
     await httpRequest<void>({
       baseUrl: this.apiUrl,
       path: `/mappings/${encodeURIComponent(mappingId)}/versions`,
       method: 'POST',
-      body: entry,
+      body: {},
     });
   }
 

@@ -36,10 +36,9 @@ describe('get-version handler', () => {
     sharedMocks.getItem.mockReset().mockResolvedValue({
       mappingId: 'map-1',
       version: 2,
-      savedAt: '2026-05-15T00:00:00.000Z',
-      savedBy: 'user',
-      ruleCount: 2,
-      config: {},
+      revisionNumber: 5,
+      createdAt: '2026-05-15T00:00:00.000Z',
+      createdBy: 'user',
     });
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
@@ -52,8 +51,9 @@ describe('get-version handler', () => {
     const result = await handler({ body: null, pathParameters: { mappingId: 'map-1', version: '2' } });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as { version: number };
+    const parsed = JSON.parse(result.body) as { version: number; revisionNumber: number };
     expect(parsed.version).toBe(2);
+    expect(parsed.revisionNumber).toBe(5);
   });
 
   it('not found returns 404 standard envelope', async () => {

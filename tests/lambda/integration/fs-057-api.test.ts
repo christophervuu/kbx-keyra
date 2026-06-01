@@ -84,6 +84,8 @@ interface Handlers {
   readonly listVersions: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly getVersion: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly saveVersion: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly listRevisions: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly getRevision: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly createSchema: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly getSchema: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly listSchemas: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
@@ -102,6 +104,7 @@ const TABLES = {
   mappings: `Mappings_IT_${TABLE_SUFFIX}`,
   schemas: `Schemas_IT_${TABLE_SUFFIX}`,
   schemaNodes: `SchemaNodes_IT_${TABLE_SUFFIX}`,
+  mappingRevisions: `MappingRevisions_IT_${TABLE_SUFFIX}`,
   mappingVersions: `MappingVersions_IT_${TABLE_SUFFIX}`,
 };
 
@@ -173,6 +176,19 @@ async function createTables(): Promise<void> {
   }));
 
   await ddb.send(new CreateTableCommand({
+    TableName: TABLES.mappingRevisions,
+    AttributeDefinitions: [
+      { AttributeName: 'mappingId', AttributeType: 'S' },
+      { AttributeName: 'revision', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'mappingId', KeyType: 'HASH' },
+      { AttributeName: 'revision', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await ddb.send(new CreateTableCommand({
     TableName: TABLES.mappingVersions,
     AttributeDefinitions: [
       { AttributeName: 'mappingId', AttributeType: 'S' },
@@ -213,6 +229,7 @@ async function clearTable(tableName: string, keyNames: readonly string[]): Promi
 
 async function clearAllTables(): Promise<void> {
   await clearTable(TABLES.mappingVersions, ['mappingId', 'version']);
+  await clearTable(TABLES.mappingRevisions, ['mappingId', 'revision']);
   await clearTable(TABLES.schemaNodes, ['schemaId', 'path']);
   await clearTable(TABLES.mappings, ['mappingId']);
   await clearTable(TABLES.schemas, ['schemaId']);
@@ -223,6 +240,7 @@ async function clearAllTables(): Promise<void> {
 async function dropTables(): Promise<void> {
   for (const name of [
     TABLES.mappingVersions,
+    TABLES.mappingRevisions,
     TABLES.schemaNodes,
     TABLES.schemas,
     TABLES.mappings,
@@ -265,8 +283,10 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     env.MAPPINGS_TABLE = TABLES.mappings;
     env.SCHEMAS_TABLE = TABLES.schemas;
     env.SCHEMA_NODES_TABLE = TABLES.schemaNodes;
+    env.MAPPING_REVISIONS_TABLE = TABLES.mappingRevisions;
     env.MAPPING_VERSIONS_TABLE = TABLES.mappingVersions;
     env.CONTENT_BUCKET = CONTENT_BUCKET;
+    env.OPENSEARCH_ENDPOINT = 'http://localhost:9200';
 
     await createTables();
 
@@ -291,6 +311,8 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
       listVersions: mapping.listMappingVersionsHandler,
       getVersion: mapping.getMappingVersionHandler,
       saveVersion: mapping.saveMappingVersionHandler,
+      listRevisions: mapping.listMappingRevisionsHandler,
+      getRevision: mapping.getMappingRevisionHandler,
       createSchema: schema.createSchemaHandler,
       getSchema: schema.getSchemaHandler,
       listSchemas: schema.listSchemasHandler,
@@ -356,7 +378,7 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     const updated = await handlers.updateMapping(event({
       projectId: p1.projectId,
       name: 'Invoice Map',
-      version: 1,
+      expectedRevision: 1,
       rules: [
         { target: 'Invoice.Id', type: 'string', expression: 'source("id")' },
         { target: 'Invoice.Amount', type: 'number', expression: 'source("amount")' },
@@ -364,9 +386,9 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
       ],
     }, { id: mapping.mappingId }));
     expect(updated.statusCode).toBe(200);
-    expect(parseBody<{ version: number; ruleCount: number }>(updated)).toMatchObject({ version: 2, ruleCount: 3 });
+    expect(parseBody<{ revision: number; ruleCount: number }>(updated)).toMatchObject({ revision: 2, ruleCount: 3 });
 
-    const stale = await handlers.updateMapping(event({ projectId: p1.projectId, name: 'Invoice Map', version: 1, rules: [] }, { id: mapping.mappingId }));
+    const stale = await handlers.updateMapping(event({ projectId: p1.projectId, name: 'Invoice Map', expectedRevision: 1, rules: [] }, { id: mapping.mappingId }));
     expect(stale.statusCode).toBe(409);
 
     const get = await handlers.getMapping(event(undefined, { id: mapping.mappingId }));
@@ -390,23 +412,19 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     const project = parseBody<{ projectId: string }>(await handlers.createProject(event({ name: 'P', slug: 'p' })));
     const mapping = parseBody<{ mappingId: string }>(await handlers.createMapping(event({ projectId: project.projectId, name: 'M', rules: [] })));
 
-    const save1 = await handlers.saveVersion(event({
-      version: 1,
-      savedAt: new Date().toISOString(),
-      savedBy: 'tester',
-      ruleCount: 0,
-      config: { name: 'M', version: 1, engineVersion: '1.0.0', config: {}, rules: [] },
-    }, { mappingId: mapping.mappingId }));
-    expect(save1.statusCode).toBe(204);
+    const saved = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'M',
+      expectedRevision: 1,
+      rules: [{ target: 'A', type: 'string', expression: 'source("a")' }],
+    }, { id: mapping.mappingId }));
+    expect(saved.statusCode).toBe(200);
 
-    const save2 = await handlers.saveVersion(event({
-      version: 2,
-      savedAt: new Date().toISOString(),
-      savedBy: 'tester',
-      ruleCount: 1,
-      config: { name: 'M', version: 2, engineVersion: '1.0.0', config: {}, rules: [{ target: 'A', type: 'string', expression: 'source("a")' }] },
-    }, { mappingId: mapping.mappingId }));
-    expect(save2.statusCode).toBe(204);
+    const save1 = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(save1.statusCode).toBe(201);
+
+    const save2 = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(save2.statusCode).toBe(201);
 
     const list = await handlers.listVersions(event(undefined, { mappingId: mapping.mappingId }));
     expect(list.statusCode).toBe(200);
@@ -415,6 +433,49 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     const get = await handlers.getVersion(event(undefined, { mappingId: mapping.mappingId, version: '1' }));
     expect(get.statusCode).toBe(200);
     expect(parseBody<{ version: number }>(get).version).toBe(1);
+  });
+
+  it('FS-063: revision save, no-op detection, conflict, and version linkage', async () => {
+    const project = parseBody<{ projectId: string }>(await handlers.createProject(event({ name: 'P', slug: 'p' })));
+    const mapping = parseBody<{ mappingId: string }>(await handlers.createMapping(event({ projectId: project.projectId, name: 'M', rules: [] })));
+
+    const save = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'M',
+      expectedRevision: 1,
+      rules: [{ target: 'A', type: 'string', expression: 'source("a")' }],
+    }, { id: mapping.mappingId }));
+    expect(save.statusCode).toBe(200);
+    expect(parseBody<{ revision: number; noChange: boolean }>(save)).toMatchObject({ revision: 2, noChange: false });
+
+    const noOp = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'M',
+      expectedRevision: 2,
+      rules: [{ target: 'A', type: 'string', expression: 'source("a")' }],
+    }, { id: mapping.mappingId }));
+    expect(noOp.statusCode).toBe(200);
+    expect(parseBody<{ revision: number; noChange: boolean }>(noOp)).toMatchObject({ revision: 2, noChange: true });
+
+    const conflict = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'M',
+      expectedRevision: 1,
+      rules: [],
+    }, { id: mapping.mappingId }));
+    expect(conflict.statusCode).toBe(409);
+
+    const createVersion = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(createVersion.statusCode).toBe(201);
+    expect(parseBody<{ version: number; revisionNumber: number }>(createVersion)).toMatchObject({ version: 1, revisionNumber: 2 });
+
+    const revisions = await handlers.listRevisions(event(undefined, { mappingId: mapping.mappingId }));
+    expect(revisions.statusCode).toBe(200);
+    expect(parseBody<Array<{ revision: number }>>(revisions).map((entry) => entry.revision)).toContain(2);
+
+    const revision = await handlers.getRevision(event(undefined, { mappingId: mapping.mappingId, revision: '2' }));
+    expect(revision.statusCode).toBe(200);
+    expect(parseBody<{ revision: number }>(revision).revision).toBe(2);
   });
 
   it('AE-03, AE-04, AE-08: schema small/large create and query flow', async () => {

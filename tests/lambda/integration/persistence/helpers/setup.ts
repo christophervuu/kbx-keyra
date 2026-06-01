@@ -30,6 +30,7 @@ export const TEST_TABLES = {
   mappings: `keyra-mappings-fs061-${SUFFIX}`,
   schemaMetadata: `keyra-schema-metadata-fs061-${SUFFIX}`,
   schemaNodes: `keyra-schema-nodes-fs061-${SUFFIX}`,
+  mappingRevisions: `keyra-mapping-revisions-fs061-${SUFFIX}`,
   mappingVersions: `keyra-mapping-versions-fs061-${SUFFIX}`,
 } as const;
 
@@ -77,6 +78,7 @@ export function applyIntegrationEnvironment(): void {
   processRef.env.MAPPINGS_TABLE = TEST_TABLES.mappings;
   processRef.env.SCHEMA_METADATA_TABLE = TEST_TABLES.schemaMetadata;
   processRef.env.SCHEMA_NODES_TABLE = TEST_TABLES.schemaNodes;
+  processRef.env.MAPPING_REVISIONS_TABLE = TEST_TABLES.mappingRevisions;
   processRef.env.MAPPING_VERSIONS_TABLE = TEST_TABLES.mappingVersions;
   processRef.env.STORAGE_BUCKET = TEST_BUCKET;
 
@@ -193,6 +195,19 @@ export async function createTables(): Promise<void> {
   }));
 
   await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.mappingRevisions,
+    AttributeDefinitions: [
+      { AttributeName: 'mappingId', AttributeType: 'S' },
+      { AttributeName: 'revision', AttributeType: 'N' },
+    ],
+    KeySchema: [
+      { AttributeName: 'mappingId', KeyType: 'HASH' },
+      { AttributeName: 'revision', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
     TableName: TEST_TABLES.mappingVersions,
     AttributeDefinitions: [
       { AttributeName: 'mappingId', AttributeType: 'S' },
@@ -209,6 +224,7 @@ export async function createTables(): Promise<void> {
   await waitForTableActive(TEST_TABLES.mappings);
   await waitForTableActive(TEST_TABLES.schemaMetadata);
   await waitForTableActive(TEST_TABLES.schemaNodes);
+  await waitForTableActive(TEST_TABLES.mappingRevisions);
   await waitForTableActive(TEST_TABLES.mappingVersions);
 }
 
@@ -216,6 +232,7 @@ export async function deleteTables(): Promise<void> {
   const dynamo = createDynamoControlClient();
   const orderedDeletion = [
     TEST_TABLES.mappingVersions,
+    TEST_TABLES.mappingRevisions,
     TEST_TABLES.schemaNodes,
     TEST_TABLES.schemaMetadata,
     TEST_TABLES.mappings,

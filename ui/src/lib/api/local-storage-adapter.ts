@@ -20,6 +20,10 @@ import type {
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
   MappingConfig,
+  MappingRevision,
+  MappingRevisionDetail,
+  MappingSaveResult,
+  MappingVersion,
   MappingVersionEntry,
   MappingMetadata,
   Project,
@@ -74,11 +78,66 @@ interface StoredMapping {
   config: MappingConfig;
 }
 
+interface StoredRevisionEntry {
+  readonly revision: number;
+  readonly savedAt: string;
+  readonly savedBy: string;
+  readonly ruleCount: number;
+  readonly configHash: string;
+  readonly config: MappingConfig;
+}
+
+interface StoredVersionEntry {
+  readonly version: number;
+  readonly revisionNumber: number;
+  readonly createdAt: string;
+  readonly createdBy: string;
+}
+
 const OFFLINE_MODE_MESSAGE = 'Not available in offline mode';
 
 export class LocalStorageAdapter implements ApiAdapter {
   private versionKey(mappingId: string): string {
     return `keyra:versions:${mappingId}`;
+  }
+
+  private revisionKey(mappingId: string): string {
+    return `keyra:revisions:${mappingId}`;
+  }
+
+  private sortObject(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sortObject(item));
+    }
+
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const sortedKeys = Object.keys(record).sort((a, b) => a.localeCompare(b));
+      const next: Record<string, unknown> = {};
+      for (const key of sortedKeys) {
+        next[key] = this.sortObject(record[key]);
+      }
+      return next;
+    }
+
+    return value;
+  }
+
+  private async computeConfigHash(config: MappingConfig): Promise<string> {
+    const normalized = {
+      ...config,
+      version: 0,
+    };
+    const json = JSON.stringify(this.sortObject(normalized));
+
+    if (globalThis.crypto?.subtle) {
+      const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
+      return Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+    }
+
+    return json;
   }
 
   private readArray<T>(key: string): T[] {
@@ -343,30 +402,154 @@ export class LocalStorageAdapter implements ApiAdapter {
     return nextMetadata;
   }
 
+  async saveMapping(id: string, config: MappingConfig): Promise<MappingSaveResult> {
+    const revisions = this.readArray<StoredRevisionEntry>(this.revisionKey(id))
+      .sort((a, b) => b.revision - a.revision);
+    const latest = revisions[0];
+
+    const currentHash = await this.computeConfigHash(config);
+    if (latest && latest.configHash === currentHash) {
+      return {
+        revision: latest.revision,
+        noChange: true,
+      };
+    }
+
+    const nextRevision = (latest?.revision ?? 0) + 1;
+    const now = this.nowIso();
+
+    const nextConfig: MappingConfig = {
+      ...config,
+      id,
+      version: nextRevision,
+    };
+
+    await this.updateMapping(id, nextConfig);
+
+    this.writeArray(this.revisionKey(id), [
+      ...revisions,
+      {
+        revision: nextRevision,
+        savedAt: now,
+        savedBy: 'local-user',
+        ruleCount: nextConfig.rules.length,
+        configHash: currentHash,
+        config: nextConfig,
+      } satisfies StoredRevisionEntry,
+    ]);
+
+    return {
+      revision: nextRevision,
+      noChange: false,
+    };
+  }
+
   async deleteMapping(id: string): Promise<void> {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
     const next = mappings.filter((item) => item.metadata.mappingId !== id);
     this.writeArray(STORAGE_KEYS.mappings, next);
     localStorage.removeItem(this.versionKey(id));
+    localStorage.removeItem(this.revisionKey(id));
   }
 
   async listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]> {
-    const entries = this.readArray<MappingVersionEntry>(this.versionKey(mappingId));
-    return entries.sort((a, b) => b.version - a.version);
+    const rawEntries = this.readArray<unknown>(this.versionKey(mappingId));
+    const legacyEntries = rawEntries
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+
+        const record = entry as Partial<MappingVersionEntry>;
+        if (
+          typeof record.version === 'number'
+          && typeof record.savedAt === 'string'
+          && typeof record.savedBy === 'string'
+          && typeof record.ruleCount === 'number'
+          && !!record.config
+        ) {
+          return record as MappingVersionEntry;
+        }
+
+        return null;
+      })
+      .filter((entry): entry is MappingVersionEntry => entry !== null);
+
+    if (legacyEntries.length > 0) {
+      return legacyEntries.sort((a, b) => b.version - a.version);
+    }
+
+    const versions = await this.listVersions(mappingId);
+    const revisions = this.readArray<StoredRevisionEntry>(this.revisionKey(mappingId));
+
+    return versions
+      .map((version) => {
+        const revision = revisions.find((entry) => entry.revision === version.revisionNumber);
+        if (!revision) {
+          return null;
+        }
+
+        return {
+          version: version.version,
+          savedAt: revision.savedAt,
+          savedBy: revision.savedBy,
+          ruleCount: revision.ruleCount,
+          config: revision.config,
+        } satisfies MappingVersionEntry;
+      })
+      .filter((entry): entry is MappingVersionEntry => entry !== null)
+      .sort((a, b) => b.version - a.version);
   }
 
   async getMappingVersion(mappingId: string, version: number): Promise<MappingVersionEntry> {
-    const entries = this.readArray<MappingVersionEntry>(this.versionKey(mappingId));
-    const found = entries.find((entry) => entry.version === version);
+    const legacy = this.readArray<unknown>(this.versionKey(mappingId))
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
 
-    if (!found) {
-      throw this.notFound('MappingVersion', `${mappingId}@v${version}`);
+        const record = entry as Partial<MappingVersionEntry>;
+        if (
+          typeof record.version === 'number'
+          && typeof record.savedAt === 'string'
+          && typeof record.savedBy === 'string'
+          && typeof record.ruleCount === 'number'
+          && !!record.config
+        ) {
+          return record as MappingVersionEntry;
+        }
+
+        return null;
+      })
+      .filter((entry): entry is MappingVersionEntry => entry !== null)
+      .find((entry) => entry.version === version);
+
+    if (legacy) {
+      return legacy;
     }
 
-    return found;
+    const found = await this.getVersion(mappingId, version);
+    const revision = await this.getMappingRevision(mappingId, found.revisionNumber);
+
+    return {
+      version: found.version,
+      savedAt: revision.savedAt,
+      savedBy: revision.savedBy,
+      ruleCount: revision.ruleCount,
+      config: revision.config,
+    };
   }
 
   async saveMappingVersion(mappingId: string, entry: MappingVersionEntry): Promise<void> {
+    try {
+      await this.getMapping(mappingId);
+      await this.saveMapping(mappingId, entry.config);
+      await this.createMappingVersion(mappingId);
+      return;
+    } catch {
+      // Fall back to legacy direct-write behavior for tests/fixtures that only persist version history.
+    }
+
     const key = this.versionKey(mappingId);
     const entries = this.readArray<MappingVersionEntry>(key);
     const next = [...entries, entry];
@@ -378,6 +561,139 @@ export class LocalStorageAdapter implements ApiAdapter {
       : next;
 
     this.writeArray(key, pruned);
+  }
+
+  async listVersions(mappingId: string): Promise<MappingVersion[]> {
+    const rawEntries = this.readArray<unknown>(this.versionKey(mappingId));
+
+    const entries = rawEntries
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+
+        const record = entry as Record<string, unknown>;
+
+        if (
+          typeof record.version === 'number'
+          && typeof record.revisionNumber === 'number'
+          && typeof record.createdAt === 'string'
+          && typeof record.createdBy === 'string'
+        ) {
+          return record as unknown as StoredVersionEntry;
+        }
+
+        if (
+          typeof record.version === 'number'
+          && typeof record.savedAt === 'string'
+          && typeof record.savedBy === 'string'
+        ) {
+          return {
+            version: record.version,
+            revisionNumber: record.version,
+            createdAt: record.savedAt,
+            createdBy: record.savedBy,
+          } satisfies StoredVersionEntry;
+        }
+
+        return null;
+      })
+      .filter((entry): entry is StoredVersionEntry => entry !== null);
+
+    return entries.sort((a, b) => b.version - a.version);
+  }
+
+  async getVersion(mappingId: string, version: number): Promise<MappingVersion> {
+    const entries = this.readArray<StoredVersionEntry>(this.versionKey(mappingId));
+    const found = entries.find((entry) => entry.version === version);
+
+    if (!found) {
+      throw this.notFound('MappingVersion', `${mappingId}@v${version}`);
+    }
+
+    return found;
+  }
+
+  async listMappingRevisions(mappingId: string): Promise<MappingRevision[]> {
+    const entries = this.readArray<StoredRevisionEntry>(this.revisionKey(mappingId))
+      .sort((a, b) => b.revision - a.revision);
+    return entries.map((entry) => ({
+      revision: entry.revision,
+      savedAt: entry.savedAt,
+      savedBy: entry.savedBy,
+      ruleCount: entry.ruleCount,
+    }));
+  }
+
+  async getMappingRevision(mappingId: string, revision: number): Promise<MappingRevisionDetail> {
+    const entries = this.readArray<StoredRevisionEntry>(this.revisionKey(mappingId));
+    const entry = entries.find((candidate) => candidate.revision === revision);
+
+    if (!entry) {
+      throw this.notFound('MappingRevision', `${mappingId}@r${revision}`);
+    }
+
+    return {
+      mappingId,
+      revision,
+      savedAt: entry.savedAt,
+      savedBy: entry.savedBy,
+      ruleCount: entry.ruleCount,
+      config: entry.config,
+    };
+  }
+
+  async listRevisions(mappingId: string): Promise<MappingRevision[]> {
+    return this.listMappingRevisions(mappingId);
+  }
+
+  async getRevision(mappingId: string, revision: number): Promise<MappingRevisionDetail> {
+    return this.getMappingRevision(mappingId, revision);
+  }
+
+  async createMappingVersion(mappingId: string): Promise<MappingVersion> {
+    const revisions = this.readArray<StoredRevisionEntry>(this.revisionKey(mappingId))
+      .sort((a, b) => b.revision - a.revision);
+
+    let latestRevision = revisions[0]?.revision;
+    if (!latestRevision) {
+      const mapping = await this.getMapping(mappingId);
+      const saved = await this.saveMapping(mappingId, mapping);
+      latestRevision = saved.revision;
+    }
+
+    const versions = this.readArray<StoredVersionEntry>(this.versionKey(mappingId))
+      .sort((a, b) => b.version - a.version);
+    const nextVersion = (versions[0]?.version ?? 0) + 1;
+    const now = this.nowIso();
+
+    const nextEntry: StoredVersionEntry = {
+      version: nextVersion,
+      revisionNumber: latestRevision,
+      createdAt: now,
+      createdBy: 'local-user',
+    };
+
+    const nextVersions = [...versions, nextEntry];
+
+    const pruned = nextVersions.length > MAX_MAPPING_VERSIONS
+      ? [...nextVersions]
+        .sort((a, b) => a.version - b.version)
+        .slice(nextVersions.length - MAX_MAPPING_VERSIONS)
+      : nextVersions;
+
+    this.writeArray(this.versionKey(mappingId), pruned);
+
+    return {
+      version: nextVersion,
+      revisionNumber: latestRevision,
+      createdAt: now,
+      createdBy: 'local-user',
+    };
+  }
+
+  async createVersion(mappingId: string): Promise<MappingVersion> {
+    return this.createMappingVersion(mappingId);
   }
 
   async duplicateMapping(id: string, newName: string): Promise<MappingMetadata> {

@@ -35,6 +35,16 @@ export interface MappingEditorPageProps {
   onViewUnsavedChanges?: () => void;
   /** Callback for the Save button */
   onSave?: () => void;
+  /** Current revision number (FS-063) */
+  currentRevision?: number;
+  /** Current version (milestone) number, or null when none created yet */
+  currentVersion?: number | null;
+  /** Whether there is a local autosaved draft */
+  hasDraft?: boolean;
+  /** Whether the Save button should be enabled */
+  canSave?: boolean;
+  /** Callback for the Version button */
+  onCreateVersion?: () => void;
   /** Source schema display name */
   sourceSchemaName?: string | null;
   /** Target schema display name */
@@ -118,6 +128,11 @@ export function MappingEditorPage({
   unsavedChangeCount = 0,
   onViewUnsavedChanges,
   onSave = () => undefined,
+  currentRevision,
+  currentVersion = null,
+  hasDraft = false,
+  canSave,
+  onCreateVersion,
   sourceSchemaName = null,
   targetSchemaName = null,
   sourceContent,
@@ -150,12 +165,17 @@ export function MappingEditorPage({
       data-testid="mapping-editor-page"
     >
       {/* Context bar */}
-      <EditorTopBar
+        <EditorTopBar
         projectName={projectName}
         projectId={projectId}
         mappingName={mappingName}
         mappingId={mappingId}
         version={version}
+        currentRevision={currentRevision}
+        currentVersion={currentVersion}
+        hasDraft={hasDraft}
+        canSave={canSave}
+        onCreateVersion={onCreateVersion}
         deployStatus={deployStatus}
         saveStatus={saveStatus}
         unsavedChangeCount={unsavedChangeCount}

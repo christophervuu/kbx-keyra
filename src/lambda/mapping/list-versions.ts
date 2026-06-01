@@ -12,10 +12,9 @@ import {
 interface MappingVersionEntry {
   readonly mappingId: string;
   readonly version: number;
-  readonly savedAt: string;
-  readonly savedBy: string;
-  readonly ruleCount: number;
-  readonly config: Record<string, unknown>;
+  readonly revisionNumber: number;
+  readonly createdAt: string;
+  readonly createdBy: string;
 }
 
 function getEnvValue(key: string): string | undefined {

@@ -63,13 +63,16 @@ src/
     mapping/          Mapping CRUD lambdas (FS-057 T-03)
       create-mapping.ts POST /mappings handler
       get-mapping.ts    GET /mappings/:id handler (returns MappingConfig from S3)
-      update-mapping.ts PUT /mappings/:id handler (optimistic concurrency + version increment)
+      update-mapping.ts PUT /mappings/:id handler (optimistic concurrency + revision save + no-op hash detection)
       delete-mapping.ts DELETE /mappings/:id handler (removes Dynamo metadata + S3 config)
       duplicate-mapping.ts POST /mappings/:id/duplicate handler (new mappingId + version reset)
       list-mappings.ts  GET /projects/:projectId/mappings handler (projectId-index query)
+      list-revisions.ts GET /mappings/:mappingId/revisions handler (descending by revision)
+      get-revision.ts   GET /mappings/:mappingId/revisions/:revision handler
       list-versions.ts  GET /mappings/:mappingId/versions handler (descending by version)
       get-version.ts    GET /mappings/:mappingId/versions/:version handler
-      save-version.ts   POST /mappings/:mappingId/versions handler (save + prune to 50)
+      create-version.ts POST /mappings/:mappingId/versions handler (create milestone from latest revision; optional implicitSave)
+      save-version.ts   Backward-compatible shim exporting create-version handler
       index.ts          Mapping lambda barrel exports
     shared/           Shared Lambda handler utilities (FS-057 T-01)
       index.ts         Shared lambda utilities barrel export
@@ -96,11 +99,13 @@ src/
       types.ts          DynamoDB item types, input contracts, and domain converters
       clients.ts        DynamoDB Document Client + S3 Client singletons from env config
       config.ts         Table-name constants, bucket name, and S3 key builders
+      hash.ts           Stable JSON SHA-256 config hashing utility for no-op revision detection
       projects.ts       Projects table CRUD data-access module (create/get/list/update/delete)
-      mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate)
+      mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate) with revision/version compatibility fields
       schema-metadata.ts SchemaMetadata table CRUD + status transition update operation
       schema-nodes.ts   SchemaNodes partition query/batch-write/delete operations with retry/backoff
-      mapping-versions.ts MappingVersions save/list/get/getConfig with S3 snapshots and prune-to-50 logic
+      mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
+      mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
       s3/               Shared S3 content helpers for schemas and mappings
         index.ts          S3 helper barrel exports
         schema-content.ts Schema original/processed content put/get/delete helpers
@@ -743,13 +748,16 @@ tests/
     mapping/          Mapping lambda handler tests (FS-057 T-03)
       create-mapping.test.ts Create mapping tests (201 + required fields)
       get-mapping.test.ts Get mapping tests (S3 config read + 404)
-      update-mapping.test.ts Update mapping tests (version increment + conflict)
+      update-mapping.test.ts Update mapping tests (revision increment + no-op + conflict)
       delete-mapping.test.ts Delete mapping tests (204 + S3 delete + 404)
       duplicate-mapping.test.ts Duplicate mapping tests (new id/version + 404)
       list-mappings.test.ts List mappings tests (project-scoped query)
+      list-revisions.test.ts List mapping revisions tests (descending order)
+      get-revision.test.ts Get mapping revision tests (200 + config load)
       list-versions.test.ts List mapping versions tests (descending order + empty)
-      get-version.test.ts Get mapping version tests (200 + 404)
-      save-version.test.ts Save mapping version tests (204 + validation + prune)
+      get-version.test.ts Get mapping version tests (200 + revision pointer + 404)
+      create-version.test.ts Create mapping version tests (201 from latest revision)
+      save-version.test.ts Save mapping version shim tests (delegates to create-version flow)
     shared/           Shared lambda utility tests (FS-057 T-01)
       response.test.ts Response/error envelope and CORS header tests
       request.test.ts  Request body/path/query parsing tests
@@ -792,10 +800,12 @@ tests/
       clients.test.ts  AWS client initialization tests (region + endpoint overrides)
       config.test.ts   Table/bucket env defaults and S3 key-builder tests
       projects.test.ts Projects CRUD command-shape and behavior tests with mocked Dynamo client
-      mappings.test.ts Mappings CRUD/GSI/version-increment/S3-config tests with mocked Dynamo+S3 clients
+      mappings.test.ts Mappings CRUD/GSI/revision+version increment/S3-config tests with mocked Dynamo+S3 clients
+      hash.test.ts      Config hash determinism and stable key-order hashing tests
       schema-metadata.test.ts SchemaMetadata CRUD + updateStatus expression/defaults tests
       schema-nodes.test.ts SchemaNodes batch chunking/retry, partition query, contains-filter, and delete-by-schema tests
-      mapping-versions.test.ts MappingVersions save/prune/list/get/getConfig tests with mocked Dynamo+S3 clients
+      mapping-revisions.test.ts MappingRevisions save/no-op/list/get/getConfig/prune behavior tests with mocked Dynamo+S3 clients
+      mapping-versions.test.ts MappingVersions milestone create/list/get tests with mocked Dynamo client
       s3/               Persistence S3 helper tests
         schema-content.test.ts Schema content helper tests (put/get/getOriginal/delete + NoSuchKey handling)
         mapping-config.test.ts Mapping config helper tests (put/get/delete + NoSuchKey handling)
@@ -809,7 +819,8 @@ tests/
       mappings.integration.test.ts Mappings create/get/list/update/duplicate/delete integration cycle
       schema-metadata.integration.test.ts SchemaMetadata create/get/list/updateStatus/delete integration cycle
       schema-nodes.integration.test.ts SchemaNodes batchWrite/list/queryContains/deleteBySchema integration cycle
-      mapping-versions.integration.test.ts MappingVersions save/list/get/getConfig + prune-to-50 integration cycle
+      mapping-revisions.integration.test.ts MappingRevisions save/list/get/getConfig + selective-prune integration cycle
+      mapping-versions.integration.test.ts MappingVersions milestone create/list/get integration cycle
       s3-content.integration.test.ts Schema content + mapping config S3 helper integration cycle
     schema-ingestion/  FS-056 end-to-end ingestion/query orchestration tests
       inline-path.test.ts Inline path integration coverage (50/499/500 threshold behavior)

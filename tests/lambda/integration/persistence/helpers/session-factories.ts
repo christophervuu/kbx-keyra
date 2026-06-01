@@ -9,6 +9,7 @@ import {
   UpdateCommand,
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
+import { createHash } from 'node:crypto';
 
 import type {
   CreateMappingInput,
@@ -44,6 +45,10 @@ function schemaContentKey(schemaId: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function computeConfigHash(config: MappingConfig): string {
+  return createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
 async function readBodyAsString(output: unknown): Promise<string | null> {
@@ -227,6 +232,9 @@ export function createMappingsModule(deps: {
       projectId: input.projectId,
       name: input.name,
       version: 1,
+      revision: 1,
+      latestVersion: null,
+      configHash: computeConfigHash(input.config),
       sourceSchemaId,
       targetSchemaId,
       status: input.status ?? inferStatus(input.config),
@@ -276,17 +284,19 @@ export function createMappingsModule(deps: {
     }
 
     if (config) {
+      const currentRevision = existing.revision ?? existing.version ?? 0;
       const payload = createConfigPayload(
         config,
         mappingId,
         existing.projectId,
         fields.name ?? existing.name,
-        existing.version + 1,
+        currentRevision + 1,
       );
       await putConfig(existing.configS3Key, payload);
     }
 
     const names: Record<string, string> = {
+      '#revision': 'revision',
       '#version': 'version',
       '#updatedAt': 'updatedAt',
     };
@@ -294,7 +304,7 @@ export function createMappingsModule(deps: {
       ':one': 1,
       ':updatedAt': nowIso(),
     };
-    const updates: string[] = ['#version = #version + :one', '#updatedAt = :updatedAt'];
+    const updates: string[] = ['#revision = #version + :one', '#version = #version + :one', '#updatedAt = :updatedAt'];
 
     const updatableKeys: readonly (keyof UpdateMappingInput)[] = [
       'name',
@@ -304,6 +314,7 @@ export function createMappingsModule(deps: {
       'ruleCount',
       'coverage',
       'configS3Key',
+      'configHash',
     ];
 
     for (const key of updatableKeys) {
@@ -590,12 +601,6 @@ export function createMappingVersionsModule(deps: {
 }) {
   const maxVersions = 50;
 
-  interface SaveInput {
-    readonly version: number;
-    readonly savedBy: string;
-    readonly ruleCount: number;
-    readonly config: MappingConfig;
-  }
 
   async function listAscending(mappingId: string): Promise<MappingVersionItem[]> {
     const result = await deps.dynamoClient.send(new QueryCommand({
@@ -637,11 +642,22 @@ export function createMappingVersionsModule(deps: {
     }
   }
 
-  async function save(mappingId: string, entry: SaveInput): Promise<MappingVersionItem> {
+  async function save(
+    mappingId: string,
+    entry: {
+      readonly version: number;
+      readonly savedBy: string;
+      readonly ruleCount: number;
+      readonly config: MappingConfig;
+    },
+  ): Promise<MappingVersionItem> {
     const configS3Key = mappingVersionKey(mappingId, entry.version);
     const item: MappingVersionItem = {
       mappingId,
       version: entry.version,
+      revisionNumber: entry.version,
+      createdAt: nowIso(),
+      createdBy: entry.savedBy,
       savedAt: nowIso(),
       savedBy: entry.savedBy,
       ruleCount: entry.ruleCount,

@@ -81,7 +81,11 @@ export interface MappingItem {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
-  readonly version: number;
+  readonly revision: number;
+  readonly latestVersion: number | null;
+  readonly configHash: string;
+  /** @deprecated legacy compatibility field; mirrors revision */
+  readonly version?: number;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
   readonly status: MappingStatus;
@@ -135,10 +139,32 @@ export interface SchemaNodeItem {
 export interface MappingVersionItem {
   readonly mappingId: string;
   readonly version: number;
+  readonly revisionNumber: number;
+  readonly createdAt: ISODateString;
+  readonly createdBy: string;
+  /** @deprecated legacy compatibility fields */
+  readonly savedAt?: ISODateString;
+  /** @deprecated legacy compatibility fields */
+  readonly savedBy?: string;
+  /** @deprecated legacy compatibility fields */
+  readonly ruleCount?: number;
+  /** @deprecated legacy compatibility fields */
+  readonly configS3Key?: string;
+  /** @deprecated legacy compatibility field */
+  readonly config?: Record<string, unknown>;
+}
+
+/**
+ * DynamoDB MappingRevisions table item.
+ */
+export interface MappingRevisionItem {
+  readonly mappingId: string;
+  readonly revision: number;
   readonly savedAt: ISODateString;
   readonly savedBy: string;
   readonly ruleCount: number;
   readonly configS3Key: string;
+  readonly configHash: string;
 }
 
 export interface CreateProjectInput {
@@ -176,6 +202,7 @@ export interface UpdateMappingInput {
   readonly ruleCount?: number;
   readonly coverage?: number;
   readonly configS3Key?: string;
+  readonly configHash?: string;
 }
 
 export interface CreateSchemaMetadataInput {
@@ -268,11 +295,12 @@ export function toProjectDetail(item: ProjectItem, mappings: readonly MappingMet
 }
 
 export function toMappingMetadata(item: MappingItem): MappingMetadata {
+  const revision = item.revision ?? item.version ?? 0;
   return {
     mappingId: item.mappingId,
     projectId: item.projectId,
     name: item.name,
-    version: item.version,
+    version: revision,
     status: item.status,
     sourceSchemaId: item.sourceSchemaId,
     targetSchemaId: item.targetSchemaId,

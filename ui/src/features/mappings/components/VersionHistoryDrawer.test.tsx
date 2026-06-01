@@ -1,8 +1,15 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { VersionHistoryDrawer, VersionListItem, formatRelativeTime } from './VersionHistoryDrawer';
+import {
+  VersionHistoryDrawer,
+  VersionListItem,
+  RevisionListItem,
+  MappingVersionListItem,
+  formatRelativeTime,
+} from './VersionHistoryDrawer';
 import type { VersionHistoryEntry } from '../hooks/use-version-history';
+import type { MappingRevision, MappingVersion } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -273,5 +280,211 @@ describe('VersionHistoryDrawer', () => {
       </VersionHistoryDrawer>,
     );
     expect(screen.getByTestId('diff-view')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-07: RevisionListItem tests
+// ---------------------------------------------------------------------------
+
+function makeRevision(revision: number, overrides?: Partial<MappingRevision>): MappingRevision {
+  return {
+    revision,
+    savedAt: new Date(Date.now() - revision * 60_000).toISOString(),
+    savedBy: 'alice',
+    ruleCount: revision * 3,
+    ...overrides,
+  };
+}
+
+function makeMappingVersion(version: number, overrides?: Partial<MappingVersion>): MappingVersion {
+  return {
+    version,
+    revisionNumber: version * 2,
+    createdAt: new Date(Date.now() - version * 60_000).toISOString(),
+    createdBy: 'bob',
+    ...overrides,
+  };
+}
+
+describe('RevisionListItem', () => {
+  it('renders revision badge, rule count, and author', () => {
+    const rev = makeRevision(5);
+    render(
+      <RevisionListItem revision={rev} isSelected={false} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByTestId('revision-badge-5')).toBeInTheDocument();
+    expect(screen.getByText('Rev 5')).toBeInTheDocument();
+    expect(screen.getByText('15 rules')).toBeInTheDocument();
+    expect(screen.getByText('Saved by alice')).toBeInTheDocument();
+  });
+
+  it('calls onSelect with revision number on click', () => {
+    const onSelect = vi.fn();
+    render(
+      <RevisionListItem revision={makeRevision(3)} isSelected={false} onSelect={onSelect} />,
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(onSelect).toHaveBeenCalledWith(3);
+  });
+
+  it('calls onSelect on Enter key', () => {
+    const onSelect = vi.fn();
+    render(
+      <RevisionListItem revision={makeRevision(3)} isSelected={false} onSelect={onSelect} />,
+    );
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' });
+    expect(onSelect).toHaveBeenCalledWith(3);
+  });
+
+  it('calls onSelect on Space key', () => {
+    const onSelect = vi.fn();
+    render(
+      <RevisionListItem revision={makeRevision(3)} isSelected={false} onSelect={onSelect} />,
+    );
+    fireEvent.keyDown(screen.getByRole('button'), { key: ' ' });
+    expect(onSelect).toHaveBeenCalledWith(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-07: MappingVersionListItem tests
+// ---------------------------------------------------------------------------
+
+describe('MappingVersionListItem', () => {
+  it('renders version badge, revision link, and author', () => {
+    const ver = makeMappingVersion(2);
+    render(
+      <MappingVersionListItem version={ver} isSelected={false} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByTestId('version-badge-2')).toBeInTheDocument();
+    expect(screen.getByText('v2')).toBeInTheDocument();
+    expect(screen.getByText('→ Rev 4')).toBeInTheDocument();
+    expect(screen.getByText('Created by bob')).toBeInTheDocument();
+  });
+
+  it('calls onSelect with version number on click', () => {
+    const onSelect = vi.fn();
+    render(
+      <MappingVersionListItem version={makeMappingVersion(1)} isSelected={false} onSelect={onSelect} />,
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(onSelect).toHaveBeenCalledWith(1);
+  });
+
+  it('calls onSelect on Enter key', () => {
+    const onSelect = vi.fn();
+    render(
+      <MappingVersionListItem version={makeMappingVersion(1)} isSelected={false} onSelect={onSelect} />,
+    );
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' });
+    expect(onSelect).toHaveBeenCalledWith(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-07: VersionHistoryDrawer two-tab mode tests
+// ---------------------------------------------------------------------------
+
+const REVISIONS: MappingRevision[] = [makeRevision(3), makeRevision(2), makeRevision(1)];
+const MAPPING_VERSIONS: MappingVersion[] = [makeMappingVersion(2), makeMappingVersion(1)];
+
+const TAB_PROPS = {
+  isOpen: true,
+  onClose: vi.fn(),
+  revisions: REVISIONS,
+  isLoadingRevisions: false,
+  selectedRevision: null as number | null,
+  onSelectRevision: vi.fn(),
+  mappingVersions: MAPPING_VERSIONS,
+  isLoadingMappingVersions: false,
+  selectedMappingVersion: null as number | null,
+  onSelectMappingVersion: vi.fn(),
+};
+
+describe('VersionHistoryDrawer — two-tab mode (T-07)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders tab strip when revisions prop is provided', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} />);
+    expect(screen.getByTestId('history-tabs')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-revisions')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-versions')).toBeInTheDocument();
+  });
+
+  it('defaults to Revisions tab', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} />);
+    expect(screen.getByTestId('tab-revisions')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('tab-versions')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('renders revisions list on Revisions tab', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} />);
+    expect(screen.getByTestId('revisions-list')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-item-3')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-item-2')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-item-1')).toBeInTheDocument();
+  });
+
+  it('switches to Versions tab on click', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} />);
+    fireEvent.click(screen.getByTestId('tab-versions'));
+    expect(screen.getByTestId('tab-versions')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('tab-revisions')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('renders versions list on Versions tab', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} />);
+    fireEvent.click(screen.getByTestId('tab-versions'));
+    expect(screen.getByTestId('versions-list')).toBeInTheDocument();
+    expect(screen.getByTestId('version-item-2')).toBeInTheDocument();
+    expect(screen.getByTestId('version-item-1')).toBeInTheDocument();
+  });
+
+  it('shows Revisions empty state when revisions list is empty', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} revisions={[]} />);
+    expect(screen.getByTestId('revisions-empty-state')).toBeInTheDocument();
+  });
+
+  it('shows Versions empty state when mappingVersions list is empty', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} mappingVersions={[]} />);
+    fireEvent.click(screen.getByTestId('tab-versions'));
+    expect(screen.getByTestId('versions-empty-state')).toBeInTheDocument();
+  });
+
+  it('shows revisions loading skeleton', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} isLoadingRevisions={true} />);
+    expect(screen.getByLabelText('Loading revisions')).toBeInTheDocument();
+  });
+
+  it('shows versions loading skeleton', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} isLoadingMappingVersions={true} />);
+    fireEvent.click(screen.getByTestId('tab-versions'));
+    expect(screen.getByLabelText('Loading versions')).toBeInTheDocument();
+  });
+
+  it('calls onSelectRevision when a revision item is clicked', () => {
+    const onSelectRevision = vi.fn();
+    render(<VersionHistoryDrawer {...TAB_PROPS} onSelectRevision={onSelectRevision} />);
+    fireEvent.click(screen.getByTestId('revision-item-2'));
+    expect(onSelectRevision).toHaveBeenCalledWith(2);
+  });
+
+  it('calls onSelectMappingVersion when a version item is clicked', () => {
+    const onSelectMappingVersion = vi.fn();
+    render(<VersionHistoryDrawer {...TAB_PROPS} onSelectMappingVersion={onSelectMappingVersion} />);
+    fireEvent.click(screen.getByTestId('tab-versions'));
+    fireEvent.click(screen.getByTestId('version-item-1'));
+    expect(onSelectMappingVersion).toHaveBeenCalledWith(1);
+  });
+
+  it('does not render legacy body when in tab mode', () => {
+    render(<VersionHistoryDrawer {...TAB_PROPS} versions={VERSIONS} />);
+    // Legacy empty-state text should not be present
+    expect(
+      screen.queryByText(/This is the first version/),
+    ).not.toBeInTheDocument();
   });
 });

@@ -59,6 +59,20 @@ function makeMappingVersionEntry(mappingId: string, version: number): MappingVer
   };
 }
 
+function makeMappingConfig(mappingId: string, projectId: string, version: number, expression: string): MappingConfig {
+  return {
+    id: mappingId,
+    projectId,
+    name: 'Mapping A',
+    version,
+    engineVersion: '2.0.0',
+    sourceSchemaRef: SOURCE_SCHEMA_REF,
+    targetSchemaRef: TARGET_SCHEMA_REF,
+    config: {},
+    rules: [{ target: 'A', type: 'string', expression }],
+  };
+}
+
 describe('LocalStorageAdapter', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', createStorageMock());
@@ -405,6 +419,111 @@ describe('LocalStorageAdapter', () => {
     await expect(adapter.getMappingVersion('mapping-1', 1)).resolves.toEqual(entry);
   });
 
+  it('saveMapping returns noChange=true for unchanged config', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
+    });
+
+    const config = makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")');
+    const firstSave = await adapter.saveMapping(created.mappingId, config);
+    const secondSave = await adapter.saveMapping(created.mappingId, config);
+
+    expect(firstSave).toMatchObject({ revision: 1, noChange: false });
+    expect(secondSave).toMatchObject({ revision: 1, noChange: true });
+  });
+
+  it('saveMapping increments revision when config changes', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
+    });
+
+    const save1 = await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
+    const save2 = await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("y")'));
+
+    expect(save1.revision).toBe(1);
+    expect(save2.revision).toBe(2);
+    expect(save2.noChange).toBe(false);
+  });
+
+  it('createVersion points to latest revision and list/get revisions descend', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
+    });
+
+    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
+    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("y")'));
+
+    const version = await adapter.createVersion(created.mappingId);
+    expect(version.revisionNumber).toBe(2);
+
+    const revisions = await adapter.listRevisions(created.mappingId);
+    expect(revisions.map((r) => r.revision)).toEqual([2, 1]);
+
+    const revision = await adapter.getRevision(created.mappingId, 2);
+    expect(revision.revision).toBe(2);
+    expect(revision.config.rules[0]?.expression).toBe('static("y")');
+  });
+
+  it('listVersions returns versions descending with revisionNumber', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
+    });
+
+    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
+    await adapter.createVersion(created.mappingId);
+    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("y")'));
+    await adapter.createVersion(created.mappingId);
+
+    const versions = await adapter.listVersions(created.mappingId);
+    expect(versions.map((v) => v.version)).toEqual([2, 1]);
+    expect(versions[0]?.revisionNumber).toBe(2);
+    expect(versions[1]?.revisionNumber).toBe(1);
+  });
+
   it('saveMappingVersion appends without overwriting previous entries', async () => {
     const adapter = new LocalStorageAdapter();
 
@@ -492,8 +611,10 @@ describe('LocalStorageAdapter', () => {
       created.mappingId,
       makeMappingVersionEntry(created.mappingId, 1),
     );
+    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
 
     await adapter.deleteMapping(created.mappingId);
     await expect(adapter.listMappingVersions(created.mappingId)).resolves.toEqual([]);
+    await expect(adapter.listRevisions(created.mappingId)).resolves.toEqual([]);
   });
 });

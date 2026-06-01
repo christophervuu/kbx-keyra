@@ -16,6 +16,7 @@ import {
 import { dynamoClient, s3Client } from './clients.js';
 import { BUCKET_NAME, TABLE_NAMES, mappingConfigKey } from './config.js';
 import type { CreateMappingInput, MappingConfig, MappingItem, MappingStatus, UpdateMappingInput } from './types.js';
+import { computeConfigHash } from './hash.js';
 
 type MappingCreateInput = Omit<CreateMappingInput, 'configS3Key'> & { readonly config: MappingConfig };
 type MappingUpdateField = keyof UpdateMappingInput;
@@ -60,6 +61,13 @@ function createConfigPayload(config: MappingConfig, mappingId: string, projectId
   };
 }
 
+function mapRevisionToConfigVersion(config: MappingConfig, revision: number): MappingConfig {
+  return {
+    ...config,
+    version: revision,
+  };
+}
+
 async function putMappingConfig(configS3Key: string, config: MappingConfig): Promise<void> {
   await s3Client.send(
     new PutObjectCommand({
@@ -91,6 +99,7 @@ function buildMappingUpdateExpression(
   fields: UpdateMappingInput,
 ): Pick<UpdateCommandInput, 'UpdateExpression' | 'ExpressionAttributeNames' | 'ExpressionAttributeValues'> {
   const names: Record<string, string> = {
+    '#revision': 'revision',
     '#version': 'version',
     '#updatedAt': 'updatedAt',
   };
@@ -99,7 +108,7 @@ function buildMappingUpdateExpression(
     ':updatedAt': nowIso(),
   };
 
-  const updates: string[] = ['#version = #version + :one', '#updatedAt = :updatedAt'];
+  const updates: string[] = ['#revision = #version + :one', '#version = #version + :one', '#updatedAt = :updatedAt'];
   const updatableKeys: readonly MappingUpdateField[] = [
     'name',
     'sourceSchemaId',
@@ -108,6 +117,7 @@ function buildMappingUpdateExpression(
     'ruleCount',
     'coverage',
     'configS3Key',
+    'configHash',
   ];
 
   for (const key of updatableKeys) {
@@ -137,11 +147,15 @@ export async function create(input: MappingCreateInput): Promise<MappingItem> {
   const sourceSchemaId = input.config.sourceSchemaRef?.schemaId ?? input.sourceSchemaId;
   const targetSchemaId = input.config.targetSchemaRef?.schemaId ?? input.targetSchemaId;
   const ruleCount = input.ruleCount ?? input.config.rules.length;
+  const configHash = await computeConfigHash(input.config);
   const item: MappingItem = {
     mappingId,
     projectId: input.projectId,
     name: input.name,
+    revision: 1,
     version: 1,
+    latestVersion: null,
+    configHash,
     sourceSchemaId,
     targetSchemaId,
     status: input.status ?? inferStatus(input.config),
@@ -203,11 +217,19 @@ export async function update(
   }
 
   if (config) {
-    const nextVersion = existing.version + 1;
+    const currentRevision = existing.revision ?? existing.version ?? 0;
+    const nextRevision = currentRevision + 1;
     const nextName = fields.name ?? existing.name;
     const nextProjectId = existing.projectId;
-    const payload = createConfigPayload(config, mappingId, nextProjectId, nextName, nextVersion);
+    const payload = createConfigPayload(mapRevisionToConfigVersion(config, nextRevision), mappingId, nextProjectId, nextName, nextRevision);
     await putMappingConfig(existing.configS3Key, payload);
+
+    if (fields.configHash === undefined) {
+      fields = {
+        ...fields,
+        configHash: await computeConfigHash(config),
+      };
+    }
   }
 
   const expression = buildMappingUpdateExpression(fields);

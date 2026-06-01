@@ -10,6 +10,31 @@ import { useAdapter } from '@/lib/api';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
+// Draft types
+// ---------------------------------------------------------------------------
+
+/**
+ * State of any autosaved local draft found in localStorage on editor load.
+ *
+ * - `none` — no draft was found (or it was already accepted/discarded)
+ * - `same-revision` — draft was saved against the same revision the server currently has;
+ *   prompt "Restore draft" / "Discard draft"
+ * - `stale-revision` — draft was saved against an older revision; server has newer changes;
+ *   prompt with context per FS-063 Q5
+ */
+export type DraftRestoreState =
+  | { status: 'none' }
+  | { status: 'same-revision'; draft: MappingConfig }
+  | { status: 'stale-revision'; draft: MappingConfig; serverRevision: number };
+
+/** Shape stored in localStorage under `keyra:draft:{mappingId}` */
+interface StoredDraft {
+  config: MappingConfig;
+  baseRevision: number;
+  savedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -87,8 +112,23 @@ export interface MappingEditorActions {
    */
   applyRule: (targetPath: string, expression: string) => void;
 
-  /** Persist current state to adapter */
-  save: () => void;
+  /** Persist current state to adapter. Returns noChange=true when nothing was saved. */
+  save: () => Promise<{ noChange: boolean } | undefined>;
+  /**
+   * Create a new version milestone from the latest revision.
+   * If there are unsaved changes, saves first (implicit revision), then creates the version.
+   * Shows success toast "Version {N} created from Revision {R}".
+   */
+  createVersion: () => Promise<void>;
+  /**
+   * Accept the local draft found on load: replace editor state with the draft content.
+   * Clears the draft restore prompt. Does not auto-save.
+   */
+  acceptDraftRestore: () => void;
+  /**
+   * Discard the local draft found on load: remove it from localStorage and clear the prompt.
+   */
+  discardDraftRestore: () => void;
   /** Retry a failed load */
   retry: () => void;
   /**
@@ -142,6 +182,31 @@ export interface UseMappingEditorResult {
   saveStatus: SaveStatus;
   /** Whether there are unsaved changes (rules differ from last save, or draftRules non-empty) */
   hasUnsavedChanges: boolean;
+  /**
+   * Whether saving would create a new revision (i.e. there are changes to persist).
+   * False when the editor state matches the last saved revision — Save button should be disabled.
+   */
+  canSave: boolean;
+  /**
+   * The current server revision number for this mapping.
+   * Updated after each successful save.
+   */
+  currentRevision: number;
+  /**
+   * The latest version (milestone) number for this mapping, or null if no version has been created.
+   * Updated after a successful createVersion() call.
+   */
+  currentVersion: number | null;
+  /**
+   * Whether there is a local autosaved draft in localStorage for this mapping.
+   * True from when autosave writes a draft until the draft is cleared (on save or discard).
+   */
+  hasDraft: boolean;
+  /**
+   * State of any local draft found in localStorage when the editor loaded.
+   * Use this to render a restore/discard prompt.
+   */
+  draftRestoreState: DraftRestoreState;
   /**
    * Number of fields with draft changes that differ from their saved state.
    * Resets to 0 on successful save.
@@ -327,6 +392,15 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   // Keys: target paths, Values: draft DSL expressions (empty = delete on save)
   const [draftRules, setDraftRules] = useState<Map<string, string>>(new Map());
 
+  // FS-063 revision / version tracking
+  const [currentRevision, setCurrentRevision] = useState(0);
+  const [currentVersion, setCurrentVersion] = useState<number | null>(null);
+  const [hasDraft, setHasDraft] = useState(false);
+  const [draftRestoreState, setDraftRestoreState] = useState<DraftRestoreState>({ status: 'none' });
+
+  // localStorage key helpers
+  const draftKey = `keyra:draft:${mappingId}`;
+
   // Save state
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -360,8 +434,34 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       setConfigOptions(mappingConfig.config);
       setLastSavedConfigOptions(mappingConfig.config);
       setVersion(mappingConfig.version);
+      setCurrentRevision(mappingConfig.version);
       // Clear any stale drafts on reload
       setDraftRules(new Map());
+
+      // Check for a local autosaved draft (FS-063 Q4/Q5)
+      try {
+        const storedDraftRaw = localStorage.getItem(`keyra:draft:${mappingId}`);
+        if (storedDraftRaw) {
+          const stored = JSON.parse(storedDraftRaw) as StoredDraft;
+          setHasDraft(true);
+          if (stored.baseRevision >= mappingConfig.version) {
+            setDraftRestoreState({ status: 'same-revision', draft: stored.config });
+          } else {
+            setDraftRestoreState({
+              status: 'stale-revision',
+              draft: stored.config,
+              serverRevision: mappingConfig.version,
+            });
+          }
+        } else {
+          setHasDraft(false);
+          setDraftRestoreState({ status: 'none' });
+        }
+      } catch {
+        // If draft parsing fails, ignore silently
+        setHasDraft(false);
+        setDraftRestoreState({ status: 'none' });
+      }
 
       // Load schemas in parallel (graceful failure per AE-10)
       // Explicitly skip getSchema() when schemaRef is undefined (schema-optional mappings)
@@ -470,6 +570,35 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   }, [unsavedChangeCount, rules, lastSavedRules, configOptions, lastSavedConfigOptions]);
 
   // ---------------------------------------------------------------------------
+  // Autosave draft to localStorage (FS-063 AE-06)
+  // Debounce 5 s after any change; clears on successful save.
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (loadState !== 'loaded' || !hasUnsavedChanges || !config) return;
+
+    const timer = setTimeout(() => {
+      const effectiveRules =
+        draftRules.size > 0 ? mergeDraftsIntoRules(rules, draftRules) : [...rules];
+      const draftConfig: MappingConfig = { ...config, rules: effectiveRules, config: configOptions };
+      const stored: StoredDraft = {
+        config: draftConfig,
+        baseRevision: currentRevision,
+        savedAt: new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem(draftKey, JSON.stringify(stored));
+        setHasDraft(true);
+      } catch {
+        // localStorage full or unavailable — ignore silently
+      }
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude config from dep list; trigger on rule/option changes
+  }, [rules, draftRules, configOptions, hasUnsavedChanges, loadState, currentRevision, draftKey]);
+
+  // ---------------------------------------------------------------------------
   // Save status derivation
   // ---------------------------------------------------------------------------
 
@@ -505,8 +634,8 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
   const saveRef = useRef<() => void>(() => {});
 
-  const save = useCallback(async () => {
-    if (!config || saveInProgressRef.current || !hasUnsavedChanges) return;
+  const save = useCallback(async (): Promise<{ noChange: boolean } | undefined> => {
+    if (!config || saveInProgressRef.current || !hasUnsavedChanges) return undefined;
 
     saveInProgressRef.current = true;
     setSaveState('saving');
@@ -517,10 +646,11 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       config,
       rules,
       version,
+      currentRevision,
       draftRules,
     };
 
-    const newVersion = version + 1;
+    const optimisticRevision = currentRevision + 1;
 
     // Merge draftRules into the current rules array before saving
     const mergedRules = draftRules.size > 0
@@ -529,7 +659,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
     const updatedConfig: MappingConfig = {
       ...config,
-      version: newVersion,
+      version: optimisticRevision,
       rules: mergedRules,
       config: configOptions,
     };
@@ -537,45 +667,63 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     // Optimistically reflect the pending save immediately.
     setConfig(updatedConfig);
     setRules(mergedRules);
-    setVersion(newVersion);
+    setVersion(optimisticRevision);
+    setCurrentRevision(optimisticRevision);
 
     try {
-      await adapter.updateMapping(mappingId, updatedConfig);
-      if (!mountedRef.current) return;
+      const saveResult = await adapter.saveMapping(mappingId, updatedConfig);
+      if (!mountedRef.current) return undefined;
 
+      const finalRevision = saveResult.revision;
+      setCurrentRevision(finalRevision);
+      setVersion(finalRevision);
       setLastSavedRules(mergedRules);
       setLastSavedConfigOptions(configOptions);
       setSaveState('saved');
       // Clear all drafts — they've been committed to saved rules
       setDraftRules(new Map());
+      // Clear localStorage draft
+      try {
+        localStorage.removeItem(draftKey);
+        setHasDraft(false);
+      } catch {
+        // ignore
+      }
 
-      // Fire-and-forget version snapshot (AE-01)
-      const versionEntry: MappingVersionEntry = {
-        version: newVersion,
-        savedAt: new Date().toISOString(),
-        savedBy: 'You',
-        ruleCount: updatedConfig.rules.length,
-        config: updatedConfig,
-      };
-      adapter.saveMappingVersion(mappingId, versionEntry).catch((err) => {
-        console.warn('Failed to save version history entry:', err);
-      });
+      if (!saveResult.noChange) {
+        // Fire-and-forget version snapshot (backward compat — AE-01)
+        const versionEntry: MappingVersionEntry = {
+          version: finalRevision,
+          savedAt: new Date().toISOString(),
+          savedBy: 'You',
+          ruleCount: updatedConfig.rules.length,
+          config: updatedConfig,
+        };
+        adapter.saveMappingVersion(mappingId, versionEntry).catch((err) => {
+          console.warn('Failed to save version history entry:', err);
+        });
+      }
+
+      return { noChange: saveResult.noChange };
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return undefined;
 
       // Rollback optimistic state to exact pre-save snapshot.
       setConfig(snapshot.config);
       setRules(snapshot.rules);
       setVersion(snapshot.version);
+      setCurrentRevision(snapshot.currentRevision);
       // Preserve in-session draft work on failure.
       setDraftRules(snapshot.draftRules);
 
       setSaveError(err instanceof Error ? err.message : 'Save failed');
       setSaveState('error');
+
+      return undefined;
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId]);
+  }, [config, version, currentRevision, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId, draftKey]);
 
   // Keep ref up to date for keyboard handler
   useEffect(() => {
@@ -595,6 +743,55 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // createVersion (FS-063 AE-03, AE-04)
+  // ---------------------------------------------------------------------------
+
+  const createVersion = useCallback(async (): Promise<void> => {
+    if (!config) return;
+
+    // Implicit save if unsaved changes exist (AE-04)
+    if (hasUnsavedChanges) {
+      const saveResult = await save();
+      if (!mountedRef.current) return;
+      // If save didn't return a result (i.e. it failed or was a no-op with no changes), abort
+      if (saveResult === undefined) return;
+    }
+
+    try {
+      const versionResult = await adapter.createVersion(mappingId);
+      if (!mountedRef.current) return;
+      setCurrentVersion(versionResult.version);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      console.warn('Failed to create version:', err);
+    }
+  }, [config, hasUnsavedChanges, save, adapter, mappingId]);
+
+  // ---------------------------------------------------------------------------
+  // Draft restore actions (FS-063 Q4/Q5)
+  // ---------------------------------------------------------------------------
+
+  const acceptDraftRestore = useCallback(() => {
+    if (draftRestoreState.status === 'none') return;
+    const { draft } = draftRestoreState;
+    setRules(draft.rules);
+    setConfigOptions(draft.config ?? {});
+    setDraftRestoreState({ status: 'none' });
+    setSaveState('idle');
+  }, [draftRestoreState]);
+
+  const discardDraftRestore = useCallback(() => {
+    try {
+      localStorage.removeItem(draftKey);
+      setHasDraft(false);
+    } catch {
+      // ignore
+    }
+    setDraftRestoreState({ status: 'none' });
+  }, [draftKey]);
 
   // ---------------------------------------------------------------------------
   // Actions — rule mutations
@@ -702,9 +899,16 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       setConfigOptions(fullConfig.config);
       setLastSavedConfigOptions(fullConfig.config);
       setVersion(newVersion);
+      setCurrentRevision(newVersion);
       setSaveState('saved');
       // Clear drafts — restore replaces all state
       setDraftRules(new Map());
+      try {
+        localStorage.removeItem(draftKey);
+        setHasDraft(false);
+      } catch {
+        // ignore
+      }
 
       // Fire-and-forget version snapshot
       const versionEntry: MappingVersionEntry = {
@@ -873,6 +1077,9 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       getUnsavedChangeSummary,
       applyRule,
       save,
+      createVersion,
+      acceptDraftRestore,
+      discardDraftRestore,
       retry,
       canNavigateAway,
     }),
@@ -880,7 +1087,8 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       addRule, updateRule, deleteRule, deleteRuleByTarget, reorderRules,
       bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore,
       updateDraft, commitDraft, revertDraft, revertAllDrafts, getDraftExpression,
-      getUnsavedChangeSummary, applyRule, save, retry, canNavigateAway,
+      getUnsavedChangeSummary, applyRule, save, createVersion, acceptDraftRestore,
+      discardDraftRestore, retry, canNavigateAway,
     ],
   );
 
@@ -897,6 +1105,8 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     loadError,
     mappingName,
     version,
+    currentRevision,
+    currentVersion,
     sourceSchemaName,
     targetSchemaName,
     rules,
@@ -910,6 +1120,9 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     schemasLoaded,
     saveStatus,
     hasUnsavedChanges,
+    canSave: hasUnsavedChanges,
+    hasDraft,
+    draftRestoreState,
     unsavedChangeCount,
     unsavedRuleCount: unsavedChangeCount, // deprecated alias
     saveError,

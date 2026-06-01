@@ -11,6 +11,8 @@ import type {
   CreateProjectInput,
   CreateSchemaInput,
   MappingConfig,
+  MappingSaveResult,
+  MappingVersion,
   MappingVersionEntry,
   UpdateProjectInput,
   UpdateSchemaInput,
@@ -152,6 +154,32 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('saveMapping maps to PUT /mappings/:id with expectedRevision', async () => {
+    const config: MappingConfig = {
+      id: 'm-1',
+      projectId: 'p-1',
+      name: 'Map Save',
+      version: 2,
+      engineVersion: '2.0.0',
+      config: {},
+      rules: [],
+    };
+    const saveResult: MappingSaveResult = { revision: 3, noChange: false };
+    vi.mocked(httpRequest).mockResolvedValueOnce(saveResult);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.saveMapping('m-1', config)).resolves.toEqual(saveResult);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1',
+      method: 'PUT',
+      body: {
+        ...config,
+        expectedRevision: 2,
+      },
+    });
+  });
+
   it('deleteMapping maps to DELETE /mappings/:id and handles void', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
     const adapter = new HttpAdapter(API_URL);
@@ -201,6 +229,39 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('listVersions maps to GET /mappings/:id/versions with milestone shape', async () => {
+    const versions: MappingVersion[] = [
+      { version: 2, revisionNumber: 5, createdAt: '2026-06-01T00:00:00.000Z', createdBy: 'system' },
+    ];
+    vi.mocked(httpRequest).mockResolvedValueOnce(versions);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listVersions('m-1')).resolves.toEqual(versions);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/versions',
+      method: 'GET',
+    });
+  });
+
+  it('getVersion maps to GET /mappings/:id/versions/:version with milestone shape', async () => {
+    const version: MappingVersion = {
+      version: 2,
+      revisionNumber: 5,
+      createdAt: '2026-06-01T00:00:00.000Z',
+      createdBy: 'system',
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(version);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getVersion('m-1', 2)).resolves.toEqual(version);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/versions/2',
+      method: 'GET',
+    });
+  });
+
   it('saveMappingVersion maps to POST /mappings/:id/versions and handles void', async () => {
     const entry: MappingVersionEntry = {
       version: 3,
@@ -223,7 +284,50 @@ describe('HttpAdapter (CRUD)', () => {
       baseUrl: API_URL,
       path: '/mappings/m-1/versions',
       method: 'POST',
-      body: entry,
+      body: {},
+    });
+  });
+
+  it('listRevisions maps to GET /mappings/:id/revisions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([{ revision: 2 }]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.listRevisions('m-1')).resolves.toEqual([{ revision: 2 }]);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/revisions',
+      method: 'GET',
+    });
+  });
+
+  it('getRevision maps to GET /mappings/:id/revisions/:revision', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ revision: 2, mappingId: 'm-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getRevision('m-1', 2)).resolves.toMatchObject({ revision: 2, mappingId: 'm-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/revisions/2',
+      method: 'GET',
+    });
+  });
+
+  it('createVersion maps to POST /mappings/:id/versions', async () => {
+    const version: MappingVersion = {
+      version: 3,
+      revisionNumber: 5,
+      createdAt: '2026-06-01T00:00:00.000Z',
+      createdBy: 'system',
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(version);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.createVersion('m-1')).resolves.toEqual(version);
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/versions',
+      method: 'POST',
+      body: {},
     });
   });
 

@@ -46,6 +46,9 @@ function makeMappingItem(overrides: Partial<MappingItem> = {}): MappingItem {
     projectId: 'project-1',
     name: 'Mapping 1',
     version: 1,
+    revision: 1,
+    latestVersion: null,
+    configHash: 'hash-1',
     sourceSchemaId: 'schema-source',
     targetSchemaId: 'schema-target',
     status: 'draft',
@@ -74,7 +77,7 @@ describe('persistence mappings', () => {
     vi.restoreAllMocks();
   });
 
-  it('create stores config in S3 and metadata in DynamoDB with version 1', async () => {
+  it('create stores config in S3 and metadata in DynamoDB with revision/version 1', async () => {
     randomUuidMock.mockReturnValue('mapping-created-1');
     s3SendMock.mockResolvedValue({});
     dynamoSendMock.mockResolvedValue({});
@@ -88,6 +91,9 @@ describe('persistence mappings', () => {
 
     expect(result.mappingId).toBe('mapping-created-1');
     expect(result.version).toBe(1);
+    expect(result.revision).toBe(1);
+    expect(result.latestVersion).toBeNull();
+    expect(result.configHash).toMatch(/^[a-f0-9]{64}$/);
     expect(result.configS3Key).toBe('mappings/mapping-created-1/config.json');
 
     expect(s3SendMock).toHaveBeenCalledTimes(1);
@@ -147,9 +153,9 @@ describe('persistence mappings', () => {
     });
   });
 
-  it('update increments version and writes S3 only when config is provided', async () => {
-    const existing = makeMappingItem({ version: 3, configS3Key: 'mappings/mapping-1/config.json' });
-    const updated = makeMappingItem({ version: 4, name: 'Updated', updatedAt: '2026-05-15T01:00:00.000Z' });
+  it('update increments revision/version and writes S3 only when config is provided', async () => {
+    const existing = makeMappingItem({ version: 3, revision: 3, configS3Key: 'mappings/mapping-1/config.json' });
+    const updated = makeMappingItem({ version: 4, revision: 4, name: 'Updated', updatedAt: '2026-05-15T01:00:00.000Z' });
     const mappings = await importMappingsModule();
 
     dynamoSendMock.mockResolvedValueOnce({ Item: existing });
@@ -168,6 +174,7 @@ describe('persistence mappings', () => {
     );
 
     expect(withConfig.version).toBe(4);
+    expect(withConfig.revision).toBe(4);
     expect(s3SendMock).toHaveBeenCalledTimes(1);
 
     const updateCommand = dynamoSendMock.mock.calls[1]?.[0] as {
@@ -176,6 +183,7 @@ describe('persistence mappings', () => {
         ExpressionAttributeValues: Record<string, unknown>;
       };
     };
+    expect(updateCommand.input.UpdateExpression).toContain('#revision = #version + :one');
     expect(updateCommand.input.UpdateExpression).toContain('#version = #version + :one');
     expect(updateCommand.input.ExpressionAttributeValues[':one']).toBe(1);
 
@@ -240,10 +248,12 @@ describe('persistence mappings', () => {
 
     expect(result.mappingId).toBe('mapping-duplicated-1');
     expect(result.version).toBe(1);
+    expect(result.revision).toBe(1);
     expect(result.name).toBe('Copy Name');
 
     const putCommand = dynamoSendMock.mock.calls[1]?.[0] as { input: { Item: MappingItem } };
     expect(putCommand.input.Item.version).toBe(1);
+    expect(putCommand.input.Item.revision).toBe(1);
     expect(putCommand.input.Item.name).toBe('Copy Name');
 
     const putObjectCommand = s3SendMock.mock.calls[1]?.[0] as { input: { Body: string; Key: string } };

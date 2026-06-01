@@ -2,6 +2,7 @@ export {
   BUCKET_NAME,
   TABLE_NAMES,
   mappingConfigKey,
+  mappingRevisionKey,
   mappingVersionKey,
   schemaContentKey,
   schemaOriginalKey,
@@ -17,12 +18,20 @@ export {
   update as updateMapping,
 } from './mappings.js';
 export {
+  create as createMappingVersion,
   get as getMappingVersion,
   getConfig as getMappingVersionConfig,
   list as listMappingVersions,
   mappingVersions,
   save as saveMappingVersion,
 } from './mapping-versions.js';
+export {
+  get as getMappingRevision,
+  getConfig as getMappingRevisionConfig,
+  list as listMappingRevisions,
+  mappingRevisions,
+  save as saveMappingRevision,
+} from './mapping-revisions.js';
 export {
   create as createSchemaMetadata,
   delete as deleteSchemaMetadata,
@@ -54,6 +63,7 @@ export { create as createProject, delete as deleteProject, get as getProject, li
 export type {
   MappingConfig,
   MappingConfigOptions,
+  MappingRevisionItem,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaMetadataInput,
@@ -81,3 +91,4 @@ export type {
   UploadSourceInfo,
 } from './types.js';
 export { toMappingMetadata, toProjectDetail, toProjectMetadata, toSchemaMetadata } from './types.js';
+export { computeConfigHash } from './hash.js';

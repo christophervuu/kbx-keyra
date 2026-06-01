@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const validateMock = vi.hoisted(() => vi.fn());
 
@@ -7,6 +7,7 @@ const sharedMocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
   requireFields: vi.fn(),
   getItem: vi.fn(),
+  query: vi.fn(),
   putObject: vi.fn(),
   updateItem: vi.fn(),
   conflict: vi.fn(),
@@ -41,15 +42,22 @@ function getEnvStore(): EnvStore {
 describe('update-mapping handler', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.stubGlobal('crypto', {
+      subtle: {
+        digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)),
+      },
+    });
+
     const env = getEnvStore();
     env.MAPPINGS_TABLE = 'Mappings';
+    env.MAPPING_REVISIONS_TABLE = 'MappingRevisions';
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('map-1');
     sharedMocks.parseBody.mockReset().mockReturnValue({
       projectId: 'proj-1',
       name: 'Invoice Map Updated',
-      version: 1,
+      expectedRevision: 1,
       engineVersion: '1.0.0',
       config: {},
       rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
@@ -60,6 +68,7 @@ describe('update-mapping handler', () => {
       projectId: 'proj-1',
       name: 'Invoice Map',
       version: 1,
+      revision: 1,
       status: 'draft',
       ruleCount: 0,
       coverage: 0,
@@ -68,6 +77,7 @@ describe('update-mapping handler', () => {
       updatedAt: '2026-05-15T00:00:00.000Z',
     });
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
+    sharedMocks.query.mockReset().mockResolvedValue([]);
     sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.conflict.mockReset().mockImplementation((message) => ({ code: 'CONFLICT', message, statusCode: 409, retryable: false }));
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
@@ -77,13 +87,18 @@ describe('update-mapping handler', () => {
     validateMock.mockReset().mockReturnValue({ diagnostics: [], coverage: { percentage: 50 } });
   });
 
-  it('matching version returns 200 with incremented version and recomputed status', async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('matching expectedRevision returns 200 with incremented revision and noChange=false', async () => {
     const { handler } = await importHandler();
     const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as { version: number; ruleCount: number; status: string; coverage: number };
-    expect(parsed.version).toBe(2);
+    const parsed = JSON.parse(result.body) as { revision: number; noChange: boolean; ruleCount: number; status: string; coverage: number };
+    expect(parsed.revision).toBe(2);
+    expect(parsed.noChange).toBe(false);
     expect(parsed.ruleCount).toBe(1);
     expect(parsed.status).toBe('ready');
     expect(parsed.coverage).toBe(50);
@@ -98,14 +113,41 @@ describe('update-mapping handler', () => {
     expect(result.statusCode).toBe(404);
   });
 
-  it('stale version returns 409 conflict', async () => {
-    sharedMocks.parseBody.mockReturnValue({ projectId: 'proj-1', name: 'Invoice Map Updated', version: 0, rules: [] });
+  it('stale expectedRevision returns 409 conflict', async () => {
+    sharedMocks.parseBody.mockReturnValue({ projectId: 'proj-1', name: 'Invoice Map Updated', expectedRevision: 0, rules: [] });
 
     const { handler } = await importHandler();
     const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
 
     expect(result.statusCode).toBe(409);
     const parsed = JSON.parse(result.body) as { error: { message: string } };
-    expect(parsed.error.message).toContain('Version mismatch: expected 1, got 0. Reload and retry.');
+    expect(parsed.error.message).toContain('Revision mismatch: expected 1, got 0. Reload and retry.');
+  });
+
+  it('unchanged config hash returns noChange=true without writes', async () => {
+    sharedMocks.query.mockResolvedValueOnce([
+      {
+        mappingId: 'map-1',
+        revision: 1,
+        configHash: '0'.repeat(64),
+      },
+    ]);
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      config: {},
+      rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    const parsed = JSON.parse(result.body) as { noChange: boolean; revision: number };
+    expect(parsed.noChange).toBe(true);
+    expect(parsed.revision).toBe(1);
+    expect(sharedMocks.putObject).not.toHaveBeenCalled();
   });
 });
