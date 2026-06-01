@@ -30,7 +30,7 @@ Conditions:
     - prod
 Globals:
   Function:
-    Runtime: nodejs20.x
+    Runtime: nodejs24.x
     MemorySize: 256
     Timeout: 29
     Environment:
@@ -71,8 +71,7 @@ Resources:
       - Retain
       - Delete
     Properties:
-      TableName:
-        Fn::Sub: ${Stage}-keyra-projects
+      TableName: integrations-keyra-projects
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
       - AttributeName: projectId
@@ -93,8 +92,7 @@ Resources:
       - Retain
       - Delete
     Properties:
-      TableName:
-        Fn::Sub: ${Stage}-keyra-mappings
+      TableName: integrations-keyra-mappings
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
       - AttributeName: mappingId
@@ -124,8 +122,7 @@ Resources:
       - Retain
       - Delete
     Properties:
-      TableName:
-        Fn::Sub: ${Stage}-keyra-schema-metadata
+      TableName: integrations-keyra-schema-metadata
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
       - AttributeName: schemaId
@@ -146,8 +143,7 @@ Resources:
       - Retain
       - Delete
     Properties:
-      TableName:
-        Fn::Sub: ${Stage}-keyra-schema-nodes
+      TableName: integrations-keyra-schema-nodes
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
       - AttributeName: schemaId
@@ -195,8 +191,7 @@ Resources:
       - Retain
       - Delete
     Properties:
-      TableName:
-        Fn::Sub: ${Stage}-keyra-mapping-versions
+      TableName: integrations-keyra-mapping-versions
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
       - AttributeName: mappingId
@@ -213,8 +208,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      BucketName:
-        Fn::Sub: ${Org}-keyra-${Stage}-${AWS::AccountId}
+      BucketName: integrations-keyra
       CorsConfiguration:
         CorsRules:
         - AllowedOrigins:
@@ -255,6 +249,7 @@ Resources:
         Target: node20
       SamResourceId: CreateProjectFunction
     Properties:
+      FunctionName: kbx-keyra-createproject
       CodeUri: CreateProjectFunction
       Handler: create-project.handler
       Policies:
@@ -284,6 +279,7 @@ Resources:
         Target: node20
       SamResourceId: ListProjectsFunction
     Properties:
+      FunctionName: kbx-keyra-listprojects
       CodeUri: ListProjectsFunction
       Handler: list-projects.handler
       Policies:
@@ -316,6 +312,7 @@ Resources:
         Target: node20
       SamResourceId: GetProjectFunction
     Properties:
+      FunctionName: kbx-keyra-getproject
       CodeUri: GetProjectFunction
       Handler: get-project.handler
       MemorySize: 512
@@ -352,6 +349,7 @@ Resources:
         Target: node20
       SamResourceId: UpdateProjectFunction
     Properties:
+      FunctionName: kbx-keyra-updateproject
       CodeUri: UpdateProjectFunction
       Handler: update-project.handler
       Policies:
@@ -381,6 +379,7 @@ Resources:
         Target: node20
       SamResourceId: DeleteProjectFunction
     Properties:
+      FunctionName: kbx-keyra-deleteproject
       CodeUri: DeleteProjectFunction
       Handler: delete-project.handler
       Policies:
@@ -413,6 +412,7 @@ Resources:
         Target: node20
       SamResourceId: CreateMappingFunction
     Properties:
+      FunctionName: kbx-keyra-createmapping
       CodeUri: CreateMappingFunction
       Handler: create-mapping.handler
       Policies:
@@ -445,6 +445,7 @@ Resources:
         Target: node20
       SamResourceId: GetMappingFunction
     Properties:
+      FunctionName: kbx-keyra-getmapping
       CodeUri: GetMappingFunction
       Handler: get-mapping.handler
       MemorySize: 512
@@ -478,6 +479,7 @@ Resources:
         Target: node20
       SamResourceId: UpdateMappingFunction
     Properties:
+      FunctionName: kbx-keyra-updatemapping
       CodeUri: UpdateMappingFunction
       Handler: update-mapping.handler
       Policies:
@@ -510,6 +512,7 @@ Resources:
         Target: node20
       SamResourceId: DeleteMappingFunction
     Properties:
+      FunctionName: kbx-keyra-deletemapping
       CodeUri: DeleteMappingFunction
       Handler: delete-mapping.handler
       Policies:
@@ -542,6 +545,7 @@ Resources:
         Target: node20
       SamResourceId: DuplicateMappingFunction
     Properties:
+      FunctionName: kbx-keyra-duplicatemapping
       CodeUri: DuplicateMappingFunction
       Handler: duplicate-mapping.handler
       Policies:
@@ -574,6 +578,7 @@ Resources:
         Target: node20
       SamResourceId: ListMappingsFunction
     Properties:
+      FunctionName: kbx-keyra-listmappings
       CodeUri: ListMappingsFunction
       Handler: list-mappings.handler
       Policies:
@@ -586,7 +591,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /projects/{projectId}/mappings
+            Path: /projects/{id}/mappings
             Method: get
       Environment:
         Variables:
@@ -603,6 +608,7 @@ Resources:
         Target: node20
       SamResourceId: ListVersionsFunction
     Properties:
+      FunctionName: kbx-keyra-listversions
       CodeUri: ListVersionsFunction
       Handler: list-versions.handler
       Policies:
@@ -615,7 +621,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/versions
+            Path: /mappings/{id}/versions
             Method: get
       Environment:
         Variables:
@@ -632,6 +638,7 @@ Resources:
         Target: node20
       SamResourceId: GetVersionFunction
     Properties:
+      FunctionName: kbx-keyra-getversion
       CodeUri: GetVersionFunction
       Handler: get-version.handler
       Policies:
@@ -647,7 +654,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/versions/{version}
+            Path: /mappings/{id}/versions/{version}
             Method: get
       Environment:
         Variables:
@@ -664,6 +671,7 @@ Resources:
         Target: node20
       SamResourceId: SaveVersionFunction
     Properties:
+      FunctionName: kbx-keyra-saveversion
       CodeUri: SaveVersionFunction
       Handler: save-version.handler
       Policies:
@@ -682,7 +690,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/versions
+            Path: /mappings/{id}/versions
             Method: post
       Environment:
         Variables:
@@ -699,6 +707,7 @@ Resources:
         Target: node20
       SamResourceId: CreateSchemaFunction
     Properties:
+      FunctionName: kbx-keyra-createschema
       CodeUri: CreateSchemaFunction
       Handler: create-schema.handler
       MemorySize: 512
@@ -737,6 +746,7 @@ Resources:
         Target: node20
       SamResourceId: ListSchemasFunction
     Properties:
+      FunctionName: kbx-keyra-listschemas
       CodeUri: ListSchemasFunction
       Handler: list-schemas.handler
       Policies:
@@ -766,6 +776,7 @@ Resources:
         Target: node20
       SamResourceId: GetSchemaFunction
     Properties:
+      FunctionName: kbx-keyra-getschema
       CodeUri: GetSchemaFunction
       Handler: get-schema.handler
       Policies:
@@ -798,6 +809,7 @@ Resources:
         Target: node20
       SamResourceId: DeleteSchemaFunction
     Properties:
+      FunctionName: kbx-keyra-deleteschema
       CodeUri: DeleteSchemaFunction
       Handler: delete-schema.handler
       Policies:
@@ -836,6 +848,7 @@ Resources:
         Target: node20
       SamResourceId: QuerySchemaNodesFunction
     Properties:
+      FunctionName: kbx-keyra-queryschemanodes
       CodeUri: QuerySchemaNodesFunction
       Handler: query-schema-nodes.handler
       MemorySize: 512
@@ -876,6 +889,7 @@ Resources:
         Target: node20
       SamResourceId: IngestSchemaFunction
     Properties:
+      FunctionName: kbx-keyra-ingestschema
       CodeUri: IngestSchemaFunction
       Handler: ingest-schema.handler
       MemorySize: 512
@@ -901,7 +915,7 @@ Resources:
           Action:
           - states:StartExecution
           Resource:
-            Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${Stage}-keyra-schema-ingestion
+            Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:kbx-keyra-schema-ingestion
         - Effect: Allow
           Action:
           - aoss:APIAccessAll
@@ -926,6 +940,7 @@ Resources:
         Target: node20
       SamResourceId: ProcessBatchFunction
     Properties:
+      FunctionName: kbx-keyra-processbatch
       CodeUri: ProcessBatchFunction
       Handler: process-batch.handler
       MemorySize: 512
@@ -958,6 +973,7 @@ Resources:
         Target: node20
       SamResourceId: OrchestrationTasksFunction
     Properties:
+      FunctionName: kbx-keyra-orchestrationtasks
       CodeUri: OrchestrationTasksFunction
       Handler: orchestration-tasks.handler
       MemorySize: 512
@@ -979,41 +995,35 @@ Resources:
   SchemaNodesEncryptionPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
-      Name:
-        Fn::Sub: ${Stage}-keyra-schema-nodes-encryption
+      Name: kbx-keyra-sn-enc
       Type: encryption
       Description: Encryption policy for schema nodes collection.
-      Policy:
-        Fn::Sub: '{"Rules":[{"ResourceType":"collection","Resource":["collection/${Stage}-keyra-schema-nodes"]}],"AWSOwnedKey":true}'
+      Policy: '{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"]}],"AWSOwnedKey":true}'
   SchemaNodesNetworkPolicy:
     Type: AWS::OpenSearchServerless::SecurityPolicy
     Properties:
-      Name:
-        Fn::Sub: ${Stage}-keyra-schema-nodes-network
+      Name: kbx-keyra-sn-net
       Type: network
       Description: Network policy allowing public access for Phase 1.
-      Policy:
-        Fn::Sub: '[{"Rules":[{"ResourceType":"collection","Resource":["collection/${Stage}-keyra-schema-nodes"]},{"ResourceType":"dashboard","Resource":["collection/${Stage}-keyra-schema-nodes"]}],"AllowFromPublic":true}]'
+      Policy: '[{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"]},{"ResourceType":"dashboard","Resource":["collection/integrations-keyra-schema-nodes"]}],"AllowFromPublic":true}]'
   SchemaNodesCollection:
     Type: AWS::OpenSearchServerless::Collection
     DependsOn:
     - SchemaNodesEncryptionPolicy
     - SchemaNodesNetworkPolicy
     Properties:
-      Name:
-        Fn::Sub: ${Stage}-keyra-schema-nodes
+      Name: integrations-keyra-schema-nodes
       Type: SEARCH
       Description: Schema node index for keyword and structural queries.
   SchemaNodesAccessPolicy:
     Type: AWS::OpenSearchServerless::AccessPolicy
     Properties:
-      Name:
-        Fn::Sub: ${Stage}-keyra-schema-nodes-access
+      Name: kbx-keyra-sn-acc
       Type: data
       Description: Data access policy for schema query/index Lambda roles.
       Policy:
         Fn::Sub:
-        - '[{"Rules":[{"ResourceType":"collection","Resource":["collection/${Stage}-keyra-schema-nodes"],"Permission":["aoss:CreateCollectionItems","aoss:UpdateCollectionItems","aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/${Stage}-keyra-schema-nodes/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument","aoss:DeleteDocument"]}],"Principal":["${QuerySchemaNodesFunctionRoleArn}","${IngestSchemaFunctionRoleArn}","${ProcessBatchFunctionRoleArn}","${OrchestrationTasksFunctionRoleArn}"]}]'
+        - '[{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"],"Permission":["aoss:CreateCollectionItems","aoss:UpdateCollectionItems","aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/integrations-keyra-schema-nodes/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument"]}],"Principal":["${QuerySchemaNodesFunctionRoleArn}","${IngestSchemaFunctionRoleArn}","${ProcessBatchFunctionRoleArn}","${OrchestrationTasksFunctionRoleArn}"]}]'
         - QuerySchemaNodesFunctionRoleArn:
             Fn::GetAtt:
             - QuerySchemaNodesFunctionRole
@@ -1033,8 +1043,7 @@ Resources:
   SchemaIngestionStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
-      Name:
-        Fn::Sub: ${Stage}-keyra-schema-ingestion
+      Name: kbx-keyra-schema-ingestion
       DefinitionUri: ../../src/lambda/schema/step-functions/schema-ingestion.asl.json
       DefinitionSubstitutions:
         ProcessBatchFunctionArn:

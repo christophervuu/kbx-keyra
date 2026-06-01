@@ -399,7 +399,7 @@ function generateJsonSchemaNodes(schemaId, raw) {
         fieldName,
         type: inferNodeType(fieldSchema),
         depth,
-        parentPath,
+        ...typeof parentPath === "string" && parentPath !== "" ? { parentPath } : {},
         isArray: isArraySchema(fieldSchema),
         isRequired: required.has(fieldName),
         childCount: childCountFromSchema(fieldSchema),
@@ -416,7 +416,7 @@ function generateJsonSchemaNodes(schemaId, raw) {
     }
   }
   const rootRequired = new Set(Array.isArray(root.required) ? root.required.filter((entry) => typeof entry === "string") : []);
-  visit(root, "", null, 1, rootRequired);
+  visit(root, "", void 0, 1, rootRequired);
   return nodes;
 }
 function generateXsdNodes(schemaId, raw) {
@@ -437,7 +437,6 @@ function generateXsdNodes(schemaId, raw) {
       fieldName,
       type: typeMatch?.[1] ?? "any",
       depth: 1,
-      parentPath: null,
       isArray: false,
       isRequired: false,
       childCount: 0
@@ -510,9 +509,25 @@ async function handler(event) {
       console.log("Schema async ingestion kickoff intended", { schemaId, estimatedFieldCount: estimated });
     }
     return jsonResponse(201, metadata);
-  } catch {
+  } catch (error) {
+    if (error instanceof DynamoServiceError || error instanceof S3ServiceError) {
+      const appError = error.appError;
+      console.error("create-schema downstream service failure", {
+        requestId: appError.requestId,
+        code: appError.code,
+        statusCode: appError.statusCode,
+        retryable: appError.retryable,
+        message: appError.message
+      });
+      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
+    }
     const err = internalError();
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable);
+    console.error("create-schema unexpected failure", {
+      requestId: err.requestId,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: error instanceof Error ? error.message : "Unknown error value"
+    });
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
   }
 }
 // Annotate the CommonJS export names for ESM import in node:

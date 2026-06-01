@@ -184,11 +184,18 @@ async function parseSuccessResponse<T>(response: Response): Promise<T> {
     });
   }
 
-  if (!isSuccessEnvelope<T>(parsed)) {
-    throw malformedResponseError();
+  if (isSuccessEnvelope<T>(parsed)) {
+    return parsed.data;
   }
 
-  return parsed.data;
+  // Phase 1 backend returns plain JSON success payloads (not wrapped in { success, data }).
+  // Accept plain object/array/null responses for compatibility while preserving explicit
+  // handling of success/error envelopes above.
+  if (isPlainJsonSuccessPayload(parsed)) {
+    return parsed as T;
+  }
+
+  throw malformedResponseError();
 }
 
 async function parseErrorResponse(response: Response): Promise<HttpClientError> {
@@ -255,6 +262,27 @@ function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
     value !== null &&
     (value as { success?: unknown }).success === false
   );
+}
+
+function isPlainJsonSuccessPayload(value: unknown): boolean {
+  if (value === null) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return true;
+  }
+
+  if (typeof value === 'object') {
+    // If a payload advertises an envelope marker, require envelope validation instead.
+    if ('success' in (value as Record<string, unknown>)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function getErrorCode(error: ErrorDetails | undefined): string | undefined {

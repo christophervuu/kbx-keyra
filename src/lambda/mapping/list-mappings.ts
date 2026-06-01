@@ -39,7 +39,7 @@ function getMappingsTableOrThrow(): string {
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const projectId = parsePathParam(event, 'projectId');
+  const projectId = parsePathParam(event, 'projectId') ?? parsePathParam(event, 'id');
   if (!projectId) {
     return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: projectId', 400, false);
   }

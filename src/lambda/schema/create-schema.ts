@@ -1,5 +1,7 @@
 import {
+  DynamoServiceError,
   ERROR_CODES,
+  S3ServiceError,
   errorResponse,
   internalError,
   jsonResponse,
@@ -23,7 +25,7 @@ interface SchemaNodeRecord {
   readonly fieldName: string;
   readonly type: string;
   readonly depth: number;
-  readonly parentPath: string | null;
+  readonly parentPath?: string;
   readonly isArray: boolean;
   readonly isRequired: boolean;
   readonly childCount: number;
@@ -230,7 +232,7 @@ function generateJsonSchemaNodes(schemaId: string, raw: string): SchemaNodeRecor
   function visit(
     current: Record<string, unknown>,
     currentPath: string,
-    parentPath: string | null,
+    parentPath: string | undefined,
     depth: number,
     required: ReadonlySet<string>,
   ): void {
@@ -253,7 +255,7 @@ function generateJsonSchemaNodes(schemaId: string, raw: string): SchemaNodeRecor
         fieldName,
         type: inferNodeType(fieldSchema),
         depth,
-        parentPath,
+        ...(typeof parentPath === 'string' && parentPath !== '' ? { parentPath } : {}),
         isArray: isArraySchema(fieldSchema),
         isRequired: required.has(fieldName),
         childCount: childCountFromSchema(fieldSchema),
@@ -276,7 +278,7 @@ function generateJsonSchemaNodes(schemaId: string, raw: string): SchemaNodeRecor
   }
 
   const rootRequired = new Set<string>(Array.isArray(root.required) ? root.required.filter((entry): entry is string => typeof entry === 'string') : []);
-  visit(root, '', null, 1, rootRequired);
+  visit(root, '', undefined, 1, rootRequired);
   return nodes;
 }
 
@@ -300,7 +302,6 @@ function generateXsdNodes(schemaId: string, raw: string): SchemaNodeRecord[] {
       fieldName,
       type: typeMatch?.[1] ?? 'any',
       depth: 1,
-      parentPath: null,
       isArray: false,
       isRequired: false,
       childCount: 0,
@@ -388,8 +389,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     return jsonResponse(201, metadata);
-  } catch {
+  } catch (error) {
+    if (error instanceof DynamoServiceError || error instanceof S3ServiceError) {
+      const appError = error.appError;
+      console.error('create-schema downstream service failure', {
+        requestId: appError.requestId,
+        code: appError.code,
+        statusCode: appError.statusCode,
+        retryable: appError.retryable,
+        message: appError.message,
+      });
+      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
+    }
+
     const err = internalError();
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable);
+    console.error('create-schema unexpected failure', {
+      requestId: err.requestId,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage: error instanceof Error ? error.message : 'Unknown error value',
+    });
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
   }
 }

@@ -77,6 +77,48 @@ describe('httpRequest', () => {
     );
   });
 
+  it('successful GET parses plain object JSON response', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ projectId: 'p-plain', name: 'Plain Project' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await httpRequest<{ projectId: string; name: string }>({
+      baseUrl: 'http://localhost:3001/api/',
+      path: '/projects/p-plain',
+      method: 'GET',
+    });
+
+    expect(result).toEqual({ projectId: 'p-plain', name: 'Plain Project' });
+  });
+
+  it('successful GET parses plain array JSON response', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ projectId: 'p-1' }, { projectId: 'p-2' }]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await httpRequest<Array<{ projectId: string }>>({
+      baseUrl: 'http://localhost:3001/api/',
+      path: '/projects',
+      method: 'GET',
+    });
+
+    expect(result).toEqual([{ projectId: 'p-1' }, { projectId: 'p-2' }]);
+  });
+
   it.each([
     ['POST' as const, '/projects', { name: 'New project' }],
     ['PUT' as const, '/projects/p-1', { name: 'Updated project' }],
@@ -460,7 +502,7 @@ describe('httpRequest', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({ nope: true }), { status: 200 })),
+      vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify('unexpected'), { status: 200 })),
     );
     const malformedError = await httpRequest({
       baseUrl: 'http://localhost:3001/api',
