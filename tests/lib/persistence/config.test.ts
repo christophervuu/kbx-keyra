@@ -18,6 +18,8 @@ const ORIGINAL_ENV = {
   SCHEMA_NODES_TABLE: getEnvStore().SCHEMA_NODES_TABLE,
   MAPPING_REVISIONS_TABLE: getEnvStore().MAPPING_REVISIONS_TABLE,
   MAPPING_VERSIONS_TABLE: getEnvStore().MAPPING_VERSIONS_TABLE,
+  DEPLOYMENTS_TABLE: getEnvStore().DEPLOYMENTS_TABLE,
+  DEPLOYMENT_CURRENT_TABLE: getEnvStore().DEPLOYMENT_CURRENT_TABLE,
   STORAGE_BUCKET: getEnvStore().STORAGE_BUCKET,
 };
 
@@ -48,6 +50,8 @@ describe('persistence config', () => {
     setEnvValue('SCHEMA_NODES_TABLE', ORIGINAL_ENV.SCHEMA_NODES_TABLE);
     setEnvValue('MAPPING_REVISIONS_TABLE', ORIGINAL_ENV.MAPPING_REVISIONS_TABLE);
     setEnvValue('MAPPING_VERSIONS_TABLE', ORIGINAL_ENV.MAPPING_VERSIONS_TABLE);
+    setEnvValue('DEPLOYMENTS_TABLE', ORIGINAL_ENV.DEPLOYMENTS_TABLE);
+    setEnvValue('DEPLOYMENT_CURRENT_TABLE', ORIGINAL_ENV.DEPLOYMENT_CURRENT_TABLE);
     setEnvValue('STORAGE_BUCKET', ORIGINAL_ENV.STORAGE_BUCKET);
   });
 
@@ -59,6 +63,11 @@ describe('persistence config', () => {
     expect(config.mappingConfigKey('mapping-1')).toBe('mappings/mapping-1/config.json');
     expect(config.mappingVersionKey('mapping-1', 12)).toBe('mappings/mapping-1/versions/v12.json');
     expect(config.mappingRevisionKey('mapping-1', 12)).toBe('mappings/mapping-1/revisions/r12.json');
+    expect(config.deploymentSnapshotKey('mapping-1', 'DEV', '2026-06-01T00:00:00.000Z')).toBe(
+      'deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json',
+    );
+    expect(config.deploymentHistorySortKey('QA', '2026-06-01T00:00:00.000Z')).toBe('QA#2026-06-01T00:00:00.000Z');
+    expect(config.deploymentCurrentKey('mapping-1', 'PROD')).toBe('mapping-1#PROD');
   });
 
   it('uses defaults when table and bucket env vars are unset', async () => {
@@ -68,6 +77,8 @@ describe('persistence config', () => {
     setEnvValue('SCHEMA_NODES_TABLE', undefined);
     setEnvValue('MAPPING_REVISIONS_TABLE', undefined);
     setEnvValue('MAPPING_VERSIONS_TABLE', undefined);
+    setEnvValue('DEPLOYMENTS_TABLE', undefined);
+    setEnvValue('DEPLOYMENT_CURRENT_TABLE', undefined);
     setEnvValue('STORAGE_BUCKET', undefined);
     vi.resetModules();
 
@@ -80,6 +91,8 @@ describe('persistence config', () => {
       schemaNodes: 'keyra-schema-nodes',
       mappingRevisions: 'keyra-mapping-revisions',
       mappingVersions: 'keyra-mapping-versions',
+      deployments: 'keyra-deployments',
+      deploymentCurrent: 'keyra-deployment-current',
     });
     expect(config.BUCKET_NAME).toBe('keyra-storage');
   });
@@ -91,6 +104,8 @@ describe('persistence config', () => {
     setEnvValue('SCHEMA_NODES_TABLE', 'schema-nodes-dev');
     setEnvValue('MAPPING_REVISIONS_TABLE', 'mapping-revisions-dev');
     setEnvValue('MAPPING_VERSIONS_TABLE', 'mapping-versions-dev');
+    setEnvValue('DEPLOYMENTS_TABLE', 'deployments-dev');
+    setEnvValue('DEPLOYMENT_CURRENT_TABLE', 'deployment-current-dev');
     setEnvValue('STORAGE_BUCKET', 'storage-dev');
     vi.resetModules();
 
@@ -103,6 +118,8 @@ describe('persistence config', () => {
       schemaNodes: 'schema-nodes-dev',
       mappingRevisions: 'mapping-revisions-dev',
       mappingVersions: 'mapping-versions-dev',
+      deployments: 'deployments-dev',
+      deploymentCurrent: 'deployment-current-dev',
     });
     expect(config.BUCKET_NAME).toBe('storage-dev');
   });

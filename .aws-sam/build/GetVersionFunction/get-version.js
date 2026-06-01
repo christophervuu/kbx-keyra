@@ -34,6 +34,10 @@ var ERROR_CODES = {
   RESOURCE_NOT_FOUND: "RESOURCE_NOT_FOUND",
   CONTENT_UNAVAILABLE: "CONTENT_UNAVAILABLE",
   CONFLICT: "CONFLICT",
+  SOURCE_NOT_FOUND: "SOURCE_NOT_FOUND",
+  REVISION_NOT_DEPLOYABLE_TO_ENV: "REVISION_NOT_DEPLOYABLE_TO_ENV",
+  PROMOTION_REQUIRES_VERSION: "PROMOTION_REQUIRES_VERSION",
+  SNAPSHOT_INTEGRITY_ERROR: "SNAPSHOT_INTEGRITY_ERROR",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   TIMEOUT: "TIMEOUT"
@@ -49,15 +53,6 @@ function notFound(resource, id, requestId) {
     code: ERROR_CODES.RESOURCE_NOT_FOUND,
     message: `${resource} with id '${id}' not found`,
     statusCode: 404,
-    retryable: false,
-    requestId: resolveRequestId(requestId)
-  };
-}
-function contentUnavailable(message, requestId) {
-  return {
-    code: ERROR_CODES.CONTENT_UNAVAILABLE,
-    message,
-    statusCode: 500,
     retryable: false,
     requestId: resolveRequestId(requestId)
   };
@@ -177,13 +172,6 @@ function getEnvValue2(key) {
   const env = globalThis.process?.env;
   return env?.[key];
 }
-function isNoSuchKey(error) {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const typed = error;
-  return typed.name === "NoSuchKey" || typed.Code === "NoSuchKey" || typed.$metadata?.httpStatusCode === 404;
-}
 function createS3Client() {
   const endpoint = getEnvValue2("S3_ENDPOINT");
   const region = getEnvValue2("AWS_REGION") ?? "us-east-1";
@@ -200,36 +188,6 @@ function createS3Client() {
   });
 }
 var s3Client = createS3Client();
-var S3ServiceError = class extends Error {
-  constructor(message, appError, cause) {
-    super(message);
-    this.appError = appError;
-    this.cause = cause;
-    this.name = "S3ServiceError";
-  }
-  appError;
-  cause;
-};
-function mapS3Error(error, operation, key) {
-  if (isNoSuchKey(error)) {
-    const mapped2 = notFound("S3 object", key ?? "unknown");
-    throw new S3ServiceError(mapped2.message, mapped2, error);
-  }
-  const mapped = serviceUnavailable(`S3 transient failure during ${operation}`);
-  throw new S3ServiceError(mapped.message, mapped, error);
-}
-async function getObject(params) {
-  try {
-    const result = await s3Client.send(new import_client_s3.GetObjectCommand(params));
-    const body = result.Body;
-    if (!body?.transformToString) {
-      return "";
-    }
-    return await body.transformToString();
-  } catch (error) {
-    return mapS3Error(error, "getObject", params.Key);
-  }
-}
 
 // src/lambda/mapping/get-version.ts
 function getEnvValue3(key) {
@@ -237,20 +195,12 @@ function getEnvValue3(key) {
   return env?.[key];
 }
 var MAPPING_VERSIONS_TABLE = getEnvValue3("MAPPING_VERSIONS_TABLE");
-var CONTENT_BUCKET = getEnvValue3("CONTENT_BUCKET");
 function getMappingVersionsTableOrThrow() {
   const table = MAPPING_VERSIONS_TABLE?.trim();
   if (!table) {
     throw new Error("Missing required environment variable: MAPPING_VERSIONS_TABLE");
   }
   return table;
-}
-function getContentBucketOrThrow() {
-  const bucket = CONTENT_BUCKET?.trim();
-  if (!bucket) {
-    throw new Error("Missing required environment variable: CONTENT_BUCKET");
-  }
-  return bucket;
 }
 function parseVersion(versionParam) {
   if (!versionParam) {
@@ -261,9 +211,6 @@ function parseVersion(versionParam) {
     return null;
   }
   return value;
-}
-function isConfigObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 async function handler(event) {
   const mappingId = parsePathParam(event, "mappingId") ?? parsePathParam(event, "id");
@@ -283,37 +230,8 @@ async function handler(event) {
       const err = notFound("Mapping version", `${mappingId}:${version}`);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
-    let config;
-    if (isConfigObject(entry.config)) {
-      config = entry.config;
-    } else if (typeof entry.configS3Key === "string" && entry.configS3Key.trim() !== "") {
-      const rawConfig = await getObject({
-        Bucket: getContentBucketOrThrow(),
-        Key: entry.configS3Key
-      });
-      config = JSON.parse(rawConfig);
-    } else {
-      const appError = contentUnavailable(
-        `Mapping version '${mappingId}:${version}' metadata exists but version content is unavailable in storage`
-      );
-      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
-    }
-    const response = {
-      mappingId: entry.mappingId,
-      version: entry.version,
-      savedAt: entry.savedAt,
-      savedBy: entry.savedBy,
-      ruleCount: entry.ruleCount,
-      config
-    };
-    return jsonResponse(200, response);
-  } catch (error) {
-    if (error instanceof S3ServiceError && error.appError.code === ERROR_CODES.RESOURCE_NOT_FOUND) {
-      const appError = contentUnavailable(
-        `Mapping version '${mappingId}:${version}' metadata exists but version content is unavailable in storage`
-      );
-      return errorResponse(appError.code, appError.message, appError.statusCode, appError.retryable, appError.requestId);
-    }
+    return jsonResponse(200, entry);
+  } catch {
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);
   }

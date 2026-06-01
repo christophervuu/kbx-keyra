@@ -30,6 +30,8 @@ export const TEST_TABLES = {
   schemaNodes: `keyra-schema-nodes-it-${SUFFIX}`,
   mappingRevisions: `keyra-mapping-revisions-it-${SUFFIX}`,
   mappingVersions: `keyra-mapping-versions-it-${SUFFIX}`,
+  deployments: `keyra-deployments-it-${SUFFIX}`,
+  deploymentCurrent: `keyra-deployment-current-it-${SUFFIX}`,
 } as const;
 
 export const TEST_BUCKET = `keyra-storage-it-${SUFFIX}`;
@@ -75,6 +77,8 @@ export function applyPersistenceTestEnvironment(): void {
   processRef.env.SCHEMA_NODES_TABLE = TEST_TABLES.schemaNodes;
   processRef.env.MAPPING_REVISIONS_TABLE = TEST_TABLES.mappingRevisions;
   processRef.env.MAPPING_VERSIONS_TABLE = TEST_TABLES.mappingVersions;
+  processRef.env.DEPLOYMENTS_TABLE = TEST_TABLES.deployments;
+  processRef.env.DEPLOYMENT_CURRENT_TABLE = TEST_TABLES.deploymentCurrent;
   processRef.env.STORAGE_BUCKET = TEST_BUCKET;
 }
 
@@ -193,6 +197,26 @@ export async function createTables(): Promise<void> {
     ],
     BillingMode: 'PAY_PER_REQUEST',
   }));
+
+  await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.deployments,
+    AttributeDefinitions: [
+      { AttributeName: 'mappingId', AttributeType: 'S' },
+      { AttributeName: 'environmentDeployedAt', AttributeType: 'S' },
+    ],
+    KeySchema: [
+      { AttributeName: 'mappingId', KeyType: 'HASH' },
+      { AttributeName: 'environmentDeployedAt', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await dynamo.send(new CreateTableCommand({
+    TableName: TEST_TABLES.deploymentCurrent,
+    AttributeDefinitions: [{ AttributeName: 'mappingIdEnvironment', AttributeType: 'S' }],
+    KeySchema: [{ AttributeName: 'mappingIdEnvironment', KeyType: 'HASH' }],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
 }
 
 async function clearTable(tableName: string, keyNames: readonly string[]): Promise<void> {
@@ -222,6 +246,8 @@ async function clearTable(tableName: string, keyNames: readonly string[]): Promi
 }
 
 export async function clearTablesData(): Promise<void> {
+  await clearTable(TEST_TABLES.deploymentCurrent, ['mappingIdEnvironment']);
+  await clearTable(TEST_TABLES.deployments, ['mappingId', 'environmentDeployedAt']);
   await clearTable(TEST_TABLES.mappingRevisions, ['mappingId', 'revision']);
   await clearTable(TEST_TABLES.mappingVersions, ['mappingId', 'version']);
   await clearTable(TEST_TABLES.schemaNodes, ['schemaId', 'path']);

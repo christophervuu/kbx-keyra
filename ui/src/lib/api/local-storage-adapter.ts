@@ -1,4 +1,10 @@
 import type { ApiAdapter } from './types';
+import type {
+  CurrentDeployment,
+  CurrentDeployments,
+  DeploymentRecord,
+  DeploymentSourceType,
+} from './types';
 
 import type {
   ActivityEntry,
@@ -11,7 +17,7 @@ import type {
   CreateSchemaInput,
   DeploymentContext,
   DeploymentDiff,
-  DeploymentRecord,
+  DeploymentRecord as LegacyDeploymentRecord,
   DeployStatus,
   Environment,
   ExplainRuleInput,
@@ -94,9 +100,19 @@ interface StoredVersionEntry {
   readonly createdBy: string;
 }
 
+interface CurrentDeploymentsInput {
+  readonly DEV?: CurrentDeployment | null;
+  readonly QA?: CurrentDeployment | null;
+  readonly PROD?: CurrentDeployment | null;
+}
+
 const OFFLINE_MODE_MESSAGE = 'Not available in offline mode';
 
 export class LocalStorageAdapter implements ApiAdapter {
+  private deploymentKey(mappingId: string): string {
+    return `keyra:deployments:${mappingId}`;
+  }
+
   private versionKey(mappingId: string): string {
     return `keyra:versions:${mappingId}`;
   }
@@ -189,6 +205,130 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   private nowIso(): string {
     return new Date().toISOString();
+  }
+
+  private computeStaleness(
+    deployment: CurrentDeployment | null,
+    mapping: { revision: number; latestVersion: number | null },
+  ): 'current' | 'stale' | 'not-deployed' {
+    if (!deployment) {
+      return 'not-deployed';
+    }
+
+    if (deployment.sourceType === 'revision') {
+      return mapping.revision > deployment.sourceNumber ? 'stale' : 'current';
+    }
+
+    const latestVersion = mapping.latestVersion ?? deployment.sourceNumber;
+    return latestVersion > deployment.sourceNumber ? 'stale' : 'current';
+  }
+
+  private computeAllEnvironments(
+    currentDeployments: CurrentDeploymentsInput,
+    mapping: { revision: number; latestVersion: number | null },
+  ): CurrentDeployments {
+    return {
+      DEV: {
+        environment: 'DEV',
+        deployment: currentDeployments.DEV ?? null,
+        status: this.computeStaleness(currentDeployments.DEV ?? null, mapping),
+      },
+      QA: {
+        environment: 'QA',
+        deployment: currentDeployments.QA ?? null,
+        status: this.computeStaleness(currentDeployments.QA ?? null, mapping),
+      },
+      PROD: {
+        environment: 'PROD',
+        deployment: currentDeployments.PROD ?? null,
+        status: this.computeStaleness(currentDeployments.PROD ?? null, mapping),
+      },
+    };
+  }
+
+  private readDeployments(mappingId: string): DeploymentRecord[] {
+    return this.readArray<DeploymentRecord>(this.deploymentKey(mappingId));
+  }
+
+  private writeDeployments(mappingId: string, deployments: DeploymentRecord[]): void {
+    this.writeArray(this.deploymentKey(mappingId), deployments);
+  }
+
+  private toCurrentDeployment(item: DeploymentRecord): CurrentDeployment {
+    return {
+      mappingId: item.mappingId,
+      environment: item.environment,
+      deployedAt: item.deployedAt,
+      sourceType: item.sourceType,
+      sourceNumber: item.sourceNumber,
+      configHash: item.configHash,
+      configS3Key: item.configS3Key,
+    };
+  }
+
+  private getCurrentByEnvironment(
+    mappingId: string,
+  ): { DEV: CurrentDeployment | null; QA: CurrentDeployment | null; PROD: CurrentDeployment | null } {
+    const deployments = this.readDeployments(mappingId);
+
+    const latestFor = (environment: Environment): CurrentDeployment | null => {
+      const entry = deployments
+        .filter((item) => item.environment === environment)
+        .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt))[0];
+
+      return entry ? this.toCurrentDeployment(entry) : null;
+    };
+
+    return {
+      DEV: latestFor('DEV'),
+      QA: latestFor('QA'),
+      PROD: latestFor('PROD'),
+    };
+  }
+
+  private async appendDeployment(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      sourceType: DeploymentSourceType;
+      sourceNumber: number;
+      deployedBy: string;
+      promotedFrom?: Environment;
+      rollbackOf?: string;
+    },
+  ): Promise<DeploymentRecord> {
+    const mapping = await this.getMapping(mappingId);
+    const deployedAt = this.nowIso();
+    const configHash = await this.computeConfigHash(mapping);
+
+    const record: DeploymentRecord = {
+      mappingId,
+      environmentDeployedAt: `${input.environment}#${deployedAt}`,
+      environment: input.environment,
+      sourceType: input.sourceType,
+      sourceNumber: input.sourceNumber,
+      configS3Key: `local://deployments/${mappingId}/${input.environment}/${deployedAt}.json`,
+      configHash,
+      deployedAt,
+      deployedBy: input.deployedBy,
+      ...(input.promotedFrom !== undefined ? { promotedFrom: input.promotedFrom } : {}),
+      ...(input.rollbackOf !== undefined ? { rollbackOf: input.rollbackOf } : {}),
+    };
+
+    const deployments = this.readDeployments(mappingId);
+    deployments.push(record);
+    this.writeDeployments(mappingId, deployments);
+
+    return record;
+  }
+
+  private async getLatestVersionNumber(mappingId: string): Promise<number | null> {
+    const versions = await this.listVersions(mappingId);
+    if (versions.length === 0) {
+      return null;
+    }
+
+    return versions.reduce((maxVersion, version) => Math.max(maxVersion, version.version), versions[0]?.version ?? 0);
   }
 
   // Schemas
@@ -832,7 +972,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       throw this.notFound('Mapping', mappingId);
     }
 
-    const deployments = this.readArray<DeploymentRecord>(STORAGE_KEYS.deployments).filter(
+    const deployments = this.readArray<LegacyDeploymentRecord>(STORAGE_KEYS.deployments).filter(
       (item) => item.mappingId === mappingId,
     );
 
@@ -858,8 +998,8 @@ export class LocalStorageAdapter implements ApiAdapter {
     };
   }
 
-  async deploy(mappingId: string, environment: Environment): Promise<DeploymentRecord> {
-    const deployments = this.readArray<DeploymentRecord>(STORAGE_KEYS.deployments);
+  async deploy(mappingId: string, environment: Environment): Promise<LegacyDeploymentRecord> {
+    const deployments = this.readArray<LegacyDeploymentRecord>(STORAGE_KEYS.deployments);
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
     const mapping = mappings.find((item) => item.metadata.mappingId === mappingId);
 
@@ -869,7 +1009,7 @@ export class LocalStorageAdapter implements ApiAdapter {
         : item,
     );
 
-    const record: DeploymentRecord = {
+    const record: LegacyDeploymentRecord = {
       mappingId,
       environment,
       version: mapping?.metadata.version ?? 1,
@@ -884,8 +1024,8 @@ export class LocalStorageAdapter implements ApiAdapter {
     return record;
   }
 
-  async promote(mappingId: string, from: Environment, to: Environment): Promise<DeploymentRecord> {
-    const deployments = this.readArray<DeploymentRecord>(STORAGE_KEYS.deployments);
+  async promote(mappingId: string, from: Environment, to: Environment): Promise<LegacyDeploymentRecord> {
+    const deployments = this.readArray<LegacyDeploymentRecord>(STORAGE_KEYS.deployments);
     const source = deployments
       .filter((item) => item.mappingId === mappingId && item.environment === from)
       .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt))[0];
@@ -896,7 +1036,7 @@ export class LocalStorageAdapter implements ApiAdapter {
         : item,
     );
 
-    const record: DeploymentRecord = {
+    const record: LegacyDeploymentRecord = {
       mappingId,
       environment: to,
       version: source?.version ?? 1,
@@ -915,8 +1055,8 @@ export class LocalStorageAdapter implements ApiAdapter {
     mappingId: string,
     environment: Environment,
     targetVersion: number,
-  ): Promise<DeploymentRecord> {
-    const deployments = this.readArray<DeploymentRecord>(STORAGE_KEYS.deployments);
+  ): Promise<LegacyDeploymentRecord> {
+    const deployments = this.readArray<LegacyDeploymentRecord>(STORAGE_KEYS.deployments);
 
     const normalized = deployments.map((item) =>
       item.mappingId === mappingId && item.environment === environment && item.status === 'active'
@@ -924,7 +1064,7 @@ export class LocalStorageAdapter implements ApiAdapter {
         : item,
     );
 
-    const record: DeploymentRecord = {
+    const record: LegacyDeploymentRecord = {
       mappingId,
       environment,
       version: targetVersion,
@@ -950,6 +1090,126 @@ export class LocalStorageAdapter implements ApiAdapter {
       toVersion,
       changedFields: [],
     };
+  }
+
+  async deployMapping(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      sourceType: DeploymentSourceType;
+      sourceNumber: number;
+    },
+  ): Promise<DeploymentRecord> {
+    await this.getMapping(mappingId);
+
+    if (input.sourceType === 'revision' && input.environment !== 'DEV') {
+      throw {
+        message: 'Revision deployments are only allowed for DEV',
+        code: 'REVISION_NOT_DEPLOYABLE_TO_ENV',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    if (input.sourceType === 'revision') {
+      await this.getRevision(mappingId, input.sourceNumber);
+    } else {
+      await this.getVersion(mappingId, input.sourceNumber);
+    }
+
+    return this.appendDeployment(mappingId, {
+      environment: input.environment,
+      sourceType: input.sourceType,
+      sourceNumber: input.sourceNumber,
+      deployedBy: 'local-user',
+    });
+  }
+
+  async promoteDeployment(
+    mappingId: string,
+    input: {
+      fromEnvironment: Environment;
+      toEnvironment: Environment;
+    },
+  ): Promise<DeploymentRecord> {
+    await this.getMapping(mappingId);
+
+    const source = this.readDeployments(mappingId)
+      .filter((item) => item.environment === input.fromEnvironment)
+      .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt))[0];
+
+    if (!source) {
+      throw this.notFound('Deployment', `${mappingId}:${input.fromEnvironment}`);
+    }
+
+    if (source.sourceType !== 'version') {
+      throw {
+        message: 'Promotion requires a version-backed source deployment',
+        code: 'PROMOTION_REQUIRES_VERSION',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    return this.appendDeployment(mappingId, {
+      environment: input.toEnvironment,
+      sourceType: 'version',
+      sourceNumber: source.sourceNumber,
+      deployedBy: 'local-user',
+      promotedFrom: input.fromEnvironment,
+    });
+  }
+
+  async rollbackDeployment(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      deploymentSK: string;
+    },
+  ): Promise<DeploymentRecord> {
+    await this.getMapping(mappingId);
+
+    const target = this.readDeployments(mappingId).find(
+      (item) => item.environment === input.environment && item.environmentDeployedAt === input.deploymentSK,
+    );
+
+    if (!target) {
+      throw this.notFound('Deployment', `${mappingId}:${input.deploymentSK}`);
+    }
+
+    return this.appendDeployment(mappingId, {
+      environment: input.environment,
+      sourceType: target.sourceType,
+      sourceNumber: target.sourceNumber,
+      deployedBy: 'local-user',
+      rollbackOf: input.deploymentSK,
+    });
+  }
+
+  async listDeployments(
+    mappingId: string,
+    options?: {
+      environment?: Environment;
+    },
+  ): Promise<DeploymentRecord[]> {
+    await this.getMapping(mappingId);
+
+    const deployments = this.readDeployments(mappingId)
+      .filter((item) => (options?.environment ? item.environment === options.environment : true))
+      .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt));
+
+    return deployments;
+  }
+
+  async getCurrentDeployments(mappingId: string): Promise<CurrentDeployments> {
+    const mapping = await this.getMapping(mappingId);
+    const current = this.getCurrentByEnvironment(mappingId);
+    const latestVersion = await this.getLatestVersionNumber(mappingId);
+
+    return this.computeAllEnvironments(current, {
+      revision: mapping.version,
+      latestVersion,
+    });
   }
 
   // GitHub: CDM Repo (read-only)

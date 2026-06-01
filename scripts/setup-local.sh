@@ -21,7 +21,10 @@ PROJECTS_TABLE="dev-keyra-projects"
 MAPPINGS_TABLE="dev-keyra-mappings"
 SCHEMA_METADATA_TABLE="dev-keyra-schema-metadata"
 SCHEMA_NODES_TABLE="dev-keyra-schema-nodes"
+MAPPING_REVISIONS_TABLE="dev-keyra-mapping-revisions"
 MAPPING_VERSIONS_TABLE="dev-keyra-mapping-versions"
+DEPLOYMENTS_TABLE="dev-keyra-deployments"
+DEPLOYMENT_CURRENT_TABLE="dev-keyra-deployment-current"
 
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-local}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-local}"
@@ -169,6 +172,64 @@ create_mapping_versions_table() {
   echo "[created] $MAPPING_VERSIONS_TABLE"
 }
 
+create_mapping_revisions_table() {
+  if table_exists "$MAPPING_REVISIONS_TABLE"; then
+    echo "[exists] $MAPPING_REVISIONS_TABLE"
+    return
+  fi
+
+  aws dynamodb create-table \
+    --table-name "$MAPPING_REVISIONS_TABLE" \
+    --attribute-definitions \
+      AttributeName=mappingId,AttributeType=S \
+      AttributeName=revision,AttributeType=N \
+    --key-schema \
+      AttributeName=mappingId,KeyType=HASH \
+      AttributeName=revision,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST \
+    --endpoint-url "$DDB_ENDPOINT" >/dev/null
+
+  echo "[created] $MAPPING_REVISIONS_TABLE"
+}
+
+create_deployments_table() {
+  if table_exists "$DEPLOYMENTS_TABLE"; then
+    echo "[exists] $DEPLOYMENTS_TABLE"
+    return
+  fi
+
+  aws dynamodb create-table \
+    --table-name "$DEPLOYMENTS_TABLE" \
+    --attribute-definitions \
+      AttributeName=mappingId,AttributeType=S \
+      AttributeName=environmentDeployedAt,AttributeType=S \
+    --key-schema \
+      AttributeName=mappingId,KeyType=HASH \
+      AttributeName=environmentDeployedAt,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST \
+    --endpoint-url "$DDB_ENDPOINT" >/dev/null
+
+  echo "[created] $DEPLOYMENTS_TABLE"
+}
+
+create_deployment_current_table() {
+  if table_exists "$DEPLOYMENT_CURRENT_TABLE"; then
+    echo "[exists] $DEPLOYMENT_CURRENT_TABLE"
+    return
+  fi
+
+  aws dynamodb create-table \
+    --table-name "$DEPLOYMENT_CURRENT_TABLE" \
+    --attribute-definitions \
+      AttributeName=mappingIdEnvironment,AttributeType=S \
+    --key-schema \
+      AttributeName=mappingIdEnvironment,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST \
+    --endpoint-url "$DDB_ENDPOINT" >/dev/null
+
+  echo "[created] $DEPLOYMENT_CURRENT_TABLE"
+}
+
 bucket_exists() {
   aws s3api head-bucket \
     --bucket "$BUCKET_NAME" \
@@ -195,7 +256,10 @@ main() {
   create_mappings_table
   create_schema_metadata_table
   create_schema_nodes_table
+  create_mapping_revisions_table
   create_mapping_versions_table
+  create_deployments_table
+  create_deployment_current_table
   create_bucket
 
   echo

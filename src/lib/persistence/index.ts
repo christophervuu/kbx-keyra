@@ -1,6 +1,9 @@
 export {
   BUCKET_NAME,
   TABLE_NAMES,
+  deploymentCurrentKey,
+  deploymentHistorySortKey,
+  deploymentSnapshotKey,
   mappingConfigKey,
   mappingRevisionKey,
   mappingVersionKey,
@@ -17,6 +20,13 @@ export {
   mappings,
   update as updateMapping,
 } from './mappings.js';
+export {
+  create as createDeployment,
+  deployments,
+  getCurrent as getCurrentDeployment,
+  getCurrentAll as getCurrentDeployments,
+  listHistory as listDeploymentHistory,
+} from './deployments.js';
 export {
   create as createMappingVersion,
   get as getMappingVersion,
@@ -64,6 +74,11 @@ export type {
   MappingConfig,
   MappingConfigOptions,
   MappingRevisionItem,
+  DeploymentCurrentItem,
+  DeploymentEnvironment,
+  DeploymentItem,
+  DeploymentSourceType,
+  CreateDeploymentInput,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaMetadataInput,

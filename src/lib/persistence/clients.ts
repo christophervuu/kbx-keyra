@@ -7,6 +7,7 @@ type EnvStore = Record<string, string | undefined>;
 interface AwsClientConfig {
   readonly region: string;
   readonly endpoint?: string;
+  readonly forcePathStyle?: boolean;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -35,6 +36,7 @@ function buildS3Config(): AwsClientConfig {
   return {
     region: getRegion(),
     endpoint: toOptionalEndpoint(getEnvValue('S3_ENDPOINT')),
+    forcePathStyle: true,
   };
 }
 

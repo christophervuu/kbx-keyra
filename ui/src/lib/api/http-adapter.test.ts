@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AdapterMethodNotImplementedError } from './errors';
 import { HttpAdapter } from './http-adapter';
 import { httpRequest } from './http-client';
-import { AdapterMethodNotImplementedError } from './errors';
 
 import { toAppError } from '@/lib/state/app-error';
-
 import type {
   CreateMappingInput,
   CreateProjectInput,
@@ -389,6 +388,173 @@ describe('HttpAdapter (CRUD)', () => {
       path: '/projects/p-1',
       method: 'DELETE',
     });
+  });
+
+  it('deployMapping maps to POST /mappings/:id/deploy', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      mappingId: 'm-1',
+      environmentDeployedAt: 'DEV#2026-06-01T00:00:00.000Z',
+      environment: 'DEV',
+      sourceType: 'revision',
+      sourceNumber: 2,
+      configS3Key: 'deployments/m-1/DEV/2026-06-01T00:00:00.000Z.json',
+      configHash: 'abc',
+      deployedAt: '2026-06-01T00:00:00.000Z',
+      deployedBy: 'system',
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.deployMapping('m-1', {
+      environment: 'DEV',
+      sourceType: 'revision',
+      sourceNumber: 2,
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/deploy',
+      method: 'POST',
+      body: {
+        environment: 'DEV',
+        sourceType: 'revision',
+        sourceNumber: 2,
+      },
+    });
+  });
+
+  it('promoteDeployment maps to POST /mappings/:id/promote', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      mappingId: 'm-1',
+      environmentDeployedAt: 'QA#2026-06-01T00:00:00.000Z',
+      environment: 'QA',
+      sourceType: 'version',
+      sourceNumber: 3,
+      configS3Key: 'deployments/m-1/QA/2026-06-01T00:00:00.000Z.json',
+      configHash: 'abc',
+      deployedAt: '2026-06-01T00:00:00.000Z',
+      deployedBy: 'system',
+      promotedFrom: 'DEV',
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.promoteDeployment('m-1', {
+      fromEnvironment: 'DEV',
+      toEnvironment: 'QA',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/promote',
+      method: 'POST',
+      body: {
+        fromEnvironment: 'DEV',
+        toEnvironment: 'QA',
+      },
+    });
+  });
+
+  it('rollbackDeployment maps to POST /mappings/:id/rollback', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      mappingId: 'm-1',
+      environmentDeployedAt: 'PROD#2026-06-01T00:00:00.000Z',
+      environment: 'PROD',
+      sourceType: 'version',
+      sourceNumber: 2,
+      configS3Key: 'deployments/m-1/PROD/2026-06-01T00:00:00.000Z.json',
+      configHash: 'abc',
+      deployedAt: '2026-06-01T00:00:00.000Z',
+      deployedBy: 'system',
+      rollbackOf: 'PROD#2026-05-31T00:00:00.000Z',
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.rollbackDeployment('m-1', {
+      environment: 'PROD',
+      deploymentSK: 'PROD#2026-05-31T00:00:00.000Z',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/rollback',
+      method: 'POST',
+      body: {
+        environment: 'PROD',
+        deploymentSK: 'PROD#2026-05-31T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('listDeployments maps to GET /mappings/:id/deployments with environment query', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listDeployments('m-1', { environment: 'QA' });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/deployments?environment=QA',
+      method: 'GET',
+    });
+  });
+
+  it('getCurrentDeployments maps to current endpoint and computes staleness', async () => {
+    vi.mocked(httpRequest)
+      .mockResolvedValueOnce({
+        DEV: {
+          mappingIdEnvironment: 'm-1#DEV',
+          mappingId: 'm-1',
+          environment: 'DEV',
+          deployedAt: '2026-06-01T00:00:00.000Z',
+          sourceType: 'revision',
+          sourceNumber: 1,
+          configHash: 'dev-hash',
+          configS3Key: 'deployments/m-1/DEV/2026-06-01T00:00:00.000Z.json',
+        },
+        QA: {
+          mappingIdEnvironment: 'm-1#QA',
+          mappingId: 'm-1',
+          environment: 'QA',
+          deployedAt: '2026-06-01T00:00:00.000Z',
+          sourceType: 'version',
+          sourceNumber: 1,
+          configHash: 'qa-hash',
+          configS3Key: 'deployments/m-1/QA/2026-06-01T00:00:00.000Z.json',
+        },
+        PROD: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'm-1',
+        projectId: 'p-1',
+        name: 'Map',
+        version: 2,
+        engineVersion: '2.0.0',
+        config: {},
+        rules: [],
+      })
+      .mockResolvedValueOnce([
+        {
+          version: 2,
+          revisionNumber: 2,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          createdBy: 'system',
+        },
+      ]);
+
+    const adapter = new HttpAdapter(API_URL);
+    const result = await adapter.getCurrentDeployments('m-1');
+
+    expect(httpRequest).toHaveBeenNthCalledWith(1, {
+      baseUrl: API_URL,
+      path: '/mappings/m-1/deployments/current',
+      method: 'GET',
+    });
+
+    expect(result.DEV.status).toBe('stale');
+    expect(result.QA.status).toBe('stale');
+    expect(result.PROD.status).toBe('not-deployed');
   });
 
   it('propagates errors from httpRequest unchanged', async () => {

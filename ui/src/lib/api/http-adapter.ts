@@ -1,6 +1,12 @@
 import { AdapterMethodNotImplementedError } from './errors';
 import { httpRequest } from './http-client';
 import { LocalStorageAdapter } from './local-storage-adapter';
+import type {
+  CurrentDeployment,
+  CurrentDeployments,
+  DeploymentRecord,
+  DeploymentSourceType,
+} from './types';
 
 import type {
   ActivityEntry,
@@ -13,7 +19,7 @@ import type {
   CreateSchemaInput,
   DeploymentContext,
   DeploymentDiff,
-  DeploymentRecord,
+  DeploymentRecord as LegacyDeploymentRecord,
   Environment,
   ExplainRuleInput,
   ExplainRuleResult,
@@ -47,6 +53,28 @@ import type {
   ValidateMappingsInput,
   ValidationReport,
 } from '@/lib/types';
+
+interface CurrentDeploymentsApiResponse {
+  readonly DEV: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+  readonly QA: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+  readonly PROD: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+}
+
+function computeStatus(
+  deployment: CurrentDeployment | null,
+  mapping: { revision: number; latestVersion: number | null },
+): 'current' | 'stale' | 'not-deployed' {
+  if (!deployment) {
+    return 'not-deployed';
+  }
+
+  if (deployment.sourceType === 'revision') {
+    return mapping.revision > deployment.sourceNumber ? 'stale' : 'current';
+  }
+
+  const latestVersion = mapping.latestVersion ?? deployment.sourceNumber;
+  return latestVersion > deployment.sourceNumber ? 'stale' : 'current';
+}
 
 /**
  * HttpAdapter MUST remain HTTP-only for data reconstruction.
@@ -308,7 +336,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     throw this.notImplemented('getDeploymentContext');
   }
 
-  override async deploy(mappingId: string, environment: Environment): Promise<DeploymentRecord> {
+  override async deploy(mappingId: string, environment: Environment): Promise<LegacyDeploymentRecord> {
     void mappingId;
     void environment;
     throw this.notImplemented('deploy');
@@ -318,7 +346,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     mappingId: string,
     from: Environment,
     to: Environment,
-  ): Promise<DeploymentRecord> {
+  ): Promise<LegacyDeploymentRecord> {
     void mappingId;
     void from;
     void to;
@@ -329,7 +357,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     mappingId: string,
     environment: Environment,
     targetVersion: number,
-  ): Promise<DeploymentRecord> {
+  ): Promise<LegacyDeploymentRecord> {
     void mappingId;
     void environment;
     void targetVersion;
@@ -345,6 +373,108 @@ export class HttpAdapter extends LocalStorageAdapter {
     void fromVersion;
     void toVersion;
     throw this.notImplemented('getDeploymentDiff');
+  }
+
+  override async deployMapping(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      sourceType: DeploymentSourceType;
+      sourceNumber: number;
+    },
+  ): Promise<DeploymentRecord> {
+    return httpRequest<DeploymentRecord>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/deploy`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async promoteDeployment(
+    mappingId: string,
+    input: {
+      fromEnvironment: Environment;
+      toEnvironment: Environment;
+    },
+  ): Promise<DeploymentRecord> {
+    return httpRequest<DeploymentRecord>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/promote`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async rollbackDeployment(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      deploymentSK: string;
+    },
+  ): Promise<DeploymentRecord> {
+    return httpRequest<DeploymentRecord>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/rollback`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async listDeployments(
+    mappingId: string,
+    options?: {
+      environment?: Environment;
+    },
+  ): Promise<DeploymentRecord[]> {
+    const environmentQuery = options?.environment
+      ? `?environment=${encodeURIComponent(options.environment)}`
+      : '';
+
+    return httpRequest<DeploymentRecord[]>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/deployments${environmentQuery}`,
+      method: 'GET',
+    });
+  }
+
+  override async getCurrentDeployments(mappingId: string): Promise<CurrentDeployments> {
+    const [current, mappingConfig, versions] = await Promise.all([
+      httpRequest<CurrentDeploymentsApiResponse>({
+        baseUrl: this.apiUrl,
+        path: `/mappings/${encodeURIComponent(mappingId)}/deployments/current`,
+        method: 'GET',
+      }),
+      this.getMapping(mappingId),
+      this.listVersions(mappingId),
+    ]);
+
+    const latestVersion = versions.length > 0
+      ? versions.reduce((max, version) => Math.max(max, version.version), versions[0]?.version ?? 0)
+      : null;
+
+    const stalenessInput = {
+      revision: mappingConfig.version,
+      latestVersion,
+    };
+
+    return {
+      DEV: {
+        environment: 'DEV',
+        deployment: current.DEV,
+        status: computeStatus(current.DEV, stalenessInput),
+      },
+      QA: {
+        environment: 'QA',
+        deployment: current.QA,
+        status: computeStatus(current.QA, stalenessInput),
+      },
+      PROD: {
+        environment: 'PROD',
+        deployment: current.PROD,
+        status: computeStatus(current.PROD, stalenessInput),
+      },
+    };
   }
 
   override async listCdmSchemas(path?: string): Promise<GitHubFile[]> {

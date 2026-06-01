@@ -17,6 +17,8 @@ export const TABLE_NAMES = {
   schemaNodes: getEnvValueOrDefault('SCHEMA_NODES_TABLE', 'keyra-schema-nodes'),
   mappingRevisions: getEnvValueOrDefault('MAPPING_REVISIONS_TABLE', 'keyra-mapping-revisions'),
   mappingVersions: getEnvValueOrDefault('MAPPING_VERSIONS_TABLE', 'keyra-mapping-versions'),
+  deployments: getEnvValueOrDefault('DEPLOYMENTS_TABLE', 'keyra-deployments'),
+  deploymentCurrent: getEnvValueOrDefault('DEPLOYMENT_CURRENT_TABLE', 'keyra-deployment-current'),
 } as const;
 
 export const BUCKET_NAME = getEnvValueOrDefault('STORAGE_BUCKET', 'keyra-storage');
@@ -39,4 +41,16 @@ export function mappingVersionKey(mappingId: string, version: number): string {
 
 export function mappingRevisionKey(mappingId: string, revision: number): string {
   return `mappings/${mappingId}/revisions/r${revision}.json`;
+}
+
+export function deploymentSnapshotKey(mappingId: string, environment: string, deployedAt: string): string {
+  return `deployments/${mappingId}/${environment}/${deployedAt}.json`;
+}
+
+export function deploymentHistorySortKey(environment: string, deployedAt: string): string {
+  return `${environment}#${deployedAt}`;
+}
+
+export function deploymentCurrentKey(mappingId: string, environment: string): string {
+  return `${mappingId}#${environment}`;
 }

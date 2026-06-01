@@ -9,7 +9,7 @@ import type {
   CreateSchemaInput,
   DeploymentContext,
   DeploymentDiff,
-  DeploymentRecord,
+  DeploymentRecord as LegacyDeploymentRecord,
   Environment,
   ExplainRuleInput,
   ExplainRuleResult,
@@ -43,6 +43,46 @@ import type {
   ValidateMappingsInput,
   ValidationReport,
 } from '@/lib/types';
+
+export type DeploymentSourceType = 'revision' | 'version';
+
+export type DeploymentStatus = 'current' | 'stale' | 'not-deployed';
+
+export interface DeploymentRecord {
+  readonly mappingId: string;
+  readonly environmentDeployedAt: string;
+  readonly environment: Environment;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly configS3Key: string;
+  readonly configHash: string;
+  readonly deployedAt: string;
+  readonly deployedBy: string;
+  readonly promotedFrom?: Environment;
+  readonly rollbackOf?: string;
+}
+
+export interface CurrentDeployment {
+  readonly mappingId: string;
+  readonly environment: Environment;
+  readonly deployedAt: string;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly configHash: string;
+  readonly configS3Key: string;
+}
+
+export interface EnvironmentDeploymentSummary {
+  readonly environment: Environment;
+  readonly deployment: CurrentDeployment | null;
+  readonly status: DeploymentStatus;
+}
+
+export interface CurrentDeployments {
+  readonly DEV: EnvironmentDeploymentSummary;
+  readonly QA: EnvironmentDeploymentSummary;
+  readonly PROD: EnvironmentDeploymentSummary;
+}
 
 export interface ApiAdapter {
   // Schemas
@@ -87,18 +127,47 @@ export interface ApiAdapter {
 
   // Deployment
   getDeploymentContext(mappingId: string): Promise<DeploymentContext>;
-  deploy(mappingId: string, environment: Environment): Promise<DeploymentRecord>;
-  promote(mappingId: string, from: Environment, to: Environment): Promise<DeploymentRecord>;
+  deploy(mappingId: string, environment: Environment): Promise<LegacyDeploymentRecord>;
+  promote(mappingId: string, from: Environment, to: Environment): Promise<LegacyDeploymentRecord>;
   rollback(
     mappingId: string,
     environment: Environment,
     targetVersion: number,
-  ): Promise<DeploymentRecord>;
+  ): Promise<LegacyDeploymentRecord>;
   getDeploymentDiff(
     mappingId: string,
     fromVersion: number,
     toVersion: number,
   ): Promise<DeploymentDiff>;
+  deployMapping(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      sourceType: DeploymentSourceType;
+      sourceNumber: number;
+    },
+  ): Promise<DeploymentRecord>;
+  promoteDeployment(
+    mappingId: string,
+    input: {
+      fromEnvironment: Environment;
+      toEnvironment: Environment;
+    },
+  ): Promise<DeploymentRecord>;
+  rollbackDeployment(
+    mappingId: string,
+    input: {
+      environment: Environment;
+      deploymentSK: string;
+    },
+  ): Promise<DeploymentRecord>;
+  listDeployments(
+    mappingId: string,
+    options?: {
+      environment?: Environment;
+    },
+  ): Promise<DeploymentRecord[]>;
+  getCurrentDeployments(mappingId: string): Promise<CurrentDeployments>;
 
   // GitHub: CDM Repo (read-only)
   listCdmSchemas(path?: string): Promise<GitHubFile[]>;

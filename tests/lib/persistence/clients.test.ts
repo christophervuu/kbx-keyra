@@ -84,7 +84,7 @@ describe('persistence clients', () => {
     const clients = await importClientsModule();
 
     expect(dynamoCtorMock).toHaveBeenCalledWith({ region: 'us-east-1', endpoint: undefined });
-    expect(s3CtorMock).toHaveBeenCalledWith({ region: 'us-east-1', endpoint: undefined });
+    expect(s3CtorMock).toHaveBeenCalledWith({ region: 'us-east-1', endpoint: undefined, forcePathStyle: true });
     expect(documentFromMock).toHaveBeenCalledTimes(1);
     expect(clients.dynamoClient).toEqual({ __brand: 'document-client' });
   });
@@ -104,6 +104,7 @@ describe('persistence clients', () => {
     expect(s3CtorMock).toHaveBeenCalledWith({
       region: 'us-west-2',
       endpoint: 'http://localhost:4566',
+      forcePathStyle: true,
     });
   });
 });

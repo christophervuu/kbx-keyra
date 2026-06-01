@@ -91,6 +91,11 @@ interface Handlers {
   readonly listSchemas: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly deleteSchema: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly querySchemaNodes: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly deployMapping: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly promoteDeployment: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly rollbackDeployment: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly listDeployments: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly getCurrentDeployments: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
 }
 
 const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -106,6 +111,8 @@ const TABLES = {
   schemaNodes: `SchemaNodes_IT_${TABLE_SUFFIX}`,
   mappingRevisions: `MappingRevisions_IT_${TABLE_SUFFIX}`,
   mappingVersions: `MappingVersions_IT_${TABLE_SUFFIX}`,
+  deployments: `Deployments_IT_${TABLE_SUFFIX}`,
+  deploymentCurrent: `DeploymentCurrent_IT_${TABLE_SUFFIX}`,
 };
 
 const CONTENT_BUCKET = `integration-bucket-${TABLE_SUFFIX}`;
@@ -200,6 +207,26 @@ async function createTables(): Promise<void> {
     ],
     BillingMode: 'PAY_PER_REQUEST',
   }));
+
+  await ddb.send(new CreateTableCommand({
+    TableName: TABLES.deployments,
+    AttributeDefinitions: [
+      { AttributeName: 'mappingId', AttributeType: 'S' },
+      { AttributeName: 'environmentDeployedAt', AttributeType: 'S' },
+    ],
+    KeySchema: [
+      { AttributeName: 'mappingId', KeyType: 'HASH' },
+      { AttributeName: 'environmentDeployedAt', KeyType: 'RANGE' },
+    ],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+
+  await ddb.send(new CreateTableCommand({
+    TableName: TABLES.deploymentCurrent,
+    AttributeDefinitions: [{ AttributeName: 'mappingIdEnvironment', AttributeType: 'S' }],
+    KeySchema: [{ AttributeName: 'mappingIdEnvironment', KeyType: 'HASH' }],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
 }
 
 async function clearTable(tableName: string, keyNames: readonly string[]): Promise<void> {
@@ -228,6 +255,8 @@ async function clearTable(tableName: string, keyNames: readonly string[]): Promi
 }
 
 async function clearAllTables(): Promise<void> {
+  await clearTable(TABLES.deploymentCurrent, ['mappingIdEnvironment']);
+  await clearTable(TABLES.deployments, ['mappingId', 'environmentDeployedAt']);
   await clearTable(TABLES.mappingVersions, ['mappingId', 'version']);
   await clearTable(TABLES.mappingRevisions, ['mappingId', 'revision']);
   await clearTable(TABLES.schemaNodes, ['schemaId', 'path']);
@@ -239,6 +268,8 @@ async function clearAllTables(): Promise<void> {
 
 async function dropTables(): Promise<void> {
   for (const name of [
+    TABLES.deploymentCurrent,
+    TABLES.deployments,
     TABLES.mappingVersions,
     TABLES.mappingRevisions,
     TABLES.schemaNodes,
@@ -250,10 +281,15 @@ async function dropTables(): Promise<void> {
   }
 }
 
-function event(body?: unknown, pathParameters?: Record<string, string>): APIGatewayProxyEvent {
+function event(
+  body?: unknown,
+  pathParameters?: Record<string, string>,
+  queryStringParameters?: Record<string, string>,
+): APIGatewayProxyEvent {
   return {
     body: body === undefined ? null : JSON.stringify(body),
     ...(pathParameters ? { pathParameters } : {}),
+    ...(queryStringParameters ? { queryStringParameters } : {}),
   };
 }
 
@@ -285,7 +321,11 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     env.SCHEMA_NODES_TABLE = TABLES.schemaNodes;
     env.MAPPING_REVISIONS_TABLE = TABLES.mappingRevisions;
     env.MAPPING_VERSIONS_TABLE = TABLES.mappingVersions;
+    env.DEPLOYMENTS_TABLE = TABLES.deployments;
+    env.DEPLOYMENT_CURRENT_TABLE = TABLES.deploymentCurrent;
+    env.DYNAMODB_ENDPOINT = ENDPOINT;
     env.CONTENT_BUCKET = CONTENT_BUCKET;
+    env.STORAGE_BUCKET = CONTENT_BUCKET;
     env.OPENSEARCH_ENDPOINT = 'http://localhost:9200';
 
     await createTables();
@@ -295,6 +335,7 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     const project = await import('../../../src/lambda/project/index.js');
     const mapping = await import('../../../src/lambda/mapping/index.js');
     const schema = await import('../../../src/lambda/schema/index.js');
+    const deployment = await import('../../../src/lambda/deployment/index.js');
 
     handlers = {
       createProject: project.createProjectHandler,
@@ -318,6 +359,11 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
       listSchemas: schema.listSchemasHandler,
       deleteSchema: schema.deleteSchemaHandler,
       querySchemaNodes: schema.querySchemaNodesHandler,
+      deployMapping: deployment.deployMappingHandler,
+      promoteDeployment: deployment.promoteDeploymentHandler,
+      rollbackDeployment: deployment.rollbackDeploymentHandler,
+      listDeployments: deployment.listDeploymentsHandler,
+      getCurrentDeployments: deployment.getCurrentDeploymentsHandler,
     };
   });
 
@@ -565,6 +611,105 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     await clearTable(TABLES.projects, ['projectId']);
     const deleted = await handlers.deleteSchema(event(undefined, { id: schema.schemaId }));
     expect(deleted.statusCode).toBe(204);
+  });
+
+  it('FS-064 AE-01/AE-02/AE-03/AE-06/AE-07/AE-08 deployment handlers integration', async () => {
+    const project = parseBody<{ projectId: string }>(await handlers.createProject(event({ name: 'Deploy Project', slug: 'deploy-project' })));
+    const mapping = parseBody<{ mappingId: string }>(await handlers.createMapping(event({ projectId: project.projectId, name: 'Deploy Map', rules: [] })));
+
+    const saved = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'Deploy Map',
+      expectedRevision: 1,
+      rules: [{ target: 'A', type: 'string', expression: 'source("a")' }],
+    }, { id: mapping.mappingId }));
+    expect(saved.statusCode).toBe(200);
+    expect(parseBody<{ revision: number }>(saved).revision).toBe(2);
+
+    const deployRevisionDev = await handlers.deployMapping(
+      event({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 }, { mappingId: mapping.mappingId }),
+    );
+    expect(deployRevisionDev.statusCode).toBe(201);
+    expect(parseBody<{ sourceType: string; sourceNumber: number }>(deployRevisionDev)).toMatchObject({ sourceType: 'revision', sourceNumber: 2 });
+
+    const deployRevisionQa = await handlers.deployMapping(
+      event({ environment: 'QA', sourceType: 'revision', sourceNumber: 2 }, { mappingId: mapping.mappingId }),
+    );
+    expect(deployRevisionQa.statusCode).toBe(400);
+    expect(parseBody<{ error: { code: string } }>(deployRevisionQa).error.code).toBe('REVISION_NOT_DEPLOYABLE_TO_ENV');
+
+    const versionCreated = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(versionCreated.statusCode).toBe(201);
+    expect(parseBody<{ version: number; revisionNumber: number }>(versionCreated)).toMatchObject({ version: 1, revisionNumber: 2 });
+
+    const deployVersionProd = await handlers.deployMapping(
+      event({ environment: 'PROD', sourceType: 'version', sourceNumber: 1 }, { mappingId: mapping.mappingId }),
+    );
+    expect(deployVersionProd.statusCode).toBe(201);
+    expect(parseBody<{ sourceType: string; sourceNumber: number }>(deployVersionProd)).toMatchObject({ sourceType: 'version', sourceNumber: 1 });
+
+    const promoteFromRevision = await handlers.promoteDeployment(
+      event({ fromEnvironment: 'DEV', toEnvironment: 'QA' }, { mappingId: mapping.mappingId }),
+    );
+    expect(promoteFromRevision.statusCode).toBe(400);
+    expect(parseBody<{ error: { code: string } }>(promoteFromRevision).error.code).toBe('PROMOTION_REQUIRES_VERSION');
+
+    const deployVersionDev = await handlers.deployMapping(
+      event({ environment: 'DEV', sourceType: 'version', sourceNumber: 1 }, { mappingId: mapping.mappingId }),
+    );
+    expect(deployVersionDev.statusCode).toBe(201);
+
+    const promoteVersion = await handlers.promoteDeployment(
+      event({ fromEnvironment: 'DEV', toEnvironment: 'QA' }, { mappingId: mapping.mappingId }),
+    );
+    expect(promoteVersion.statusCode).toBe(201);
+    expect(parseBody<{ sourceType: string; sourceNumber: number; promotedFrom: string }>(promoteVersion)).toMatchObject({
+      sourceType: 'version',
+      sourceNumber: 1,
+      promotedFrom: 'DEV',
+    });
+
+    const listProdBeforeRollback = await handlers.listDeployments(
+      event(undefined, { mappingId: mapping.mappingId }, { environment: 'PROD' }),
+    );
+    expect(listProdBeforeRollback.statusCode).toBe(200);
+    const prodEntries = parseBody<Array<{ environmentDeployedAt: string; sourceNumber: number }>>(listProdBeforeRollback);
+    expect(prodEntries.length).toBe(1);
+    const firstProdEntry = prodEntries[0];
+    expect(firstProdEntry).toBeDefined();
+
+    const updatedAgain = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'Deploy Map',
+      expectedRevision: 2,
+      rules: [{ target: 'A', type: 'string', expression: 'source("aa")' }],
+    }, { id: mapping.mappingId }));
+    expect(updatedAgain.statusCode).toBe(200);
+
+    const versionTwo = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(versionTwo.statusCode).toBe(201);
+    expect(parseBody<{ version: number }>(versionTwo).version).toBe(2);
+
+    const deployVersionTwoProd = await handlers.deployMapping(
+      event({ environment: 'PROD', sourceType: 'version', sourceNumber: 2 }, { mappingId: mapping.mappingId }),
+    );
+    expect(deployVersionTwoProd.statusCode).toBe(201);
+
+    const rollback = await handlers.rollbackDeployment(
+      event({ environment: 'PROD', deploymentSK: firstProdEntry!.environmentDeployedAt }, { mappingId: mapping.mappingId }),
+    );
+    expect(rollback.statusCode).toBe(201);
+    expect(parseBody<{ rollbackOf: string; sourceNumber: number }>(rollback)).toMatchObject({
+      rollbackOf: firstProdEntry!.environmentDeployedAt,
+      sourceNumber: 1,
+    });
+
+    const current = await handlers.getCurrentDeployments(event(undefined, { mappingId: mapping.mappingId }));
+    expect(current.statusCode).toBe(200);
+    const currentBody = parseBody<{ DEV: { sourceType: string }; QA: { sourceType: string }; PROD: { sourceType: string; sourceNumber: number } }>(current);
+    expect(currentBody.DEV.sourceType).toBe('version');
+    expect(currentBody.QA.sourceType).toBe('version');
+    expect(currentBody.PROD.sourceNumber).toBe(1);
   });
 
   afterAll(async () => {

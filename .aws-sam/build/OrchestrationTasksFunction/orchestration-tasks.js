@@ -19433,6 +19433,9 @@ async function handleErrorTask(event) {
     errorDetails
   };
 }
+function assertNever(value) {
+  throw new Error(`Unsupported orchestration action: ${String(value)}`);
+}
 async function handler(event) {
   switch (event.action) {
     case "parse":
@@ -19443,11 +19446,8 @@ async function handler(event) {
       return updateMetadataTask(event);
     case "handleError":
       return handleErrorTask(event);
-    default: {
-      const neverAction = event.action;
-      throw new Error(`Unsupported orchestration action: ${String(neverAction)}`);
-    }
   }
+  return assertNever(event);
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

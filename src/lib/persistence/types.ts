@@ -167,6 +167,54 @@ export interface MappingRevisionItem {
   readonly configHash: string;
 }
 
+export type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
+
+export type DeploymentSourceType = 'revision' | 'version';
+
+/**
+ * DynamoDB Deployments table item.
+ */
+export interface DeploymentItem {
+  readonly mappingId: string;
+  /** Composite SK: {ENV}#{ISO8601} */
+  readonly environmentDeployedAt: string;
+  readonly environment: DeploymentEnvironment;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly configS3Key: string;
+  readonly configHash: string;
+  readonly deployedAt: ISODateString;
+  readonly deployedBy: string;
+  readonly promotedFrom?: DeploymentEnvironment;
+  readonly rollbackOf?: string;
+}
+
+/**
+ * DynamoDB DeploymentCurrent table item.
+ */
+export interface DeploymentCurrentItem {
+  /** Composite PK: {mappingId}#{ENV} */
+  readonly mappingIdEnvironment: string;
+  readonly mappingId: string;
+  readonly environment: DeploymentEnvironment;
+  readonly deployedAt: ISODateString;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly configHash: string;
+  readonly configS3Key: string;
+}
+
+export interface CreateDeploymentInput {
+  readonly mappingId: string;
+  readonly environment: DeploymentEnvironment;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly deployedBy: string;
+  readonly config: MappingConfig;
+  readonly promotedFrom?: DeploymentEnvironment;
+  readonly rollbackOf?: string;
+}
+
 export interface CreateProjectInput {
   readonly name: string;
   readonly description: string;

@@ -1,7 +1,9 @@
 "use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -15,6 +17,14 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // src/lambda/mapping/update-mapping.ts
@@ -1047,13 +1057,13 @@ function isPlainObject(value) {
 }
 var valueMapImplementation = (args, context) => {
   const value = args[0];
-  const mappings = args[1];
+  const mappings2 = args[1];
   const hasFallback = args.length >= 3;
   const fallback = hasFallback ? args[2] : null;
   if (value === null) {
     return fallback;
   }
-  if (!isPlainObject(mappings)) {
+  if (!isPlainObject(mappings2)) {
     context.addDiagnostic({
       code: DIAGNOSTIC_CODES["KEYRA-E060"].code,
       severity: DIAGNOSTIC_CODES["KEYRA-E060"].severity,
@@ -1063,8 +1073,8 @@ var valueMapImplementation = (args, context) => {
     return null;
   }
   const key = String(value);
-  if (Object.hasOwn(mappings, key)) {
-    return mappings[key];
+  if (Object.hasOwn(mappings2, key)) {
+    return mappings2[key];
   }
   context.addDiagnostic({
     code: DIAGNOSTIC_CODES["KEYRA-W003"].code,
@@ -2964,9 +2974,130 @@ function collectParseDiagnostics(parsedRules) {
 // src/engine/index.ts
 registerAllFunctions(defaultRegistry);
 
-// src/lambda/shared/dynamo.ts
+// src/lib/persistence/config.ts
+function getEnvValue(key) {
+  const env = globalThis.process?.env;
+  return env?.[key];
+}
+function getEnvValueOrDefault(key, fallback) {
+  const value = getEnvValue(key)?.trim();
+  return value && value.length > 0 ? value : fallback;
+}
+var TABLE_NAMES = {
+  projects: getEnvValueOrDefault("PROJECTS_TABLE", "keyra-projects"),
+  mappings: getEnvValueOrDefault("MAPPINGS_TABLE", "keyra-mappings"),
+  schemaMetadata: getEnvValueOrDefault("SCHEMA_METADATA_TABLE", "keyra-schema-metadata"),
+  schemaNodes: getEnvValueOrDefault("SCHEMA_NODES_TABLE", "keyra-schema-nodes"),
+  mappingRevisions: getEnvValueOrDefault("MAPPING_REVISIONS_TABLE", "keyra-mapping-revisions"),
+  mappingVersions: getEnvValueOrDefault("MAPPING_VERSIONS_TABLE", "keyra-mapping-versions"),
+  deployments: getEnvValueOrDefault("DEPLOYMENTS_TABLE", "keyra-deployments"),
+  deploymentCurrent: getEnvValueOrDefault("DEPLOYMENT_CURRENT_TABLE", "keyra-deployment-current")
+};
+var BUCKET_NAME = getEnvValueOrDefault("STORAGE_BUCKET", "keyra-storage");
+
+// src/lib/persistence/clients.ts
 var import_client_dynamodb = require("@aws-sdk/client-dynamodb");
+var import_client_s3 = require("@aws-sdk/client-s3");
 var import_lib_dynamodb = require("@aws-sdk/lib-dynamodb");
+function getEnvValue2(key) {
+  const env = globalThis.process?.env;
+  return env?.[key];
+}
+function getRegion() {
+  const region = getEnvValue2("AWS_REGION")?.trim();
+  return region && region.length > 0 ? region : "us-east-1";
+}
+function toOptionalEndpoint(value) {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : void 0;
+}
+function buildDynamoConfig() {
+  return {
+    region: getRegion(),
+    endpoint: toOptionalEndpoint(getEnvValue2("DYNAMODB_ENDPOINT"))
+  };
+}
+function buildS3Config() {
+  return {
+    region: getRegion(),
+    endpoint: toOptionalEndpoint(getEnvValue2("S3_ENDPOINT")),
+    forcePathStyle: true
+  };
+}
+var dynamoClient = import_lib_dynamodb.DynamoDBDocumentClient.from(new import_client_dynamodb.DynamoDBClient(buildDynamoConfig()));
+var s3Client = new import_client_s3.S3Client(buildS3Config());
+
+// src/lib/persistence/mappings.ts
+var import_client_s32 = require("@aws-sdk/client-s3");
+var import_lib_dynamodb2 = require("@aws-sdk/lib-dynamodb");
+
+// src/lib/persistence/hash.ts
+function sortObject(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortObject);
+  }
+  if (value && typeof value === "object") {
+    const record = value;
+    const sortedKeys = Object.keys(record).sort((a, b) => a.localeCompare(b));
+    const result = {};
+    for (const key of sortedKeys) {
+      result[key] = sortObject(record[key]);
+    }
+    return result;
+  }
+  return value;
+}
+function stableStringify(value) {
+  return JSON.stringify(sortObject(value));
+}
+function toHex(bytes) {
+  return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+function digestToHex(digest) {
+  return toHex(new Uint8Array(digest));
+}
+async function computeConfigHash(config) {
+  const json = stableStringify(config);
+  if (globalThis.crypto?.subtle) {
+    const encoder = new TextEncoder();
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", encoder.encode(json));
+    return digestToHex(digest);
+  }
+  const { createHash } = await import("node:crypto");
+  return createHash("sha256").update(json).digest("hex");
+}
+
+// src/lib/persistence/deployments.ts
+var import_lib_dynamodb3 = require("@aws-sdk/lib-dynamodb");
+
+// src/lib/persistence/s3/deployment-snapshot.ts
+var import_client_s33 = require("@aws-sdk/client-s3");
+
+// src/lib/persistence/mapping-versions.ts
+var import_lib_dynamodb5 = require("@aws-sdk/lib-dynamodb");
+
+// src/lib/persistence/mapping-revisions.ts
+var import_client_s34 = require("@aws-sdk/client-s3");
+var import_lib_dynamodb4 = require("@aws-sdk/lib-dynamodb");
+
+// src/lib/persistence/schema-metadata.ts
+var import_lib_dynamodb6 = require("@aws-sdk/lib-dynamodb");
+
+// src/lib/persistence/schema-nodes.ts
+var import_lib_dynamodb7 = require("@aws-sdk/lib-dynamodb");
+
+// src/lib/persistence/s3/mapping-config.ts
+var import_client_s35 = require("@aws-sdk/client-s3");
+
+// src/lib/persistence/s3/schema-content.ts
+var import_client_s36 = require("@aws-sdk/client-s3");
+
+// src/lib/persistence/projects.ts
+var import_lib_dynamodb8 = require("@aws-sdk/lib-dynamodb");
+
+// src/lambda/shared/dynamo.ts
+var import_client_dynamodb2 = require("@aws-sdk/client-dynamodb");
+var import_lib_dynamodb9 = require("@aws-sdk/lib-dynamodb");
 
 // src/lambda/shared/errors.ts
 var ERROR_CODES = {
@@ -2974,6 +3105,10 @@ var ERROR_CODES = {
   RESOURCE_NOT_FOUND: "RESOURCE_NOT_FOUND",
   CONTENT_UNAVAILABLE: "CONTENT_UNAVAILABLE",
   CONFLICT: "CONFLICT",
+  SOURCE_NOT_FOUND: "SOURCE_NOT_FOUND",
+  REVISION_NOT_DEPLOYABLE_TO_ENV: "REVISION_NOT_DEPLOYABLE_TO_ENV",
+  PROMOTION_REQUIRES_VERSION: "PROMOTION_REQUIRES_VERSION",
+  SNAPSHOT_INTEGRITY_ERROR: "SNAPSHOT_INTEGRITY_ERROR",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   TIMEOUT: "TIMEOUT"
@@ -3031,18 +3166,18 @@ function serviceUnavailable(message = "Service temporarily unavailable", request
 }
 
 // src/lambda/shared/dynamo.ts
-function getEnvValue(key) {
+function getEnvValue3(key) {
   const env = globalThis.process?.env;
   return env?.[key];
 }
 function createDynamoClient() {
-  const endpoint = getEnvValue("DYNAMODB_ENDPOINT") ?? getEnvValue("AWS_ENDPOINT_URL_DYNAMODB");
-  const base = new import_client_dynamodb.DynamoDBClient({
+  const endpoint = getEnvValue3("DYNAMODB_ENDPOINT") ?? getEnvValue3("AWS_ENDPOINT_URL_DYNAMODB");
+  const base = new import_client_dynamodb2.DynamoDBClient({
     ...endpoint ? { endpoint } : {}
   });
-  return import_lib_dynamodb.DynamoDBDocumentClient.from(base);
+  return import_lib_dynamodb9.DynamoDBDocumentClient.from(base);
 }
-var dynamoClient = createDynamoClient();
+var dynamoClient2 = createDynamoClient();
 var DynamoServiceError = class extends Error {
   constructor(message, appError, cause) {
     super(message);
@@ -3069,15 +3204,23 @@ function mapDynamoError(error, operation) {
 }
 async function getItem(params) {
   try {
-    const result = await dynamoClient.send(new import_lib_dynamodb.GetCommand(params));
+    const result = await dynamoClient2.send(new import_lib_dynamodb9.GetCommand(params));
     return result.Item ?? null;
   } catch (error) {
     return mapDynamoError(error, "getItem");
   }
 }
+async function query(params) {
+  try {
+    const result = await dynamoClient2.send(new import_lib_dynamodb9.QueryCommand(params));
+    return result.Items ?? [];
+  } catch (error) {
+    return mapDynamoError(error, "query");
+  }
+}
 async function updateItem(params) {
   try {
-    const result = await dynamoClient.send(new import_lib_dynamodb.UpdateCommand(params));
+    const result = await dynamoClient2.send(new import_lib_dynamodb9.UpdateCommand(params));
     return result.Attributes ?? null;
   } catch (error) {
     return mapDynamoError(error, "updateItem");
@@ -3144,8 +3287,8 @@ function errorResponse(code, message, statusCode, retryable, requestId) {
 }
 
 // src/lambda/shared/s3.ts
-var import_client_s3 = require("@aws-sdk/client-s3");
-function getEnvValue2(key) {
+var import_client_s37 = require("@aws-sdk/client-s3");
+function getEnvValue4(key) {
   const env = globalThis.process?.env;
   return env?.[key];
 }
@@ -3157,21 +3300,21 @@ function isNoSuchKey(error) {
   return typed.name === "NoSuchKey" || typed.Code === "NoSuchKey" || typed.$metadata?.httpStatusCode === 404;
 }
 function createS3Client() {
-  const endpoint = getEnvValue2("S3_ENDPOINT");
-  const region = getEnvValue2("AWS_REGION") ?? "us-east-1";
-  return new import_client_s3.S3Client({
+  const endpoint = getEnvValue4("S3_ENDPOINT");
+  const region = getEnvValue4("AWS_REGION") ?? "us-east-1";
+  return new import_client_s37.S3Client({
     region,
     ...endpoint ? {
       endpoint,
       forcePathStyle: true,
       credentials: {
-        accessKeyId: getEnvValue2("AWS_ACCESS_KEY_ID") ?? "test",
-        secretAccessKey: getEnvValue2("AWS_SECRET_ACCESS_KEY") ?? "test"
+        accessKeyId: getEnvValue4("AWS_ACCESS_KEY_ID") ?? "test",
+        secretAccessKey: getEnvValue4("AWS_SECRET_ACCESS_KEY") ?? "test"
       }
     } : {}
   });
 }
-var s3Client = createS3Client();
+var s3Client2 = createS3Client();
 var S3ServiceError = class extends Error {
   constructor(message, appError, cause) {
     super(message);
@@ -3192,7 +3335,7 @@ function mapS3Error(error, operation, key) {
 }
 async function putObject(params) {
   try {
-    await s3Client.send(new import_client_s3.PutObjectCommand(params));
+    await s3Client2.send(new import_client_s37.PutObjectCommand(params));
   } catch (error) {
     mapS3Error(error, "putObject", params.Key);
   }
@@ -3219,16 +3362,24 @@ function requireFields(body, fields) {
 }
 
 // src/lambda/mapping/update-mapping.ts
-function getEnvValue3(key) {
+function getEnvValue5(key) {
   const env = globalThis.process?.env;
   return env?.[key];
 }
-var MAPPINGS_TABLE = getEnvValue3("MAPPINGS_TABLE");
-var CONTENT_BUCKET = getEnvValue3("CONTENT_BUCKET");
+var MAPPINGS_TABLE = getEnvValue5("MAPPINGS_TABLE");
+var MAPPING_REVISIONS_TABLE = getEnvValue5("MAPPING_REVISIONS_TABLE");
+var CONTENT_BUCKET = getEnvValue5("CONTENT_BUCKET");
 function getMappingsTableOrThrow() {
   const table = MAPPINGS_TABLE?.trim();
   if (!table) {
     throw new Error("Missing required environment variable: MAPPINGS_TABLE");
+  }
+  return table;
+}
+function getMappingRevisionsTableOrThrow() {
+  const table = MAPPING_REVISIONS_TABLE?.trim();
+  if (!table) {
+    throw new Error("Missing required environment variable: MAPPING_REVISIONS_TABLE");
   }
   return table;
 }
@@ -3284,20 +3435,26 @@ function deriveStatusAndCoverage(config) {
     ruleCount
   };
 }
+function getCurrentRevision(metadata) {
+  return metadata.revision ?? metadata.version;
+}
+function toRevisionS3Key(mappingId, revision) {
+  return `mappings/${mappingId}/revisions/r${revision}.json`;
+}
 async function handler(event) {
   const mappingId = parsePathParam(event, "id");
   if (!mappingId) {
     return errorResponse(ERROR_CODES.VALIDATION_ERROR, "Missing required path parameter: id", 400, false);
   }
   const body = parseBody(event);
-  const required = requireFields(body, ["projectId", "name", "version"]);
+  const required = requireFields(body, ["projectId", "name", "expectedRevision"]);
   if (!required.ok) {
     const err = required.error;
     return errorResponse(err?.code ?? ERROR_CODES.VALIDATION_ERROR, err?.message ?? "Validation failed", err?.statusCode ?? 400, err?.retryable ?? false);
   }
-  const requestVersion = body?.version;
-  if (typeof requestVersion !== "number") {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, "Missing required field: version", 400, false);
+  const expectedRevision = body?.expectedRevision;
+  if (typeof expectedRevision !== "number") {
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, "Missing required field: expectedRevision", 400, false);
   }
   try {
     const existing = await getItem({
@@ -3308,71 +3465,120 @@ async function handler(event) {
       const err = notFound("Mapping", mappingId);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
-    if (requestVersion !== existing.version) {
-      const err = conflict(`Version mismatch: expected ${existing.version}, got ${requestVersion}. Reload and retry.`);
+    const currentRevision = getCurrentRevision(existing);
+    if (expectedRevision !== currentRevision) {
+      const err = conflict(`Revision mismatch: expected ${currentRevision}, got ${expectedRevision}. Reload and retry.`);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
-    const nextVersion = existing.version + 1;
+    const nextRevision = currentRevision + 1;
     const config = {
       id: mappingId,
       projectId: typeof body?.projectId === "string" ? body.projectId : existing.projectId,
       name: typeof body?.name === "string" ? body.name : existing.name,
-      version: nextVersion,
+      version: nextRevision,
       engineVersion: typeof body?.engineVersion === "string" ? body.engineVersion : "1.0.0",
       sourceSchemaRef: body?.sourceSchemaRef ?? void 0,
       targetSchemaRef: body?.targetSchemaRef ?? void 0,
       config: body?.config ?? {},
       rules: Array.isArray(body?.rules) ? body.rules : []
     };
+    const configHash = await computeConfigHash({ ...config, version: 0 });
+    const latestRevisionEntries = await query({
+      TableName: getMappingRevisionsTableOrThrow(),
+      KeyConditionExpression: "#mappingId = :mappingId",
+      ExpressionAttributeNames: {
+        "#mappingId": "mappingId"
+      },
+      ExpressionAttributeValues: {
+        ":mappingId": mappingId
+      },
+      ScanIndexForward: false,
+      Limit: 1
+    });
+    const latestRevision = latestRevisionEntries[0] ?? null;
+    if (latestRevision?.configHash === configHash) {
+      return jsonResponse(200, {
+        mappingId,
+        revision: currentRevision,
+        noChange: true
+      });
+    }
     const derivation = deriveStatusAndCoverage(config);
     const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const revisionConfigS3Key = toRevisionS3Key(mappingId, nextRevision);
+    await putObject({
+      Bucket: getContentBucketOrThrow(),
+      Key: revisionConfigS3Key,
+      Body: JSON.stringify(config),
+      ContentType: "application/json"
+    });
     await putObject({
       Bucket: getContentBucketOrThrow(),
       Key: existing.configS3Key,
       Body: JSON.stringify(config),
       ContentType: "application/json"
     });
-    const updatedMetadata = {
-      ...existing,
-      projectId: config.projectId ?? existing.projectId,
-      name: config.name,
-      version: nextVersion,
-      status: derivation.status,
-      sourceSchemaId: config.sourceSchemaRef?.schemaId,
-      targetSchemaId: config.targetSchemaRef?.schemaId,
-      ruleCount: derivation.ruleCount,
-      coverage: derivation.coverage,
-      updatedAt
-    };
     await updateItem({
       TableName: getMappingsTableOrThrow(),
       Key: { mappingId },
-      UpdateExpression: "SET #projectId = :projectId, #name = :name, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt",
+      UpdateExpression: "SET #projectId = :projectId, #name = :name, #revision = :revision, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt, #configHash = :configHash",
       ExpressionAttributeNames: {
         "#projectId": "projectId",
         "#name": "name",
+        "#revision": "revision",
         "#version": "version",
         "#status": "status",
         "#sourceSchemaId": "sourceSchemaId",
         "#targetSchemaId": "targetSchemaId",
         "#ruleCount": "ruleCount",
         "#coverage": "coverage",
-        "#updatedAt": "updatedAt"
+        "#updatedAt": "updatedAt",
+        "#configHash": "configHash"
       },
       ExpressionAttributeValues: {
-        ":projectId": updatedMetadata.projectId,
-        ":name": updatedMetadata.name,
-        ":version": updatedMetadata.version,
-        ":status": updatedMetadata.status,
-        ":sourceSchemaId": updatedMetadata.sourceSchemaId,
-        ":targetSchemaId": updatedMetadata.targetSchemaId,
-        ":ruleCount": updatedMetadata.ruleCount,
-        ":coverage": updatedMetadata.coverage,
-        ":updatedAt": updatedMetadata.updatedAt
+        ":projectId": config.projectId ?? existing.projectId,
+        ":name": config.name,
+        ":revision": nextRevision,
+        ":version": nextRevision,
+        ":status": derivation.status,
+        ":sourceSchemaId": config.sourceSchemaRef?.schemaId ?? existing.sourceSchemaId ?? null,
+        ":targetSchemaId": config.targetSchemaRef?.schemaId ?? existing.targetSchemaId ?? null,
+        ":ruleCount": derivation.ruleCount,
+        ":coverage": derivation.coverage,
+        ":updatedAt": updatedAt,
+        ":configHash": configHash
       },
       ReturnValues: "ALL_NEW"
     });
-    return jsonResponse(200, updatedMetadata);
+    await updateItem({
+      TableName: getMappingRevisionsTableOrThrow(),
+      Key: { mappingId, revision: nextRevision },
+      UpdateExpression: "SET #savedAt = :savedAt, #savedBy = :savedBy, #ruleCount = :ruleCount, #configS3Key = :configS3Key, #configHash = :configHash",
+      ExpressionAttributeNames: {
+        "#savedAt": "savedAt",
+        "#savedBy": "savedBy",
+        "#ruleCount": "ruleCount",
+        "#configS3Key": "configS3Key",
+        "#configHash": "configHash"
+      },
+      ExpressionAttributeValues: {
+        ":savedAt": updatedAt,
+        ":savedBy": "system",
+        ":ruleCount": derivation.ruleCount,
+        ":configS3Key": revisionConfigS3Key,
+        ":configHash": configHash
+      },
+      ReturnValues: "ALL_NEW"
+    });
+    return jsonResponse(200, {
+      mappingId,
+      revision: nextRevision,
+      noChange: false,
+      status: derivation.status,
+      ruleCount: derivation.ruleCount,
+      coverage: derivation.coverage,
+      updatedAt
+    });
   } catch {
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);

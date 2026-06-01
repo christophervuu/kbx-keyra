@@ -74,6 +74,13 @@ src/
       create-version.ts POST /mappings/:mappingId/versions handler (create milestone from latest revision; optional implicitSave)
       save-version.ts   Backward-compatible shim exporting create-version handler
       index.ts          Mapping lambda barrel exports
+    deployment/       Deployment policy lambdas (FS-064 T-02)
+      deploy-mapping.ts POST /mappings/:mappingId/deploy handler (revision/version deploy with environment policy enforcement)
+      promote-deployment.ts POST /mappings/:mappingId/promote handler (version-backed promotion only)
+      rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)
+      list-deployments.ts GET /mappings/:mappingId/deployments handler (optional environment filter)
+      get-current-deployments.ts GET /mappings/:mappingId/deployments/current handler
+      index.ts          Deployment lambda barrel exports
     shared/           Shared Lambda handler utilities (FS-057 T-01)
       index.ts         Shared lambda utilities barrel export
       types.ts         Shared API Gateway event/response types
@@ -106,10 +113,15 @@ src/
       schema-nodes.ts   SchemaNodes partition query/batch-write/delete operations with retry/backoff
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
+      deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory) with immutable snapshot writes (FS-064 T-01)
       s3/               Shared S3 content helpers for schemas and mappings
         index.ts          S3 helper barrel exports
         schema-content.ts Schema original/processed content put/get/delete helpers
         mapping-config.ts Mapping config put/get/delete helpers
+        deployment-snapshot.ts Immutable deployment snapshot S3 helper (put)
+    deployment/       Shared deployment utility logic (FS-064 T-03)
+      index.ts          Deployment utility barrel exports
+      staleness.ts      Pure deployment staleness computation helpers (computeStaleness, computeAllEnvironments)
     schema/           Schema ingestion shared contracts and utilities (FS-056 T-01)
       index.ts          Schema module barrel exports
       types.ts          Schema ingestion/query interfaces and unions
@@ -164,7 +176,7 @@ ui/
         ProjectDeployments.tsx
         CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
-        MappingDeployment.tsx
+        MappingDeployment.tsx       Thin wrapper: extracts projectId/mappingId from route params, renders DeploymentPage (FS-064 T-05)
         MappingTestLab.tsx          Thin wrapper: extracts projectId/mappingId from route params, renders TestLabPage (FS-021 T-06, FS-032 T-01)
         SchemaLibrary.tsx          Renders SchemaLibraryPage from features/schemas (FS-016 T-04)
         SchemaDetail.tsx
@@ -172,6 +184,18 @@ ui/
         Settings.tsx
         NotFound.tsx
     features/             Feature-scoped code — one folder per major screen or domain
+        deployments/        Deployment feature module (FS-064 T-05)
+          index.ts          Barrel export (DeploymentPage, useDeploymentPage, types)
+          components/       Deployment UI components
+            index.ts                 Components barrel
+            DeploymentPage.tsx       Full deployment page: environment selector, revision/version sections, deploy action, success/error feedback (FS-064 T-05)
+            DeploymentPage.test.tsx  Component tests: 15 tests covering DEV/QA/PROD behavior, deploy action, success/error banners, feedback dismissal (FS-064 T-05)
+            EnvironmentSelector.tsx  Tab-style DEV/QA/PROD selector with keyboard navigation (role=tablist, aria-selected) (FS-064 T-05)
+            RevisionDeploySection.tsx  Revision list with deploy buttons; buttons disabled for QA/PROD environments (FS-064 T-05)
+            VersionDeploySection.tsx   Version list with deploy buttons; buttons enabled for all environments (FS-064 T-05)
+          hooks/            Deployment hooks
+            index.ts                 Hooks barrel
+            use-deployment-page.ts   Data-fetching hook: loads revisions, versions, currentDeployments; drives deploy action with success/error feedback (FS-064 T-05)
         schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
         index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
         types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types, SchemaLibraryItem, SchemaLibraryFilters, SchemaLibrarySort, SyncStatus, DisplayFormat — FS-016 T-01)
@@ -758,6 +782,8 @@ tests/
       get-version.test.ts Get mapping version tests (200 + revision pointer + 404)
       create-version.test.ts Create mapping version tests (201 from latest revision)
       save-version.test.ts Save mapping version shim tests (delegates to create-version flow)
+    deployment/       Deployment lambda handler tests (FS-064 T-02)
+      deployment-handlers.test.ts Unit tests for deploy/promote/rollback/list/current handlers and policy/error behavior
     shared/           Shared lambda utility tests (FS-057 T-01)
       response.test.ts Response/error envelope and CORS header tests
       request.test.ts  Request body/path/query parsing tests
@@ -806,9 +832,13 @@ tests/
       schema-nodes.test.ts SchemaNodes batch chunking/retry, partition query, contains-filter, and delete-by-schema tests
       mapping-revisions.test.ts MappingRevisions save/no-op/list/get/getConfig/prune behavior tests with mocked Dynamo+S3 clients
       mapping-versions.test.ts MappingVersions milestone create/list/get tests with mocked Dynamo client
+      deployments.test.ts Deployments persistence tests (create/getCurrent/getCurrentAll/listHistory) with mocked Dynamo+S3 snapshot helper
       s3/               Persistence S3 helper tests
         schema-content.test.ts Schema content helper tests (put/get/getOriginal/delete + NoSuchKey handling)
         mapping-config.test.ts Mapping config helper tests (put/get/delete + NoSuchKey handling)
+        deployment-snapshot.test.ts Deployment snapshot helper tests (put + returned key)
+    deployment/       Deployment shared utility tests (FS-064 T-03)
+      staleness.test.ts Staleness computation tests (revision/version current+stale, not-deployed, latestVersion edge case)
   integration/        Integration and performance test suites (Vitest)
     lambda/            Backend API integration tests against DynamoDB Local (FS-057 T-07)
       fs-057-api.test.ts End-to-end CRUD + error-envelope acceptance coverage using handler invocation
@@ -821,6 +851,7 @@ tests/
       schema-nodes.integration.test.ts SchemaNodes batchWrite/list/queryContains/deleteBySchema integration cycle
       mapping-revisions.integration.test.ts MappingRevisions save/list/get/getConfig + selective-prune integration cycle
       mapping-versions.integration.test.ts MappingVersions milestone create/list/get integration cycle
+      deployments.integration.test.ts Deployments + DeploymentCurrent integration cycle (create/current/history)
       s3-content.integration.test.ts Schema content + mapping config S3 helper integration cycle
     schema-ingestion/  FS-056 end-to-end ingestion/query orchestration tests
       inline-path.test.ts Inline path integration coverage (50/499/500 threshold behavior)
