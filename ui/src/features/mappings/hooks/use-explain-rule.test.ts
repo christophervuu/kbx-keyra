@@ -20,6 +20,8 @@ const MOCK_INPUT: ExplainRuleInput = {
 
 const MOCK_RESULT: ExplainRuleResult = {
   explanation: 'Multiplies price by quantity to compute the order total.',
+  confidence: 'high',
+  limitations: ['Assumes source.price and source.qty are numeric.'],
 };
 
 // ---------------------------------------------------------------------------
@@ -91,7 +93,7 @@ describe('useExplainRule', () => {
     });
   });
 
-  it('transitions to success with result when adapter resolves', async () => {
+  it('AE-01/AE-05: transitions to success with structured result when adapter resolves', async () => {
     const adapter = makeAdapter(vi.fn().mockResolvedValue(MOCK_RESULT));
     const { result } = renderHook(() => useExplainRule(), {
       wrapper: makeWrapper(adapter),
@@ -106,6 +108,10 @@ describe('useExplainRule', () => {
       result: MOCK_RESULT,
       error: null,
     });
+    expect(result.current.state.result?.confidence).toBe('high');
+    expect(result.current.state.result?.limitations).toEqual([
+      'Assumes source.price and source.qty are numeric.',
+    ]);
   });
 
   it('transitions to error with user-friendly message when adapter rejects', async () => {
@@ -227,23 +233,34 @@ describe('useExplainRule', () => {
     });
   });
 
-  it('calling explain() after success resets and re-fetches', async () => {
+  it('AE-03: calling explain() after success re-fetches without mutating input payload', async () => {
     const explainFn = vi.fn().mockResolvedValue(MOCK_RESULT);
     const adapter = makeAdapter(explainFn);
     const { result } = renderHook(() => useExplainRule(), {
       wrapper: makeWrapper(adapter),
     });
 
+    const payload: ExplainRuleInput = {
+      targetPath: MOCK_INPUT.targetPath,
+      expression: MOCK_INPUT.expression,
+    };
+    const snapshot = JSON.parse(JSON.stringify(payload)) as ExplainRuleInput;
+
     await act(async () => {
-      result.current.explain(MOCK_INPUT);
+      result.current.explain(payload);
     });
     expect(result.current.state.status).toBe('success');
 
     await act(async () => {
-      result.current.explain(MOCK_INPUT);
+      result.current.explain(payload);
     });
     expect(result.current.state.status).toBe('success');
     expect(explainFn).toHaveBeenCalledTimes(2);
+
+    // Non-mutation guarantee at hook call boundary (AE-03)
+    expect(payload).toEqual(snapshot);
+    expect(explainFn).toHaveBeenNthCalledWith(1, payload);
+    expect(explainFn).toHaveBeenNthCalledWith(2, payload);
   });
 
   it('calling explain() while loading aborts previous request', async () => {

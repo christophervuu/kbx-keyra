@@ -683,11 +683,16 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
-  it('explainRule maps to POST /ai/explain-rule', async () => {
-    vi.mocked(httpRequest).mockResolvedValueOnce({ explanation: 'ok' });
+  it('AE-01/AE-05: explainRule maps to POST /ai/explain-rule and preserves structured response', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      explanation: 'Maps source x to Order.Total.',
+      confidence: 'medium',
+      limitations: ['Assumes source field x exists.'],
+    });
     const adapter = new HttpAdapter(API_URL);
 
-    await adapter.explainRule({ targetPath: 'Order.Total', expression: 'source("x")' });
+    const input = { targetPath: 'Order.Total', expression: 'source("x")' };
+    const result = await adapter.explainRule(input);
 
     expect(httpRequest).toHaveBeenCalledWith({
       baseUrl: API_URL,
@@ -695,6 +700,23 @@ describe('HttpAdapter (CRUD)', () => {
       method: 'POST',
       body: { targetPath: 'Order.Total', expression: 'source("x")' },
     });
+    expect(result).toEqual({
+      explanation: 'Maps source x to Order.Total.',
+      confidence: 'medium',
+      limitations: ['Assumes source field x exists.'],
+    });
+  });
+
+  it('AE-03: explainRule call does not mutate caller input object', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ explanation: 'ok' });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = { targetPath: 'Order.Total', expression: 'source("x")' };
+    const before = JSON.parse(JSON.stringify(input)) as typeof input;
+
+    await adapter.explainRule(input);
+
+    expect(input).toEqual(before);
   });
 
   it('smartFix maps to POST /ai/smart-fix', async () => {

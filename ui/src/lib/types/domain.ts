@@ -428,6 +428,8 @@ export interface ExplainRuleInput {
 
 export interface ExplainRuleResult {
   readonly explanation: string;
+  readonly confidence?: 'high' | 'medium' | 'low';
+  readonly limitations?: readonly string[];
 }
 
 export interface SmartFixInput {

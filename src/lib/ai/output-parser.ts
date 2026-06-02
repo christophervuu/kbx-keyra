@@ -77,6 +77,30 @@ function validateSchemaObjectShape(data: unknown, schema: Record<string, unknown
         return `property '${key}' has invalid type`;
       }
 
+      if (propertyTypes.includes('string') && typeof value === 'string') {
+        const minLength = typeof propertySchemaRecord.minLength === 'number'
+          ? propertySchemaRecord.minLength
+          : undefined;
+        const maxLength = typeof propertySchemaRecord.maxLength === 'number'
+          ? propertySchemaRecord.maxLength
+          : undefined;
+
+        if (typeof minLength === 'number' && value.length < minLength) {
+          return `property '${key}' must be at least ${minLength} character(s)`;
+        }
+
+        if (typeof maxLength === 'number' && value.length > maxLength) {
+          return `property '${key}' must be at most ${maxLength} character(s)`;
+        }
+      }
+
+      if (propertyTypes.includes('array') && Array.isArray(value)) {
+        const arrayValidation = validateSchemaArrayShape(value, propertySchemaRecord);
+        if (arrayValidation) {
+          return `property '${key}' ${arrayValidation}`;
+        }
+      }
+
       if (propertySchemaRecord.enum && Array.isArray(propertySchemaRecord.enum)) {
         const enumValues = propertySchemaRecord.enum;
         if (!enumValues.includes(value)) {
@@ -103,6 +127,17 @@ function validateSchemaArrayShape(data: unknown, schema: Record<string, unknown>
     return 'expected array';
   }
 
+  const minItems = typeof schema.minItems === 'number' ? schema.minItems : undefined;
+  const maxItems = typeof schema.maxItems === 'number' ? schema.maxItems : undefined;
+
+  if (typeof minItems === 'number' && data.length < minItems) {
+    return `must contain at least ${minItems} item(s)`;
+  }
+
+  if (typeof maxItems === 'number' && data.length > maxItems) {
+    return `must contain at most ${maxItems} item(s)`;
+  }
+
   if (typeof schema.items !== 'object' || schema.items === null) {
     return null;
   }
@@ -118,6 +153,19 @@ function validateSchemaArrayShape(data: unknown, schema: Record<string, unknown>
       if (itemValidation) {
         return `item[${index}] ${itemValidation}`;
       }
+      continue;
+    }
+
+    if (itemType.includes('string') && typeof item !== 'string') {
+      return `item[${index}] has invalid type`;
+    }
+
+    if (itemType.includes('number') && typeof item !== 'number') {
+      return `item[${index}] has invalid type`;
+    }
+
+    if (itemType.includes('boolean') && typeof item !== 'boolean') {
+      return `item[${index}] has invalid type`;
     }
   }
 

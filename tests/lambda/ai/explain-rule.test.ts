@@ -48,11 +48,14 @@ describe('aiExplainRule handler', () => {
     vi.resetModules();
   });
 
-  it('returns 200 and AI result for valid request', async () => {
+  it('returns 200 and normalized AI result for valid request', async () => {
     invokeAIMock.mockResolvedValue({
       success: true,
       data: {
-        explanation: 'This rule maps the source id to target order id',
+        explanation:
+          'This rule maps the source id to target order id. It keeps downstream values deterministic. Extra sentence should be truncated.',
+        confidence: 'high',
+        limitations: ['Assumes source id exists.'],
       },
       promptId: 'explain-rule',
       model: 'openai/gpt-4.1-mini',
@@ -64,7 +67,7 @@ describe('aiExplainRule handler', () => {
       createEvent(
         JSON.stringify({
           targetPath: 'Order.Id',
-          expression: 'source("id")',
+          expression: '  source("id")  ',
         }),
       ),
     );
@@ -76,9 +79,16 @@ describe('aiExplainRule handler', () => {
     });
     expect(response.headers?.['x-request-id']).toBeTruthy();
 
-    const parsedBody = JSON.parse(response.body) as { success: boolean; data: { explanation: string } };
+    const parsedBody = JSON.parse(response.body) as {
+      success: boolean;
+      data: { explanation: string; confidence?: string; limitations?: string[] };
+    };
     expect(parsedBody.success).toBe(true);
     expect(parsedBody.data.explanation).toContain('maps the source id');
+    expect(parsedBody.data.explanation).toContain('keeps downstream values deterministic');
+    expect(parsedBody.data.explanation).not.toContain('Extra sentence should be truncated');
+    expect(parsedBody.data.confidence).toBe('high');
+    expect(parsedBody.data.limitations).toEqual(['Assumes source id exists.']);
     expect(invokeAIMock).toHaveBeenCalledWith('explain-rule', {
       targetPath: 'Order.Id',
       expression: 'source("id")',
@@ -95,6 +105,72 @@ describe('aiExplainRule handler', () => {
     expect(parsed.error.code).toBe('VALIDATION_ERROR');
     expect(parsed.error.retryable).toBe(false);
     expect(parsed.error.requestId).toBeTruthy();
+  });
+
+  it('returns VALIDATION_ERROR for empty expression string', async () => {
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetPath: 'Order.Id',
+          expression: '   ',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(400);
+    const parsed = JSON.parse(response.body) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('VALIDATION_ERROR');
+    expect(parsed.error.message).toContain('non-empty');
+    expect(invokeAIMock).not.toHaveBeenCalled();
+  });
+
+  it('returns deterministic failure for completely unparsable expression and skips invokeAI (AE-02)', async () => {
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetPath: 'Order.Id',
+          expression: '!!!@@@',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(400);
+    const parsed = JSON.parse(response.body) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('VALIDATION_ERROR');
+    expect(parsed.error.message).toContain('completely unparsable');
+    expect(invokeAIMock).not.toHaveBeenCalled();
+  });
+
+  it('attempts best-effort explanation for partially invalid DSL fragments (AE-02)', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        explanation: 'The expression appears to read from source id, but it has syntax issues.',
+      },
+      promptId: 'explain-rule',
+      model: 'openai/gpt-4.1-mini',
+    });
+
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetPath: 'Order.Id',
+          expression: 'source("id"',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(invokeAIMock).toHaveBeenCalledWith('explain-rule', {
+      targetPath: 'Order.Id',
+      expression: 'source("id"',
+    });
   });
 
   it('maps PROMPT_NOT_FOUND to canonical RESOURCE_NOT_FOUND envelope (AE-06)', async () => {
@@ -223,11 +299,44 @@ describe('aiExplainRule handler', () => {
     });
   });
 
+  it('returns INVALID_MODEL_OUTPUT when explanation normalizes to empty string', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        explanation: '   ',
+      },
+      promptId: 'explain-rule',
+      model: 'openai/gpt-4.1-mini',
+    });
+
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetPath: 'Order.Id',
+          expression: 'source("id")',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(500);
+    const parsed = JSON.parse(response.body) as {
+      error: { code: string; statusCode: number; retryable: boolean; message: string };
+    };
+    expect(parsed.error).toMatchObject({
+      code: 'INVALID_MODEL_OUTPUT',
+      statusCode: 500,
+      retryable: false,
+    });
+    expect(parsed.error.message).toContain('non-empty');
+  });
+
   it('enforces prompt-source policy and thin handler invocation path (AE-04)', async () => {
     for (const filePath of AI_HANDLER_PATHS) {
       const source = await readFile(filePath, 'utf8');
 
-      expect(source).toContain('invokeAI(');
+      expect(source).toMatch(/invokeAI(?:<[^>]+>)?\(/);
       expect(source).not.toMatch(/\{\{[^}]+\}\}/g);
       expect(source).not.toMatch(/new\s+OpenAI\s*\(/);
       expect(source).not.toMatch(/chat\.completions\.create\s*\(/);

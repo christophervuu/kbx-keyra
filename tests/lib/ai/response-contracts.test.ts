@@ -26,6 +26,21 @@ describe('response schema contracts', () => {
     expect(explainContract?.schema).toMatchObject({
       type: 'object',
       required: ['explanation'],
+      properties: {
+        explanation: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 320,
+        },
+        confidence: {
+          type: 'string',
+          enum: ['high', 'medium', 'low'],
+        },
+        limitations: {
+          type: 'array',
+          maxItems: 5,
+        },
+      },
     });
   });
 

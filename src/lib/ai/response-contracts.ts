@@ -11,7 +11,16 @@ export const RESPONSE_SCHEMA_CONTRACTS: Readonly<Record<CanonicalPromptId, Respo
     schema: {
       type: 'object',
       properties: {
-        explanation: { type: 'string' },
+        explanation: { type: 'string', minLength: 1, maxLength: 320 },
+        confidence: {
+          type: 'string',
+          enum: ['high', 'medium', 'low'],
+        },
+        limitations: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: 5,
+        },
       },
       required: ['explanation'],
       additionalProperties: false,

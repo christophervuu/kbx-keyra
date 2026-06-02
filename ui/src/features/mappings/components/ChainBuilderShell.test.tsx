@@ -342,9 +342,11 @@ describe('ChainBuilderShell — Explain Rule (FS-041)', () => {
     expect(btn).toHaveAttribute('title', 'Explain this expression using AI');
   });
 
-  it('AE-02: shows explanation panel with text on success', async () => {
+  it('AE-02/AE-04: shows explanation panel with text and generated-assistance label on success', async () => {
     const explainRule = vi.fn().mockResolvedValue({
       explanation: 'Maps the email field from the source.',
+      confidence: 'high',
+      limitations: ['Assumes source email is present.'],
     } satisfies ExplainRuleResult);
     renderShell({ expression: 'source("email")' }, { explainRule });
 
@@ -355,6 +357,9 @@ describe('ChainBuilderShell — Explain Rule (FS-041)', () => {
     });
     expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
       'Maps the email field from the source.',
+    );
+    expect(screen.getByTestId('explanation-assistance-label')).toHaveTextContent(
+      'AI-generated assistance. This explanation is not persisted to mapping content.',
     );
   });
 

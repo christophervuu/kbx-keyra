@@ -108,12 +108,37 @@ function mapErrorCodeToMessage(code: unknown): string {
 }
 
 function isExplainRuleResult(value: unknown): value is ExplainRuleResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'explanation' in value &&
-    typeof (value as { explanation?: unknown }).explanation === 'string'
-  );
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const typed = value as {
+    explanation?: unknown;
+    confidence?: unknown;
+    limitations?: unknown;
+  };
+
+  if (typeof typed.explanation !== 'string') {
+    return false;
+  }
+
+  if (
+    typed.confidence !== undefined &&
+    typed.confidence !== 'high' &&
+    typed.confidence !== 'medium' &&
+    typed.confidence !== 'low'
+  ) {
+    return false;
+  }
+
+  if (
+    typed.limitations !== undefined &&
+    (!Array.isArray(typed.limitations) || typed.limitations.some((item) => typeof item !== 'string'))
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function mapSuggestHttpStatusToMessage(status: number): string {
@@ -313,7 +338,11 @@ export async function explainRuleHttp(
       throw new Error(MALFORMED_RESPONSE_MESSAGE);
     }
 
-    return { explanation: parsed.data.explanation };
+    return {
+      explanation: parsed.data.explanation,
+      confidence: parsed.data.confidence,
+      limitations: parsed.data.limitations,
+    };
   } catch (error) {
     if (
       typeof error === 'object' &&

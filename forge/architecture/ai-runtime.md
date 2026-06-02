@@ -481,6 +481,16 @@ AI handlers (`explain-rule`, `suggest-expression`, `auto-map`) use shared failur
 
 `suggest-expression` validates (`instruction`, `targetPath`, `targetType`, `sourceContext`) and routes through canonical prompt ID resolution (`nl-to-rule` alias -> `natural-language-to-dsl`).
 
+### Explain Rule canonical contract (FS-069)
+
+`src/lambda/ai/explain-rule.ts` is a canonical thin handler over `invokeAI('explain-rule', ...)` and enforces these production constraints:
+
+- Validates required request fields (`targetPath`, non-empty `expression`)
+- Rejects completely unparsable expressions before invocation (no meaningful DSL fragment)
+- Uses prompt-registry + structured-output path via `invokeAI()`; success is gated by shared contract validation (`response-contracts.ts` + `output-parser.ts`)
+- Normalizes success data to concise explanation output (1–2 sentences target, hard token clamp) with optional metadata passthrough (`confidence`, `limitations[]`)
+- Remains read-only assistance: explain invocation never mutates mapping rules or persistence state
+
 Lambda handlers do not:
 - Read from DynamoDB directly
 - Call the OpenAI SDK directly

@@ -86,9 +86,17 @@ export function ExplanationPanel({ state, onDismiss, onRetry }: ExplanationPanel
           </button>
         </>
       ) : (
-        <p className="text-xs leading-relaxed text-slate-200">
-          {state.result?.explanation}
-        </p>
+        <>
+          <p
+            data-testid="explanation-assistance-label"
+            className="mb-2 text-[11px] text-blue-300/90"
+          >
+            AI-generated assistance. This explanation is not persisted to mapping content.
+          </p>
+          <p className="text-xs leading-relaxed text-slate-200">
+            {state.result?.explanation}
+          </p>
+        </>
       )}
     </div>
   );

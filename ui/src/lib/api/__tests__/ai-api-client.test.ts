@@ -23,7 +23,11 @@ describe('explainRuleHttp', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         success: true,
-        data: { explanation: 'This rule maps negative invoices to credit memos.' },
+        data: {
+          explanation: 'This rule maps negative invoices to credit memos.',
+          confidence: 'high',
+          limitations: ['Assumes InvoiceAmount is numeric.'],
+        },
       }),
     });
 
@@ -31,6 +35,8 @@ describe('explainRuleHttp', () => {
 
     await expect(explainRuleHttp(apiUrl, input)).resolves.toEqual({
       explanation: 'This rule maps negative invoices to credit memos.',
+      confidence: 'high',
+      limitations: ['Assumes InvoiceAmount is numeric.'],
     });
 
     expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/explain-rule`, {
@@ -153,6 +159,46 @@ describe('explainRuleHttp', () => {
         json: vi.fn().mockResolvedValue({
           success: true,
           data: {},
+        }),
+      }),
+    );
+
+    await expect(explainRuleHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
+  });
+
+  it('throws malformed response error when confidence is invalid', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            explanation: 'ok',
+            confidence: 'very-high',
+          },
+        }),
+      }),
+    );
+
+    await expect(explainRuleHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
+  });
+
+  it('throws malformed response error when limitations contains non-string values', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            explanation: 'ok',
+            limitations: ['good', 123],
+          },
         }),
       }),
     );

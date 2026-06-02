@@ -126,4 +126,97 @@ describe('parseModelOutput', () => {
       expect(result.error.message).toContain('schema validation');
     }
   });
+
+  it('enforces string minLength/maxLength constraints', () => {
+    const tooLong = parseModelOutput(
+      JSON.stringify({ explanation: 'x'.repeat(321) }),
+      'explain-rule',
+      'openai/gpt-4.1-mini',
+      {
+        type: 'object',
+        properties: {
+          explanation: { type: 'string', minLength: 1, maxLength: 320 },
+        },
+        required: ['explanation'],
+        additionalProperties: false,
+      },
+    );
+
+    expect(tooLong.success).toBe(false);
+    if (!tooLong.success) {
+      expect(tooLong.error.code).toBe('INVALID_MODEL_OUTPUT');
+      expect(tooLong.error.message).toContain('at most 320');
+    }
+
+    const empty = parseModelOutput(
+      JSON.stringify({ explanation: '' }),
+      'explain-rule',
+      'openai/gpt-4.1-mini',
+      {
+        type: 'object',
+        properties: {
+          explanation: { type: 'string', minLength: 1, maxLength: 320 },
+        },
+        required: ['explanation'],
+        additionalProperties: false,
+      },
+    );
+
+    expect(empty.success).toBe(false);
+    if (!empty.success) {
+      expect(empty.error.code).toBe('INVALID_MODEL_OUTPUT');
+      expect(empty.error.message).toContain('at least 1');
+    }
+  });
+
+  it('enforces array item type and maxItems constraints', () => {
+    const tooMany = parseModelOutput(
+      JSON.stringify({ explanation: 'ok', limitations: ['a', 'b', 'c', 'd', 'e', 'f'] }),
+      'explain-rule',
+      'openai/gpt-4.1-mini',
+      {
+        type: 'object',
+        properties: {
+          explanation: { type: 'string' },
+          limitations: {
+            type: 'array',
+            items: { type: 'string' },
+            maxItems: 5,
+          },
+        },
+        required: ['explanation'],
+        additionalProperties: false,
+      },
+    );
+
+    expect(tooMany.success).toBe(false);
+    if (!tooMany.success) {
+      expect(tooMany.error.code).toBe('INVALID_MODEL_OUTPUT');
+      expect(tooMany.error.message).toContain('at most 5');
+    }
+
+    const invalidItemType = parseModelOutput(
+      JSON.stringify({ explanation: 'ok', limitations: ['a', 123] }),
+      'explain-rule',
+      'openai/gpt-4.1-mini',
+      {
+        type: 'object',
+        properties: {
+          explanation: { type: 'string' },
+          limitations: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+        },
+        required: ['explanation'],
+        additionalProperties: false,
+      },
+    );
+
+    expect(invalidItemType.success).toBe(false);
+    if (!invalidItemType.success) {
+      expect(invalidItemType.error.code).toBe('INVALID_MODEL_OUTPUT');
+      expect(invalidItemType.error.message).toContain('item[1] has invalid type');
+    }
+  });
 });

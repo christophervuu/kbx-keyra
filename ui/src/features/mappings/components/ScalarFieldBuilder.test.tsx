@@ -1029,20 +1029,30 @@ describe('ScalarFieldBuilder', () => {
       expect(btn).toHaveAttribute('title', 'Explain this expression using AI');
     });
 
-    it('AE-01: shows explanation panel with text on success', async () => {
+    it('AE-01/AE-04/AE-03: shows explanation panel with text + generated-assistance label and does not mutate draft/expression state', async () => {
       const explainRule = vi.fn().mockResolvedValue({
         explanation: 'Maps the first name from the source.',
+        confidence: 'high',
+        limitations: ['Assumes source firstName exists.'],
       } satisfies ExplainRuleResult);
+      const updateDraft = vi.fn();
+      const revertDraft = vi.fn();
+      const getDraftExpression = vi.fn().mockReturnValue(null);
+
       renderBuilder(
         {
           currentExpression: 'source("firstName")',
-          updateDraft: vi.fn(),
-          getDraftExpression: vi.fn().mockReturnValue(null),
+          updateDraft,
+          revertDraft,
+          getDraftExpression,
         },
         { explainRule },
       );
       // Switch to editor mode so expression state is driven by raw DSL
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      const editor = screen.getByRole('textbox', { name: 'DSL expression editor' }) as HTMLTextAreaElement;
+      const before = editor.value;
 
       fireEvent.click(screen.getByTestId('ai-explain-btn'));
 
@@ -1052,6 +1062,14 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
         'Maps the first name from the source.',
       );
+      expect(screen.getByTestId('explanation-assistance-label')).toHaveTextContent(
+        'AI-generated assistance. This explanation is not persisted to mapping content.',
+      );
+
+      // Non-mutation guarantee (AE-03): explain flow must not change draft/expression state.
+      expect(editor.value).toBe(before);
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(revertDraft).not.toHaveBeenCalled();
     });
 
     it('AE-04: shows offline error message', async () => {
@@ -1078,18 +1096,26 @@ describe('ScalarFieldBuilder', () => {
       );
     });
 
-    it('AE-05: shows network error message and Try again button', async () => {
+    it('AE-03: shows network error message + Try again and preserves expression/draft state', async () => {
       const netMsg = 'Could not reach the Explain service. Check your connection and try again.';
       const explainRule = vi.fn().mockRejectedValue(new Error(netMsg));
+      const updateDraft = vi.fn();
+      const revertDraft = vi.fn();
+      const getDraftExpression = vi.fn().mockReturnValue(null);
+
       renderBuilder(
         {
           currentExpression: 'source("firstName")',
-          updateDraft: vi.fn(),
-          getDraftExpression: vi.fn().mockReturnValue(null),
+          updateDraft,
+          revertDraft,
+          getDraftExpression,
         },
         { explainRule },
       );
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      const editor = screen.getByRole('textbox', { name: 'DSL expression editor' }) as HTMLTextAreaElement;
+      const before = editor.value;
 
       fireEvent.click(screen.getByTestId('ai-explain-btn'));
 
@@ -1098,6 +1124,11 @@ describe('ScalarFieldBuilder', () => {
       });
       expect(screen.getByTestId('explanation-panel')).toHaveTextContent(netMsg);
       expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+
+      // Non-mutation guarantee (AE-03)
+      expect(editor.value).toBe(before);
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(revertDraft).not.toHaveBeenCalled();
     });
 
     it('AE-08: dismiss closes the panel', async () => {

@@ -351,10 +351,16 @@ AI features are integrated as thin vertical slices with a stable layering patter
 4. **Inline UI component** for user interaction and result presentation
 
 Current slices:
-- **Explain Rule (FS-041):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
+- **Explain Rule (FS-041, hardened by FS-069):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
 - **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
 - **Auto-Map Review Workspace (FS-046 → FS-048):** `HttpAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
 - **Phase 2 route-complete adapter surface (FS-068):** `HttpAdapter.autoMap` / `smartFix` / `validateMappings` map to canonical `/ai/*` routes; temporarily unavailable backend capability is surfaced as `FEATURE_NOT_ENABLED`
+
+Explain Rule UI semantics (current canonical behavior):
+- The explanation surface is explicitly labeled as **AI-generated assistance**.
+- The panel copy clarifies explanations are **not persisted** to mapping content.
+- Explain success/failure flows are read-only: they must not mutate expression text, rule ordering, or draft/persisted mapping state.
+- Optional backend metadata (`confidence`, `limitations[]`) is part of the UI type/API contract even when not prominently rendered.
 
 Canonical backend-mode contract notes:
 
