@@ -22,12 +22,13 @@ Scope:
 - Shared data-access module structure
 
 Out of scope:
-- Deployments table (future spec)
 - Templates table (future spec)
 - MappingMemory table (future AI/RAG spec)
 - PromptRegistry table (already implemented in `src/lib/ai/prompt-registry.ts`)
 - OpenSearch Serverless (covered by FS-056 architecture)
 - IaC / CloudFormation / CDK definitions
+
+Note: Deployments table is now in scope and documented in `forge/architecture/deployments.md`.
 
 ---
 
@@ -316,6 +317,7 @@ For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_END
 - Product spec data model: `specs/PRODUCT-TECHNICAL.md` Section 15
 - Backend API handlers: FS-057
 - Revision/version model update: FS-063
+- **Deployment subsystem**: `forge/architecture/deployments.md` (Deployments + DeploymentCurrent tables, snapshot S3 layout, staleness computation)
 - Schema ingestion pipeline: FS-056
 - HttpAdapter (client): FS-055
 - Phase 1 readiness baseline: `forge/architecture/phase-1-readiness.md`

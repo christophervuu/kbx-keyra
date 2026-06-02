@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAdapter } from '@/lib/api';
+import type { CurrentDeployments } from '@/lib/api/types';
 import type { MappingMetadata, ProjectMetadata } from '@/lib/types/domain';
 
 import type {
@@ -26,9 +27,32 @@ export function deriveWorstStatus(mappings: MappingMetadata[]): ProjectWorstStat
   return 'ready';
 }
 
+/**
+ * Computes the worst deployment status across multiple CurrentDeployments
+ * for a single environment.
+ *
+ * Priority: stale > not-deployed > deployed (current).
+ * If any mapping is stale, the project env is stale.
+ * If any mapping has a current deploy (and none are stale), it's deployed.
+ * Otherwise not-deployed.
+ */
+function worstEnvDeployStatus(
+  deploymentsList: Array<CurrentDeployments | null>,
+  env: 'DEV' | 'QA' | 'PROD',
+): 'deployed' | 'stale' | 'not-deployed' {
+  let hasCurrent = false;
+  for (const dep of deploymentsList) {
+    const status = dep?.[env]?.status ?? 'not-deployed';
+    if (status === 'stale') return 'stale';
+    if (status === 'current') hasCurrent = true;
+  }
+  return hasCurrent ? 'deployed' : 'not-deployed';
+}
+
 function buildProjectListItem(
   project: ProjectMetadata,
   mappings: MappingMetadata[],
+  deploymentsList: Array<CurrentDeployments | null>,
 ): ProjectListItem {
   return {
     projectId: project.projectId,
@@ -37,9 +61,9 @@ function buildProjectListItem(
     mappingCount: mappings.length,
     updatedAt: project.updatedAt,
     worstStatus: deriveWorstStatus(mappings),
-    devDeploy: 'not-deployed',
-    qaDeploy: 'not-deployed',
-    prodDeploy: 'not-deployed',
+    devDeploy: worstEnvDeployStatus(deploymentsList, 'DEV'),
+    qaDeploy: worstEnvDeployStatus(deploymentsList, 'QA'),
+    prodDeploy: worstEnvDeployStatus(deploymentsList, 'PROD'),
   };
 }
 
@@ -113,8 +137,23 @@ export function useDashboardData(): UseDashboardDataResult {
 
         if (cancelled) return;
 
+        // Fetch current deployments for every mapping in parallel (best-effort)
+        const deploymentArrays: Array<Array<CurrentDeployments | null>> = await Promise.all(
+          mappingArrays.map((mappings) =>
+            Promise.all(
+              mappings.map((m) =>
+                adapter
+                  .getCurrentDeployments(m.mappingId)
+                  .catch(() => null as CurrentDeployments | null),
+              ),
+            ),
+          ),
+        );
+
+        if (cancelled) return;
+
         const projectItems = projectList.map((p, i) =>
-          buildProjectListItem(p, mappingArrays[i] ?? []),
+          buildProjectListItem(p, mappingArrays[i] ?? [], deploymentArrays[i] ?? []),
         );
 
         setMetrics(computeMetrics(projectList, mappingArrays, schemaList.length));

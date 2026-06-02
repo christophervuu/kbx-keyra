@@ -1,3 +1,5 @@
+export { DeploymentBadge } from './DeploymentBadge';
+export type { DeploymentBadgeProps } from './DeploymentBadge';
 export { AsyncErrorBanner, ErrorBanner } from './ErrorBanner';
 export type { AsyncErrorBannerProps, ErrorBannerProps } from './ErrorBanner';
 export { Button } from './Button';

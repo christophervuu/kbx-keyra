@@ -4,13 +4,39 @@ import type { MappingRowData, ProjectLoadState, SchemaCardData } from '../types'
 
 import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
+import type { CurrentDeployments } from '@/lib/api/types';
 import type { AppError } from '@/lib/state/app-error';
+import type { DeployStatus } from '@/lib/types/domain';
 import type {
   MappingMetadata,
   ProjectDetail,
   SchemaDetail,
   SchemaRef,
 } from '@/lib/types/domain';
+
+// ---------------------------------------------------------------------------
+// Deployment status helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps DeploymentStatus (from the deployments API) to the legacy
+ * DeployStatus used by MappingRowData / MappingRow badges.
+ */
+function toDeployStatus(
+  deployments: CurrentDeployments | null,
+  env: 'DEV' | 'QA' | 'PROD',
+): DeployStatus {
+  const summary = deployments?.[env];
+  if (!summary) return 'not-deployed';
+  switch (summary.status) {
+    case 'current':
+      return 'deployed';
+    case 'stale':
+      return 'stale';
+    default:
+      return 'not-deployed';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,6 +59,7 @@ function buildSchemaCardData(detail: SchemaDetail): SchemaCardData {
 function buildMappingRowData(
   mapping: MappingMetadata,
   schemaMap: Map<string, string>,
+  deployments: CurrentDeployments | null,
 ): MappingRowData {
   return {
     mappingId: mapping.mappingId,
@@ -46,9 +73,9 @@ function buildMappingRowData(
     ruleCount: mapping.ruleCount,
     coverage: mapping.coverage,
     status: mapping.status,
-    devDeploy: 'not-deployed',
-    qaDeploy: 'not-deployed',
-    prodDeploy: 'not-deployed',
+    devDeploy: toDeployStatus(deployments, 'DEV'),
+    qaDeploy: toDeployStatus(deployments, 'QA'),
+    prodDeploy: toDeployStatus(deployments, 'PROD'),
     updatedAt: mapping.updatedAt,
   };
 }
@@ -93,6 +120,7 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [schemaDetails, setSchemaDetails] = useState<SchemaDetail[]>([]);
   const [mappingsMeta, setMappingsMeta] = useState<MappingMetadata[]>([]);
+  const [deploymentsMap, setDeploymentsMap] = useState<Map<string, CurrentDeployments | null>>(new Map());
 
   // Incremented by retry() to trigger re-fetch
   const [fetchKey, setFetchKey] = useState(0);
@@ -115,16 +143,22 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
       setProject(null);
       setSchemaDetails([]);
       setMappingsMeta([]);
+      setDeploymentsMap(new Map());
 
       try {
         const detail = await adapter.getProject(projectId);
 
         if (cancelled) return;
 
-        // Load all schemas in parallel (best-effort)
-        const schemaResults = await Promise.allSettled(
-          detail.schemaRefs.map((ref) => adapter.getSchema(ref.schemaId)),
-        );
+        // Load schemas and current deployments in parallel (best-effort)
+        const [schemaResults, deploymentResults] = await Promise.all([
+          Promise.allSettled(
+            detail.schemaRefs.map((ref) => adapter.getSchema(ref.schemaId)),
+          ),
+          Promise.allSettled(
+            detail.mappings.map((m) => adapter.getCurrentDeployments(m.mappingId)),
+          ),
+        ]);
 
         if (cancelled) return;
 
@@ -132,9 +166,20 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
           .filter((r): r is PromiseFulfilledResult<SchemaDetail> => r.status === 'fulfilled')
           .map((r) => r.value);
 
+        // Build mappingId → CurrentDeployments lookup (null for failed fetches)
+        const deploymentsMap = new Map<string, CurrentDeployments | null>(
+          detail.mappings.map((m, i) => [
+            m.mappingId,
+            deploymentResults[i]?.status === 'fulfilled'
+              ? (deploymentResults[i] as PromiseFulfilledResult<CurrentDeployments>).value
+              : null,
+          ]),
+        );
+
         setProject(detail);
         setSchemaDetails(loaded);
         setMappingsMeta([...detail.mappings]);
+        setDeploymentsMap(deploymentsMap);
         setLoadState('loaded');
       } catch (err: unknown) {
         if (cancelled) return;
@@ -164,7 +209,9 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
   );
 
   const schemas: SchemaCardData[] = schemaDetails.map(buildSchemaCardData);
-  const mappings: MappingRowData[] = mappingsMeta.map((m) => buildMappingRowData(m, schemaMap));
+  const mappings: MappingRowData[] = mappingsMeta.map((m) =>
+    buildMappingRowData(m, schemaMap, deploymentsMap.get(m.mappingId) ?? null),
+  );
 
   // ---------------------------------------------------------------------------
   // Inline editing
@@ -225,7 +272,8 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
     async (tags: string[]) => {
       if (!projectRef.current) return;
       const updated = await adapter.updateProject(projectId, { tags });
-      setProject((prev) => (prev ? { ...prev, tags: updated.tags ?? [] } : prev));
+      void updated; // returned ProjectMetadata does not carry tags; use input value
+      setProject((prev) => (prev ? { ...prev, tags } : prev));
     },
     [adapter, projectId],
   );
