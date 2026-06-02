@@ -2,26 +2,16 @@ import { parse } from '../../engine/dsl/index.js';
 import { registerAllFunctions } from '../../engine/functions/index.js';
 import { defaultRegistry } from '../../engine/registry/function-registry.js';
 import type { Diagnostic } from '../../engine/types/index.js';
-import { invokeAI, type AIErrorCode } from '../../lib/ai/index.js';
-
-export interface APIGatewayProxyEvent {
-  readonly body: string | null;
-  readonly httpMethod?: string;
-  readonly headers?: Record<string, string | undefined>;
-}
-
-export interface APIGatewayProxyResult {
-  readonly statusCode: number;
-  readonly headers?: Record<string, string>;
-  readonly body: string;
-}
-
-const JSON_HEADERS: Record<string, string> = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'OPTIONS,POST',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-};
+import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
+import {
+  ERROR_CODES,
+  errorResponse,
+  generateRequestId,
+  jsonResponse,
+  parseBody,
+  type APIGatewayProxyEvent,
+  type APIGatewayProxyResult,
+} from '../shared/index.js';
 
 const AUTO_MAP_LOG_PREFIX = '[auto-map lambda]';
 const LOG_TEXT_LIMIT = 400;
@@ -68,42 +58,35 @@ function summarizeTextField(value: unknown):
   };
 }
 
-function jsonResponse(statusCode: number, payload: unknown): APIGatewayProxyResult {
+function autoMapJsonResponse(statusCode: number, payload: unknown, requestId?: string): APIGatewayProxyResult {
+  const base = jsonResponse(statusCode, payload, requestId);
   return {
-    statusCode,
-    headers: JSON_HEADERS,
-    body: JSON.stringify(payload),
+    ...base,
+    headers: {
+      ...(base.headers ?? {}),
+      'Access-Control-Allow-Methods': 'OPTIONS,POST',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    },
   };
 }
 
-function statusCodeForAIError(code: AIErrorCode): number {
-  switch (code) {
-    case 'PROMPT_NOT_FOUND':
-      return 404;
-    case 'MODEL_RATE_LIMITED':
-      return 429;
-    case 'VALIDATION_ERROR':
-      return 400;
-    default:
-      return 500;
-  }
-}
+function parseTargetListing(targetSection: string): Set<string> | null {
+  const lines = targetSection.split('\n');
+  const allowedTargets = new Set<string>();
 
-function parseRequestBody(body: string | null): Record<string, unknown> | null {
-  if (!body) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(body) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) {
-      return null;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      continue;
     }
 
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
+    const match = /^-\s+(.+?)\s+\(.+\)$/.exec(trimmed);
+    if (match?.[1]) {
+      allowedTargets.add(match[1]);
+    }
   }
+
+  return allowedTargets.size > 0 ? allowedTargets : null;
 }
 
 function validateExpression(expression: string): { valid: boolean; diagnostics: string[] } {
@@ -138,25 +121,6 @@ function normalizeValidationDiagnostics(diagnostics: string[]): Array<{
     severity: 'error',
     message,
   }));
-}
-
-function parseTargetListing(targetSection: string): Set<string> | null {
-  const lines = targetSection.split('\n');
-  const allowedTargets = new Set<string>();
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === '') {
-      continue;
-    }
-
-    const match = /^-\s+(.+?)\s+\(.+\)$/.exec(trimmed);
-    if (match?.[1]) {
-      allowedTargets.add(match[1]);
-    }
-  }
-
-  return allowedTargets.size > 0 ? allowedTargets : null;
 }
 
 function buildSuggestions(
@@ -230,6 +194,8 @@ function buildSuggestions(
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const requestId = generateRequestId();
+
   console.info(`${AUTO_MAP_LOG_PREFIX} request received`, {
     httpMethod: event.httpMethod ?? 'UNKNOWN',
     hasBody: typeof event.body === 'string',
@@ -238,19 +204,19 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   if (event.httpMethod === 'OPTIONS') {
     console.info(`${AUTO_MAP_LOG_PREFIX} options preflight`);
-    return jsonResponse(200, {
+    return autoMapJsonResponse(200, {
       ok: true,
-    });
+    }, requestId);
   }
 
-  const requestBody = parseRequestBody(event.body);
+  const requestBody = parseBody(event);
   if (!requestBody) {
     console.error(`${AUTO_MAP_LOG_PREFIX} invalid request body`, {
       bodyPreview: typeof event.body === 'string' ? truncateForLog(event.body) : null,
     });
-    return jsonResponse(400, {
+    return autoMapJsonResponse(400, {
       error: 'Invalid request body',
-    });
+    }, requestId);
   }
 
   const targetSectionRaw = requestBody.targetSection;
@@ -272,9 +238,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       hasTargetSection: typeof targetSectionRaw === 'string' && targetSectionRaw !== '',
       hasSectionPath: typeof sectionPathRaw === 'string' && sectionPathRaw !== '',
     });
-    return jsonResponse(400, {
+    return autoMapJsonResponse(400, {
       error: 'Missing required field: targetSection or sectionPath',
-    });
+    }, requestId);
   }
 
   const sourceContext = requestBody.sourceContext;
@@ -283,9 +249,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       sourceContextType: typeof sourceContext,
       sourceContextLength: typeof sourceContext === 'string' ? sourceContext.length : 0,
     });
-    return jsonResponse(400, {
+    return autoMapJsonResponse(400, {
       error: 'Missing required field: sourceContext',
-    });
+    }, requestId);
   }
 
   const businessContext = typeof requestBody.businessContext === 'string' ? requestBody.businessContext : '';
@@ -325,7 +291,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         console.error(`${AUTO_MAP_LOG_PREFIX} ai success payload missing rules array`, {
           rulesType: typeof rulesValue,
         });
-        return jsonResponse(200, result);
+        return autoMapJsonResponse(200, result, requestId);
       }
 
       console.info(`${AUTO_MAP_LOG_PREFIX} ai rules received`, {
@@ -360,46 +326,52 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
 
       if (isSectionRequest) {
-        return jsonResponse(200, {
+        return autoMapJsonResponse(200, {
           ...result,
           data: {
             ...(result.data as Record<string, unknown>),
             rules: enrichedRules,
             suggestions,
           },
-        });
+        }, requestId);
       }
 
       console.info(`${AUTO_MAP_LOG_PREFIX} returning enriched rules response`, {
         enrichedRuleCount: enrichedRules.length,
       });
 
-      return jsonResponse(200, {
+      return autoMapJsonResponse(200, {
         ...result,
         data: {
           ...(result.data as Record<string, unknown>),
           rules: enrichedRules,
           suggestions,
         },
-      });
+      }, requestId);
     }
 
+    const normalized = normalizeAIError(result.error);
     console.error(`${AUTO_MAP_LOG_PREFIX} ai error response`, {
       errorCode: result.error.code,
       message: result.error.message,
-      mappedStatus: statusCodeForAIError(result.error.code),
+      mappedStatus: normalized.statusCode,
     });
 
-    return jsonResponse(statusCodeForAIError(result.error.code), result);
+    return errorResponse(
+      normalized.code,
+      normalized.message,
+      normalized.statusCode,
+      normalized.retryable,
+      requestId,
+    );
   } catch {
     console.error(`${AUTO_MAP_LOG_PREFIX} unexpected handler error`);
-    return jsonResponse(500, {
-      success: false,
-      error: {
-        code: 'MODEL_ERROR',
-        message: 'Unexpected error while handling request',
-      },
-      promptId: 'auto-map',
-    });
+    return errorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      'Unexpected error while handling request',
+      500,
+      true,
+      requestId,
+    );
   }
 }

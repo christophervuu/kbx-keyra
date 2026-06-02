@@ -23,6 +23,7 @@ function createInvocationParams() {
     model: 'openai/gpt-4.1-mini',
     temperature: 0,
     maxTokens: 400,
+    timeoutMs: 5_000,
     systemMessage: 'System message with {{dslReference}}',
     userMessage: 'Explain source("id") for Order.Id',
     responseSchema: {
@@ -347,5 +348,33 @@ describe('ModelClient', () => {
       expect(result.error.message).toContain('GITHUB_TOKEN');
     }
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('maps invocation timeout to TIMEOUT', async () => {
+    const create = vi.fn().mockImplementation(
+      async () =>
+        await new Promise(() => {
+          // intentionally unresolved to trigger timeout
+        }),
+    );
+
+    const client = new ModelClient(createConfig(), {
+      chat: {
+        completions: {
+          create,
+        },
+      },
+    });
+
+    const result = await client.invoke({
+      ...createInvocationParams(),
+      timeoutMs: 1,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('TIMEOUT');
+      expect(result.error.message).toContain('timed out');
+    }
   });
 });

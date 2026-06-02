@@ -34,8 +34,9 @@
     "test:integration:persistence": "RUN_PERSISTENCE_INTEGRATION=1 vitest run --passWithNoTests tests/integration/persistence",
     "test:integration:persistence:cross-session": "RUN_PERSISTENCE_INTEGRATION=1 vitest run --passWithNoTests tests/lambda/integration/persistence",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint . && pnpm run lint:ui:ai-guardrails",
+    "test": "vitest run --passWithNoTests",
+    "lint:ui:ai-guardrails": "tsx scripts/check-ui-ai-guardrails.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.922.0",

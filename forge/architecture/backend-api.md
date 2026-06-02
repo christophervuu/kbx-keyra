@@ -21,7 +21,7 @@ Scope:
 - Shared handler module conventions under `src/lambda/shared/`
 
 Out of scope:
-- AI endpoints under `src/lambda/ai/` (covered by `ai-runtime.md`)
+- Detailed AI runtime internals under `src/lib/ai/` (covered by `ai-runtime.md`)
 - Deployment/GitHub/Activity/Preview/Auth architecture
 - IaC resource authoring details (covered by `infrastructure.md`)
 
@@ -324,7 +324,24 @@ The naming above reflects the currently implemented lambda surface. Infrastructu
 
 ---
 
-## 11) Cross-References
+## 11) AI Handler API Conventions (FS-066 Addendum)
+
+This architecture primarily covers non-AI handlers, but Phase 2 introduced cross-cutting API conventions that AI handlers now follow consistently:
+
+- AI handlers (`src/lambda/ai/{explain-rule,suggest-expression,auto-map}.ts`) are thin request/response shells and delegate invocation to shared runtime (`invokeAI(...)`).
+- AI handler failures are normalized through `normalizeAIError(...)` into canonical backend error envelope semantics before returning `errorResponse(...)`.
+- AI handler responses use the same canonical error envelope contract in Section 5 (`code`, `message`, `statusCode`, `retryable`, `requestId`).
+- Browser clients must access AI via backend API routes only (UI -> `ApiAdapter`/`HttpAdapter` -> API Gateway -> Lambda). Direct browser-side provider invocation is prohibited by repository guardrails.
+
+Canonical FS-066 normalization behavior used by AI handlers:
+
+- `VALIDATION_ERROR`/`LIMIT_EXCEEDED` -> `VALIDATION_ERROR` (400)
+- `PROMPT_NOT_FOUND` -> `RESOURCE_NOT_FOUND` (404)
+- `TIMEOUT` -> `TIMEOUT` (504, retryable)
+- rate-limit and transient provider/runtime classes -> `SERVICE_UNAVAILABLE` (503, retryable)
+- remaining provider/config/parse/internal classes -> `INTERNAL_ERROR` (500)
+
+## 12) Cross-References
 
 - `forge/architecture/phase-1-readiness.md` — backend boundary and Phase 1 constraints
 - `forge/architecture/project-structure.md` — canonical repo structure and lambda locations

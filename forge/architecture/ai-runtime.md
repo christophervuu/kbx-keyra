@@ -13,11 +13,52 @@ The runtime handles:
 1. **Prompt Registry access** — loading versioned prompt records from DynamoDB with in-memory caching
 2. **DSL asset resolution** — loading the DSL reference from S3 for prompt injection
 3. **Prompt rendering** — replacing template placeholders in system and user messages
-4. **Model invocation** — calling GitHub Models via the OpenAI SDK with structured output support
-5. **Output parsing** — validating and normalizing structured AI responses
-6. **Orchestration** — a single `invokeAI()` entry point that wires steps 1–5 into a reusable pipeline
+4. **Centralized routing/limits** — resolving feature invocation profile (tier/model/timeout/token cap) from shared defaults with allowlisted overrides
+5. **Invocation guards** — validating payload and prompt contract before model invocation
+6. **Model invocation** — calling GitHub Models via the OpenAI SDK with structured output support
+7. **Output parsing** — validating and normalizing structured AI responses
+8. **Telemetry** — emitting standardized start/success/failure invocation events
+9. **Error normalization** — mapping AI/runtime/provider errors to canonical backend envelope semantics for handlers
+10. **Orchestration** — a single `invokeAI()` entry point that wires all steps into a reusable pipeline
 
 ---
+
+## FS-066 Shared Foundation Standard
+
+FS-066 established the Phase 2 shared AI foundation on top of FS-065 reconciliation. This is the canonical runtime model for backend AI invocation.
+
+### Implemented shared contracts
+
+- **Centralized tier routing** (`src/lib/ai/routing.ts`)
+  - Tier defaults are fixed:
+    - Tier 1: `openai/gpt-4.1-mini`, `timeoutMs=20000`, `maxOutputTokens=1200`
+    - Tier 2: `openai/gpt-4.1`, `timeoutMs=45000`, `maxOutputTokens=2500`
+  - Feature defaults are centralized by prompt/feature (`explain-rule`, `nl-to-rule`, `smart-fix`, `validate-mappings`, `auto-map`)
+  - Feature overrides are permitted only through the shared allowlist table (`AI_FEATURE_OVERRIDE_ALLOWLIST`)
+  - Registry metadata can refine model/tokens when valid; invalid/missing values fall back to code defaults
+
+- **Invocation guard contract** (`src/lib/ai/invocation-guards.ts`)
+  - Validates promptId/variables/profile before invocation
+  - Enforces positive finite timeout/token limits and non-empty model
+  - Validates prompt record contract (temperature in [0,2], non-empty system/user templates)
+
+- **Limit enforcement contract** (`src/lib/ai/invoke-ai.ts`)
+  - Fails fast when prompt `maxTokens` exceeds resolved profile max output tokens (`LIMIT_EXCEEDED`)
+  - Fails invocation when completion usage exceeds resolved max output tokens (`LIMIT_EXCEEDED`)
+  - Normalizes provider `413` model errors to `LIMIT_EXCEEDED`
+
+- **Telemetry contract** (`src/lib/ai/telemetry.ts`)
+  - Event types: `ai.invoke.start`, `ai.invoke.success`, `ai.invoke.failure`
+  - Stable fields: `invocationId`, `timestamp`, `promptId`, `requestId?`, `correlationId?`, `feature?`, `tier?`, `model?`, `timeoutMs?`, `maxOutputTokens?`, `durationMs?`, `errorCode?`
+
+- **Error normalization contract** (`src/lib/ai/error-normalization.ts`)
+  - Handler-facing mapper from AI/runtime/provider errors to canonical backend envelope semantics:
+    - `VALIDATION_ERROR|LIMIT_EXCEEDED -> VALIDATION_ERROR (400, non-retryable)`
+    - `PROMPT_NOT_FOUND -> RESOURCE_NOT_FOUND (404, non-retryable)`
+    - `TIMEOUT -> TIMEOUT (504, retryable)`
+    - `MODEL_RATE_LIMITED|provider 5xx/429 -> SERVICE_UNAVAILABLE (503, retryable)`
+    - `REGISTRY_ERROR|ASSET_ERROR -> SERVICE_UNAVAILABLE (503, retryable)`
+    - remaining config/parse/model/internal classes -> `INTERNAL_ERROR (500)`
 
 ## FS-065 Reconciliation Status (Canonical Model)
 
@@ -108,11 +149,12 @@ The adapter selection is driven by runtime configuration (`config.ts`), not by c
 
 Lambda handlers in `src/lambda/ai/` are minimal:
 
-1. Parse the API Gateway event body
+1. Parse and validate API Gateway request input
 2. Call `invokeAI(promptId, variables)` from the shared runtime
-3. Return the structured response or error
+3. Normalize failures using shared error mapper (`normalizeAIError`)
+4. Return canonical backend response envelope via shared response helpers
 
-Handlers do not contain prompt logic, caching logic, or model configuration.
+Handlers do not contain prompt logic, routing policy, limit policy, caching logic, or direct model-client orchestration.
 
 ### Environment-Driven Configuration
 
@@ -289,13 +331,16 @@ const response = await client.chat.completions.create({
 
 ### Error Handling
 
-Model errors (rate limits, invalid requests, network failures) are caught and normalized into `AIError` with appropriate error codes.
+Model client maps provider/runtime failures into shared AI error codes with provider diagnostics in `details` where available.
 
-Implemented error mapping:
-- `429` → `MODEL_RATE_LIMITED`
-- `401` / `403` → `MODEL_ERROR` (authentication context)
-- `400` → `MODEL_ERROR` (request validation context)
-- Other/network failures → `MODEL_ERROR`
+Implemented model-client mapping:
+- timeout-like failures -> `TIMEOUT`
+- `429` -> `MODEL_RATE_LIMITED`
+- `401` / `403` -> `MODEL_ERROR` (auth context)
+- `400` -> `MODEL_ERROR` (request validation context)
+- other/network failures -> `MODEL_ERROR`
+
+Handler responses must not return raw provider error payloads directly; they normalize through `normalizeAIError(...)` into canonical backend envelope codes/status/retryability.
 
 ---
 
@@ -311,18 +356,29 @@ invokeAI(promptId, variables, options?)
   ├── 1. Load prompt record (via PromptRegistryAdapter)
   │       └── Cache hit? Return cached. Miss? Query DynamoDB.
   │
-  ├── 2. Load DSL reference (via DslAssetLoader)
+  ├── 2. Resolve invocation profile (routing defaults + allowlisted overrides + valid registry metadata)
+  │       └── tier/model/timeoutMs/maxOutputTokens
+  │
+  ├── 3. Validate invocation payload and prompt contract (invocation-guards)
+  │
+  ├── 4. Enforce prompt/profile token-limit invariants
+  │
+  ├── 5. Load DSL reference (via DslAssetLoader)
   │       └── Cache hit? Return cached. Miss? Read from S3.
   │
-  ├── 3. Render messages (via prompt-renderer)
+  ├── 6. Render messages (via prompt-renderer)
   │       ├── System message: inject {{dslReference}} + any system-level vars
   │       └── User message: inject request-scoped vars ({{expression}}, etc.)
   │
-  ├── 4. Invoke model (via model-client)
+  ├── 7. Invoke model (via model-client)
   │       └── GitHub Models → structured output → raw response
   │
-  └── 5. Parse output (via output-parser)
-          └── Validate against responseSchema → AIResult<T> or AIError
+  ├── 8. Enforce completion-token usage cap (when usage available)
+  │
+  ├── 9. Parse output (via output-parser)
+  │       └── Validate against responseSchema → AIResult<T> or AIError
+  │
+  └── 10. Emit telemetry start/success/failure events around full invocation lifecycle
 ```
 
 ### Dependency Injection
@@ -372,13 +428,9 @@ export async function handler(event: APIGatewayProxyEvent) {
 }
 ```
 
-Implemented status mapping in `explain-rule` and `suggest-expression` handlers:
-- `PROMPT_NOT_FOUND` → `404`
-- `MODEL_RATE_LIMITED` → `429`
-- `VALIDATION_ERROR` → `400`
-- all other runtime errors → `500`
+AI handlers (`explain-rule`, `suggest-expression`, `auto-map`) use shared failure normalization and canonical envelope responses through `errorResponse(...)`.
 
-The `suggest-expression` handler keeps the same response/error mapping conventions while validating a different required-field set (`instruction`, `targetPath`, `targetType`, `sourceContext`) and invoking promptId `nl-to-rule`.
+`suggest-expression` validates (`instruction`, `targetPath`, `targetType`, `sourceContext`) and invokes promptId `nl-to-rule`.
 
 Lambda handlers do not:
 - Read from DynamoDB directly
@@ -432,6 +484,7 @@ console.log(result);
 - The AI runtime has **zero dependency on UI code** (`ui/`).
 - Lambda handlers import from `src/lib/ai/` — not from each other.
 - All AI calls go through API Gateway -> Lambda. The UI never calls GitHub Models directly.
+- Browser-side provider invocation is prohibited by dual policy guardrails: UI ESLint restricted imports and path-based static scanning (`scripts/check-ui-ai-guardrails.ts`).
 - AI output is **suggestion-only** — no auto-commit to mapping state.
 - Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix). Step Functions are reserved for future long-running operations like large-schema auto-map.
 - Backend mode UI integration must use `HttpAdapter` as the only canonical production adapter path.

@@ -12,7 +12,7 @@ This is a living document. Update it when the project structure changes. Do not 
 src/        Backend and shared source code
 ui/         Frontend source code (React / TypeScript / Vite)
 tests/      Test files
-scripts/    Local tooling/runner scripts
+scripts/    Local tooling/runner scripts (includes UI AI guardrail static policy check)
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
 docker-compose.test.yml  Persistence integration local stack (DynamoDB Local + LocalStack S3)
@@ -100,6 +100,10 @@ src/
       prompt-renderer.ts Prompt template placeholder renderer
       model-client.ts   GitHub Models client wrapper (OpenAI SDK)
       output-parser.ts  Model output JSON parsing into AIResponse shape
+      error-normalization.ts Shared AI error normalization to canonical backend envelope semantics
+      routing.ts        Shared invocation profile and Tier 1/Tier 2 routing resolution (defaults, allowlisted overrides, registry fallback)
+      invocation-guards.ts Shared payload/prompt/profile validation helpers for invokeAI limit/contract enforcement
+      telemetry.ts      Shared AI invocation telemetry session + structured event emission helpers
       invoke-ai.ts      AI runtime orchestration entry point
     persistence/      Shared Phase 1 persistence contracts and client setup (FS-058 T-01)
       index.ts          Persistence barrel exports (types, clients, config)
@@ -792,6 +796,9 @@ tests/
       model-client.test.ts Model client wrapper request/error handling tests
       output-parser.test.ts Output parser JSON/error normalization tests
       invoke-ai.test.ts invokeAI orchestration unit tests (mocked adapters)
+      routing.test.ts   AI routing profile tests (tier defaults, allowlisted overrides, registry fallback behavior)
+      invocation-guards.test.ts Invocation guard tests (payload/prompt contract validation)
+      telemetry.test.ts AI telemetry contract tests (start/success/failure event shape + invariants)
       integration.test.ts AI runtime integration test with local adapters + mocked model
       fixtures/       AI runtime test fixtures (local prompt JSON and DSL reference files)
         local-runtime/ Local-mode fixture files for integration test
@@ -831,6 +838,9 @@ tests/
         deployment-snapshot.test.ts Deployment snapshot helper tests (put + returned key)
     deployment/       Deployment shared utility tests (FS-064 T-03)
       staleness.test.ts Staleness computation tests (revision/version current+stale, not-deployed, latestVersion edge case)
+  scripts/            Repository script/config policy tests
+    check-ui-ai-guardrails.test.ts Static policy test for path-based UI AI guardrail scanner
+    ui-eslint-ai-guardrails.test.ts Static policy test for UI ESLint restricted-import guardrail declarations
   integration/        Integration and performance test suites (Vitest)
     lambda/            Backend API integration tests against DynamoDB Local (FS-057 T-07)
       fs-057-api.test.ts End-to-end CRUD + error-envelope acceptance coverage using handler invocation

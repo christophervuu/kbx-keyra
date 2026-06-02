@@ -1,6 +1,10 @@
 export type {
   AIError,
   AIErrorCode,
+  AIInvocationFailure,
+  AIInvocationMetadata,
+  AIInvocationResponse,
+  AIInvocationSuccess,
   AIResponse,
   AIResult,
   DslAssetLoader,
@@ -25,4 +29,26 @@ export {
   type ModelUsage,
 } from './model-client.js';
 export { parseModelOutput } from './output-parser.js';
+export {
+  normalizeAIError,
+  type BackendErrorCode,
+  type NormalizedAIError,
+} from './error-normalization.js';
+export { validateInvokePayload, validatePromptContract } from './invocation-guards.js';
+export {
+  AI_FEATURE_DEFAULTS,
+  AI_FEATURE_OVERRIDE_ALLOWLIST,
+  AI_TIER_DEFAULTS,
+  resolveInvocationProfile,
+  type AIFeatureOverride,
+  type AIInvocationFeature,
+  type AIInvocationProfile,
+  type AITier,
+  type AITierDefaults,
+  type KnownAIFeature,
+} from './routing.js';
+export {
+  createTelemetrySession,
+  type AIInvocationTelemetrySession,
+} from './telemetry.js';
 export { invokeAI } from './invoke-ai.js';

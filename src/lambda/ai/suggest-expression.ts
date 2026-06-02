@@ -1,93 +1,40 @@
-import { invokeAI, type AIErrorCode } from '../../lib/ai/index.js';
-
-export interface APIGatewayProxyEvent {
-  readonly body: string | null;
-  readonly headers?: Record<string, string | undefined>;
-}
-
-export interface APIGatewayProxyResult {
-  readonly statusCode: number;
-  readonly headers?: Record<string, string>;
-  readonly body: string;
-}
-
-const JSON_HEADERS: Record<string, string> = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-};
-
-function jsonResponse(statusCode: number, payload: unknown): APIGatewayProxyResult {
-  return {
-    statusCode,
-    headers: JSON_HEADERS,
-    body: JSON.stringify(payload),
-  };
-}
-
-function statusCodeForAIError(code: AIErrorCode): number {
-  switch (code) {
-    case 'PROMPT_NOT_FOUND':
-      return 404;
-    case 'MODEL_RATE_LIMITED':
-      return 429;
-    case 'VALIDATION_ERROR':
-      return 400;
-    default:
-      return 500;
-  }
-}
-
-function parseRequestBody(body: string | null): Record<string, unknown> | null {
-  if (!body) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(body) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) {
-      return null;
-    }
-
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+import {
+  ERROR_CODES,
+  errorResponse,
+  generateRequestId,
+  jsonResponse,
+  parseBody,
+  type APIGatewayProxyEvent,
+  type APIGatewayProxyResult,
+} from '../shared/index.js';
+import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const requestBody = parseRequestBody(event.body);
+  const requestId = generateRequestId();
+  const requestBody = parseBody(event);
+
   if (!requestBody) {
-    return jsonResponse(400, {
-      error: 'Invalid request body',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
   }
 
   const instruction = requestBody.instruction;
   if (typeof instruction !== 'string' || instruction === '') {
-    return jsonResponse(400, {
-      error: 'Missing required field: instruction',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: instruction', 400, false, requestId);
   }
 
   const targetPath = requestBody.targetPath;
   if (typeof targetPath !== 'string' || targetPath === '') {
-    return jsonResponse(400, {
-      error: 'Missing required field: targetPath',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetPath', 400, false, requestId);
   }
 
   const targetType = requestBody.targetType;
   if (typeof targetType !== 'string' || targetType === '') {
-    return jsonResponse(400, {
-      error: 'Missing required field: targetType',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetType', 400, false, requestId);
   }
 
   const sourceContext = requestBody.sourceContext;
   if (typeof sourceContext !== 'string' || sourceContext === '') {
-    return jsonResponse(400, {
-      error: 'Missing required field: sourceContext',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: sourceContext', 400, false, requestId);
   }
 
   const targetDescription =
@@ -103,18 +50,24 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     if (result.success) {
-      return jsonResponse(200, result);
+      return jsonResponse(200, result, requestId);
     }
 
-    return jsonResponse(statusCodeForAIError(result.error.code), result);
+    const normalized = normalizeAIError(result.error);
+    return errorResponse(
+      normalized.code,
+      normalized.message,
+      normalized.statusCode,
+      normalized.retryable,
+      requestId,
+    );
   } catch {
-    return jsonResponse(500, {
-      success: false,
-      error: {
-        code: 'MODEL_ERROR',
-        message: 'Unexpected error while handling request',
-      },
-      promptId: 'nl-to-rule',
-    });
+    return errorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      'Unexpected error while handling request',
+      500,
+      true,
+      requestId,
+    );
   }
 }

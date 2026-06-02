@@ -111,12 +111,12 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `autoMap(input)` | offline throw in local adapter | backend AI endpoint + adapter impl | AI | full-section vs whole-mapping semantics need definition |
+| `autoMap(input)` | `HttpAdapter` canonical path uses `POST /ai/auto-map`; offline throw in local adapter | preserve canonical backend invocation path + standardized envelope | AI | full-section vs whole-mapping semantics remain route-shared with `autoMapSection` |
 | `autoMapSection(input)` | `HttpAdapter` -> `POST /ai/auto-map`; offline throw in local | keep backend section endpoint behavior on canonical path | AI | shared route with `autoMap` |
-| `suggestExpression(input)` | `HttpAdapter` -> `POST /ai/suggest-expression`; offline throw in local | production-grade endpoint + standardized errors | AI | user-facing error mapping retained |
-| `explainRule(input)` | `HttpAdapter` -> `POST /ai/explain-rule`; offline throw in local | production-grade endpoint + standardized errors | AI | parity path retained |
-| `smartFix(input)` | offline throw in local | backend AI endpoint + adapter impl | AI | currently no HTTP override |
-| `validateMappings(input)` | offline throw in local | backend validation/report endpoint | AI/compute | contract shape exists, behavior not implemented |
+| `suggestExpression(input)` | `HttpAdapter` -> `POST /ai/suggest-expression`; offline throw in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
+| `explainRule(input)` | `HttpAdapter` -> `POST /ai/explain-rule`; offline throw in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
+| `smartFix(input)` | offline throw in local; deferred in `HttpAdapter` via `FEATURE_NOT_ENABLED` | deferred endpoint; explicit feature gating remains canonical until backend rollout | AI | no local/provider shortcut fallback |
+| `validateMappings(input)` | offline throw in local; deferred in `HttpAdapter` via `FEATURE_NOT_ENABLED` | deferred endpoint; explicit feature gating remains canonical until backend rollout | AI/compute | contract shape exists; behavior deferred behind explicit gate |
 
 ### 2.9 Schema Search / Activity / Server Preview
 
@@ -233,6 +233,11 @@ Frontend implementation currently constrains backend design in these ways:
 - `HttpAdapter` provides HTTP CRUD coverage plus canonical AI route mappings and schema query (`POST /schemas/:id/query`) via shared `httpRequest()` utility.
 - Deferred non-core methods in `HttpAdapter` throw structured `FeatureNotEnabledError` (`code: FEATURE_NOT_ENABLED`, `retryable: false`).
 - `HybridAdapter` has been retired from the repository; reintroduction is non-canonical.
+- FS-066 standardized backend AI invocation via shared runtime contracts:
+  - centralized tier routing defaults + allowlisted override policy
+  - invocation guard checks and limit enforcement
+  - standardized telemetry fields (`ai.invoke.start|success|failure`)
+  - shared error normalization from AI/runtime/provider classes to canonical backend envelope codes/status
 
 ### Backend assets already present
 - Lambda handlers under `src/lambda/ai/`:
@@ -245,9 +250,10 @@ Frontend implementation currently constrains backend design in these ways:
 
 ### Phase 1 extension path
 1. Maintain canonical backend coverage through `HttpAdapter` for required AI methods (`autoMap`, `autoMapSection`, `suggestExpression`, `explainRule`, `smartFix`, `validateMappings`)
-2. Introduce standardized error envelopes and auth-aware invocation path
+2. Preserve FS-066 standardized invocation contracts (routing/limits/telemetry/error normalization) as additional AI endpoints are onboarded
 3. Retain a single production backend adapter path (`HttpAdapter`) while keeping `ApiAdapter` call-site stability
 4. Keep compatibility for current UI flows (`useSuggestExpression`, explain/auto-map workspace lifecycle)
+5. Keep browser-side guardrails in force so provider SDK/domain usage remains backend-only
 
 ### Compatibility considerations
 - Preserve current response shapes used by UI hooks/components

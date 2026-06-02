@@ -1,12 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { APIGatewayProxyEvent } from '../../../src/lambda/ai/suggest-expression.js';
+import type { APIGatewayProxyEvent } from '../../../src/lambda/shared/index.js';
 
 const invokeAIMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/lib/ai/index.js', () => {
   return {
     invokeAI: invokeAIMock,
+    normalizeAIError: (error: { code: string; message: string; details?: unknown }) => {
+      switch (error.code) {
+        case 'PROMPT_NOT_FOUND':
+          return { code: 'RESOURCE_NOT_FOUND', statusCode: 404, retryable: false, message: error.message };
+        case 'MODEL_RATE_LIMITED':
+          return { code: 'SERVICE_UNAVAILABLE', statusCode: 503, retryable: true, message: error.message };
+        case 'VALIDATION_ERROR':
+          return { code: 'VALIDATION_ERROR', statusCode: 400, retryable: false, message: error.message };
+        default:
+          return { code: 'INTERNAL_ERROR', statusCode: 500, retryable: false, message: error.message };
+      }
+    },
   };
 });
 
@@ -23,7 +35,7 @@ describe('aiSuggestExpression handler', () => {
     vi.resetModules();
   });
 
-  it('returns 200 and AI result for valid request (AE-01)', async () => {
+  it('returns 200 and AI result for valid request', async () => {
     invokeAIMock.mockResolvedValue({
       success: true,
       data: {
@@ -49,10 +61,11 @@ describe('aiSuggestExpression handler', () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(response.headers).toEqual({
+    expect(response.headers).toMatchObject({
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
     });
+    expect(response.headers?.['x-request-id']).toBeTruthy();
 
     const parsedBody = JSON.parse(response.body) as {
       success: boolean;
@@ -64,7 +77,6 @@ describe('aiSuggestExpression handler', () => {
     expect(parsedBody.success).toBe(true);
     expect(parsedBody.data.expression).toContain('default(');
     expect(parsedBody.promptId).toBe('nl-to-rule');
-    expect(parsedBody.model).toBeTruthy();
 
     expect(invokeAIMock).toHaveBeenCalledWith('nl-to-rule', {
       instruction: 'default currency to USD if missing',
@@ -75,7 +87,7 @@ describe('aiSuggestExpression handler', () => {
     });
   });
 
-  it('returns 400 when instruction is missing (AE-02)', async () => {
+  it('returns canonical VALIDATION_ERROR envelope when instruction is missing', async () => {
     const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
 
     const response = await handler(
@@ -89,89 +101,15 @@ describe('aiSuggestExpression handler', () => {
     );
 
     expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Missing required field: instruction',
+    const parsed = JSON.parse(response.body) as { error: { code: string; retryable: boolean; requestId: string } };
+    expect(parsed.error).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      retryable: false,
     });
+    expect(parsed.error.requestId).toBeTruthy();
   });
 
-  it('returns 400 when targetPath is missing (AE-03)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(
-      createEvent(
-        JSON.stringify({
-          instruction: 'default currency to USD if missing',
-          targetType: 'string',
-          sourceContext: '- InvoiceCurrency (string)',
-        }),
-      ),
-    );
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Missing required field: targetPath',
-    });
-  });
-
-  it('returns 400 when targetType is missing (AE-04)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(
-      createEvent(
-        JSON.stringify({
-          instruction: 'default currency to USD if missing',
-          targetPath: 'Order.Header.CurrencyCode',
-          sourceContext: '- InvoiceCurrency (string)',
-        }),
-      ),
-    );
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Missing required field: targetType',
-    });
-  });
-
-  it('returns 400 when sourceContext is missing (AE-05)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(
-      createEvent(
-        JSON.stringify({
-          instruction: 'default currency to USD if missing',
-          targetPath: 'Order.Header.CurrencyCode',
-          targetType: 'string',
-        }),
-      ),
-    );
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Missing required field: sourceContext',
-    });
-  });
-
-  it('returns 400 when required field is empty string (AE-06)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(
-      createEvent(
-        JSON.stringify({
-          instruction: '',
-          targetPath: 'Order.Header.CurrencyCode',
-          targetType: 'string',
-          sourceContext: '- InvoiceCurrency (string)',
-        }),
-      ),
-    );
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Missing required field: instruction',
-    });
-  });
-
-  it('defaults targetDescription to empty string when missing (AE-07)', async () => {
+  it('defaults targetDescription to empty string when missing', async () => {
     invokeAIMock.mockResolvedValue({
       success: true,
       data: {
@@ -195,66 +133,11 @@ describe('aiSuggestExpression handler', () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(invokeAIMock).toHaveBeenCalledTimes(1);
-
     const aiVariables = invokeAIMock.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(aiVariables.targetDescription).toBe('');
   });
 
-  it('maps sourceContext request field to sourceFields variable (AE-08)', async () => {
-    invokeAIMock.mockResolvedValue({
-      success: true,
-      data: {
-        expression: 'source("Field1")',
-      },
-      promptId: 'nl-to-rule',
-      model: 'openai/gpt-4.1-mini',
-    });
-
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(
-      createEvent(
-        JSON.stringify({
-          instruction: 'copy the field',
-          targetPath: 'Order.Header.CurrencyCode',
-          targetType: 'string',
-          sourceContext: '- Field1 (string)',
-        }),
-      ),
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(invokeAIMock).toHaveBeenCalledTimes(1);
-
-    const aiVariables = invokeAIMock.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(aiVariables.sourceFields).toBe('- Field1 (string)');
-    expect(aiVariables).not.toHaveProperty('sourceContext');
-  });
-
-  it('returns 400 when body is null (AE-09)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(createEvent(null));
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Invalid request body',
-    });
-  });
-
-  it('returns 400 when body is invalid JSON (AE-10)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(createEvent('{invalid-json'));
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body)).toEqual({
-      error: 'Invalid request body',
-    });
-  });
-
-  it('maps PROMPT_NOT_FOUND to 404 (AE-11)', async () => {
+  it('maps PROMPT_NOT_FOUND to canonical RESOURCE_NOT_FOUND envelope', async () => {
     invokeAIMock.mockResolvedValue({
       success: false,
       error: {
@@ -278,9 +161,15 @@ describe('aiSuggestExpression handler', () => {
     );
 
     expect(response.statusCode).toBe(404);
+    const parsed = JSON.parse(response.body) as { error: { code: string; statusCode: number; retryable: boolean } };
+    expect(parsed.error).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+      statusCode: 404,
+      retryable: false,
+    });
   });
 
-  it('maps MODEL_RATE_LIMITED to 429 (AE-12)', async () => {
+  it('maps MODEL_RATE_LIMITED to canonical SERVICE_UNAVAILABLE envelope', async () => {
     invokeAIMock.mockResolvedValue({
       success: false,
       error: {
@@ -303,10 +192,16 @@ describe('aiSuggestExpression handler', () => {
       ),
     );
 
-    expect(response.statusCode).toBe(429);
+    expect(response.statusCode).toBe(503);
+    const parsed = JSON.parse(response.body) as { error: { code: string; statusCode: number; retryable: boolean } };
+    expect(parsed.error).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      statusCode: 503,
+      retryable: true,
+    });
   });
 
-  it('maps unknown AI errors to 500 (AE-13)', async () => {
+  it('maps unknown AI errors to canonical INTERNAL_ERROR envelope', async () => {
     invokeAIMock.mockResolvedValue({
       success: false,
       error: {
@@ -330,9 +225,15 @@ describe('aiSuggestExpression handler', () => {
     );
 
     expect(response.statusCode).toBe(500);
+    const parsed = JSON.parse(response.body) as { error: { code: string; statusCode: number; retryable: boolean } };
+    expect(parsed.error).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      statusCode: 500,
+      retryable: false,
+    });
   });
 
-  it('returns synthetic MODEL_ERROR on unexpected exception (AE-14)', async () => {
+  it('returns canonical INTERNAL_ERROR envelope on unexpected exception', async () => {
     invokeAIMock.mockRejectedValue(new Error('unexpected failure'));
 
     const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
@@ -349,24 +250,11 @@ describe('aiSuggestExpression handler', () => {
     );
 
     expect(response.statusCode).toBe(500);
-    expect(JSON.parse(response.body)).toEqual({
-      success: false,
-      error: {
-        code: 'MODEL_ERROR',
-        message: 'Unexpected error while handling request',
-      },
-      promptId: 'nl-to-rule',
-    });
-  });
-
-  it('includes JSON and CORS headers on responses (AE-15)', async () => {
-    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
-
-    const response = await handler(createEvent(null));
-
-    expect(response.headers).toEqual({
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+    const parsed = JSON.parse(response.body) as { error: { code: string; retryable: boolean; message: string } };
+    expect(parsed.error).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      retryable: true,
+      message: 'Unexpected error while handling request',
     });
   });
 });

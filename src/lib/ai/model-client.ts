@@ -8,6 +8,7 @@ export interface ModelInvocationParams {
   readonly model: string;
   readonly temperature: number;
   readonly maxTokens: number;
+  readonly timeoutMs: number;
   readonly systemMessage: string;
   readonly userMessage: string;
   readonly responseSchema: object;
@@ -65,6 +66,36 @@ interface OpenAIModelClient {
       }): Promise<ChatCompletionResponse>;
     };
   };
+}
+
+interface ProviderErrorDetails {
+  status?: number;
+  message: string;
+  code?: string;
+  type?: string;
+  param?: string;
+  requestId?: string;
+  providerError?: unknown;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+}
+
+function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      reject(new Error(`Model invocation timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutHandle);
+        resolve(value);
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+  });
 }
 
 function getErrorStatus(error: unknown): number | undefined {
@@ -140,8 +171,8 @@ function normalizeHeaders(headers: unknown): Record<string, string> | undefined 
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function extractProviderErrorDetails(error: unknown): Record<string, unknown> {
-  const details: Record<string, unknown> = {
+function extractProviderErrorDetails(error: unknown): ProviderErrorDetails {
+  const details: ProviderErrorDetails = {
     status: getErrorStatus(error),
     message: getErrorMessage(error),
   };
@@ -251,29 +282,32 @@ export class ModelClient {
     try {
       const normalizedResponseSchema = normalizeResponseSchema(params.responseSchema);
 
-      const response = await this.client.chat.completions.create({
-        model: params.model,
-        temperature: params.temperature,
-        max_tokens: params.maxTokens,
-        messages: [
-          {
-            role: 'system',
-            content: params.systemMessage,
+      const response = await raceWithTimeout(
+        this.client.chat.completions.create({
+          model: params.model,
+          temperature: params.temperature,
+          max_tokens: params.maxTokens,
+          messages: [
+            {
+              role: 'system',
+              content: params.systemMessage,
+            },
+            {
+              role: 'user',
+              content: params.userMessage,
+            },
+          ],
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: params.promptId,
+              strict: true,
+              schema: normalizedResponseSchema,
+            },
           },
-          {
-            role: 'user',
-            content: params.userMessage,
-          },
-        ],
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: params.promptId,
-            strict: true,
-            schema: normalizedResponseSchema,
-          },
-        },
-      });
+        }),
+        params.timeoutMs,
+      );
 
       const content = response.choices?.[0]?.message?.content ?? null;
       const usage = response.usage
@@ -301,6 +335,18 @@ export class ModelClient {
   private mapModelError(error: unknown, promptId: string): AIError {
     const details = extractProviderErrorDetails(error);
     const status = typeof details.status === 'number' ? details.status : undefined;
+
+    if (details.message.toLowerCase().includes('timed out')) {
+      return {
+        success: false,
+        error: {
+          code: 'TIMEOUT',
+          message: details.message,
+          details,
+        },
+        promptId,
+      };
+    }
 
     if (status === 429) {
       return {
