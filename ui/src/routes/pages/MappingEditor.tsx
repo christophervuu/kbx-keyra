@@ -650,6 +650,7 @@ export default function MappingEditor() {
     ) : (
       <ScalarFieldBuilder
         key={selectedNode.path}
+        mappingId={mappingId}
         selectedTargetPath={selectedNode.path}
         selectedTargetType={toTargetFieldType(selectedNode.type)}
         selectedTargetRequired={selectedNode.isRequired}

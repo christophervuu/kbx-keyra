@@ -328,7 +328,7 @@ Template rendering replaces `{{placeholder}}` tokens in `systemMessage` and `use
    - `{{dslReference}}` — the full DSL reference text loaded by the DSL asset loader
 
 2. **Request-scoped placeholders** — provided by the caller:
-   - `{{targetPath}}`, `{{expression}}`, `{{instruction}}`, `{{sourceContext}}`, etc.
+   - `{{targetPath}}`, `{{targetType}}`, `{{expression}}`, `{{instruction}}`, etc.
    - Variable names are prompt-specific and defined in `userMessageTemplate`
 
 ### Rendering Rules
@@ -479,7 +479,28 @@ export async function handler(event: APIGatewayProxyEvent) {
 
 AI handlers (`explain-rule`, `suggest-expression`, `auto-map`) use shared failure normalization and canonical envelope responses through `errorResponse(...)`.
 
-`suggest-expression` validates (`instruction`, `targetPath`, `targetType`, `sourceContext`) and routes through canonical prompt ID resolution (`nl-to-rule` alias -> `natural-language-to-dsl`).
+`suggest-expression` validates (`mappingId`, `instruction`, `targetPath`, `targetType`) and routes through canonical prompt ID resolution (`nl-to-rule` alias -> `natural-language-to-dsl`).
+
+### Suggest Expression canonical contract (FS-070)
+
+`src/lambda/ai/suggest-expression.ts` is a canonical thin handler over `invokeAI('nl-to-rule', ...)` and enforces these production constraints:
+
+- Request contract uses mapping/target identity, not UI-provided schema blobs:
+  - required: `mappingId`, `instruction`, `targetPath`, `targetType`
+  - optional: `targetDescription`
+- Backend owns context retrieval/assembly from persisted mapping/schema data before invocation.
+- Context assembly is bounded with deterministic truncation/summarization:
+  - ~64KB raw text or ~8k token-equivalent, whichever is reached first.
+- On successful model output parse, candidate expressions are validated before response success:
+  - syntax validity
+  - function compatibility
+  - target-type compatibility
+- Success payload includes review-state metadata:
+  - `expression`, optional `explanation`
+  - `validation: { valid, diagnostics[] }`
+  - `readyToApply`
+  - `context` metadata (`sourceNodeCount`, `includedNodeCount`, `truncated`, `approxTokenCount`, `byteLength`)
+- Validation-invalid outcomes are returned as suggestion results with diagnostics and `readyToApply: false` (not transport failures).
 
 ### Explain Rule canonical contract (FS-069)
 

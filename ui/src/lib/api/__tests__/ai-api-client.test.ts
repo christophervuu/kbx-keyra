@@ -241,11 +241,11 @@ describe('explainRuleHttp', () => {
 describe('suggestExpressionHttp', () => {
   const apiUrl = 'https://example.execute-api.us-east-1.amazonaws.com/sandbox';
   const input = {
+    mappingId: 'mapping-1',
     instruction: 'default to USD if source currency is missing',
     targetPath: 'Order.Header.Currency',
     targetType: 'string',
     targetDescription: 'ISO currency code',
-    sourceContext: '- Invoice.Amount (number)\n- Invoice.CurrencyCode (string)',
   };
 
   beforeEach(() => {
@@ -265,6 +265,15 @@ describe('suggestExpressionHttp', () => {
         data: {
           expression: 'default(source("Invoice.CurrencyCode"), "USD")',
           explanation: 'Uses source currency and falls back to USD.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 15,
+            includedNodeCount: 15,
+            truncated: false,
+            approxTokenCount: 120,
+            byteLength: 980,
+          },
         },
       }),
     });
@@ -274,17 +283,26 @@ describe('suggestExpressionHttp', () => {
     await expect(suggestExpressionHttp(apiUrl, input)).resolves.toEqual({
       expression: 'default(source("Invoice.CurrencyCode"), "USD")',
       explanation: 'Uses source currency and falls back to USD.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 15,
+        includedNodeCount: 15,
+        truncated: false,
+        approxTokenCount: 120,
+        byteLength: 980,
+      },
     });
 
     expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/suggest-expression`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mappingId: input.mappingId,
         instruction: input.instruction,
         targetPath: input.targetPath,
         targetType: input.targetType,
         targetDescription: input.targetDescription,
-        sourceContext: input.sourceContext,
       }),
       signal: expect.any(AbortSignal),
     });
@@ -299,6 +317,15 @@ describe('suggestExpressionHttp', () => {
           success: true,
           data: {
             expression: 'default(source("Invoice.CurrencyCode"), "USD")',
+            validation: { valid: true, diagnostics: [] },
+            readyToApply: true,
+            context: {
+              sourceNodeCount: 15,
+              includedNodeCount: 15,
+              truncated: false,
+              approxTokenCount: 120,
+              byteLength: 980,
+            },
           },
         }),
       }),
@@ -307,6 +334,15 @@ describe('suggestExpressionHttp', () => {
     await expect(suggestExpressionHttp(apiUrl, input)).resolves.toEqual({
       expression: 'default(source("Invoice.CurrencyCode"), "USD")',
       explanation: undefined,
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 15,
+        includedNodeCount: 15,
+        truncated: false,
+        approxTokenCount: 120,
+        byteLength: 980,
+      },
     });
   });
 
@@ -431,12 +467,23 @@ describe('suggestExpressionHttp', () => {
     );
   });
 
-  it('includes sourceContext when provided', async () => {
+  it('includes mappingId and targetType in request body', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue({
         success: true,
-        data: { expression: 'source("Invoice.CurrencyCode")' },
+        data: {
+          expression: 'source("Invoice.CurrencyCode")',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 2,
+            includedNodeCount: 2,
+            truncated: false,
+            approxTokenCount: 10,
+            byteLength: 80,
+          },
+        },
       }),
     });
 
@@ -446,7 +493,8 @@ describe('suggestExpressionHttp', () => {
 
     const requestInit = fetchMock.mock.calls[0][1] as globalThis.RequestInit;
     const parsedBody = JSON.parse(String(requestInit.body));
-    expect(parsedBody.sourceContext).toBe(input.sourceContext);
+    expect(parsedBody.mappingId).toBe(input.mappingId);
+    expect(parsedBody.targetType).toBe(input.targetType);
   });
 
   it('omits targetDescription when undefined', async () => {
@@ -454,22 +502,52 @@ describe('suggestExpressionHttp', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         success: true,
-        data: { expression: 'source("Invoice.CurrencyCode")' },
+        data: {
+          expression: 'source("Invoice.CurrencyCode")',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 2,
+            includedNodeCount: 2,
+            truncated: false,
+            approxTokenCount: 10,
+            byteLength: 80,
+          },
+        },
       }),
     });
 
     vi.stubGlobal('fetch', fetchMock);
 
     await suggestExpressionHttp(apiUrl, {
+      mappingId: input.mappingId,
       instruction: input.instruction,
       targetPath: input.targetPath,
       targetType: input.targetType,
-      sourceContext: input.sourceContext,
     });
 
     const requestInit = fetchMock.mock.calls[0][1] as globalThis.RequestInit;
     const parsedBody = JSON.parse(String(requestInit.body));
     expect(parsedBody).not.toHaveProperty('targetDescription');
+  });
+
+  it('throws malformed response error when validation/ready/context metadata are missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            expression: 'source("Invoice.CurrencyCode")',
+          },
+        }),
+      }),
+    );
+
+    await expect(suggestExpressionHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
   });
 });
 

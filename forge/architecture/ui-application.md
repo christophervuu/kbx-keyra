@@ -377,14 +377,40 @@ Non-canonical/prohibited shortcut patterns:
 
 The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion, section-level review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
 
-### Suggest Source Context and RAG Compatibility (FS-042)
+### Suggest Expression canonical review model (FS-070)
 
-`SuggestExpressionInput.sourceContext` is a **showcase/local-first** context mechanism, not a long-term retrieval architecture dependency.
+Suggest Expression uses backend-owned retrieval and validation-aware review semantics.
 
-- **Today (showcase):** UI derives source context from `ParsedSchema` leaf fields and sends a pre-formatted text block (max 200 lines), format: `- {path} ({type})`.
-- **Transition path:** backend RAG retrieval (OpenSearch + structural enrichment) can ignore `sourceContext` and fetch context server-side.
-- **Compatibility model:** API supports both paths simultaneously; `sourceContext` remains optional/compatible during migration.
-- **UI impact:** no UI surface/API-layer redesign is required when backend transitions to RAG.
+Canonical UI→API request contract:
+
+- `mappingId`
+- `instruction`
+- `targetPath`
+- `targetType`
+- optional `targetDescription`
+
+`sourceContext` is non-canonical for production flow; context retrieval/assembly is owned by backend handlers.
+
+Canonical hook/UI state model:
+
+- `useSuggestExpression` lifecycle: `idle | inputting | loading | success | error`
+- success-state sub-state:
+  - `suggestionState: 'ready' | 'invalid'`
+  - `readyToApply: boolean`
+- invalid suggestions are represented as success-state review outcomes (with diagnostics), not transport failures.
+
+Canonical `SuggestExpressionInline` review behavior:
+
+- Inline editable suggestion area supports **edit-before-apply**.
+- Surface is explicitly labeled as AI-generated assistance and non-persistent.
+- Validation diagnostics are shown for invalid suggestions/reviewed expressions.
+- **Strict apply block:** Accept is disabled until the current reviewed expression validates.
+- Dismiss closes suggestion UI without mutating current draft expression.
+
+Draft mutation semantics:
+
+- Accept applies only to in-memory draft state (`updateDraft`) for the active target field.
+- No implicit save/persist occurs from suggestion generation, invalid outcomes, dismiss, or retry flows.
 
 ---
 

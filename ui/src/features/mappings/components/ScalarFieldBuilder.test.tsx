@@ -68,6 +68,7 @@ function makeDraftApi(overrides: {
 }
 
 const DEFAULT_PROPS: ScalarFieldBuilderProps = {
+  mappingId: 'mapping-123',
   selectedTargetPath: 'patient.firstName',
   selectedTargetType: 'string',
   selectedTargetRequired: false,
@@ -86,6 +87,15 @@ function makeDefaultAdapter(): Partial<ApiAdapter> {
     suggestExpression: vi.fn().mockResolvedValue({
       expression: 'source("firstName")',
       explanation: 'Maps first name.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 10,
+        includedNodeCount: 10,
+        truncated: false,
+        approxTokenCount: 128,
+        byteLength: 512,
+      },
     } satisfies SuggestExpressionResult),
   };
 }
@@ -1193,6 +1203,41 @@ describe('ScalarFieldBuilder', () => {
   // ---------------------------------------------------------------------------
 
   describe('Suggest Expression (FS-042)', () => {
+    it('generate sends canonical suggest payload (mappingId/target/instruction, no sourceContext)', async () => {
+      const suggestExpression = vi.fn().mockResolvedValue({
+        expression: 'source("firstName")',
+        explanation: 'Maps first name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
+      } satisfies SuggestExpressionResult);
+      renderBuilder({ mappingId: 'mapping-xyz' }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+      fireEvent.change(textarea, { target: { value: 'map first name' } });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(suggestExpression).toHaveBeenCalledTimes(1);
+      });
+
+      const firstCall = suggestExpression.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(firstCall).toMatchObject({
+        mappingId: 'mapping-xyz',
+        instruction: 'map first name',
+        targetPath: 'patient.firstName',
+        targetType: 'string',
+      });
+      expect(firstCall).not.toHaveProperty('sourceContext');
+    });
+
     it('clicking Suggest button opens the inline input area', () => {
       renderBuilder();
       fireEvent.click(screen.getByTestId('ai-suggest-btn'));
@@ -1222,6 +1267,15 @@ describe('ScalarFieldBuilder', () => {
       const suggestExpression = vi.fn().mockResolvedValue({
         expression: 'source("firstName")',
         explanation: 'Maps first name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
       } satisfies SuggestExpressionResult);
       renderBuilder({ updateDraft }, { suggestExpression });
 
@@ -1251,6 +1305,15 @@ describe('ScalarFieldBuilder', () => {
       const suggestExpression = vi.fn().mockResolvedValue({
         expression: 'concat(source("customer.firstName"), " ", source("customer.lastName"))',
         explanation: 'Concatenate first and last name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
       } satisfies SuggestExpressionResult);
       renderBuilder({ updateDraft }, { suggestExpression });
 
@@ -1292,6 +1355,49 @@ describe('ScalarFieldBuilder', () => {
       );
 
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+    });
+
+    it('invalid suggestion shows diagnostics, blocks Accept, and dismiss does not mutate draft', async () => {
+      const updateDraft = vi.fn();
+      const suggestExpression = vi.fn().mockResolvedValue({
+        expression: 'concat(source("firstName"), source("amount"))',
+        explanation: 'Combine values',
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expression returns string but target expects number.',
+            },
+          ],
+        },
+        readyToApply: false,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
+      } satisfies SuggestExpressionResult);
+      renderBuilder({ selectedTargetType: 'number', updateDraft }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+      fireEvent.change(textarea, { target: { value: 'format name and amount' } });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('suggest-expression-validation')).toBeInTheDocument();
+      });
+
+      const acceptBtn = screen.getByRole('button', { name: /accept/i });
+      expect(acceptBtn).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: /dismiss suggestion/i }));
+      expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+      expect(updateDraft).not.toHaveBeenCalled();
     });
   });
 });

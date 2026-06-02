@@ -25,26 +25,26 @@
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, Lightbulb, Loader2, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench, XCircle } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import { RawDslEditor } from './RawDslEditor';
-import type { RawDslEditorRef } from './RawDslEditor';
-import { ComplexExpressionWarning } from './ComplexExpressionWarning';
+import type { LogicKind } from './AddLogicPicker';
+import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { ChainBuilderShell } from './ChainBuilderShell';
 import { ChainSourceCard } from './ChainSourceCard';
-import { StaticValueInput } from './StaticValueInput';
-import { LogicStepList } from './LogicStepList';
-import { BuilderFeedbackArea } from './BuilderFeedbackArea';
-import { ValidationSummaryRow } from './ValidationSummaryRow';
+import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { ExplanationPanel } from './ExplanationPanel';
+import { LogicStepList } from './LogicStepList';
+import { RawDslEditor } from './RawDslEditor';
+import type { RawDslEditorRef } from './RawDslEditor';
+import { StaticValueInput } from './StaticValueInput';
 import { SuggestExpressionInline } from './SuggestExpressionInline';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
-import { useDslValidation } from '../hooks/use-dsl-validation';
-import { useDropZone } from '../hooks/use-drop-zone';
+import { ValidationSummaryRow } from './ValidationSummaryRow';
+import { PreviewContext } from '../context/preview-context';
 import { useBuilderValidation } from '../hooks/use-builder-validation';
+import { useDropZone } from '../hooks/use-drop-zone';
+import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useExplainRule } from '../hooks/use-explain-rule';
 import { useSuggestExpression } from '../hooks/use-suggest-expression';
-import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
-import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
-import { PreviewContext } from '../context/preview-context';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type {
   ChainBuilderState,
   LogicStep,
@@ -57,19 +57,21 @@ import {
   createEmptyConditionStep,
   createEmptyValueMapStep,
 } from '../lib/chain-builder-state';
-import { generateExpressionFromChain } from '../lib/chain-expression-generator';
 import { decomposeToChain } from '../lib/chain-decomposer';
+import { generateExpressionFromChain } from '../lib/chain-expression-generator';
 import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
-import type { LogicKind } from './AddLogicPicker';
-import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
+import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 
-import type { ParsedSchema, MappingRule, SchemaTreeNode } from '@/lib/types/domain';
+import type { ParsedSchema, MappingRule } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface ScalarFieldBuilderProps {
+  /** Mapping identifier used for AI suggestion requests */
+  mappingId: string;
   /** Full dot-path of the selected target field */
   selectedTargetPath: string;
   /** JSON Schema type of the selected target field */
@@ -415,36 +417,11 @@ function HeaderOverflowMenu({
 }
 
 // ---------------------------------------------------------------------------
-// Source context formatting (for SuggestExpression)
-// ---------------------------------------------------------------------------
-
-/**
- * Converts a ParsedSchema tree into a newline-separated text block of leaf
- * field paths and types, capped at 200 entries.
- * Format: "- {path} ({type})"
- */
-function formatSourceContext(parsedSourceSchema: ParsedSchema | null): string {
-  if (!parsedSourceSchema?.nodes) return '';
-  const lines: string[] = [];
-  function walk(nodes: SchemaTreeNode[]) {
-    for (const node of nodes) {
-      if (lines.length >= 200) return;
-      if (node.children && node.children.length > 0) {
-        walk(node.children);
-      } else {
-        lines.push(`- ${node.path} (${node.type})`);
-      }
-    }
-  }
-  walk(parsedSourceSchema.nodes);
-  return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function ScalarFieldBuilder({
+  mappingId,
   selectedTargetPath,
   selectedTargetType,
   selectedTargetRequired,
@@ -465,12 +442,10 @@ export function ScalarFieldBuilder({
   const prevHydratedTargetRef = useRef<string>(selectedTargetPath);
   const hasHydratedTargetRef = useRef(false);
   const skipNextBuilderEmissionRef = useRef(false);
-  const hydrationPathRef = useRef(selectedTargetPath);
 
-  if (hydrationPathRef.current !== selectedTargetPath) {
-    hydrationPathRef.current = selectedTargetPath;
+  useEffect(() => {
     hasHydratedTargetRef.current = false;
-  }
+  }, [selectedTargetPath]);
 
   // FS-038 T-12: Chain builder state
   const [chainState, setChainState] = useState<ChainBuilderState>(() => createEmptyChainState());
@@ -601,6 +576,7 @@ export function ScalarFieldBuilder({
     const draftExpr = getDraftExpression(selectedTargetPath);
     const expr = draftExpr ?? currentExpression ?? '';
     prevHydratedTargetRef.current = selectedTargetPath;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     hydrateFromExpression(expr, { warningOnFailure: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath, currentExpression]);
@@ -653,6 +629,7 @@ export function ScalarFieldBuilder({
 
   useEffect(() => {
     if (stagedSourcePath === null || stagedSourcePath.trim().length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     handleInsertSourceField(stagedSourcePath);
   }, [stagedSourcePath, handleInsertSourceField]);
 
@@ -1028,10 +1005,10 @@ export function ScalarFieldBuilder({
             targetType={selectedTargetType}
             onGenerate={(instruction) => {
               generateSuggestion({
+                mappingId,
                 instruction,
                 targetPath: selectedTargetPath,
                 targetType: selectedTargetType,
-                sourceContext: formatSourceContext(parsedSourceSchema),
               });
             }}
             onAccept={(expr) => {

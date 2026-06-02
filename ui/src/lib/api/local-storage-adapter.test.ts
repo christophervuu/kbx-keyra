@@ -293,10 +293,10 @@ describe('LocalStorageAdapter', () => {
       'suggestExpression',
       (adapter: LocalStorageAdapter) =>
         adapter.suggestExpression({
+          mappingId: 'm',
           instruction: 'copy',
           targetPath: 'Order.Total',
           targetType: 'string',
-          sourceContext: '- Invoice.Total (number)',
         }),
     ],
     [

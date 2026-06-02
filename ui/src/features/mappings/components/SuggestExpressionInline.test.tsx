@@ -5,6 +5,7 @@
  * Tests keyboard shortcuts, button interactions, and accessibility attributes.
  */
 
+import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -23,18 +24,24 @@ const IDLE_STATE: SuggestExpressionState = {
   status: 'idle',
   result: null,
   error: null,
+  suggestionState: null,
+  readyToApply: false,
 };
 
 const INPUTTING_STATE: SuggestExpressionState = {
   status: 'inputting',
   result: null,
   error: null,
+  suggestionState: null,
+  readyToApply: false,
 };
 
 const LOADING_STATE: SuggestExpressionState = {
   status: 'loading',
   result: null,
   error: null,
+  suggestionState: null,
+  readyToApply: false,
 };
 
 const SUCCESS_STATE: SuggestExpressionState = {
@@ -42,8 +49,22 @@ const SUCCESS_STATE: SuggestExpressionState = {
   result: {
     expression: 'default(source("Invoice.CurrencyCode"), "USD")',
     explanation: 'Uses source currency and falls back to USD.',
+    validation: {
+      valid: true,
+      diagnostics: [],
+    },
+    readyToApply: true,
+    context: {
+      sourceNodeCount: 20,
+      includedNodeCount: 20,
+      truncated: false,
+      approxTokenCount: 128,
+      byteLength: 1024,
+    },
   },
   error: null,
+  suggestionState: 'ready',
+  readyToApply: true,
 };
 
 const SUCCESS_STATE_NO_EXPLANATION: SuggestExpressionState = {
@@ -51,14 +72,30 @@ const SUCCESS_STATE_NO_EXPLANATION: SuggestExpressionState = {
   result: {
     expression: 'source("Invoice.CurrencyCode")',
     explanation: '',
+    validation: {
+      valid: true,
+      diagnostics: [],
+    },
+    readyToApply: true,
+    context: {
+      sourceNodeCount: 20,
+      includedNodeCount: 20,
+      truncated: false,
+      approxTokenCount: 128,
+      byteLength: 1024,
+    },
   },
   error: null,
+  suggestionState: 'ready',
+  readyToApply: true,
 };
 
 const ERROR_STATE: SuggestExpressionState = {
   status: 'error',
   result: null,
   error: 'Suggest Expression is not available in offline mode',
+  suggestionState: null,
+  readyToApply: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -200,13 +237,16 @@ describe('SuggestExpressionInline', () => {
     expect(onDismiss).toHaveBeenCalled();
   });
 
-  it('shows expression in code block on success', () => {
+  it('shows editable review expression on success', () => {
     render(<SuggestExpressionInline {...makeProps(SUCCESS_STATE)} />);
 
     expect(screen.getByTestId('suggest-expression-inline')).toBeInTheDocument();
     expect(
-      screen.getByText('default(source("Invoice.CurrencyCode"), "USD")'),
+      screen.getByRole('textbox', { name: /suggested expression editor/i }),
     ).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /suggested expression editor/i })).toHaveValue(
+      'default(source("Invoice.CurrencyCode"), "USD")',
+    );
   });
 
   it('shows explanation text when present in result', () => {
@@ -225,7 +265,7 @@ describe('SuggestExpressionInline', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('calls onAccept with expression when Accept is clicked', async () => {
+  it('calls onAccept with reviewed expression when Accept is clicked', async () => {
     const user = userEvent.setup();
     const onAccept = vi.fn();
     render(<SuggestExpressionInline {...makeProps(SUCCESS_STATE, { onAccept })} />);
@@ -233,6 +273,79 @@ describe('SuggestExpressionInline', () => {
     await user.click(screen.getByRole('button', { name: /accept/i }));
     expect(onAccept).toHaveBeenCalledWith(
       'default(source("Invoice.CurrencyCode"), "USD")',
+    );
+  });
+
+  it('shows diagnostics and gates Accept when suggestion is validation-invalid', async () => {
+    const user = userEvent.setup();
+    const onAccept = vi.fn();
+    const invalidSuccessState: SuggestExpressionState = {
+      status: 'success',
+      result: {
+        expression: 'concat(source("Invoice.CurrencyCode"), source("Invoice.Total"))',
+        explanation: 'Display formatted value',
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Returns string but target expects number',
+            },
+          ],
+        },
+        readyToApply: false,
+        context: {
+          sourceNodeCount: 20,
+          includedNodeCount: 20,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 1024,
+        },
+      },
+      error: null,
+      suggestionState: 'invalid',
+      readyToApply: false,
+    };
+
+    render(<SuggestExpressionInline {...makeProps(invalidSuccessState, { onAccept })} />);
+
+    const acceptBtn = screen.getByRole('button', { name: /accept/i });
+    expect(acceptBtn).toBeDisabled();
+    expect(screen.getByTestId('suggest-expression-validation')).toBeInTheDocument();
+    expect(
+      screen.getByText('Returns string but target expects number'),
+    ).toBeInTheDocument();
+
+    await user.click(acceptBtn);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('supports edit-before-apply and enables Accept once edited expression validates', async () => {
+    const user = userEvent.setup();
+    const onAccept = vi.fn();
+    render(<SuggestExpressionInline {...makeProps(SUCCESS_STATE, { onAccept })} />);
+
+    const editor = screen.getByRole('textbox', { name: /suggested expression editor/i });
+    await user.clear(editor);
+    await user.type(editor, 'source(');
+
+    expect(screen.getByRole('button', { name: /accept/i })).toBeDisabled();
+
+    await user.clear(editor);
+    await user.type(editor, 'source("Invoice.CurrencyCode")');
+
+    const acceptBtn = screen.getByRole('button', { name: /accept/i });
+    expect(acceptBtn).not.toBeDisabled();
+
+    await user.click(acceptBtn);
+    expect(onAccept).toHaveBeenCalledWith('source("Invoice.CurrencyCode")');
+  });
+
+  it('renders assistance label clarifying suggestion-only semantics', () => {
+    render(<SuggestExpressionInline {...makeProps(SUCCESS_STATE)} />);
+    expect(screen.getByTestId('suggest-expression-assistance-label')).toHaveTextContent(
+      'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
     );
   });
 

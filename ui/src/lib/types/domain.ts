@@ -399,26 +399,32 @@ export interface AutoMapReviewSummary {
 }
 
 export interface SuggestExpressionInput {
+  readonly mappingId: string;
   readonly instruction: string;
   readonly targetPath: string;
-  readonly targetType?: string;
+  readonly targetType: string;
   readonly targetDescription?: string;
-  /**
-   * Pre-formatted text block of available source fields for the showcase/local slice.
-   * Format: one line per field, e.g., "- Invoice.Amount (number)\n- Invoice.CurrencyCode (string)"
-   * This is a temporary substitute for RAG retrieval and will become optional/ignored
-   * once the backend implements its own context retrieval.
-   */
-  readonly sourceContext?: string;
-  /**
-   * @deprecated Use `sourceContext` instead. Retained for backward compatibility.
-   */
-  readonly context?: Readonly<Record<string, unknown>>;
+}
+
+export interface SuggestExpressionValidationResult {
+  readonly valid: boolean;
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+export interface SuggestExpressionContextMeta {
+  readonly sourceNodeCount: number;
+  readonly includedNodeCount: number;
+  readonly truncated: boolean;
+  readonly approxTokenCount: number;
+  readonly byteLength: number;
 }
 
 export interface SuggestExpressionResult {
   readonly expression: string;
   readonly explanation?: string;
+  readonly validation: SuggestExpressionValidationResult;
+  readonly readyToApply: boolean;
+  readonly context: SuggestExpressionContextMeta;
 }
 
 export interface ExplainRuleInput {

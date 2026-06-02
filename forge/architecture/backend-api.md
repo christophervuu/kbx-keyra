@@ -345,6 +345,58 @@ Canonical AI normalization behavior used by AI handlers (FS-066 baseline + FS-06
 - rate-limit and transient provider/runtime classes -> `SERVICE_UNAVAILABLE` (503, retryable)
 - remaining provider/config/parse/internal classes -> `INTERNAL_ERROR` (500)
 
+### Suggest Expression endpoint contract (FS-070)
+
+`POST /ai/suggest-expression`
+
+Canonical request payload:
+
+```json
+{
+  "mappingId": "map_123",
+  "instruction": "Use invoice currency and fallback to USD",
+  "targetPath": "Order.Header.Currency",
+  "targetType": "string",
+  "targetDescription": "Optional target-field guidance"
+}
+```
+
+Canonical success payload:
+
+```json
+{
+  "success": true,
+  "data": {
+    "expression": "default(source(\"Invoice.CurrencyCode\"), \"USD\")",
+    "explanation": "Uses source currency and falls back to USD.",
+    "validation": {
+      "valid": true,
+      "diagnostics": []
+    },
+    "readyToApply": true,
+    "context": {
+      "sourceNodeCount": 120,
+      "includedNodeCount": 87,
+      "truncated": true,
+      "approxTokenCount": 7900,
+      "byteLength": 64000
+    }
+  }
+}
+```
+
+Failure/edge semantics:
+
+- Backend owns schema-context retrieval and prompt-variable assembly; clients do not send full `sourceContext` blobs.
+- Missing/invalid mapping/target context returns canonical client errors (validation/not-found envelope classes).
+- Provider/runtime failures return normalized canonical envelopes (`TIMEOUT`, `SERVICE_UNAVAILABLE`, etc.) via shared AI error normalization.
+- Model output contract failures return `INVALID_MODEL_OUTPUT` (500, non-retryable).
+- Validation-invalid generated expressions are returned as successful suggestion responses with:
+  - `validation.valid: false`
+  - diagnostics populated
+  - `readyToApply: false`
+  (UI must treat these as reviewable-but-not-apply-ready, not transport errors.)
+
 ## 12) Cross-References
 
 - `forge/architecture/phase-1-readiness.md` — backend boundary and Phase 1 constraints

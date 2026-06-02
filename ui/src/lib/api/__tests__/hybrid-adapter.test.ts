@@ -45,18 +45,18 @@ describe('HybridAdapter (deprecated retained path)', () => {
 
     await expect(
       adapter.suggestExpression({
+        mappingId: 'm-1',
         instruction: 'copy',
         targetPath: 'Order.Total',
         targetType: 'string',
-        sourceContext: '- Invoice.Total (number)',
       }),
     ).resolves.toEqual({ expression: 'source("Invoice.Total")' });
 
     expect(suggestExpressionHttp).toHaveBeenCalledWith('http://localhost:3001/api', {
+      mappingId: 'm-1',
       instruction: 'copy',
       targetPath: 'Order.Total',
       targetType: 'string',
-      sourceContext: '- Invoice.Total (number)',
     });
   });
 

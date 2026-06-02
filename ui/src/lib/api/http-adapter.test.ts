@@ -660,14 +660,25 @@ describe('HttpAdapter (CRUD)', () => {
   });
 
   it('suggestExpression maps to POST /ai/suggest-expression', async () => {
-    vi.mocked(httpRequest).mockResolvedValueOnce({ expression: 'source("x")' });
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      expression: 'source("x")',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 8,
+        includedNodeCount: 8,
+        truncated: false,
+        approxTokenCount: 42,
+        byteLength: 240,
+      },
+    });
     const adapter = new HttpAdapter(API_URL);
 
     await adapter.suggestExpression({
+      mappingId: 'm-1',
       instruction: 'copy',
       targetPath: 'Order.Total',
       targetType: 'string',
-      sourceContext: '- Invoice.Total (number)',
     });
 
     expect(httpRequest).toHaveBeenCalledWith({
@@ -675,12 +686,82 @@ describe('HttpAdapter (CRUD)', () => {
       path: '/ai/suggest-expression',
       method: 'POST',
       body: {
+        mappingId: 'm-1',
         instruction: 'copy',
         targetPath: 'Order.Total',
         targetType: 'string',
-        sourceContext: '- Invoice.Total (number)',
       },
     });
+  });
+
+  it('suggestExpression preserves invalid validation payloads for review gating', async () => {
+    const payload = {
+      expression: 'concat(source("Invoice.Total"), source("Invoice.CurrencyCode"))',
+      explanation: 'Combines total and currency for display',
+      validation: {
+        valid: false,
+        diagnostics: [
+          {
+            code: 'TYPE_MISMATCH',
+            severity: 'error',
+            message: 'Expression returns string but target type is number',
+            path: 'Order.Total',
+          },
+        ],
+      },
+      readyToApply: false,
+      context: {
+        sourceNodeCount: 130,
+        includedNodeCount: 100,
+        truncated: true,
+        approxTokenCount: 7700,
+        byteLength: 64000,
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.suggestExpression({
+        mappingId: 'm-1',
+        instruction: 'format total with currency',
+        targetPath: 'Order.Total',
+        targetType: 'number',
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/suggest-expression',
+      method: 'POST',
+      body: {
+        mappingId: 'm-1',
+        instruction: 'format total with currency',
+        targetPath: 'Order.Total',
+        targetType: 'number',
+      },
+    });
+  });
+
+  it('suggestExpression preserves normalized app errors from httpRequest', async () => {
+    const normalizedError = Object.assign(new Error('Invalid request body'), {
+      code: 'VALIDATION_ERROR',
+      statusCode: 400,
+      retryable: false,
+    });
+    vi.mocked(httpRequest).mockRejectedValueOnce(normalizedError);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.suggestExpression({
+        mappingId: 'm-1',
+        instruction: 'copy amount',
+        targetPath: 'Order.Total',
+        targetType: 'number',
+      }),
+    ).rejects.toBe(normalizedError);
   });
 
   it('AE-01/AE-05: explainRule maps to POST /ai/explain-rule and preserves structured response', async () => {
