@@ -650,8 +650,6 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       draftRules,
     };
 
-    const optimisticRevision = currentRevision + 1;
-
     // Merge draftRules into the current rules array before saving
     const mergedRules = draftRules.size > 0
       ? mergeDraftsIntoRules(rules, draftRules)
@@ -659,7 +657,9 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
     const updatedConfig: MappingConfig = {
       ...config,
-      version: optimisticRevision,
+      // Backend expects expectedRevision to be the current persisted revision.
+      // Version/currentRevision are advanced only after a successful save response.
+      version: currentRevision,
       rules: mergedRules,
       config: configOptions,
     };
@@ -667,14 +667,18 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     // Optimistically reflect the pending save immediately.
     setConfig(updatedConfig);
     setRules(mergedRules);
-    setVersion(optimisticRevision);
-    setCurrentRevision(optimisticRevision);
 
     try {
       const saveResult = await adapter.saveMapping(mappingId, updatedConfig);
       if (!mountedRef.current) return undefined;
 
       const finalRevision = saveResult.revision;
+      const persistedConfig: MappingConfig = {
+        ...updatedConfig,
+        version: finalRevision,
+      };
+
+      setConfig(persistedConfig);
       setCurrentRevision(finalRevision);
       setVersion(finalRevision);
       setLastSavedRules(mergedRules);
@@ -696,8 +700,8 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
           version: finalRevision,
           savedAt: new Date().toISOString(),
           savedBy: 'You',
-          ruleCount: updatedConfig.rules.length,
-          config: updatedConfig,
+          ruleCount: persistedConfig.rules.length,
+          config: persistedConfig,
         };
         adapter.saveMappingVersion(mappingId, versionEntry).catch((err) => {
           console.warn('Failed to save version history entry:', err);

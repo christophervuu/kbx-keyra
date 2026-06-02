@@ -367,7 +367,7 @@ describe('useMappingEditor', () => {
       expect(adapter.saveMapping).toHaveBeenCalledWith(
         'mapping-1',
         expect.objectContaining({
-          version: 4,
+          version: 3,
           rules: expect.arrayContaining([
             expect.objectContaining({ target: 'NewField' }),
           ]),
@@ -435,7 +435,7 @@ describe('useMappingEditor', () => {
       expect(result.current.rules).toHaveLength(2);
       expect(result.current.draftRules.get('A.D')).toBe('static("draft")');
 
-      let pendingSave!: Promise<void>;
+      let pendingSave!: Promise<{ noChange: boolean } | undefined>;
       act(() => {
         pendingSave = result.current.actions.save();
       });
