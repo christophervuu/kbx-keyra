@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AIResponse, PromptRecord } from '../../../src/lib/ai/index.js';
+import { PROMPT_IDS } from '../../../src/lib/ai/prompt-ids.js';
 
 const modelInvokeMock = vi.hoisted(() => vi.fn());
 
@@ -99,7 +100,7 @@ describe('invokeAI', () => {
     resetEnv();
   });
 
-  it('returns successful parsed AIResult for full pipeline (AE-01)', async () => {
+  it('returns successful parsed AIResult for full pipeline with schema-valid output (AE-01, AE-04)', async () => {
     modelInvokeMock.mockResolvedValue({
       success: true,
       data: {
@@ -142,6 +143,9 @@ describe('invokeAI', () => {
       expect(result.invocation).toEqual({
         feature: 'explain-rule',
         promptId: 'explain-rule',
+        promptVersion: 3,
+        promptSelectionSource: undefined,
+        promptSelectionEnvironment: undefined,
         tier: 'tier1',
         model: 'openai/gpt-4.1-mini',
         timeoutMs: 20_000,
@@ -158,7 +162,7 @@ describe('invokeAI', () => {
     modelInvokeMock.mockResolvedValue({
       success: true,
       data: {
-        content: '{"ok":true}',
+        content: '{"explanation":"fallback ok"}',
       },
       promptId: 'explain-rule',
       model: 'openai/gpt-4.1-mini',
@@ -206,6 +210,72 @@ describe('invokeAI', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.code).toBe('PROMPT_NOT_FOUND');
+    }
+  });
+
+  it('resolves nl-to-rule alias to natural-language-to-dsl before registry lookup (AE-02)', async () => {
+    modelInvokeMock.mockResolvedValue({
+      success: true,
+      data: {
+        content: '{"expression":"source(\\"InvoiceCurrency\\")"}',
+      },
+      promptId: PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL,
+      model: 'openai/gpt-4.1-mini',
+    } as AIResponse<unknown>);
+
+    const getLatestPrompt = vi.fn().mockResolvedValue(
+      createPromptRecord({
+        promptId: PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL,
+      }),
+    );
+
+    const { invokeAI } = await import('../../../src/lib/ai/invoke-ai.js');
+
+    const result = await invokeAI('nl-to-rule', { instruction: 'map field' }, {
+      promptRegistry: {
+        getLatestPrompt,
+      },
+      dslAssetLoader: {
+        loadDslReference: async () => '# DSL',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(getLatestPrompt).toHaveBeenCalledWith(PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL);
+    expect(getLatestPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates prompt selection metadata into invocation diagnostics context', async () => {
+    modelInvokeMock.mockResolvedValue({
+      success: true,
+      data: {
+        content: '{"explanation":"selection metadata"}',
+      },
+      promptId: 'explain-rule',
+      model: 'openai/gpt-4.1-mini',
+    } as AIResponse<unknown>);
+
+    const { invokeAI } = await import('../../../src/lib/ai/invoke-ai.js');
+
+    const result = await invokeAI('explain-rule', {}, {
+      promptRegistry: {
+        getLatestPrompt: async () =>
+          createPromptRecord({
+            version: 7,
+            selectionSource: 'active-pointer',
+            selectionEnvironment: 'prod',
+          }),
+      },
+      dslAssetLoader: {
+        loadDslReference: async () => '# DSL',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.invocation.promptVersion).toBe(7);
+      expect(result.invocation.promptSelectionSource).toBe('active-pointer');
+      expect(result.invocation.promptSelectionEnvironment).toBe('prod');
     }
   });
 
@@ -279,7 +349,7 @@ describe('invokeAI', () => {
     }
   });
 
-  it('returns PARSE_ERROR when model content is invalid JSON', async () => {
+  it('returns INVALID_MODEL_OUTPUT when model content is invalid JSON (AE-05)', async () => {
     modelInvokeMock.mockResolvedValue({
       success: true,
       data: {
@@ -302,7 +372,35 @@ describe('invokeAI', () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.code).toBe('PARSE_ERROR');
+      expect(result.error.code).toBe('INVALID_MODEL_OUTPUT');
+    }
+  });
+
+  it('returns INVALID_MODEL_OUTPUT when model payload violates centralized schema contract (AE-04, AE-05)', async () => {
+    modelInvokeMock.mockResolvedValue({
+      success: true,
+      data: {
+        content: '{"explanation":42}',
+      },
+      promptId: 'explain-rule',
+      model: 'openai/gpt-4.1-mini',
+    } as AIResponse<unknown>);
+
+    const { invokeAI } = await import('../../../src/lib/ai/invoke-ai.js');
+
+    const result = await invokeAI('explain-rule', {}, {
+      promptRegistry: {
+        getLatestPrompt: async () => createPromptRecord(),
+      },
+      dslAssetLoader: {
+        loadDslReference: async () => '# DSL',
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('INVALID_MODEL_OUTPUT');
+      expect(result.error.message).toContain('schema validation');
     }
   });
 

@@ -145,6 +145,7 @@ Purpose:
 | `RESOURCE_NOT_FOUND` | 404 | false | requested project/mapping/schema/version/content absent |
 | `CONFLICT` | 409 | false | referential integrity block, optimistic concurrency mismatch |
 | `INTERNAL_ERROR` | 500 | true | unexpected handler failure |
+| `INVALID_MODEL_OUTPUT` | 500 | false | AI response failed runtime structured-output validation |
 | `SERVICE_UNAVAILABLE` | 503 | true | transient DynamoDB/S3 service issue (e.g., throttling) |
 | `TIMEOUT` | 504 | true | lambda/downstream timeout condition |
 
@@ -324,7 +325,7 @@ The naming above reflects the currently implemented lambda surface. Infrastructu
 
 ---
 
-## 11) AI Handler API Conventions (FS-066 Addendum)
+## 11) AI Handler API Conventions (FS-066/FS-067 Addendum)
 
 This architecture primarily covers non-AI handlers, but Phase 2 introduced cross-cutting API conventions that AI handlers now follow consistently:
 
@@ -333,10 +334,11 @@ This architecture primarily covers non-AI handlers, but Phase 2 introduced cross
 - AI handler responses use the same canonical error envelope contract in Section 5 (`code`, `message`, `statusCode`, `retryable`, `requestId`).
 - Browser clients must access AI via backend API routes only (UI -> `ApiAdapter`/`HttpAdapter` -> API Gateway -> Lambda). Direct browser-side provider invocation is prohibited by repository guardrails.
 
-Canonical FS-066 normalization behavior used by AI handlers:
+Canonical AI normalization behavior used by AI handlers (FS-066 baseline + FS-067 updates):
 
 - `VALIDATION_ERROR`/`LIMIT_EXCEEDED` -> `VALIDATION_ERROR` (400)
 - `PROMPT_NOT_FOUND` -> `RESOURCE_NOT_FOUND` (404)
+- `INVALID_MODEL_OUTPUT` -> `INVALID_MODEL_OUTPUT` (500, non-retryable)
 - `TIMEOUT` -> `TIMEOUT` (504, retryable)
 - rate-limit and transient provider/runtime classes -> `SERVICE_UNAVAILABLE` (503, retryable)
 - remaining provider/config/parse/internal classes -> `INTERNAL_ERROR` (500)

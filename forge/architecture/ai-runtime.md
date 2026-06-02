@@ -55,10 +55,48 @@ FS-066 established the Phase 2 shared AI foundation on top of FS-065 reconciliat
   - Handler-facing mapper from AI/runtime/provider errors to canonical backend envelope semantics:
     - `VALIDATION_ERROR|LIMIT_EXCEEDED -> VALIDATION_ERROR (400, non-retryable)`
     - `PROMPT_NOT_FOUND -> RESOURCE_NOT_FOUND (404, non-retryable)`
+    - `INVALID_MODEL_OUTPUT -> INVALID_MODEL_OUTPUT (500, non-retryable)`
     - `TIMEOUT -> TIMEOUT (504, retryable)`
     - `MODEL_RATE_LIMITED|provider 5xx/429 -> SERVICE_UNAVAILABLE (503, retryable)`
     - `REGISTRY_ERROR|ASSET_ERROR -> SERVICE_UNAVAILABLE (503, retryable)`
     - remaining config/parse/model/internal classes -> `INTERNAL_ERROR (500)`
+
+## FS-067 Prompt Registry + Structured Output Contracts
+
+FS-067 hardened prompt selection and structured-output contracts across all AI handlers.
+
+### Canonical prompt identity contract
+
+- Canonical prompt IDs are centralized in `src/lib/ai/prompt-ids.ts` and consumed by runtime/handlers.
+- Canonical IDs include:
+  - `explain-rule`
+  - `natural-language-to-dsl`
+  - `smart-fix`
+  - `ai-validation`
+  - `auto-map`
+  - `field-description`
+- Backward compatibility alias:
+  - `nl-to-rule -> natural-language-to-dsl` (one release-cycle compatibility path).
+
+### Deterministic prompt selection + rollback contract
+
+- Authoritative rollback selector: **environment-scoped active pointer record**.
+- Runtime environment selector variable:
+  - `PROMPT_REGISTRY_ACTIVE_POINTER_ENV`
+- Selection behavior:
+  1. If active-pointer env is configured and pointer exists, select the pointed version deterministically.
+  2. Otherwise select latest `status=active` version.
+  3. Otherwise fall back to latest version record.
+- Invalid pointer configuration (for example pointer version missing) is a deterministic registry failure (no silent fallback).
+- Prompt status fields are retained as historical metadata and are not authoritative when pointer selection is configured.
+- Invocation diagnostics include selected prompt metadata (`promptVersion`, `promptSelectionSource`, `promptSelectionEnvironment`).
+
+### Shared structured response contract
+
+- Runtime response schema contracts are centralized in `src/lib/ai/response-contracts.ts`.
+- `invokeAI()` uses shared contract lookup first, then prompt-record schema fallback when needed.
+- Output parser enforces strict JSON parse + schema validation before success results are returned.
+- Invalid/malformed model output returns `INVALID_MODEL_OUTPUT` (never a success payload).
 
 ## FS-065 Reconciliation Status (Canonical Model)
 
@@ -172,6 +210,9 @@ The in-memory representation of a row from the PromptRegistry DynamoDB table. Ma
 interface PromptRecord {
   promptId: string;
   version: number;
+  status?: 'active' | 'inactive' | 'deprecated';
+  selectionSource?: 'active-pointer' | 'latest-active' | 'latest-version';
+  selectionEnvironment?: string;
   systemMessage: string;
   userMessageTemplate: string;
   model: string;
@@ -200,7 +241,7 @@ interface AIResult<T = unknown> {
 interface AIError {
   success: false;
   error: {
-    code: string;          // e.g., 'PROMPT_NOT_FOUND', 'MODEL_ERROR', 'PARSE_ERROR'
+    code: string;          // e.g., 'PROMPT_NOT_FOUND', 'MODEL_ERROR', 'INVALID_MODEL_OUTPUT'
     message: string;
     details?: unknown;
   };
@@ -233,17 +274,25 @@ interface DslAssetLoader {
 - **SK**: `version` (number)
 - **Access**: Query PK = promptId, ScanIndexForward = false, Limit = 1 to retrieve the highest version
 
+### Selection policy
+
+- Runtime selection is deterministic and data/config-driven.
+- Authoritative rollback path is active-pointer selection (`recordType=active-pointer`) scoped by environment.
+- Pointer environment is provided by `PROMPT_REGISTRY_ACTIVE_POINTER_ENV`.
+- Without a pointer, runtime resolves latest active, then latest version fallback.
+- Selection metadata is attached to the selected record for telemetry/diagnostics.
+
 ### Caching
 
 - In-memory `Map<string, { record: PromptRecord; fetchedAt: number }>` cache
 - TTL: 5 minutes (300,000 ms)
 - Cache key: `promptId`
-- On cache miss or expiry: query DynamoDB, update cache
+- On cache miss or expiry: query adapter selection path, update cache
 - Cache is per-Lambda-instance (cold start resets cache)
 
 ### Local Adapter
 
-Reads prompt records from local JSON files under a configurable directory. File naming convention: `{promptId}.json`. Each file contains a single `PromptRecord` object. This allows local development without DynamoDB access.
+Reads prompt records from local JSON files under a configurable directory. File naming convention: `{promptId}.json`. Files may contain a single `PromptRecord` or an array of prompt versions + optional active-pointer record. This allows local development without DynamoDB access while preserving selection semantics.
 
 ---
 
@@ -376,7 +425,7 @@ invokeAI(promptId, variables, options?)
   ├── 8. Enforce completion-token usage cap (when usage available)
   │
   ├── 9. Parse output (via output-parser)
-  │       └── Validate against responseSchema → AIResult<T> or AIError
+  │       └── Validate against shared response contract / responseSchema → AIResult<T> or AIError
   │
   └── 10. Emit telemetry start/success/failure events around full invocation lifecycle
 ```
@@ -430,7 +479,7 @@ export async function handler(event: APIGatewayProxyEvent) {
 
 AI handlers (`explain-rule`, `suggest-expression`, `auto-map`) use shared failure normalization and canonical envelope responses through `errorResponse(...)`.
 
-`suggest-expression` validates (`instruction`, `targetPath`, `targetType`, `sourceContext`) and invokes promptId `nl-to-rule`.
+`suggest-expression` validates (`instruction`, `targetPath`, `targetType`, `sourceContext`) and routes through canonical prompt ID resolution (`nl-to-rule` alias -> `natural-language-to-dsl`).
 
 Lambda handlers do not:
 - Read from DynamoDB directly
@@ -448,6 +497,7 @@ Lambda handlers do not:
 |---|---|---|
 | `PROMPT_REGISTRY_TABLE` | DynamoDB table name | `integrations-keyra-promptregistry` |
 | `PROMPT_REGISTRY_LOCAL_DIR` | Local directory for prompt JSON files | (none — uses DynamoDB if unset) |
+| `PROMPT_REGISTRY_ACTIVE_POINTER_ENV` | Environment selector for active-pointer prompt version resolution | (none — pointer override disabled) |
 | `DSL_ASSET_BUCKET` | S3 bucket for DSL reference | `integrations-keyra` |
 | `DSL_ASSET_KEY` | S3 object key for DSL reference | `prompt-assets/dsl/keyra-dsl-reference.md` |
 | `DSL_ASSET_LOCAL_PATH` | Local file path for DSL reference | (none — uses S3 if unset) |

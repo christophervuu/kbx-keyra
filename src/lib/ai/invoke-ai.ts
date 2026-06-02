@@ -7,6 +7,8 @@ import { renderPrompt } from './prompt-renderer.js';
 import { resolveInvocationProfile } from './routing.js';
 import { validateInvokePayload, validatePromptContract } from './invocation-guards.js';
 import { createTelemetrySession } from './telemetry.js';
+import { resolvePromptId } from './prompt-ids.js';
+import { getResponseSchemaContract } from './response-contracts.js';
 import type {
   AIInvocationFailure,
   AIInvocationResponse,
@@ -99,17 +101,20 @@ export async function invokeAI<T = unknown>(
     return emitAndReturnFailure(failure);
   }
 
+  const promptIdResolution = resolvePromptId(promptId);
+  const resolvedPromptId = promptIdResolution?.canonicalPromptId ?? promptId;
+
   let promptRecord: PromptRecord;
   try {
-    const loadedPrompt = await promptRegistry.getLatestPrompt(promptId);
+    const loadedPrompt = await promptRegistry.getLatestPrompt(resolvedPromptId);
     if (!loadedPrompt) {
       const failure: AIInvocationFailure = {
         success: false,
         error: {
           code: 'PROMPT_NOT_FOUND',
-          message: `No prompt found for promptId: ${promptId}`,
+          message: `No prompt found for promptId: ${resolvedPromptId}`,
         },
-        promptId,
+        promptId: resolvedPromptId,
       };
 
       return emitAndReturnFailure(failure);
@@ -123,13 +128,18 @@ export async function invokeAI<T = unknown>(
         code: 'REGISTRY_ERROR',
         message: `Failed to load prompt from registry: ${toErrorMessage(error)}`,
       },
-      promptId,
+      promptId: resolvedPromptId,
     };
 
     return emitAndReturnFailure(failure);
   }
 
-  const invocation = resolveInvocationProfile(promptId, promptRecord);
+  const invocation = {
+    ...resolveInvocationProfile(resolvedPromptId, promptRecord),
+    promptVersion: promptRecord.version,
+    promptSelectionSource: promptRecord.selectionSource,
+    promptSelectionEnvironment: promptRecord.selectionEnvironment,
+  };
 
   if (Number.isFinite(promptRecord.maxTokens) && promptRecord.maxTokens > invocation.maxOutputTokens) {
     const failure: AIInvocationFailure = {
@@ -144,7 +154,7 @@ export async function invokeAI<T = unknown>(
           maxOutputTokens: invocation.maxOutputTokens,
         },
       },
-      promptId,
+      promptId: resolvedPromptId,
       invocation,
     };
 
@@ -152,7 +162,7 @@ export async function invokeAI<T = unknown>(
   }
 
   const payloadValidationError = validateInvokePayload({
-    promptId,
+    promptId: resolvedPromptId,
     variables,
     profile: invocation,
   });
@@ -167,7 +177,7 @@ export async function invokeAI<T = unknown>(
   }
 
   const promptValidationError = validatePromptContract({
-    promptId,
+    promptId: resolvedPromptId,
     promptRecord,
   });
 
@@ -193,7 +203,7 @@ export async function invokeAI<T = unknown>(
         code,
         message: `Failed to load DSL asset: ${message}`,
       },
-      promptId,
+      promptId: resolvedPromptId,
       invocation,
     };
 
@@ -212,7 +222,7 @@ export async function invokeAI<T = unknown>(
         code: 'CONFIG_ERROR',
         message: 'Missing required configuration: GITHUB_TOKEN',
       },
-      promptId,
+      promptId: resolvedPromptId,
       invocation,
     };
 
@@ -220,24 +230,29 @@ export async function invokeAI<T = unknown>(
   }
 
   let responseSchema: object;
-  try {
-    responseSchema = JSON.parse(promptRecord.responseSchema) as object;
-  } catch (error) {
-    const failure: AIInvocationFailure = {
-      success: false,
-      error: {
-        code: 'REGISTRY_ERROR',
-        message: `Prompt response schema is invalid JSON: ${toErrorMessage(error)}`,
-      },
-      promptId,
-      invocation,
-    };
+  const schemaContract = getResponseSchemaContract(resolvedPromptId);
+  if (schemaContract) {
+    responseSchema = schemaContract.schema;
+  } else {
+    try {
+      responseSchema = JSON.parse(promptRecord.responseSchema) as object;
+    } catch (error) {
+      const failure: AIInvocationFailure = {
+        success: false,
+        error: {
+          code: 'REGISTRY_ERROR',
+          message: `Prompt response schema is invalid JSON: ${toErrorMessage(error)}`,
+        },
+        promptId: resolvedPromptId,
+        invocation,
+      };
 
-    return emitAndReturnFailure(failure, invocation);
+      return emitAndReturnFailure(failure, invocation);
+    }
   }
 
   const modelResponse = await modelClient.invoke({
-    promptId,
+    promptId: resolvedPromptId,
     model: invocation.model,
     temperature: promptRecord.temperature,
     maxTokens: invocation.maxOutputTokens,
@@ -272,7 +287,7 @@ export async function invokeAI<T = unknown>(
             message: 'Model invocation exceeded configured token or payload limits',
             details: modelResponse.error.details,
           },
-          promptId,
+          promptId: resolvedPromptId,
           invocation,
         };
 
@@ -304,7 +319,7 @@ export async function invokeAI<T = unknown>(
           maxOutputTokens: invocation.maxOutputTokens,
         },
       },
-      promptId,
+      promptId: resolvedPromptId,
       invocation,
     };
 
@@ -313,8 +328,9 @@ export async function invokeAI<T = unknown>(
 
   const parsed = parseModelOutput(
     modelResponse.data.content,
-    promptId,
+    resolvedPromptId,
     invocation.model,
+    responseSchema,
     modelResponse.data.usage,
   ) as AIResponse<T>;
 
@@ -332,6 +348,6 @@ export async function invokeAI<T = unknown>(
     invocation,
   };
 
-  telemetrySession.emitSuccess(promptId, invocation);
+  telemetrySession.emitSuccess(resolvedPromptId, invocation);
   return success;
 }

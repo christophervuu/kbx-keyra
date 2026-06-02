@@ -8,6 +8,7 @@ function createConfig(overrides: Partial<AIRuntimeConfig> = {}): AIRuntimeConfig
     mode: 'aws',
     promptRegistryTable: 'integrations-keyra-promptregistry',
     promptRegistryLocalDir: undefined,
+    promptRegistryActivePointerEnv: undefined,
     dslAssetBucket: 'integrations-keyra',
     dslAssetKey: 'prompt-assets/dsl/keyra-dsl-reference.md',
     dslAssetLocalPath: undefined,

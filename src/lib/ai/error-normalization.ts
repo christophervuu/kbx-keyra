@@ -3,6 +3,7 @@ import type { AIError, AIErrorCode } from './types.js';
 export type BackendErrorCode =
   | 'VALIDATION_ERROR'
   | 'RESOURCE_NOT_FOUND'
+  | 'INVALID_MODEL_OUTPUT'
   | 'INTERNAL_ERROR'
   | 'SERVICE_UNAVAILABLE'
   | 'TIMEOUT';
@@ -113,6 +114,14 @@ export function normalizeAIError(error: AIError['error'] | AIError): NormalizedA
         code: 'SERVICE_UNAVAILABLE',
         statusCode: 503,
         retryable: true,
+        message: aiError.message,
+      };
+
+    case 'INVALID_MODEL_OUTPUT':
+      return {
+        code: 'INVALID_MODEL_OUTPUT',
+        statusCode: 500,
+        retryable: false,
         message: aiError.message,
       };
 

@@ -107,6 +107,19 @@ describe('normalizeAIError', () => {
     });
   });
 
+  it('maps INVALID_MODEL_OUTPUT to INVALID_MODEL_OUTPUT (500, non-retryable)', () => {
+    const normalized = normalizeAIError(
+      createAIError('INVALID_MODEL_OUTPUT', 'model response violated output contract'),
+    );
+
+    expect(normalized).toEqual({
+      code: 'INVALID_MODEL_OUTPUT',
+      statusCode: 500,
+      retryable: false,
+      message: 'model response violated output contract',
+    });
+  });
+
   it('maps PARSE_ERROR/CONFIG_ERROR/ASSET_NOT_FOUND to INTERNAL_ERROR', () => {
     expect(normalizeAIError(createAIError('PARSE_ERROR', 'invalid model json'))).toEqual({
       code: 'INTERNAL_ERROR',

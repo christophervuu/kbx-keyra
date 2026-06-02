@@ -1,13 +1,14 @@
 import type { PromptRecord } from './types.js';
+import { PROMPT_IDS } from './prompt-ids.js';
 
 export type AITier = 'tier1' | 'tier2';
 
 export type KnownAIFeature =
-  | 'explain-rule'
-  | 'nl-to-rule'
-  | 'smart-fix'
-  | 'validate-mappings'
-  | 'auto-map';
+  | typeof PROMPT_IDS.EXPLAIN_RULE
+  | typeof PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL
+  | typeof PROMPT_IDS.SMART_FIX
+  | typeof PROMPT_IDS.AI_VALIDATION
+  | typeof PROMPT_IDS.AUTO_MAP;
 
 export type AIInvocationFeature = KnownAIFeature | 'unclassified';
 
@@ -52,24 +53,24 @@ export const AI_TIER_DEFAULTS: Readonly<Record<AITier, AITierDefaults>> = {
 } as const;
 
 export const AI_FEATURE_DEFAULTS: Readonly<Record<KnownAIFeature, AIFeatureDefaults>> = {
-  'explain-rule': {
-    promptId: 'explain-rule',
+  [PROMPT_IDS.EXPLAIN_RULE]: {
+    promptId: PROMPT_IDS.EXPLAIN_RULE,
     tier: 'tier1',
   },
-  'nl-to-rule': {
-    promptId: 'nl-to-rule',
+  [PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL]: {
+    promptId: PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL,
     tier: 'tier1',
   },
-  'smart-fix': {
-    promptId: 'smart-fix',
+  [PROMPT_IDS.SMART_FIX]: {
+    promptId: PROMPT_IDS.SMART_FIX,
     tier: 'tier1',
   },
-  'validate-mappings': {
-    promptId: 'validate-mappings',
+  [PROMPT_IDS.AI_VALIDATION]: {
+    promptId: PROMPT_IDS.AI_VALIDATION,
     tier: 'tier1',
   },
-  'auto-map': {
-    promptId: 'auto-map',
+  [PROMPT_IDS.AUTO_MAP]: {
+    promptId: PROMPT_IDS.AUTO_MAP,
     tier: 'tier2',
   },
 } as const;
@@ -79,7 +80,7 @@ export const AI_FEATURE_DEFAULTS: Readonly<Record<KnownAIFeature, AIFeatureDefau
  * Values are optional and validated at resolution time.
  */
 export const AI_FEATURE_OVERRIDE_ALLOWLIST: Readonly<Partial<Record<KnownAIFeature, AIFeatureOverride>>> = {
-  'auto-map': {
+  [PROMPT_IDS.AUTO_MAP]: {
     tier: 'tier2',
   },
 } as const;

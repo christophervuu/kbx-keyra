@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AI_FEATURE_DEFAULTS,
   AI_FEATURE_OVERRIDE_ALLOWLIST,
+  PROMPT_IDS,
   AI_TIER_DEFAULTS,
   resolveInvocationProfile,
   type AIFeatureOverride,
@@ -42,13 +43,17 @@ describe('ai routing defaults and profile resolution', () => {
   });
 
   it('resolves known features deterministically from centralized defaults (AE-02)', () => {
-    const explain = resolveInvocationProfile('explain-rule');
-    expect(explain.feature).toBe('explain-rule');
-    expect(explain.tier).toBe(AI_FEATURE_DEFAULTS['explain-rule'].tier);
+    const explain = resolveInvocationProfile(PROMPT_IDS.EXPLAIN_RULE);
+    expect(explain.feature).toBe(PROMPT_IDS.EXPLAIN_RULE);
+    expect(explain.tier).toBe(AI_FEATURE_DEFAULTS[PROMPT_IDS.EXPLAIN_RULE].tier);
 
-    const autoMap = resolveInvocationProfile('auto-map');
-    expect(autoMap.feature).toBe('auto-map');
-    expect(autoMap.tier).toBe(AI_FEATURE_DEFAULTS['auto-map'].tier);
+    const nlToDsl = resolveInvocationProfile(PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL);
+    expect(nlToDsl.feature).toBe(PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL);
+    expect(nlToDsl.tier).toBe(AI_FEATURE_DEFAULTS[PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL].tier);
+
+    const autoMap = resolveInvocationProfile(PROMPT_IDS.AUTO_MAP);
+    expect(autoMap.feature).toBe(PROMPT_IDS.AUTO_MAP);
+    expect(autoMap.tier).toBe(AI_FEATURE_DEFAULTS[PROMPT_IDS.AUTO_MAP].tier);
   });
 
   it('falls back to code defaults when promptId is unknown (AE-09)', () => {
@@ -63,22 +68,22 @@ describe('ai routing defaults and profile resolution', () => {
 
   it('uses allowlisted overrides only for allowlisted features (AE-10)', () => {
     const customAllowlist: Partial<Record<KnownAIFeature, AIFeatureOverride>> = {
-      'auto-map': {
+      [PROMPT_IDS.AUTO_MAP]: {
         timeoutMs: 30_000,
         maxOutputTokens: 2_000,
       },
-      'explain-rule': {
+      [PROMPT_IDS.EXPLAIN_RULE]: {
         timeoutMs: 25_000,
         maxOutputTokens: 900,
       },
     };
 
-    const autoMap = resolveInvocationProfile('auto-map', undefined, customAllowlist);
+    const autoMap = resolveInvocationProfile(PROMPT_IDS.AUTO_MAP, undefined, customAllowlist);
     expect(autoMap.timeoutMs).toBe(30_000);
     expect(autoMap.maxOutputTokens).toBe(2_000);
 
-    const explain = resolveInvocationProfile('explain-rule', undefined, {
-      'auto-map': customAllowlist['auto-map'],
+    const explain = resolveInvocationProfile(PROMPT_IDS.EXPLAIN_RULE, undefined, {
+      [PROMPT_IDS.AUTO_MAP]: customAllowlist[PROMPT_IDS.AUTO_MAP],
     });
     expect(explain.timeoutMs).toBe(20_000);
     expect(explain.maxOutputTokens).toBe(1_200);
@@ -86,14 +91,14 @@ describe('ai routing defaults and profile resolution', () => {
 
   it('ignores invalid allowlisted values and falls back to defaults (AE-09)', () => {
     const invalidAllowlist: Partial<Record<KnownAIFeature, AIFeatureOverride>> = {
-      'auto-map': {
+      [PROMPT_IDS.AUTO_MAP]: {
         timeoutMs: -1,
         maxOutputTokens: 0,
         model: '',
       },
     };
 
-    const profile = resolveInvocationProfile('auto-map', undefined, invalidAllowlist);
+    const profile = resolveInvocationProfile(PROMPT_IDS.AUTO_MAP, undefined, invalidAllowlist);
 
     expect(profile.timeoutMs).toBe(45_000);
     expect(profile.maxOutputTokens).toBe(2_500);
@@ -106,7 +111,7 @@ describe('ai routing defaults and profile resolution', () => {
       maxTokens: 1_800,
     });
 
-    const profile = resolveInvocationProfile('explain-rule', promptRecord);
+    const profile = resolveInvocationProfile(PROMPT_IDS.EXPLAIN_RULE, promptRecord);
 
     expect(profile.tier).toBe('tier1');
     expect(profile.model).toBe('openai/gpt-4.1');
@@ -120,7 +125,7 @@ describe('ai routing defaults and profile resolution', () => {
       maxTokens: Number.NaN,
     });
 
-    const profile = resolveInvocationProfile('explain-rule', invalidRecord);
+    const profile = resolveInvocationProfile(PROMPT_IDS.EXPLAIN_RULE, invalidRecord);
 
     expect(profile.model).toBe('openai/gpt-4.1-mini');
     expect(profile.maxOutputTokens).toBe(1_200);
@@ -128,6 +133,6 @@ describe('ai routing defaults and profile resolution', () => {
 
   it('exports non-empty allowlist table for centralized override policy', () => {
     expect(Object.keys(AI_FEATURE_OVERRIDE_ALLOWLIST).length).toBeGreaterThan(0);
-    expect(AI_FEATURE_OVERRIDE_ALLOWLIST['auto-map']).toBeDefined();
+    expect(AI_FEATURE_OVERRIDE_ALLOWLIST[PROMPT_IDS.AUTO_MAP]).toBeDefined();
   });
 });

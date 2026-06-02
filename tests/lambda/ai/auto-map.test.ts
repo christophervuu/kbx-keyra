@@ -16,6 +16,8 @@ vi.mock('../../../src/lib/ai/index.js', () => {
           return { code: 'SERVICE_UNAVAILABLE', statusCode: 503, retryable: true, message: error.message };
         case 'VALIDATION_ERROR':
           return { code: 'VALIDATION_ERROR', statusCode: 400, retryable: false, message: error.message };
+        case 'INVALID_MODEL_OUTPUT':
+          return { code: 'INVALID_MODEL_OUTPUT', statusCode: 500, retryable: false, message: error.message };
         default:
           return { code: 'INTERNAL_ERROR', statusCode: 500, retryable: false, message: error.message };
       }
@@ -159,7 +161,7 @@ describe('aiAutoMap handler', () => {
     });
   });
 
-  it('maps PROMPT_NOT_FOUND to canonical RESOURCE_NOT_FOUND envelope', async () => {
+  it('maps PROMPT_NOT_FOUND to canonical RESOURCE_NOT_FOUND envelope (AE-06)', async () => {
     invokeAIMock.mockResolvedValue({
       success: false,
       error: {
@@ -217,6 +219,39 @@ describe('aiAutoMap handler', () => {
       statusCode: 503,
       retryable: true,
     });
+  });
+
+  it('maps INVALID_MODEL_OUTPUT to canonical INVALID_MODEL_OUTPUT envelope on HTTP 500 (AE-05)', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: false,
+      error: {
+        code: 'INVALID_MODEL_OUTPUT',
+        message: 'Model response failed schema validation',
+      },
+      promptId: 'auto-map',
+    });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetSection: '- Order.Header.DocumentType (string)',
+          sourceContext: '- InvoiceAmount (number)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(500);
+    const parsed = JSON.parse(response.body) as {
+      error: { code: string; statusCode: number; retryable: boolean; message: string };
+    };
+    expect(parsed.error).toMatchObject({
+      code: 'INVALID_MODEL_OUTPUT',
+      statusCode: 500,
+      retryable: false,
+    });
+    expect(parsed.error.message).toContain('schema validation');
   });
 
   it('maps unknown AI errors to canonical INTERNAL_ERROR envelope', async () => {

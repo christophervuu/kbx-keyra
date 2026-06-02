@@ -19,6 +19,17 @@ export {
   DynamoPromptRegistryAdapter,
   LocalPromptRegistryAdapter,
 } from './prompt-registry.js';
+export {
+  isCanonicalPromptId,
+  isSupportedPromptId,
+  PROMPT_IDS,
+  PROMPT_ID_ALIASES,
+  PROMPT_ID_ALIAS_POLICY,
+  resolvePromptId,
+  type CanonicalPromptId,
+  type PromptIdAlias,
+  type PromptIdResolution,
+} from './prompt-ids.js';
 export { createDslAssetLoader, LocalDslAssetLoader, S3DslAssetLoader } from './dsl-asset-loader.js';
 export { renderPrompt, type RenderedPrompt } from './prompt-renderer.js';
 export {
@@ -29,6 +40,11 @@ export {
   type ModelUsage,
 } from './model-client.js';
 export { parseModelOutput } from './output-parser.js';
+export {
+  RESPONSE_SCHEMA_CONTRACTS,
+  getResponseSchemaContract,
+  type ResponseSchemaContract,
+} from './response-contracts.js';
 export {
   normalizeAIError,
   type BackendErrorCode,
