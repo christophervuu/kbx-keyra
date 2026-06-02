@@ -656,7 +656,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/deploy
+            Path: /mappings/{id}/deploy
             Method: post
 
   PromoteDeploymentFunction:
@@ -691,7 +691,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/promote
+            Path: /mappings/{id}/promote
             Method: post
 
   RollbackDeploymentFunction:
@@ -726,7 +726,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/rollback
+            Path: /mappings/{id}/rollback
             Method: post
 
   ListDeploymentsFunction:
@@ -753,7 +753,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/deployments
+            Path: /mappings/{id}/deployments
             Method: get
 
   GetCurrentDeploymentsFunction:
@@ -780,7 +780,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{mappingId}/deployments/current
+            Path: /mappings/{id}/deployments/current
             Method: get
 
   CreateSchemaFunction:
