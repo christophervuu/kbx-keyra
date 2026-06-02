@@ -202,6 +202,24 @@ describe('useSuggestExpression', () => {
     expect(result.current.state.error).toBe(netMsg);
   });
 
+  it('passes through FEATURE_NOT_ENABLED message from canonical gating', async () => {
+    const featureDisabledError = Object.assign(new Error('"suggestExpression" is not enabled in this mode.'), {
+      code: 'FEATURE_NOT_ENABLED',
+      retryable: false,
+    });
+    const adapter = makeAdapter(vi.fn().mockRejectedValue(featureDisabledError));
+    const { result } = renderHook(() => useSuggestExpression(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await act(async () => {
+      result.current.generate(MOCK_INPUT);
+    });
+
+    expect(result.current.state.status).toBe('error');
+    expect(result.current.state.error).toBe('"suggestExpression" is not enabled in this mode.');
+  });
+
   it('dismiss() resets state to idle', async () => {
     const adapter = makeAdapter(vi.fn().mockResolvedValue(MOCK_RESULT));
     const { result } = renderHook(() => useSuggestExpression(), {

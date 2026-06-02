@@ -471,11 +471,6 @@ ui/
           RefreshConfirmBanner.tsx     FS-048 inline confirmation banner for Refresh All with countdown auto-dismiss
           RefreshConfirmBanner.test.tsx FS-048 component tests for countdown, confirm/cancel, and alertdialog semantics
           AutoMapWorkspace.test.tsx    FS-048 component tests for workspace shell states, slot rendering, and completion behavior
-          AutoMapReviewDrawer.tsx      FS-046 legacy right-side review drawer retained but no longer composed by MappingEditor (retired in FS-048)
-          AutoMapReviewDrawer.test.tsx FS-046 component tests (all drawer states, bulk actions visibility, completion banner, summary badges, close/retry callbacks)
-          AutoMapReviewDrawer.integration.test.tsx FS-046 integration tests (TestHarness composing hook + drawer + cards; accept/dismiss/undo/bulk-accept flows; 16 tests)
-          SuggestionReviewCard.tsx     FS-046 individual suggestion card: target path, new/replace badge, expression comparison, confidence/validation badges, Accept/Edit/Dismiss actions, Undo dismiss
-          SuggestionReviewCard.test.tsx FS-046 component tests (badge variants, action callbacks, undo dismiss, accessibility)
           ObjectTemplateBuilder.tsx  Key-value pair editor for map() object template: add/remove pairs, key text inputs, ArgumentSlot value slots in array context (T-07)
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
@@ -575,16 +570,14 @@ ui/
           use-linked-debug-selection.test.ts  Hook unit tests (select, clear, isPathSelected, isRuleSelected, auto-clear on executing, multiple runs)
           use-server-preview.ts          Server-side preview hook (FS-037 T-02): wraps adapter.previewOnServer() with 10s timeout, Phase 0 offline detection (isAvailable), stable execute callback via ref pattern
           use-server-preview.test.ts     Hook unit tests (idle state, success, timeout, Phase 0 offline error, sticky isAvailable=false, generic error, sequential calls, adapter call args)
-          use-explain-rule.ts            FS-041 Explain Rule hook: manages async lifecycle for adapter.explainRule(); idle/loading/success/error state; AbortController cleanup on unmount + re-invocation; user-friendly error mapping (offline, rate-limit, network, unexpected-response, generic)
+          use-explain-rule.ts            FS-041 Explain Rule hook: manages async lifecycle for adapter.explainRule(); idle/loading/success/error state; AbortController cleanup on unmount + re-invocation; user-friendly error mapping (offline, rate-limit, network, unexpected-response, FEATURE_NOT_ENABLED passthrough, generic)
           use-explain-rule.test.ts       FS-041 hook unit tests (idle state, loading, success, error, dismiss, re-explain, abort on re-invocation, offline error, cleanup on unmount)
-          use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping
+          use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping with FEATURE_NOT_ENABLED passthrough
           use-suggest-expression.test.ts FS-042 hook unit tests (state transitions, offline/network/rate-limit mapping, abort semantics, unmount cleanup)
-          use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, and metadata
+          use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, metadata, and FEATURE_NOT_ENABLED passthrough
           use-auto-map-workspace.test.ts FS-048 hook unit tests for generation, hydration, lifecycle actions, refresh paths, filtering, and summary derivation
           use-suggestion-preview.ts      FS-048 lazy per-expression preview hook (debounced evaluateExpression, source-data guard, error isolation)
           use-suggestion-preview.test.ts FS-048 hook unit tests for debounce, source-data absence, successful evaluation, and error fallback
-          use-auto-map-review.ts         FS-046 legacy drawer review hook retained for compatibility; no longer used by MappingEditor composition
-          use-auto-map-review.test.ts    FS-046 legacy hook tests retained
           use-deployment-context.ts      Deployment context hook (FS-037 T-03): loads DeploymentContext via adapter, derives per-environment status map, isModeAvailable() gates comparison modes by deploy status, refresh(), Phase 0 error → all env modes unavailable
           use-deployment-context.test.ts Hook unit tests (load success, environmentStatus map, isModeAvailable per mode, Phase 0 error handling, current-vs-saved always available, refresh, all-deployed)
           use-environment-comparison.ts  Comparison orchestration hook (FS-037 T-04): two-sided parallel execution via Promise.allSettled, client-side (working/saved config) and server-side (direct adapter call with 10s timeout), stale-run cancellation via runId ref, diff via computeDiff(), canRun gating
@@ -665,13 +658,12 @@ ui/
       use-optimistic-mutation.ts Shared optimistic mutation utility: snapshot capture, optimistic apply, rollback on failure, mutation-id guard for stale completion safety, surfaced AppError state (FS-059 T-06)
       use-optimistic-mutation.test.ts Unit tests: success confirmation, rollback + error surfacing, latest-only rollback under rapid overlapping mutations (FS-059 T-06)
     lib/
-      api/                ApiAdapter interface + LocalStorageAdapter + HybridAdapter + AI API client
+      api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter + AI API client helpers
                           types.ts              ApiAdapter contract
                           local-storage-adapter.ts  Phase 0 localStorage implementation
-                          hybrid-adapter.ts     FS-041/FS-042 HybridAdapter: extends LocalStorageAdapter, overrides explainRule() and suggestExpression() to call backend via HTTP
-                          http-adapter.ts       FS-055 HTTP CRUD adapter: extends LocalStorageAdapter and overrides schema/mapping/version/project CRUD to route through httpRequest
+                          http-adapter.ts       FS-055/FS-065 HTTP adapter: extends LocalStorageAdapter; routes canonical backend CRUD + retained AI methods + schema query through httpRequest; deferred non-core methods throw FEATURE_NOT_ENABLED
                           http-adapter.test.ts  FS-055 unit tests for HttpAdapter CRUD endpoint mapping, void handling, and error propagation
-                          errors.ts             FS-055 API error types including AdapterMethodNotImplementedError (`code: NOT_IMPLEMENTED`, `retryable: false`)
+                          errors.ts             FS-055/FS-065 API error types including FeatureNotEnabledError (`code: FEATURE_NOT_ENABLED`, `retryable: false`) with deprecated compatibility alias
                           ai-api-client.ts      FS-041/FS-042 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) + suggestExpressionHttp(apiUrl, input); endpoint-specific timeout, envelope parsing, error mapping
                           http-client.ts        FS-055 reusable HTTP utility: typed fetch wrapper with timeout, envelope parsing, error normalization, and retry/backoff policy
                           http-client.test.ts   FS-055 unit tests for HTTP utility success/error/retry/timeout/backoff/toAppError compatibility

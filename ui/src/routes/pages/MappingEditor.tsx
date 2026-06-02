@@ -196,7 +196,7 @@ export default function MappingEditor() {
   const [isChangesOverlayOpen, setIsChangesOverlayOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
-  // Auto-Map workspace hook (FS-048 T-10) — replaces useAutoMapReview (FS-046)
+  // Auto-Map workspace hook (FS-048 T-10) — canonical review path
   // ---------------------------------------------------------------------------
   const autoMapWorkspace = useAutoMapWorkspace({
     adapter,
@@ -761,9 +761,6 @@ export default function MappingEditor() {
           onClose={() => { setIsChangesOverlayOpen(false); }}
         />
       )}
-
-      {/* Auto-Map review drawer (FS-046) — unwired in T-10; component kept for reference */}
-      {/* <AutoMapReviewDrawer ... /> */}
 
       {/* Route-level unsaved-changes guard dialog */}
       <ConfirmDialog

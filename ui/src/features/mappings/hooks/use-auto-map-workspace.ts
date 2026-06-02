@@ -35,6 +35,8 @@ const RATE_LIMIT_FRAGMENT = 'temporarily busy';
 const RATE_LIMIT_FRAGMENT_ALT = 'rate limit';
 const NETWORK_ERROR_FRAGMENT = 'Could not reach';
 const UNEXPECTED_RESPONSE_FRAGMENT = 'unexpected response';
+const FEATURE_NOT_ENABLED_FRAGMENT = 'not enabled in this mode';
+const FEATURE_NOT_ENABLED_CODE = 'FEATURE_NOT_ENABLED';
 const GENERIC_ERROR_MESSAGE = 'An unexpected error occurred. Please try again.';
 const OFFLINE_USER_MESSAGE = 'Auto-Map is not available in offline mode';
 const NO_ELIGIBLE_TARGETS_MESSAGE = 'No eligible target fields found in this section';
@@ -117,6 +119,15 @@ export interface UseAutoMapWorkspaceResult {
 
 function mapErrorToMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+
+  if (code === FEATURE_NOT_ENABLED_CODE || message.includes(FEATURE_NOT_ENABLED_FRAGMENT)) {
+    return message;
+  }
+
   if (message.includes(OFFLINE_MODE_FRAGMENT)) return OFFLINE_USER_MESSAGE;
   if (message.includes(RATE_LIMIT_FRAGMENT) || message.includes(RATE_LIMIT_FRAGMENT_ALT)) return message;
   if (message.includes(NETWORK_ERROR_FRAGMENT)) return message;
@@ -308,7 +319,7 @@ function applyFilters(
 /**
  * Orchestration hook for the Auto-Map Review Workspace (FS-048).
  *
- * Evolves `useAutoMapReview` (FS-046) with:
+ * Canonical Auto-Map workspace hook (FS-048) with:
  * - Persistent suggestion state via sessionStorage (T-01 utilities)
  * - Extended lifecycle: suggested → accepted | edited | dismissed | stale
  * - Refresh/merge logic that preserves terminal states

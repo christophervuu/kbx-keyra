@@ -1,4 +1,4 @@
-import { AdapterMethodNotImplementedError } from './errors';
+import { FeatureNotEnabledError } from './errors';
 import { httpRequest } from './http-client';
 import { LocalStorageAdapter } from './local-storage-adapter';
 import type {
@@ -323,23 +323,23 @@ export class HttpAdapter extends LocalStorageAdapter {
   }
 
   override async listTemplates(): Promise<TemplateMetadata[]> {
-    throw this.notImplemented('listTemplates');
+    throw this.featureNotEnabled('listTemplates');
   }
 
   override async getTemplate(id: string): Promise<TemplateDetail> {
     void id;
-    throw this.notImplemented('getTemplate');
+    throw this.featureNotEnabled('getTemplate');
   }
 
   override async getDeploymentContext(mappingId: string): Promise<DeploymentContext> {
     void mappingId;
-    throw this.notImplemented('getDeploymentContext');
+    throw this.featureNotEnabled('getDeploymentContext');
   }
 
   override async deploy(mappingId: string, environment: Environment): Promise<LegacyDeploymentRecord> {
     void mappingId;
     void environment;
-    throw this.notImplemented('deploy');
+    throw this.featureNotEnabled('deploy');
   }
 
   override async promote(
@@ -350,7 +350,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     void mappingId;
     void from;
     void to;
-    throw this.notImplemented('promote');
+    throw this.featureNotEnabled('promote');
   }
 
   override async rollback(
@@ -361,7 +361,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     void mappingId;
     void environment;
     void targetVersion;
-    throw this.notImplemented('rollback');
+    throw this.featureNotEnabled('rollback');
   }
 
   override async getDeploymentDiff(
@@ -372,7 +372,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     void mappingId;
     void fromVersion;
     void toVersion;
-    throw this.notImplemented('getDeploymentDiff');
+    throw this.featureNotEnabled('getDeploymentDiff');
   }
 
   override async deployMapping(
@@ -479,84 +479,113 @@ export class HttpAdapter extends LocalStorageAdapter {
 
   override async listCdmSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw this.notImplemented('listCdmSchemas');
+    throw this.featureNotEnabled('listCdmSchemas');
   }
 
   override async linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw this.notImplemented('linkCdmSchema');
+    throw this.featureNotEnabled('linkCdmSchema');
   }
 
   override async syncCdmSchema(schemaId: string): Promise<SchemaSyncResult> {
     void schemaId;
-    throw this.notImplemented('syncCdmSchema');
+    throw this.featureNotEnabled('syncCdmSchema');
   }
 
   override async listPublishedSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw this.notImplemented('listPublishedSchemas');
+    throw this.featureNotEnabled('listPublishedSchemas');
   }
 
   override async publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void> {
     void schemaId;
     void input;
-    throw this.notImplemented('publishSchemaToGitHub');
+    throw this.featureNotEnabled('publishSchemaToGitHub');
   }
 
   override async linkPublishedSchema(input: LinkPublishedSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw this.notImplemented('linkPublishedSchema');
+    throw this.featureNotEnabled('linkPublishedSchema');
   }
 
   override async autoMap(input: AutoMapInput): Promise<AutoMapResult> {
-    void input;
-    throw this.notImplemented('autoMap');
+    return httpRequest<AutoMapResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
-    void input;
-    throw this.notImplemented('autoMapSection');
+    return httpRequest<AutoMapSectionResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult> {
-    void input;
-    throw this.notImplemented('suggestExpression');
+    return httpRequest<SuggestExpressionResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/suggest-expression',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
-    void input;
-    throw this.notImplemented('explainRule');
+    return httpRequest<ExplainRuleResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/explain-rule',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async smartFix(input: SmartFixInput): Promise<SmartFixResult> {
-    void input;
-    throw this.notImplemented('smartFix');
+    return httpRequest<SmartFixResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/smart-fix',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async validateMappings(input: ValidateMappingsInput): Promise<ValidationReport> {
-    void input;
-    throw this.notImplemented('validateMappings');
+    return httpRequest<ValidationReport>({
+      baseUrl: this.apiUrl,
+      path: '/ai/validate-mappings',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async querySchemaNodes(schemaId: string, query: string): Promise<SchemaSearchResult[]> {
-    void schemaId;
-    void query;
-    throw this.notImplemented('querySchemaNodes');
+    return httpRequest<SchemaSearchResult[]>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(schemaId)}/query`,
+      method: 'POST',
+      body: {
+        query,
+      },
+    });
   }
 
   override async listActivity(projectId?: string, limit?: number): Promise<ActivityEntry[]> {
     void projectId;
     void limit;
-    throw this.notImplemented('listActivity');
+    throw this.featureNotEnabled('listActivity');
   }
 
   override async previewOnServer(mappingId: string, input: ServerPreviewInput): Promise<ServerPreviewResult> {
     void mappingId;
     void input;
-    throw this.notImplemented('previewOnServer');
+    throw this.featureNotEnabled('previewOnServer');
   }
 
-  private notImplemented(methodName: string): AdapterMethodNotImplementedError {
-    return new AdapterMethodNotImplementedError(methodName);
+  private featureNotEnabled(featureName: string): FeatureNotEnabledError {
+    return new FeatureNotEnabledError(featureName);
   }
 }

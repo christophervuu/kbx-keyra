@@ -187,6 +187,24 @@ describe('useExplainRule', () => {
     expect(result.current.state.error).toBe(msg);
   });
 
+  it('passes through FEATURE_NOT_ENABLED message from canonical gating', async () => {
+    const featureDisabledError = Object.assign(new Error('"explainRule" is not enabled in this mode.'), {
+      code: 'FEATURE_NOT_ENABLED',
+      retryable: false,
+    });
+    const adapter = makeAdapter(vi.fn().mockRejectedValue(featureDisabledError));
+    const { result } = renderHook(() => useExplainRule(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await act(async () => {
+      result.current.explain(MOCK_INPUT);
+    });
+
+    expect(result.current.state.status).toBe('error');
+    expect(result.current.state.error).toBe('"explainRule" is not enabled in this mode.');
+  });
+
   it('dismiss() resets state to idle', async () => {
     const adapter = makeAdapter(vi.fn().mockResolvedValue(MOCK_RESULT));
     const { result } = renderHook(() => useExplainRule(), {

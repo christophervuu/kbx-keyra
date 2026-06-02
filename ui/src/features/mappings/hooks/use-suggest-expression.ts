@@ -12,6 +12,8 @@ const RATE_LIMIT_FRAGMENT = 'temporarily busy';
 const RATE_LIMIT_FRAGMENT_ALT = 'rate limit';
 const NETWORK_ERROR_FRAGMENT = 'Could not reach';
 const UNEXPECTED_RESPONSE_FRAGMENT = 'unexpected response';
+const FEATURE_NOT_ENABLED_FRAGMENT = 'not enabled in this mode';
+const FEATURE_NOT_ENABLED_CODE = 'FEATURE_NOT_ENABLED';
 const GENERIC_ERROR_MESSAGE = 'An unexpected error occurred. Please try again.';
 const OFFLINE_USER_MESSAGE = 'Suggest Expression is not available in offline mode';
 
@@ -43,6 +45,14 @@ export interface UseSuggestExpressionReturn {
 
 function mapErrorToMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+
+  if (code === FEATURE_NOT_ENABLED_CODE || message.includes(FEATURE_NOT_ENABLED_FRAGMENT)) {
+    return message;
+  }
 
   if (message.includes(OFFLINE_MODE_FRAGMENT)) {
     return OFFLINE_USER_MESSAGE;

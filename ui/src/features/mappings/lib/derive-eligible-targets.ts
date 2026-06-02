@@ -2,7 +2,7 @@ import type { ParsedSchema } from '@/lib/types/domain';
 
 /**
  * Maximum number of target field lines included in the eligible target listing.
- * Matches SOURCE_CONTEXT_LINE_LIMIT in use-auto-map-review.ts.
+ * Matches SOURCE_CONTEXT_LINE_LIMIT in use-auto-map-workspace.ts.
  */
 const TARGET_LISTING_LINE_LIMIT = 200;
 

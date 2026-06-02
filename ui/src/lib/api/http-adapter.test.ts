@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AdapterMethodNotImplementedError } from './errors';
+import { FeatureNotEnabledError } from './errors';
 import { HttpAdapter } from './http-adapter';
 import { httpRequest } from './http-client';
 
@@ -585,39 +585,144 @@ describe('HttpAdapter (CRUD)', () => {
       'linkPublishedSchema',
       (a: HttpAdapter) => a.linkPublishedSchema({ repo: 'r', branch: 'b', path: '/a.xsd' }),
     ],
-    ['autoMap', (a: HttpAdapter) => a.autoMap({ projectId: 'p-1', mappingId: 'm-1' })],
-    ['autoMapSection', (a: HttpAdapter) => a.autoMapSection({ projectId: 'p-1', mappingId: 'm-1' })],
-    [
-      'suggestExpression',
-      (a: HttpAdapter) =>
-        a.suggestExpression({ instruction: 'copy', targetPath: 'Order.Total', targetType: 'string' }),
-    ],
-    ['explainRule', (a: HttpAdapter) => a.explainRule({ targetPath: 'Order.Total', expression: 'source("x")' })],
-    ['smartFix', (a: HttpAdapter) => a.smartFix({ mappingId: 'm-1', diagnostics: [] })],
-    ['validateMappings', (a: HttpAdapter) => a.validateMappings({ mappingIds: ['m-1'] })],
-    ['querySchemaNodes', (a: HttpAdapter) => a.querySchemaNodes('s-1', 'name')],
     ['listActivity', (a: HttpAdapter) => a.listActivity()],
     [
       'previewOnServer',
       (a: HttpAdapter) => a.previewOnServer('m-1', { environment: 'DEV', sourceData: {} }),
     ],
-  ])('%s throws AdapterMethodNotImplementedError', async (_methodName, invoke) => {
+  ])('%s throws FeatureNotEnabledError', async (_methodName, invoke) => {
     const adapter = new HttpAdapter(API_URL);
 
-    await expect(invoke(adapter)).rejects.toBeInstanceOf(AdapterMethodNotImplementedError);
+    await expect(invoke(adapter)).rejects.toBeInstanceOf(FeatureNotEnabledError);
     await expect(invoke(adapter)).rejects.toMatchObject({
-      code: 'NOT_IMPLEMENTED',
+      code: 'FEATURE_NOT_ENABLED',
       retryable: false,
     });
   });
 
-  it('toAppError compatibility for AdapterMethodNotImplementedError', () => {
-    const appError = toAppError(new AdapterMethodNotImplementedError('deploy'));
+  it('toAppError compatibility for FeatureNotEnabledError', () => {
+    const appError = toAppError(new FeatureNotEnabledError('deploy'));
 
     expect(appError).toMatchObject({
-      message: '"deploy" is not yet available in HTTP mode.',
-      code: 'NOT_IMPLEMENTED',
+      message: '"deploy" is not enabled in this mode.',
+      code: 'FEATURE_NOT_ENABLED',
       retryable: false,
+    });
+  });
+
+  it('autoMap maps to POST /ai/auto-map', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ rules: [], diagnostics: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.autoMap({ projectId: 'p-1', mappingId: 'm-1' });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: { projectId: 'p-1', mappingId: 'm-1' },
+    });
+  });
+
+  it('autoMapSection maps to POST /ai/auto-map', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ suggestions: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.autoMapSection({
+      projectId: 'p-1',
+      mappingId: 'm-1',
+      sectionPath: 'Order.Header',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        sectionPath: 'Order.Header',
+      },
+    });
+  });
+
+  it('suggestExpression maps to POST /ai/suggest-expression', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ expression: 'source("x")' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.suggestExpression({
+      instruction: 'copy',
+      targetPath: 'Order.Total',
+      targetType: 'string',
+      sourceContext: '- Invoice.Total (number)',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/suggest-expression',
+      method: 'POST',
+      body: {
+        instruction: 'copy',
+        targetPath: 'Order.Total',
+        targetType: 'string',
+        sourceContext: '- Invoice.Total (number)',
+      },
+    });
+  });
+
+  it('explainRule maps to POST /ai/explain-rule', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ explanation: 'ok' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.explainRule({ targetPath: 'Order.Total', expression: 'source("x")' });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/explain-rule',
+      method: 'POST',
+      body: { targetPath: 'Order.Total', expression: 'source("x")' },
+    });
+  });
+
+  it('smartFix maps to POST /ai/smart-fix', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ updatedRules: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.smartFix({ mappingId: 'm-1', diagnostics: [] });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/smart-fix',
+      method: 'POST',
+      body: { mappingId: 'm-1', diagnostics: [] },
+    });
+  });
+
+  it('validateMappings maps to POST /ai/validate-mappings', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ valid: true, diagnostics: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.validateMappings({ mappingIds: ['m-1'] });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/validate-mappings',
+      method: 'POST',
+      body: { mappingIds: ['m-1'] },
+    });
+  });
+
+  it('querySchemaNodes maps to POST /schemas/:id/query', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.querySchemaNodes('s-1', 'postal');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/query',
+      method: 'POST',
+      body: { query: 'postal' },
     });
   });
 });

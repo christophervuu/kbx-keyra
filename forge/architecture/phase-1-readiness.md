@@ -19,7 +19,7 @@ Scope:
 - Capture adapter contract boundaries and current behavior
 - Enumerate Phase 0 simplifications that require Phase 1 resolution
 - Make frontend-imposed backend constraints explicit
-- Document AI transition path (`HybridAdapter` showcase slice → full backend integration)
+- Document AI transition path (legacy showcase adapter paths → canonical `HttpAdapter` backend integration)
 - Document engine integration points across browser and backend runtime
 
 Out of scope:
@@ -35,7 +35,7 @@ Source of truth: `ui/src/lib/api/types.ts` (`ApiAdapter`).
 
 Columns:
 - **Signature**: method contract at UI boundary
-- **Current (Phase 0)**: `LocalStorageAdapter`/`HybridAdapter` behavior
+- **Current adapters in codebase**: `LocalStorageAdapter` and `HttpAdapter` behavior
 - **Phase 1 requirement**: what backend must provide
 - **Category**: CRUD / compute / AI / deployment / integration
 - **Complexity notes**: pagination, consistency, latency, etc.
@@ -112,9 +112,9 @@ Columns:
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
 | `autoMap(input)` | offline throw in local adapter | backend AI endpoint + adapter impl | AI | full-section vs whole-mapping semantics need definition |
-| `autoMapSection(input)` | HTTP in `HybridAdapter`; offline throw in local | keep/extend backend AI section endpoint | AI | currently showcase-integrated path |
-| `suggestExpression(input)` | HTTP in `HybridAdapter`; offline throw in local | production-grade endpoint + standardized errors | AI | user-facing error mapping exists in UI |
-| `explainRule(input)` | HTTP in `HybridAdapter`; offline throw in local | production-grade endpoint + standardized errors | AI | parity with existing showcase behavior needed |
+| `autoMapSection(input)` | `HttpAdapter` -> `POST /ai/auto-map`; offline throw in local | keep backend section endpoint behavior on canonical path | AI | shared route with `autoMap` |
+| `suggestExpression(input)` | `HttpAdapter` -> `POST /ai/suggest-expression`; offline throw in local | production-grade endpoint + standardized errors | AI | user-facing error mapping retained |
+| `explainRule(input)` | `HttpAdapter` -> `POST /ai/explain-rule`; offline throw in local | production-grade endpoint + standardized errors | AI | parity path retained |
 | `smartFix(input)` | offline throw in local | backend AI endpoint + adapter impl | AI | currently no HTTP override |
 | `validateMappings(input)` | offline throw in local | backend validation/report endpoint | AI/compute | contract shape exists, behavior not implemented |
 
@@ -122,7 +122,7 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `querySchemaNodes(schemaId, query): Promise<SchemaSearchResult[]>` | returns `[]` (intentional stub) | indexed search endpoint | compute | ranking/pagination contract not yet defined |
+| `querySchemaNodes(schemaId, query): Promise<SchemaSearchResult[]>` | `HttpAdapter` -> `POST /schemas/:id/query` in backend mode; local returns `[]` placeholder | indexed search endpoint with OpenSearch-first semantics | compute | temporary PK-scoped degraded fallback gate exists (`SCHEMA_QUERY_DEGRADED_FALLBACK`) |
 | `listActivity(projectId?, limit?): Promise<ActivityEntry[]>` | local list + optional filter/limit | activity feed endpoint | compute | retention/window rules unresolved |
 | `previewOnServer(mappingId, input): Promise<ServerPreviewResult>` | offline throw in local; compare hooks gate availability | server preview endpoint | compute/integration | latency/timeouts and execution budget are critical |
 
@@ -230,9 +230,9 @@ Frontend implementation currently constrains backend design in these ways:
 - `createAdapter()` now selects:
   - `LocalStorageAdapter` when `VITE_API_URL` is unset
   - `HttpAdapter` when set
-- `HttpAdapter` currently provides HTTP CRUD coverage for schemas/mappings/versions/projects via shared `httpRequest()` utility.
-- AI and other non-CRUD methods in `HttpAdapter` currently throw structured `AdapterMethodNotImplementedError` placeholders (`code: NOT_IMPLEMENTED`, `retryable: false`).
-- `HybridAdapter` remains in the repository for compatibility/reference but is deprecated and no longer bootstrap-selected.
+- `HttpAdapter` provides HTTP CRUD coverage plus canonical AI route mappings and schema query (`POST /schemas/:id/query`) via shared `httpRequest()` utility.
+- Deferred non-core methods in `HttpAdapter` throw structured `FeatureNotEnabledError` (`code: FEATURE_NOT_ENABLED`, `retryable: false`).
+- `HybridAdapter` has been retired from the repository; reintroduction is non-canonical.
 
 ### Backend assets already present
 - Lambda handlers under `src/lambda/ai/`:
@@ -244,9 +244,9 @@ Frontend implementation currently constrains backend design in these ways:
 - Architecture reference: `forge/architecture/ai-runtime.md`.
 
 ### Phase 1 extension path
-1. Expand backend coverage from showcase methods to full AI contract (`autoMap`, `smartFix`, `validateMappings`, etc.)
+1. Maintain canonical backend coverage through `HttpAdapter` for required AI methods (`autoMap`, `autoMapSection`, `suggestExpression`, `explainRule`, `smartFix`, `validateMappings`)
 2. Introduce standardized error envelopes and auth-aware invocation path
-3. Introduce full HTTP adapter (or equivalent) while retaining `ApiAdapter` call-site stability
+3. Retain a single production backend adapter path (`HttpAdapter`) while keeping `ApiAdapter` call-site stability
 4. Keep compatibility for current UI flows (`useSuggestExpression`, explain/auto-map workspace lifecycle)
 
 ### Compatibility considerations
@@ -295,7 +295,7 @@ Frontend implementation currently constrains backend design in these ways:
 ### Intentionally simplified / changed in Phase 0
 - XSD validation remains permissive stub.
 - Local-only adapter remains primary data plane.
-- AI/GitHub/deployment are partial or showcase-only integrations.
+- AI/GitHub/deployment remain partial in breadth, but retained AI paths are now canonically routed through `HttpAdapter`.
 - Template/search subsystems have placeholder behavior.
 
 ### Still unresolved for Phase 1 planning
@@ -333,7 +333,6 @@ Frontend implementation currently constrains backend design in these ways:
 - Source contracts/implementations:
   - `ui/src/lib/api/types.ts`
   - `ui/src/lib/api/local-storage-adapter.ts`
-  - `ui/src/lib/api/hybrid-adapter.ts`
   - `ui/src/lib/api/bootstrap.ts`
   - `ui/src/lib/engine/index.ts`
   - `src/engine/validate/schema-tree.ts`

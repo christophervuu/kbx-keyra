@@ -364,6 +364,24 @@ describe('useAutoMapWorkspace', () => {
     expect(result.current.previousSuggestionsAvailable).toBe(false);
   });
 
+  it('maps FEATURE_NOT_ENABLED from canonical adapter path as explicit user-facing error', async () => {
+    const featureDisabledError = Object.assign(new Error('"autoMapSection" is not enabled in this mode.'), {
+      code: 'FEATURE_NOT_ENABLED',
+      retryable: false,
+    });
+
+    const adapterMock = {
+      autoMapSection: vi.fn().mockRejectedValue(featureDisabledError),
+    };
+    const params = makeParams({ adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'] });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => { result.current.triggerAutoMap(SECTION_PATH); });
+    await waitFor(() => expect(result.current.status).toBe('error'));
+
+    expect(result.current.error).toBe('"autoMapSection" is not enabled in this mode.');
+  });
+
   // -------------------------------------------------------------------------
   // Filter computation
   // -------------------------------------------------------------------------

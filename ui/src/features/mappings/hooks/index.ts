@@ -53,12 +53,6 @@ export type {
   SuggestExpressionState,
   UseSuggestExpressionReturn,
 } from './use-suggest-expression';
-// FS-046 auto-map review hook
-export { useAutoMapReview } from './use-auto-map-review';
-export type {
-  UseAutoMapReviewParams,
-  UseAutoMapReviewResult,
-} from './use-auto-map-review';
 // FS-048 auto-map workspace hook
 export { useAutoMapWorkspace } from './use-auto-map-workspace';
 export type {
@@ -70,4 +64,3 @@ export type {
 // FS-048 suggestion preview hook
 export { useSuggestionPreview } from './use-suggestion-preview';
 export type { UseSuggestionPreviewResult } from './use-suggestion-preview';
-

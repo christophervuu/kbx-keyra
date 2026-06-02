@@ -53,7 +53,7 @@ Phase 1 exposes 21 routes. Logical Lambda names follow the naming conventions do
 | GET | `/schemas` | `src/lambda/schema/list-schemas.ts` | `ListSchemasFunction` | List schemas |
 | GET | `/schemas/:id` | `src/lambda/schema/get-schema.ts` | `GetSchemaFunction` | Get schema detail |
 | DELETE | `/schemas/:id` | `src/lambda/schema/delete-schema.ts` | `DeleteSchemaFunction` | Delete schema (conflict when referenced) |
-| POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (DynamoDB substring match, max 50) |
+| POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (OpenSearch-first, max 50; gated PK-scoped degraded fallback) |
 
 ---
 
@@ -256,7 +256,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 | `schema/list-schemas` | scan schemas |
 | `schema/get-schema` | get schema metadata |
 | `schema/delete-schema` | get schema + scan/query project refs + delete schema + delete schema nodes |
-| `schema/query-schema-nodes` | get schema + query schema nodes by `schemaId` then in-memory substring filter on `path`/`fieldName` |
+| `schema/query-schema-nodes` | get schema + OpenSearch query via `searchSchemaNodes`; on explicit degraded gate, fallback to PK-scoped schemaId query + in-memory substring filter |
 
 ---
 
@@ -299,6 +299,7 @@ Notes:
 |---|---|
 | `AWS_REGION` | Lambda runtime region |
 | `DYNAMODB_ENDPOINT` / `AWS_ENDPOINT_URL_DYNAMODB` | local DynamoDB override for integration/local runs |
+| `SCHEMA_QUERY_DEGRADED_FALLBACK` | optional explicit degraded-mode gate for schema query Dynamo fallback when OpenSearch path fails |
 
 The naming above reflects the currently implemented lambda surface. Infrastructure/persistence docs may define broader environment contracts for future modules.
 

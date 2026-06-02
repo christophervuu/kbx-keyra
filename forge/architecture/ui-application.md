@@ -115,8 +115,6 @@ ui/src/
         WorkspaceSuggestionCard.tsx FS-048 suggestion card with lifecycle badges, expand/collapse, diagnostics, stale indicator, per-item actions (Accept/Edit/Dismiss/Undo)
         WorkspaceToolbar.tsx        FS-048 filter chips + bulk actions (Accept All Valid, Refresh Unmapped/Stale/All)
         WorkspaceSuggestionPreview.tsx FS-048 optional per-suggestion preview section (current vs suggested output) + no-source-data callout
-        AutoMapReviewDrawer.tsx     FS-046 legacy drawer component retained for compatibility; no longer composed in MappingEditor (retired by FS-048)
-        SuggestionReviewCard.tsx    FS-046 legacy drawer card retained for compatibility; superseded by WorkspaceSuggestionCard in FS-048
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (FS-043, updated FS-051); header row: status icon + type badge + target path + Builder/Editor ModeToggle + ⋮ HeaderOverflowMenu; Builder mode: ArrayModeSelector + CollectionEditorSlot + ItemTemplateEditor; Editor mode: RawDslEditor + parse status + error list + restore/reset actions; nested focused panel (NestedArrayPanel) with "Back to parent" navigation; ValidationSummaryRow pinned between feedback area and content; action row: Reset draft + Discard changes (no AI buttons — intentionally omitted)
         ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches (4 cards only; customExpression removed as mode card in FS-051 T-01 — raw DSL now accessed via Builder/Editor toggle in header)
@@ -204,7 +202,6 @@ ui/src/
         use-suggest-expression.ts  FS-042 suggest-expression async lifecycle hook (`idle|inputting|loading|success|error`) with abort-on-reinvoke/unmount/reset semantics and user-friendly error mapping
         use-auto-map-workspace.ts  FS-048 Auto-Map workspace lifecycle hook: section-triggered generation + persistence hydration, lifecycle transitions (suggested/accepted/edited/dismissed/stale), refresh merge strategy, filtering, and bulk actions
         use-suggestion-preview.ts  FS-048 lazy per-expression preview hook for workspace cards (debounced evaluateExpression with source-data dependency)
-        use-auto-map-review.ts     FS-046 legacy drawer hook retained for compatibility; no longer used by MappingEditor composition
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
       lib/
@@ -237,10 +234,9 @@ ui/src/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
-      http-adapter.ts         FS-055 HTTP adapter: CRUD over HTTP for schemas/mappings/versions/projects; non-CRUD methods throw structured NOT_IMPLEMENTED placeholders
+      http-adapter.ts         FS-055 HTTP adapter: CRUD + AI + schema-query routes over HTTP for canonical backend mode; deferred non-core methods use structured FEATURE_NOT_ENABLED gating
       http-client.ts          FS-055 reusable HTTP utility (typed fetch wrapper: timeout, canonical envelope parsing, retry/backoff, error normalization)
-      errors.ts               FS-055 API errors (`AdapterMethodNotImplementedError`)
-      hybrid-adapter.ts       Legacy/deprecated adapter retained for compatibility; no longer bootstrap-selected (FS-055)
+      errors.ts               FS-055 API errors (`FeatureNotEnabledError`; deprecated compatibility alias retained for migration compatibility)
       ai-api-client.ts        HTTP client functions for AI endpoints (`explainRuleHttp`, `suggestExpressionHttp`) (FS-041, FS-042)
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL (`HttpAdapter` when set, `LocalStorageAdapter` otherwise)
@@ -283,8 +279,7 @@ This broad contract is intentionally stable for UI call sites; adapter implement
 ### Implementations
 
 - **Current (Phase 0):** `LocalStorageAdapter` — all operations use localStorage
-- **Current (Phase 1 transition / FS-055):** `HttpAdapter` — schema/mapping/version/project CRUD routes through shared HTTP client utility; non-CRUD methods currently throw structured `AdapterMethodNotImplementedError` placeholders (`code: "NOT_IMPLEMENTED"`, `retryable: false`)
-- **Legacy (retained):** `HybridAdapter` — earlier showcase adapter that extended `LocalStorageAdapter` and overrode selected AI methods; retained for compatibility but deprecated and no longer selected by bootstrap
+- **Current (Phase 1 transition / FS-055 + FS-065 reconciliation):** `HttpAdapter` routes canonical backend operations through the shared HTTP client utility, including retained AI methods and schema query; deferred non-core methods return structured `FeatureNotEnabledError` (`code: "FEATURE_NOT_ENABLED"`, `retryable: false`)
 
 ### Bootstrap
 
@@ -294,7 +289,7 @@ Startup behavior is centralized in `createAdapter()`:
 2. If unset/empty → return `new LocalStorageAdapter()`
 3. If set → return `new HttpAdapter(apiUrl)`
 
-`HybridAdapter` is retained in the codebase with a dev-only deprecation warning and is not used by `createAdapter()`.
+`createAdapter()` has a single production backend path: `HttpAdapter` when `VITE_API_URL` is set.
 
 ### HTTP Client Utility and Error Normalization (FS-055)
 
@@ -310,21 +305,21 @@ Startup behavior is centralized in `createAdapter()`:
   - max attempts = 3, backoff = `500ms * attempt + jitter`
 - Errors are normalized to `HttpClientError` with `statusCode?`, `code?`, and `retryable`, intentionally compatible with `toAppError()` / `AppError` in async UI state
 
-### Placeholder Error Contract (FS-055)
+### Deferred Feature Gating Contract
 
-`AdapterMethodNotImplementedError` (`ui/src/lib/api/errors.ts`) is used by `HttpAdapter` non-CRUD placeholders.
+`FeatureNotEnabledError` (`ui/src/lib/api/errors.ts`) is used for explicitly deferred non-core methods.
 
-- `message`: `"{methodName}" is not yet available in HTTP mode.`
-- `code`: `NOT_IMPLEMENTED`
+- `message`: `"{featureName}" is not enabled in this mode.`
+- `code`: `FEATURE_NOT_ENABLED`
 - `retryable`: `false`
 
-This gives deterministic `toAppError()` output for unimplemented HTTP-mode adapter methods.
+This gives deterministic `toAppError()` output for intentionally gated adapter methods.
 
 ### AI API Client
 
-`ui/src/lib/api/ai-api-client.ts` provides focused HTTP client functions for individual AI endpoints:
+`ui/src/lib/api/ai-api-client.ts` provides focused HTTP helpers for AI endpoint behavior tests and endpoint-shape utilities:
 
-- **Purpose:** Thin HTTP wrappers consumed by `HybridAdapter` (and potentially future `HttpAdapter`)
+- **Purpose:** endpoint-focused HTTP wrappers for AI integrations; canonical runtime routing is through `HttpAdapter`
 - **Current exports:**
   - `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
   - `suggestExpressionHttp(apiUrl, input)` → `Promise<SuggestExpressionResult>`
@@ -338,7 +333,7 @@ This gives deterministic `toAppError()` output for unimplemented HTTP-mode adapt
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. In `HttpAdapter`, non-CRUD methods throw structured `AdapterMethodNotImplementedError` placeholders; CRUD methods use the shared HTTP client utility and normalized `HttpClientError` semantics.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. In `HttpAdapter`, canonical backend methods use the shared HTTP client utility and normalized `HttpClientError` semantics; explicitly deferred methods throw structured `FeatureNotEnabledError`.
 
 Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Phase 0:
 - `listTemplates()` returns `[]`
@@ -346,20 +341,30 @@ Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Pha
 
 These stubs keep interface shape stable while backend-backed implementations are deferred.
 
-### Showcase AI Integration Pattern (FS-041 / FS-042)
+### Canonical AI Integration Pattern (FS-041 / FS-042 / FS-065)
 
 AI features are integrated as thin vertical slices with a stable layering pattern:
 
 1. **Type contract** in `ui/src/lib/types/domain.ts`
-2. **HTTP function** in `ui/src/lib/api/ai-api-client.ts`
-3. **`HybridAdapter` override** to route the method to HTTP when `VITE_API_URL` is set
-4. **Feature hook** for async lifecycle + abort semantics
-5. **Inline UI component** for user interaction and result presentation
+2. **`HttpAdapter` backend route mapping** in `ui/src/lib/api/http-adapter.ts`
+3. **Feature hook** for async lifecycle + abort semantics
+4. **Inline UI component** for user interaction and result presentation
 
 Current slices:
-- **Explain Rule (FS-041):** `explainRuleHttp` → `HybridAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
-- **Suggest Expression (FS-042):** `suggestExpressionHttp` → `HybridAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
-- **Auto-Map Review Workspace (FS-046 → FS-048):** `autoMapSectionHttp` → `HybridAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+- **Explain Rule (FS-041):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
+- **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
+- **Auto-Map Review Workspace (FS-046 → FS-048):** `HttpAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+
+Canonical backend-mode contract notes:
+
+- `HttpAdapter` is the single canonical production adapter path when `VITE_API_URL` is set.
+- Deferred non-core methods use explicit `FEATURE_NOT_ENABLED` errors; no silent local or alternate-adapter fallback is allowed.
+- Schema query (`querySchemaNodes`) is consumed through `HttpAdapter` -> `POST /schemas/:id/query`; backend retrieval policy is OpenSearch-first with explicit gated degraded fallback.
+
+Non-canonical/prohibited shortcut patterns:
+
+- Reintroducing `HybridAdapter` (or any second production adapter path) is prohibited.
+- Reintroducing legacy Auto-Map drawer/review loop surfaces retired in FS-065 is prohibited.
 
 The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion, section-level review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
 
@@ -937,7 +942,7 @@ The workspace remains backend-strategy agnostic:
 
 #### Drawer Retirement Note
 
-`AutoMapReviewDrawer` and `useAutoMapReview` remain in the codebase for compatibility/history but are no longer composed by `MappingEditor.tsx`. The active architecture is workspace mode (`useAutoMapWorkspace` + `AutoMapWorkspace`).
+Legacy drawer-path surfaces were removed during FS-065 reconciliation. The active architecture is workspace mode (`useAutoMapWorkspace` + `AutoMapWorkspace`).
 
 ### Drag-and-Drop Pattern (HTML5 API)
 

@@ -19,6 +19,55 @@ The runtime handles:
 
 ---
 
+## FS-065 Reconciliation Status (Canonical Model)
+
+FS-065 reconciled AI showcase-era integration paths onto a single canonical production flow.
+
+### Keep
+
+- Backend AI handlers under `src/lambda/ai/` remain thin wrappers over `invokeAI()`.
+- UI backend mode consumption remains adapter-based and must route through `HttpAdapter`.
+
+### Replace
+
+- AI method placeholders using `NOT_IMPLEMENTED` were replaced by explicit feature gating semantics where methods are intentionally deferred (`FEATURE_NOT_ENABLED`, non-retryable).
+- Schema query dependency behavior moved from DynamoDB substring-first to OpenSearch-first retrieval.
+
+### Retire / Non-canonical
+
+- `HybridAdapter` is retired and must not be reintroduced as a production path.
+- Legacy UI shortcut/review-loop surfaces retired in FS-065 are non-canonical and prohibited for new work.
+
+### Interim infrastructure posture
+
+- AI routes may remain outside the full Phase 1 IaC route set temporarily.
+- This does **not** change the canonical consumption requirement: UI backend mode must call backend AI routes through `HttpAdapter` only.
+
+---
+
+## Canonical End-to-End AI Flow
+
+```text
+UI hook/component
+  -> ApiAdapter method
+  -> HttpAdapter (when VITE_API_URL is set)
+  -> API Gateway route
+  -> Lambda handler (src/lambda/ai/*)
+  -> invokeAI() shared runtime
+  -> Prompt registry + DSL asset + model client + output parser
+  -> standardized JSON response back to UI
+```
+
+Canonical route mappings currently implemented in `HttpAdapter`:
+
+- `autoMap` / `autoMapSection` -> `POST /ai/auto-map`
+- `suggestExpression` -> `POST /ai/suggest-expression`
+- `explainRule` -> `POST /ai/explain-rule`
+- `smartFix` -> `POST /ai/smart-fix`
+- `validateMappings` -> `POST /ai/validate-mappings`
+
+---
+
 ## Module Structure
 
 ```
@@ -385,6 +434,21 @@ console.log(result);
 - All AI calls go through API Gateway -> Lambda. The UI never calls GitHub Models directly.
 - AI output is **suggestion-only** — no auto-commit to mapping state.
 - Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix). Step Functions are reserved for future long-running operations like large-schema auto-map.
+- Backend mode UI integration must use `HttpAdapter` as the only canonical production adapter path.
+- Deprecated shortcut patterns (including HybridAdapter-style alternate routing) are non-canonical.
+
+---
+
+## Schema Query Dependency Contract (AI-adjacent)
+
+Some AI UX flows depend on schema search/query context. The canonical backend contract for schema-node retrieval is:
+
+- Primary path: **OpenSearch-first** query via `searchSchemaNodes(...)`.
+- Temporary degraded fallback: PK-scoped DynamoDB fallback is allowed only when `SCHEMA_QUERY_DEGRADED_FALLBACK` is explicitly enabled.
+- Fallback use must be instrumented; current handler log marker is:
+  - `[schema-query] degraded fallback activated`
+
+This fallback is transitional and is not a second canonical retrieval architecture.
 
 ---
 
