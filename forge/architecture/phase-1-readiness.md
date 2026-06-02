@@ -111,12 +111,12 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `autoMap(input)` | `HttpAdapter` canonical path uses `POST /ai/auto-map`; offline throw in local adapter | preserve canonical backend invocation path + standardized envelope | AI | full-section vs whole-mapping semantics remain route-shared with `autoMapSection` |
-| `autoMapSection(input)` | `HttpAdapter` -> `POST /ai/auto-map`; offline throw in local | keep backend section endpoint behavior on canonical path | AI | shared route with `autoMap` |
-| `suggestExpression(input)` | `HttpAdapter` -> `POST /ai/suggest-expression`; offline throw in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
-| `explainRule(input)` | `HttpAdapter` -> `POST /ai/explain-rule`; offline throw in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
-| `smartFix(input)` | offline throw in local; deferred in `HttpAdapter` via `FEATURE_NOT_ENABLED` | deferred endpoint; explicit feature gating remains canonical until backend rollout | AI | no local/provider shortcut fallback |
-| `validateMappings(input)` | offline throw in local; deferred in `HttpAdapter` via `FEATURE_NOT_ENABLED` | deferred endpoint; explicit feature gating remains canonical until backend rollout | AI/compute | contract shape exists; behavior deferred behind explicit gate |
+| `autoMap(input)` | `HttpAdapter` canonical path uses `POST /ai/auto-map`; offline throws deterministic `Not available in offline mode` error in local adapter | preserve canonical backend invocation path + standardized envelope | AI | response includes required `rules`; optional `diagnostics`/`warnings`/`retrievalMeta`; route-shared semantics with `autoMapSection` |
+| `autoMapSection(input)` | `HttpAdapter` -> `POST /ai/auto-map`; offline throws deterministic `Not available in offline mode` error in local | keep backend section endpoint behavior on canonical path | AI | shared route with `autoMap` |
+| `suggestExpression(input)` | `HttpAdapter` -> `POST /ai/suggest-expression`; offline throws deterministic `Not available in offline mode` error in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
+| `explainRule(input)` | `HttpAdapter` -> `POST /ai/explain-rule`; offline throws deterministic `Not available in offline mode` error in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
+| `smartFix(input)` | `HttpAdapter` canonical path uses `POST /ai/smart-fix`; offline throws deterministic `Not available in offline mode` error in local | backend capability may return standardized `FEATURE_NOT_ENABLED` during rollout | AI | no local/provider shortcut fallback |
+| `validateMappings(input)` | `HttpAdapter` canonical path uses `POST /ai/validate-mappings`; offline throws deterministic `Not available in offline mode` error in local | backend capability may return standardized `FEATURE_NOT_ENABLED` during rollout | AI/compute | contract shape remains stable; no hybrid fallback path |
 
 ### 2.9 Schema Search / Activity / Server Preview
 
@@ -231,8 +231,9 @@ Frontend implementation currently constrains backend design in these ways:
   - `LocalStorageAdapter` when `VITE_API_URL` is unset
   - `HttpAdapter` when set
 - `HttpAdapter` provides HTTP CRUD coverage plus canonical AI route mappings and schema query (`POST /schemas/:id/query`) via shared `httpRequest()` utility.
-- Deferred non-core methods in `HttpAdapter` throw structured `FeatureNotEnabledError` (`code: FEATURE_NOT_ENABLED`, `retryable: false`).
-- `HybridAdapter` has been retired from the repository; reintroduction is non-canonical.
+- Phase 2 AI methods are route-complete on the canonical adapter path (`/ai/explain-rule`, `/ai/suggest-expression`, `/ai/auto-map`, `/ai/smart-fix`, `/ai/validate-mappings`).
+- Temporarily unavailable backend AI capability is surfaced as standardized `FEATURE_NOT_ENABLED` (no local/hybrid fallback).
+- `HybridAdapter` is retained for one release cycle as deprecated-only bridge (dev warning on instantiation); canonical bootstrap/runtime path remains `HttpAdapter` only, and guardrails block new callsites.
 - FS-066 standardized backend AI invocation via shared runtime contracts:
   - centralized tier routing defaults + allowlisted override policy
   - invocation guard checks and limit enforcement
@@ -250,7 +251,7 @@ Frontend implementation currently constrains backend design in these ways:
 
 ### Phase 1 extension path
 1. Maintain canonical backend coverage through `HttpAdapter` for required AI methods (`autoMap`, `autoMapSection`, `suggestExpression`, `explainRule`, `smartFix`, `validateMappings`)
-2. Preserve FS-066 standardized invocation contracts (routing/limits/telemetry/error normalization) as additional AI endpoints are onboarded
+2. Preserve FS-066 standardized invocation contracts (routing/limits/telemetry/error normalization) as additional AI endpoints are onboarded and as temporarily gated endpoints transition from `FEATURE_NOT_ENABLED` to full capability
 3. Retain a single production backend adapter path (`HttpAdapter`) while keeping `ApiAdapter` call-site stability
 4. Keep compatibility for current UI flows (`useSuggestExpression`, explain/auto-map workspace lifecycle)
 5. Keep browser-side guardrails in force so provider SDK/domain usage remains backend-only

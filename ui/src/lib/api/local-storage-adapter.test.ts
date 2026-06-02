@@ -278,16 +278,47 @@ describe('LocalStorageAdapter', () => {
     });
   });
 
-  it('throws offline error for AI and GitHub methods', async () => {
+  it.each([
+    ['autoMap', (adapter: LocalStorageAdapter) => adapter.autoMap({ projectId: 'p', mappingId: 'm' })],
+    [
+      'autoMapSection',
+      (adapter: LocalStorageAdapter) =>
+        adapter.autoMapSection({
+          projectId: 'p',
+          mappingId: 'm',
+          sectionPath: 'Order.Header',
+        }),
+    ],
+    [
+      'suggestExpression',
+      (adapter: LocalStorageAdapter) =>
+        adapter.suggestExpression({
+          instruction: 'copy',
+          targetPath: 'Order.Total',
+          targetType: 'string',
+          sourceContext: '- Invoice.Total (number)',
+        }),
+    ],
+    [
+      'explainRule',
+      (adapter: LocalStorageAdapter) =>
+        adapter.explainRule({
+          targetPath: 'Order.Total',
+          expression: 'source("Invoice.Total")',
+        }),
+    ],
+    ['smartFix', (adapter: LocalStorageAdapter) => adapter.smartFix({ mappingId: 'm', diagnostics: [] })],
+    ['validateMappings', (adapter: LocalStorageAdapter) => adapter.validateMappings({ mappingIds: ['m'] })],
+    ['listCdmSchemas', (adapter: LocalStorageAdapter) => adapter.listCdmSchemas()],
+    [
+      'previewOnServer',
+      (adapter: LocalStorageAdapter) =>
+        adapter.previewOnServer('m', { environment: 'DEV', sourceData: {} }),
+    ],
+  ])('%s uses canonical offline unsupported behavior', async (_method, invoke) => {
     const adapter = new LocalStorageAdapter();
 
-    await expect(adapter.autoMap({ projectId: 'p', mappingId: 'm' })).rejects.toThrow(
-      'Not available in offline mode',
-    );
-    await expect(adapter.listCdmSchemas()).rejects.toThrow('Not available in offline mode');
-    await expect(
-      adapter.previewOnServer('m', { environment: 'DEV', sourceData: {} }),
-    ).rejects.toThrow('Not available in offline mode');
+    await expect(invoke(adapter)).rejects.toThrow('Not available in offline mode');
   });
 
   it('returns empty arrays for corrupted localStorage payloads', async () => {

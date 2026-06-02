@@ -1,0 +1,43 @@
+import { autoMapSectionHttp, explainRuleHttp, suggestExpressionHttp } from './ai-api-client';
+import { LocalStorageAdapter } from './local-storage-adapter';
+
+import type {
+  AutoMapSectionInput,
+  AutoMapSectionResult,
+  ExplainRuleInput,
+  ExplainRuleResult,
+  SuggestExpressionInput,
+  SuggestExpressionResult,
+} from '@/lib/types';
+
+/**
+ * @deprecated HybridAdapter is retained temporarily for one release cycle.
+ * Do not introduce new callsites; use HttpAdapter via VITE_API_URL.
+ */
+export class HybridAdapter extends LocalStorageAdapter {
+  private readonly apiUrl: string;
+
+  constructor(apiUrl: string) {
+    super();
+
+    if (import.meta.env.DEV) {
+      console.warn('[KeyRa] HybridAdapter is deprecated. Use HttpAdapter via VITE_API_URL instead.');
+    }
+
+    this.apiUrl = apiUrl;
+  }
+
+  override async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
+    return explainRuleHttp(this.apiUrl, input);
+  }
+
+  override async suggestExpression(
+    input: SuggestExpressionInput,
+  ): Promise<SuggestExpressionResult> {
+    return suggestExpressionHttp(this.apiUrl, input);
+  }
+
+  override async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
+    return autoMapSectionHttp(this.apiUrl, input);
+  }
+}

@@ -317,15 +317,15 @@ This gives deterministic `toAppError()` output for intentionally gated adapter m
 
 ### AI API Client
 
-`ui/src/lib/api/ai-api-client.ts` provides focused HTTP helpers for AI endpoint behavior tests and endpoint-shape utilities:
+`ui/src/lib/api/ai-api-client.ts` provides focused HTTP helpers for AI endpoint behavior tests and legacy-retained compatibility only:
 
-- **Purpose:** endpoint-focused HTTP wrappers for AI integrations; canonical runtime routing is through `HttpAdapter`
+- **Purpose:** endpoint-focused HTTP wrappers retained for deprecated `HybridAdapter` behavior parity and test utilities; canonical production routing is through `HttpAdapter`
 - **Current exports:**
   - `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
   - `suggestExpressionHttp(apiUrl, input)` → `Promise<SuggestExpressionResult>`
   - `autoMapSectionHttp(apiUrl, input)` → `Promise<AutoMapSectionResult>`
 - **Pattern:** One exported function per AI endpoint; each handles fetch + endpoint-specific timeout + response envelope parsing + user-friendly error mapping
-- **Not an adapter** — does not implement `ApiAdapter`; consumed by adapter implementations
+- **Not an adapter** — does not implement `ApiAdapter`; must not be used for new production call paths
 
 ### Dependency Injection
 
@@ -333,7 +333,7 @@ This gives deterministic `toAppError()` output for intentionally gated adapter m
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. In `HttpAdapter`, canonical backend methods use the shared HTTP client utility and normalized `HttpClientError` semantics; explicitly deferred methods throw structured `FeatureNotEnabledError`.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw deterministic offline-unavailable errors via centralized `offlineModeError()` (`Error("Not available in offline mode")`) to enforce Phase 0 boundaries. In `HttpAdapter`, canonical backend methods use the shared HTTP client utility and normalized `HttpClientError` semantics; explicitly deferred methods throw structured `FeatureNotEnabledError` and temporarily unavailable backend endpoints are surfaced as `FEATURE_NOT_ENABLED` without hybrid fallback.
 
 Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Phase 0:
 - `listTemplates()` returns `[]`
@@ -341,7 +341,7 @@ Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Pha
 
 These stubs keep interface shape stable while backend-backed implementations are deferred.
 
-### Canonical AI Integration Pattern (FS-041 / FS-042 / FS-065)
+### Canonical AI Integration Pattern (FS-041 / FS-042 / FS-065 / FS-068)
 
 AI features are integrated as thin vertical slices with a stable layering pattern:
 
@@ -354,6 +354,7 @@ Current slices:
 - **Explain Rule (FS-041):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
 - **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
 - **Auto-Map Review Workspace (FS-046 → FS-048):** `HttpAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+- **Phase 2 route-complete adapter surface (FS-068):** `HttpAdapter.autoMap` / `smartFix` / `validateMappings` map to canonical `/ai/*` routes; temporarily unavailable backend capability is surfaced as `FEATURE_NOT_ENABLED`
 
 Canonical backend-mode contract notes:
 
@@ -363,7 +364,9 @@ Canonical backend-mode contract notes:
 
 Non-canonical/prohibited shortcut patterns:
 
-- Reintroducing `HybridAdapter` (or any second production adapter path) is prohibited.
+- `HybridAdapter` is retained for one release cycle as a **deprecated bridge only** (dev warning on instantiation); it is not part of canonical bootstrap/runtime routing.
+- New `HybridAdapter` callsites are prohibited by repository guardrails.
+- New production use of legacy `ai-api-client.ts` call loops is prohibited by repository guardrails.
 - Reintroducing legacy Auto-Map drawer/review loop surfaces retired in FS-065 is prohibited.
 
 The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion, section-level review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.

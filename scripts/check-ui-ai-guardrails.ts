@@ -63,7 +63,47 @@ const FORBIDDEN_PATTERNS: readonly GuardrailPattern[] = [
     message: 'Browser/client code must not reference OpenAI provider domain directly.',
     regex: /api\.openai\.com/gi,
   },
+  {
+    ruleId: 'deprecated-hybrid-adapter-import',
+    message: 'HybridAdapter is deprecated-retained only; do not introduce new callsites. Use createAdapter()/HttpAdapter path.',
+    regex: /\bfrom\s+['"][^'"]*hybrid-adapter(?:\.[^'"]+)?['"]/g,
+  },
+  {
+    ruleId: 'deprecated-hybrid-adapter-dynamic-import',
+    message: 'HybridAdapter is deprecated-retained only; dynamic imports are prohibited.',
+    regex: /\bimport\s*\(\s*['"][^'"]*hybrid-adapter(?:\.[^'"]+)?['"]\s*\)/g,
+  },
+  {
+    ruleId: 'deprecated-hybrid-adapter-require',
+    message: 'HybridAdapter is deprecated-retained only; require() usage is prohibited.',
+    regex: /\brequire\s*\(\s*['"][^'"]*hybrid-adapter(?:\.[^'"]+)?['"]\s*\)/g,
+  },
+  {
+    ruleId: 'legacy-ai-api-client-import',
+    message: 'ai-api-client is legacy-only; use ApiAdapter/HttpAdapter methods instead of direct helper imports.',
+    regex: /\bfrom\s+['"][^'"]*ai-api-client(?:\.[^'"]+)?['"]/g,
+  },
 ];
+
+const RULE_FILE_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
+  'deprecated-hybrid-adapter-import': [
+    'src/lib/api/hybrid-adapter.ts',
+    'src/lib/api/__tests__/hybrid-adapter.test.ts',
+  ],
+  'deprecated-hybrid-adapter-dynamic-import': [
+    'src/lib/api/hybrid-adapter.ts',
+    'src/lib/api/__tests__/hybrid-adapter.test.ts',
+  ],
+  'deprecated-hybrid-adapter-require': [
+    'src/lib/api/hybrid-adapter.ts',
+    'src/lib/api/__tests__/hybrid-adapter.test.ts',
+  ],
+  'legacy-ai-api-client-import': [
+    'src/lib/api/hybrid-adapter.ts',
+    'src/lib/api/__tests__/ai-api-client.test.ts',
+    'src/lib/api/__tests__/hybrid-adapter.test.ts',
+  ],
+};
 
 function getLineAndColumn(source: string, index: number): { line: number; column: number } {
   const leading = source.slice(0, index);
@@ -73,6 +113,16 @@ function getLineAndColumn(source: string, index: number): { line: number; column
     line,
     column: index - lineStart,
   };
+}
+
+function isAllowlisted(ruleId: string, filePath: string): boolean {
+  const allowlistedPaths = RULE_FILE_ALLOWLIST[ruleId];
+  if (!allowlistedPaths) {
+    return false;
+  }
+
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  return allowlistedPaths.some((allowed) => normalizedPath.endsWith(allowed));
 }
 
 export function findGuardrailViolationsInText(
@@ -88,6 +138,10 @@ export function findGuardrailViolationsInText(
     while ((match = regex.exec(source)) !== null) {
       const startIndex = match.index;
       const { line, column } = getLineAndColumn(source, startIndex);
+
+      if (isAllowlisted(pattern.ruleId, filePath)) {
+        continue;
+      }
 
       violations.push({
         filePath,

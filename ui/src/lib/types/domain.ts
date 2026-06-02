@@ -347,6 +347,8 @@ export interface AutoMapInput {
 export interface AutoMapResult {
   readonly rules: readonly MappingRule[];
   readonly diagnostics?: readonly Diagnostic[];
+  readonly warnings?: readonly string[];
+  readonly retrievalMeta?: Readonly<Record<string, unknown>>;
 }
 
 export interface AutoMapSectionInput {

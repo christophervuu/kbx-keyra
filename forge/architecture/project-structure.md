@@ -662,13 +662,17 @@ ui/
       use-optimistic-mutation.ts Shared optimistic mutation utility: snapshot capture, optimistic apply, rollback on failure, mutation-id guard for stale completion safety, surfaced AppError state (FS-059 T-06)
       use-optimistic-mutation.test.ts Unit tests: success confirmation, rollback + error surfacing, latest-only rollback under rapid overlapping mutations (FS-059 T-06)
     lib/
-      api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter + AI API client helpers
+      api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter + deprecated HybridAdapter + AI API client helpers
                           types.ts              ApiAdapter contract
                           local-storage-adapter.ts  Phase 0 localStorage implementation
                           http-adapter.ts       FS-055/FS-065 HTTP adapter: extends LocalStorageAdapter; routes canonical backend CRUD + retained AI methods + schema query through httpRequest; deferred non-core methods throw FEATURE_NOT_ENABLED
                           http-adapter.test.ts  FS-055 unit tests for HttpAdapter CRUD endpoint mapping, void handling, and error propagation
                           errors.ts             FS-055/FS-065 API error types including FeatureNotEnabledError (`code: FEATURE_NOT_ENABLED`, `retryable: false`) with deprecated compatibility alias
-                          ai-api-client.ts      FS-041/FS-042 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) + suggestExpressionHttp(apiUrl, input); endpoint-specific timeout, envelope parsing, error mapping
+                          ai-api-client.ts      FS-041/FS-042 legacy HTTP client helper functions for AI endpoints; retained for deprecated HybridAdapter bridge only during one-cycle migration freeze
+                          hybrid-adapter.ts     Deprecated retained adapter: extends LocalStorageAdapter and routes explain/suggest/autoMapSection through ai-api-client; dev-only warning on instantiation; not bootstrap-selected
+                          __tests__/            API helper/adapter compatibility tests
+                            ai-api-client.test.ts  Unit tests for legacy AI helper HTTP wrappers
+                            hybrid-adapter.test.ts  Deprecated-path tests asserting warning-on-instantiation and helper delegation behavior
                           http-client.ts        FS-055 reusable HTTP utility: typed fetch wrapper with timeout, envelope parsing, error normalization, and retry/backoff policy
                           http-client.test.ts   FS-055 unit tests for HTTP utility success/error/retry/timeout/backoff/toAppError compatibility
                           retry.ts              FS-059 reusable retryWithBackoff utility (exponential backoff, jitter, abort signal support)

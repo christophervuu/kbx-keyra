@@ -624,6 +624,19 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('autoMap preserves optional diagnostics/warnings/retrievalMeta', async () => {
+    const payload = {
+      rules: [],
+      diagnostics: [],
+      warnings: ['Low confidence coverage'],
+      retrievalMeta: { source: 'opensearch', degraded: false },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.autoMap({ projectId: 'p-1', mappingId: 'm-1' })).resolves.toEqual(payload);
+  });
+
   it('autoMapSection maps to POST /ai/auto-map', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce({ suggestions: [] });
     const adapter = new HttpAdapter(API_URL);
@@ -695,6 +708,20 @@ describe('HttpAdapter (CRUD)', () => {
       path: '/ai/smart-fix',
       method: 'POST',
       body: { mappingId: 'm-1', diagnostics: [] },
+    });
+  });
+
+  it.each([
+    ['smartFix', (adapter: HttpAdapter) => adapter.smartFix({ mappingId: 'm-1', diagnostics: [] })],
+    ['validateMappings', (adapter: HttpAdapter) => adapter.validateMappings({ mappingIds: ['m-1'] })],
+  ])('%s surfaces FEATURE_NOT_ENABLED when backend capability is gated', async (_method, invoke) => {
+    const featureGated = new FeatureNotEnabledError('gated');
+    vi.mocked(httpRequest).mockRejectedValueOnce(featureGated);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(invoke(adapter)).rejects.toMatchObject({
+      code: 'FEATURE_NOT_ENABLED',
+      retryable: false,
     });
   });
 

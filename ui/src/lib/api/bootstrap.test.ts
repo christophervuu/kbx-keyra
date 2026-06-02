@@ -25,6 +25,7 @@ describe('createAdapter', () => {
     const adapter = createAdapter('http://localhost:4000');
 
     expect(adapter).toBeInstanceOf(HttpAdapter);
+    expect(adapter.constructor.name).not.toBe('HybridAdapter');
   });
 
   it('does not touch localStorage/sessionStorage when VITE_API_URL is set', () => {

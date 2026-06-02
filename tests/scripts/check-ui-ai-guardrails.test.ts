@@ -26,4 +26,36 @@ describe('check-ui-ai-guardrails static policy', () => {
 
     expect(violations).toEqual([]);
   });
+
+  it('reports forbidden HybridAdapter imports outside allowlisted legacy files', () => {
+    const source = "import { HybridAdapter } from '@/lib/api/hybrid-adapter';";
+
+    const violations = findGuardrailViolationsInText(source, 'ui/src/features/mappings/hooks/use-explain-rule.ts');
+
+    expect(violations.some((violation) => violation.ruleId === 'deprecated-hybrid-adapter-import')).toBe(true);
+  });
+
+  it('reports forbidden ai-api-client imports outside allowlisted legacy files', () => {
+    const source = "import { explainRuleHttp } from '@/lib/api/ai-api-client';";
+
+    const violations = findGuardrailViolationsInText(source, 'ui/src/features/mappings/hooks/use-explain-rule.ts');
+
+    expect(violations.some((violation) => violation.ruleId === 'legacy-ai-api-client-import')).toBe(true);
+  });
+
+  it('allows HybridAdapter and ai-api-client imports in legacy allowlisted files', () => {
+    const source = [
+      "import { explainRuleHttp } from './ai-api-client';",
+      "import { HybridAdapter } from './hybrid-adapter';",
+    ].join('\n');
+
+    const legacyViolations = findGuardrailViolationsInText(source, 'ui/src/lib/api/hybrid-adapter.ts');
+    const legacyTestViolations = findGuardrailViolationsInText(
+      source,
+      'ui/src/lib/api/__tests__/hybrid-adapter.test.ts',
+    );
+
+    expect(legacyViolations).toEqual([]);
+    expect(legacyTestViolations).toEqual([]);
+  });
 });

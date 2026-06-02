@@ -109,6 +109,16 @@ interface CurrentDeploymentsInput {
 const OFFLINE_MODE_MESSAGE = 'Not available in offline mode';
 
 export class LocalStorageAdapter implements ApiAdapter {
+  /**
+   * Canonical offline-mode behavior for unsupported integrations (AI, GitHub, server preview).
+   *
+   * Keep this centralized so all unsupported offline methods fail with the same deterministic
+   * semantics expected by UI error mappers and tests.
+   */
+  private offlineModeError(): Error {
+    return new Error(OFFLINE_MODE_MESSAGE);
+  }
+
   private deploymentKey(mappingId: string): string {
     return `keyra:deployments:${mappingId}`;
   }
@@ -1215,65 +1225,65 @@ export class LocalStorageAdapter implements ApiAdapter {
   // GitHub: CDM Repo (read-only)
   async listCdmSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async syncCdmSchema(schemaId: string): Promise<SchemaSyncResult> {
     void schemaId;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   // GitHub: Non-CDM Repo (read-write)
   async listPublishedSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void> {
     void schemaId;
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async linkPublishedSchema(input: LinkPublishedSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   // AI
   async autoMap(input: AutoMapInput): Promise<AutoMapResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async smartFix(input: SmartFixInput): Promise<SmartFixResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async validateMappings(input: ValidateMappingsInput): Promise<ValidationReport> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   // Schema Search
@@ -1303,6 +1313,6 @@ export class LocalStorageAdapter implements ApiAdapter {
   ): Promise<ServerPreviewResult> {
     void mappingId;
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 }
