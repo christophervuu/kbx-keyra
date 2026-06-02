@@ -563,6 +563,9 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: MappingsTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: MappingRevisionsTable
       - S3CrudPolicy:
           BucketName:
             Ref: StorageBucket
@@ -812,7 +815,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/deploy
+            Path: /mappings/{id}/deploy
             Method: post
       Environment:
         Variables:
@@ -857,7 +860,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/promote
+            Path: /mappings/{id}/promote
             Method: post
       Environment:
         Variables:
@@ -902,7 +905,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/rollback
+            Path: /mappings/{id}/rollback
             Method: post
       Environment:
         Variables:
@@ -935,7 +938,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/deployments
+            Path: /mappings/{id}/deployments
             Method: get
       Environment:
         Variables:
@@ -968,7 +971,7 @@ Resources:
           Properties:
             RestApiId:
               Ref: KeyraApi
-            Path: /mappings/{mappingId}/deployments/current
+            Path: /mappings/{id}/deployments/current
             Method: get
       Environment:
         Variables:
