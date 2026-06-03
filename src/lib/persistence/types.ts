@@ -60,6 +60,83 @@ export type SchemaSyncStatus =
   | 'not-synced'
   | 'local-changes';
 
+// ---------------------------------------------------------------------------
+// CDM Re-sync Result Contracts (FS-077)
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal status of a CDM re-sync operation.
+ *
+ * - `no-op`: upstream commit unchanged; no ingestion work performed.
+ * - `updated`: upstream commit changed; full re-ingestion completed successfully.
+ * - `failed`: re-sync could not complete (dependency resolution, parse, or index failure).
+ */
+export type CdmReSyncStatus = 'no-op' | 'updated' | 'failed';
+
+/**
+ * A single field-level diff entry between prior and refreshed schema nodes.
+ */
+export interface SchemaDiffEntry {
+  readonly path: string;
+  readonly changeType: 'added' | 'removed' | 'modified';
+}
+
+/**
+ * Field-level diff summary for a successful updated re-sync (FS-077).
+ *
+ * Present only when `status === 'updated'`.
+ */
+export interface SchemaDiffSummary {
+  /** Paths present in refreshed schema but absent in the prior schema. */
+  readonly added: readonly string[];
+  /** Paths present in the prior schema but absent in the refreshed schema. */
+  readonly removed: readonly string[];
+  /** Paths present in both schemas with differing structural fingerprint (type, isArray, depth). */
+  readonly modified: readonly string[];
+}
+
+/**
+ * Canonical result of a CDM re-sync operation (FS-077).
+ *
+ * Backward-compat fields (`synced`, `commitSha`, `message`) are retained
+ * for existing consumers. New consumers should use the `status` field.
+ */
+export interface SchemaSyncResult {
+  readonly schemaId: string;
+
+  /** Canonical three-mode outcome: no-op / updated / failed. */
+  readonly status: CdmReSyncStatus;
+
+  /**
+   * Derived from `status` for backward compat.
+   * - `true` when status is `updated` or `no-op`
+   * - `false` when status is `failed`
+   */
+  readonly synced: boolean;
+
+  /** Human-readable message describing the result. */
+  readonly message: string;
+
+  /** Failure reason — present only when status is `failed`. */
+  readonly reason?: string;
+
+  /** Commit SHA stored prior to this re-sync call. */
+  readonly previousCommitSha?: string;
+
+  /**
+   * Commit SHA after re-sync.
+   * - `currentCommitSha` reflects the value persisted/confirmed by this call.
+   * - For backward compat, this is also surfaced as `commitSha`.
+   */
+  readonly currentCommitSha?: string;
+
+  /** @deprecated Use `currentCommitSha` instead. Kept for backward compat. */
+  readonly commitSha?: string;
+
+  /** Field-level diff summary — present only when status is `updated`. */
+  readonly diffSummary?: SchemaDiffSummary;
+}
+
 export interface GitHubSourceInfo {
   readonly type: 'github';
   readonly repo: string;
@@ -127,6 +204,14 @@ export interface SchemaMetadataItem {
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
   readonly sourceRepoId?: number;
+  /** Outcome of the last CDM re-sync operation (FS-077 T-05). */
+  readonly lastSyncResult?: CdmReSyncStatus;
+  /** ISO-8601 timestamp of the last CDM re-sync operation. */
+  readonly lastSyncTimestamp?: ISODateString;
+  /** Commit SHA reported by the last CDM re-sync (may differ from source.commitSha on failure). */
+  readonly lastSyncCommitSha?: string;
+  /** Failure reason from the last CDM re-sync — present only when lastSyncResult is 'failed'. */
+  readonly lastSyncReason?: string;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
 }
@@ -218,6 +303,24 @@ export interface DeploymentCurrentItem {
   readonly sourceNumber: number;
   readonly configHash: string;
   readonly configS3Key: string;
+}
+
+/**
+ * DynamoDB SyncActivity table item (FS-077 T-05).
+ *
+ * Records the outcome of each CDM re-sync operation for observability.
+ */
+export interface SyncActivityItem {
+  readonly schemaId: string;
+  /** ISO-8601 timestamp of the sync operation (sort key). */
+  readonly timestamp: ISODateString;
+  readonly outcome: CdmReSyncStatus;
+  readonly previousCommitSha?: string;
+  readonly currentCommitSha?: string;
+  readonly reason?: string;
+  readonly addedCount?: number;
+  readonly removedCount?: number;
+  readonly modifiedCount?: number;
 }
 
 export interface CreateDeploymentInput {

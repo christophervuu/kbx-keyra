@@ -29,17 +29,25 @@ type OpenSearchClientLike = {
   }>;
 };
 
-const openSearchClient: OpenSearchClientLike = new Client({
-  ...AwsSigv4Signer({
-    region: getEnvValue('AWS_REGION') ?? 'us-east-1',
-    service: 'aoss',
-    getCredentials: () => {
-      const provider = defaultProvider();
-      return provider();
-    },
-  }),
-  node: OPENSEARCH_ENDPOINT,
-}) as unknown as OpenSearchClientLike;
+let openSearchClient: OpenSearchClientLike | undefined;
+
+function getOpenSearchClient(): OpenSearchClientLike {
+  if (!openSearchClient) {
+    openSearchClient = new Client({
+      ...AwsSigv4Signer({
+        region: getEnvValue('AWS_REGION') ?? 'us-east-1',
+        service: 'aoss',
+        getCredentials: () => {
+          const provider = defaultProvider();
+          return provider();
+        },
+      }),
+      node: OPENSEARCH_ENDPOINT,
+    }) as unknown as OpenSearchClientLike;
+  }
+
+  return openSearchClient;
+}
 
 const DEFAULT_QUERY_LIMIT = 20;
 const MAX_QUERY_LIMIT = 100;
@@ -195,7 +203,7 @@ export async function searchSchemaNodes(
   const filterClauses = buildFilterClauses(schemaId, filters);
 
   try {
-    const response = await openSearchClient.search({
+    const response = await getOpenSearchClient().search({
       index: SCHEMA_NODES_INDEX,
       size: normalizedLimit,
       body: {

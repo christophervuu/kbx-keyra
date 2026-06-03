@@ -1,18 +1,35 @@
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+
 import {
   ERROR_CODES,
   errorResponse,
   getItem,
-  internalError,
   jsonResponse,
   parsePathParam,
   putObject,
   serviceUnavailable,
-  updateItem,
   validationError,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { CDM_ROOT_PATH, encodeGitHubPath, isWithinCdmRoot } from './cdm-path.js';
+import type { SchemaSyncResult } from '../../lib/persistence/types.js';
+import { logSyncActivity } from '../../lib/persistence/index.js';
+import {
+  batchWriteSchemaNodes,
+  bulkIndexSchemaNodes,
+  computeSchemaDiff,
+  ensureIndexExists,
+  getAllSchemaNodes,
+  getInlineFieldThreshold,
+  parseJsonSchema,
+  storeOriginalSchema,
+  storeProcessedContent,
+  updateSchemaStatus,
+  updateSyncMetadata,
+} from '../../lib/schema/index.js';
+
+import type { SchemaDiffSummary } from '../../lib/persistence/types.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
 
@@ -29,6 +46,7 @@ interface GitHubSourceInfo {
 
 interface SchemaMetadataRecord {
   readonly schemaId: string;
+  readonly name: string;
   readonly format: SchemaFormat;
   readonly origin: 'cdm' | 'published' | 'local';
   readonly syncStatus: SchemaSyncStatus;
@@ -46,13 +64,6 @@ interface GitHubContentFileResponse {
   readonly download_url?: string | null;
 }
 
-interface SchemaSyncResult {
-  readonly schemaId: string;
-  readonly synced: boolean;
-  readonly commitSha?: string;
-  readonly message: string;
-}
-
 function getEnvValue(key: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.[key];
@@ -63,6 +74,10 @@ const GITHUB_TOKEN = getEnvValue('GITHUB_TOKEN')?.trim();
 
 const CDM_REPO_OWNER = getEnvValue('CDM_REPO_OWNER')?.trim() || 'KBXT';
 const CDM_REPO_NAME = getEnvValue('CDM_REPO_NAME')?.trim() || 'KBX-Canonicals';
+
+const sfnClient = new SFNClient({});
+
+const INGESTION_STATE_MACHINE_ARN = getEnvValue('INGESTION_STATE_MACHINE_ARN');
 
 function getSchemasTableOrThrow(): string {
   const table = getEnvValue('SCHEMAS_TABLE')?.trim();
@@ -167,41 +182,28 @@ async function fetchGitHubFile(path: string, branch: string): Promise<GitHubCont
   }
 }
 
-async function markSyncStatus(schemaId: string, syncStatus: SchemaSyncStatus): Promise<void> {
-  await updateItem({
-    TableName: getSchemasTableOrThrow(),
-    Key: { schemaId },
-    UpdateExpression: 'SET #syncStatus = :syncStatus, #updatedAt = :updatedAt',
-    ExpressionAttributeNames: {
-      '#syncStatus': 'syncStatus',
-      '#updatedAt': 'updatedAt',
-    },
-    ExpressionAttributeValues: {
-      ':syncStatus': syncStatus,
-      ':updatedAt': new Date().toISOString(),
-    },
-    ReturnValues: 'NONE',
-  });
+/**
+ * Best-effort activity logging wrapper — never fail the sync operation
+ * when activity logging is unavailable.
+ */
+async function logSyncActivityBestEffort(input: Parameters<typeof logSyncActivity>[0]): Promise<void> {
+  try {
+    await logSyncActivity(input);
+  } catch {
+    // Activity logging is best-effort per T-05.
+  }
 }
 
-async function markSyncedWithCommit(schemaId: string, commitSha: string): Promise<void> {
-  await updateItem({
-    TableName: getSchemasTableOrThrow(),
-    Key: { schemaId },
-    UpdateExpression: 'SET #syncStatus = :syncStatus, #updatedAt = :updatedAt, #source.#commitSha = :commitSha',
-    ExpressionAttributeNames: {
-      '#syncStatus': 'syncStatus',
-      '#updatedAt': 'updatedAt',
-      '#source': 'source',
-      '#commitSha': 'commitSha',
-    },
-    ExpressionAttributeValues: {
-      ':syncStatus': 'synced',
-      ':updatedAt': new Date().toISOString(),
-      ':commitSha': commitSha,
-    },
-    ReturnValues: 'NONE',
-  });
+/**
+ * Best-effort retrieval of pre-sync schema nodes for diff computation.
+ * Returns an empty array if the read fails (diff is best-effort per AE-05).
+ */
+async function getPriorNodes(schemaId: string): Promise<ReadonlyArray<{ path: string; type: string; isArray: boolean; depth: number }>> {
+  try {
+    return await getAllSchemaNodes(schemaId);
+  } catch {
+    return [];
+  }
 }
 
 function isReadOnlyStatusMode(event: APIGatewayProxyEvent): boolean {
@@ -249,21 +251,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const fetched = await fetchGitHubFile(source.path, source.branch);
     if (fetched === 'not-found') {
-      await markSyncStatus(schemaId, 'sync-failed');
+      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'CDM source file not found' });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'CDM source file not found' });
       return errorResponse(ERROR_CODES.SOURCE_NOT_FOUND, `CDM source file not found: ${source.path}`, 404, false);
     }
     if (fetched === 'rate-limited') {
-      await markSyncStatus(schemaId, 'sync-failed');
+      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'GitHub API rate limit' });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'GitHub API rate limit' });
       const err = serviceUnavailable('GitHub rate limit reached. Please retry shortly.');
       return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
     }
     if (fetched === 'service-unavailable') {
-      await markSyncStatus(schemaId, 'sync-failed');
+      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'GitHub API unavailable' });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'GitHub API unavailable' });
       const err = serviceUnavailable('Unable to reach GitHub right now. Please retry shortly.');
       return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
     }
     if (fetched === 'invalid' || fetched.type !== 'file') {
-      await markSyncStatus(schemaId, 'sync-failed');
+      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'Invalid GitHub response' });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Invalid GitHub response' });
       return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid GitHub response while syncing CDM schema', 400, false);
     }
 
@@ -271,31 +277,46 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const changed = typeof currentCommit !== 'string' || currentCommit !== fetched.sha;
 
     if (statusOnly) {
-      await markSyncStatus(schemaId, changed ? 'update-available' : 'synced');
+      const now = new Date().toISOString();
+      if (changed) {
+        await updateSyncMetadata(schemaId, { syncStatus: 'update-available', lastSyncResult: 'no-op', lastSyncTimestamp: now });
+      } else {
+        await updateSyncMetadata(schemaId, { syncStatus: 'synced', lastSyncResult: 'no-op', lastSyncTimestamp: now });
+      }
+      await logSyncActivityBestEffort({ schemaId, outcome: 'no-op', previousCommitSha: currentCommit, currentCommitSha: currentCommit });
 
       const result: SchemaSyncResult = {
         schemaId,
+        status: 'no-op',
         synced: !changed,
-        ...(typeof currentCommit === 'string' ? { commitSha: currentCommit } : {}),
+        currentCommitSha: currentCommit,
+        commitSha: currentCommit,
+        previousCommitSha: currentCommit,
         message: changed
-          ? 'Update available from CDM source.'
+          ? 'Update available from CDM source. Trigger a full re-sync to apply.'
           : 'Schema is up to date with CDM source.',
       };
       return jsonResponse(200, result);
     }
 
     if (!changed) {
-      await markSyncStatus(schemaId, 'synced');
+      const now = new Date().toISOString();
+      await updateSyncMetadata(schemaId, { syncStatus: 'synced', lastSyncResult: 'no-op', lastSyncTimestamp: now });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'no-op', previousCommitSha: currentCommit, currentCommitSha: currentCommit });
       const result: SchemaSyncResult = {
         schemaId,
+        status: 'no-op',
         synced: true,
-        ...(typeof currentCommit === 'string' ? { commitSha: currentCommit } : {}),
+        currentCommitSha: currentCommit,
+        commitSha: currentCommit,
+        previousCommitSha: currentCommit,
         message: 'Schema is already up to date.',
       };
       return jsonResponse(200, result);
     }
 
     let contentString: string | null = null;
+    const now = new Date().toISOString();
     if (typeof fetched.content === 'string' && fetched.encoding === 'base64') {
       contentString = decodeBase64Content(fetched.content);
     } else if (typeof fetched.download_url === 'string') {
@@ -308,27 +329,31 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         });
 
         if (!downloadResponse.ok) {
-          await markSyncStatus(schemaId, 'sync-failed');
+          await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'Failed to download CDM content' });
+          await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Failed to download CDM content' });
           const err = serviceUnavailable('Unable to download CDM schema content right now. Please retry shortly.');
           return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
         }
 
         contentString = await downloadResponse.text();
       } catch {
-        await markSyncStatus(schemaId, 'sync-failed');
+        await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'Failed to download CDM content' });
+        await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Failed to download CDM content' });
         const err = serviceUnavailable('Unable to download CDM schema content right now. Please retry shortly.');
         return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
       }
     }
 
     if (!contentString) {
-      await markSyncStatus(schemaId, 'sync-failed');
+      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'CDM file content unavailable from GitHub' });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'CDM file content unavailable from GitHub' });
       return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM file content is unavailable from GitHub response', 400, false);
     }
 
     const normalizedContent = metadata.format === 'json-schema' ? ensureJsonSchema(contentString) : contentString;
     if (!normalizedContent) {
-      await markSyncStatus(schemaId, 'sync-failed');
+      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'Invalid JSON content in CDM schema' });
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Invalid JSON content in CDM schema' });
       return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM JSON schema content is invalid JSON', 400, false);
     }
 
@@ -339,17 +364,167 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ContentType: metadata.format === 'xsd' ? 'application/xml' : 'application/json',
     });
 
-    await markSyncedWithCommit(schemaId, fetched.sha);
+    // --- Full ingestion pipeline (FS-077) ---
+    // Only run full re-ingestion for JSON Schema CDM schemas.
+    let executionArn: string | undefined;
+    let diffSummary: SchemaDiffSummary | undefined;
+
+    if (metadata.format === 'json-schema') {
+      const now = new Date().toISOString();
+
+      // 1. Parse
+      const parseResult = parseJsonSchema(normalizedContent, schemaId);
+      if (parseResult.errors && parseResult.errors.length > 0 && parseResult.nodes.length === 0 && parseResult.fieldCount === 0) {
+        await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: parseResult.errors[0] });
+        await updateSchemaStatus(schemaId, 'error');
+        await logSyncActivityBestEffort({ schemaId, outcome: 'failed', previousCommitSha: currentCommit, reason: parseResult.errors[0] });
+
+        return jsonResponse(200, {
+          schemaId,
+          status: 'failed' as const,
+          synced: false,
+          message: 'Schema re-sync failed: parse error.',
+          reason: parseResult.errors[0],
+          previousCommitSha: currentCommit,
+          commitSha: currentCommit,
+        } satisfies SchemaSyncResult);
+      }
+
+      // 1b. Best-effort diff computation against pre-sync nodes
+      const priorNodes = await getPriorNodes(schemaId);
+      diffSummary = computeSchemaDiff(priorNodes, parseResult.nodes);
+
+      const threshold = getInlineFieldThreshold();
+      const isLargeIngestion = parseResult.fieldCount >= threshold;
+
+      if (isLargeIngestion) {
+        // 2a. Route to Step Functions for large schemas
+        const stateMachineArn = INGESTION_STATE_MACHINE_ARN?.trim();
+        if (!stateMachineArn) {
+          await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'INGESTION_STATE_MACHINE_ARN not configured' });
+          await updateSchemaStatus(schemaId, 'error');
+          await logSyncActivityBestEffort({ schemaId, outcome: 'failed', previousCommitSha: currentCommit, reason: 'INGESTION_STATE_MACHINE_ARN not configured' });
+
+          return jsonResponse(200, {
+            schemaId,
+            status: 'failed' as const,
+            synced: false,
+            message: 'Schema re-sync failed: INGESTION_STATE_MACHINE_ARN not configured for large schema.',
+            reason: 'Missing INGESTION_STATE_MACHINE_ARN environment variable',
+            previousCommitSha: currentCommit,
+            commitSha: currentCommit,
+          } satisfies SchemaSyncResult);
+        }
+
+        // Store original content at the standard original key for the state machine.
+        await storeOriginalSchema(schemaId, normalizedContent, 'json-schema');
+
+        const execution = await sfnClient.send(
+          new StartExecutionCommand({
+            stateMachineArn,
+            input: JSON.stringify({
+              schemaId,
+              s3Key: `schemas/${schemaId}/original.json`,
+              format: 'json-schema',
+            }),
+          }),
+        );
+
+        executionArn = execution.executionArn ?? '';
+      } else {
+        // 2b. Inline ingestion pipeline
+        try {
+          const writeResult = await batchWriteSchemaNodes(parseResult.nodes);
+          if (writeResult.failed > 0) {
+            await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: `${writeResult.failed} nodes failed to write` });
+            await updateSchemaStatus(schemaId, 'error');
+            await logSyncActivityBestEffort({ schemaId, outcome: 'failed', previousCommitSha: currentCommit, currentCommitSha: fetched.sha, reason: `${writeResult.failed} nodes failed to write` });
+
+            return jsonResponse(200, {
+              schemaId,
+              status: 'failed' as const,
+              synced: false,
+              message: 'Schema re-sync failed: DynamoDB node write had failures.',
+              reason: `${writeResult.failed} nodes failed to write`,
+              previousCommitSha: currentCommit,
+              commitSha: currentCommit,
+            } satisfies SchemaSyncResult);
+          }
+
+          try {
+            await ensureIndexExists();
+            await bulkIndexSchemaNodes(parseResult.nodes);
+          } catch {
+            // OpenSearch indexing failure is non-fatal — schema is persisted and queryable via DynamoDB.
+          }
+
+          await storeProcessedContent(schemaId, {
+            nodes: parseResult.nodes,
+            fieldCount: parseResult.fieldCount,
+            errors: parseResult.errors,
+          });
+
+          await updateSchemaStatus(schemaId, 'ready', {
+            fieldCount: parseResult.fieldCount,
+            format: metadata.format,
+            origin: metadata.origin,
+            name: metadata.name,
+            source: metadata.source,
+          });
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : 'Unexpected ingestion failure';
+          await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: reason });
+          await updateSchemaStatus(schemaId, 'error');
+          await logSyncActivityBestEffort({ schemaId, outcome: 'failed', previousCommitSha: currentCommit, currentCommitSha: fetched.sha, reason });
+
+          return jsonResponse(200, {
+            schemaId,
+            status: 'failed' as const,
+            synced: false,
+            message: 'Schema re-sync failed during re-ingestion.',
+            reason,
+            previousCommitSha: currentCommit,
+            commitSha: currentCommit,
+          } satisfies SchemaSyncResult);
+        }
+      }
+    }
+
+    // --- Mark as synced only after successful ingestion (or skipped for xsd) ---
+    const syncNow = new Date().toISOString();
+    await updateSyncMetadata(schemaId, { syncStatus: 'synced', lastSyncResult: 'updated', lastSyncTimestamp: syncNow, lastSyncCommitSha: fetched.sha, commitSha: fetched.sha });
+    await logSyncActivityBestEffort({ schemaId, outcome: 'updated', previousCommitSha: currentCommit, currentCommitSha: fetched.sha, diffSummary });
 
     const result: SchemaSyncResult = {
       schemaId,
+      status: 'updated',
       synced: true,
+      currentCommitSha: fetched.sha,
       commitSha: fetched.sha,
-      message: 'Schema re-synced from CDM source.',
+      previousCommitSha: currentCommit,
+      diffSummary: executionArn ? undefined : diffSummary,
+      message: executionArn
+        ? 'Schema re-sync initiated via Step Functions for large schema.'
+        : 'Schema re-synced from CDM source.',
     };
+
+    if (executionArn) {
+      return jsonResponse(202, { ...result, executionArn });
+    }
+
     return jsonResponse(200, result);
-  } catch {
-    const err = internalError('Failed to sync CDM schema');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+  } catch (err) {
+    const now = new Date().toISOString();
+    await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: err instanceof Error ? err.message : 'Unknown error' }).catch(() => {});
+    await updateSchemaStatus(schemaId, 'error').catch(() => {});
+    await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: err instanceof Error ? err.message : 'Unknown error' });
+
+    return jsonResponse(200, {
+      schemaId,
+      status: 'failed' as const,
+      synced: false,
+      message: 'Schema re-sync failed with unexpected error.',
+      reason: err instanceof Error ? err.message : 'Unknown error',
+    } satisfies SchemaSyncResult);
   }
 }

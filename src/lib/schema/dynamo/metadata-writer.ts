@@ -70,6 +70,18 @@ export async function createSchemaMetadata(metadata: SchemaMetadata): Promise<vo
 type MetadataUpdateFields = Partial<Omit<SchemaMetadata, 'schemaId' | 'status' | 'createdAt' | 'updatedAt'>>
   & Record<string, unknown>;
 
+/**
+ * Sync outcome metadata passed to `updateSyncMetadata`.
+ */
+export interface SyncOutcomeMetadata {
+  readonly syncStatus: 'synced' | 'update-available' | 'sync-failed';
+  readonly lastSyncResult: 'no-op' | 'updated' | 'failed';
+  readonly lastSyncTimestamp: string;
+  readonly lastSyncCommitSha?: string;
+  readonly lastSyncReason?: string;
+  readonly commitSha?: string;
+}
+
 export async function updateSchemaStatus(
   schemaId: string,
   status: SchemaStatus,
@@ -118,6 +130,79 @@ export async function updateSchemaStatus(
     throw new MetadataWriterError(
       'SCHEMA_DYNAMO_UPDATE_ERROR',
       `Failed to update schema status for schemaId '${schemaId}'`,
+      error,
+    );
+  }
+}
+
+/**
+ * Update CDM sync outcome fields on the SchemaMetadata record (FS-077 T-05).
+ *
+ * Sets `syncStatus`, `lastSyncResult`, `lastSyncTimestamp`, and optionally
+ * `source.#commitSha`, `lastSyncCommitSha`, and `lastSyncReason` in a single
+ * transactional-like update call.
+ */
+export async function updateSyncMetadata(
+  schemaId: string,
+  outcome: SyncOutcomeMetadata,
+): Promise<void> {
+  const table = getMetadataTableOrThrow();
+  const now = outcome.lastSyncTimestamp;
+
+  const expressionNames: Record<string, string> = {
+    '#syncStatus': 'syncStatus',
+    '#lastSyncResult': 'lastSyncResult',
+    '#lastSyncTimestamp': 'lastSyncTimestamp',
+    '#updatedAt': 'updatedAt',
+  };
+
+  const expressionValues: Record<string, unknown> = {
+    ':syncStatus': outcome.syncStatus,
+    ':lastSyncResult': outcome.lastSyncResult,
+    ':lastSyncTimestamp': now,
+    ':updatedAt': now,
+  };
+
+  const sets = [
+    '#syncStatus = :syncStatus',
+    '#lastSyncResult = :lastSyncResult',
+    '#lastSyncTimestamp = :lastSyncTimestamp',
+    '#updatedAt = :updatedAt',
+  ];
+
+  if (outcome.lastSyncReason !== undefined) {
+    expressionNames['#lastSyncReason'] = 'lastSyncReason';
+    expressionValues[':lastSyncReason'] = outcome.lastSyncReason;
+    sets.push('#lastSyncReason = :lastSyncReason');
+  }
+
+  if (outcome.lastSyncCommitSha !== undefined) {
+    expressionNames['#lastSyncCommitSha'] = 'lastSyncCommitSha';
+    expressionValues[':lastSyncCommitSha'] = outcome.lastSyncCommitSha;
+    sets.push('#lastSyncCommitSha = :lastSyncCommitSha');
+  }
+
+  if (outcome.commitSha !== undefined) {
+    expressionNames['#source'] = 'source';
+    expressionNames['#commitSha'] = 'commitSha';
+    expressionValues[':commitSha'] = outcome.commitSha;
+    sets.push('#source.#commitSha = :commitSha');
+  }
+
+  try {
+    await dynamoClient.send(
+      new UpdateCommand({
+        TableName: table,
+        Key: { schemaId },
+        UpdateExpression: `SET ${sets.join(', ')}`,
+        ExpressionAttributeNames: expressionNames,
+        ExpressionAttributeValues: expressionValues,
+      }),
+    );
+  } catch (error) {
+    throw new MetadataWriterError(
+      'SCHEMA_DYNAMO_UPDATE_ERROR',
+      `Failed to update sync metadata for schemaId '${schemaId}'`,
       error,
     );
   }

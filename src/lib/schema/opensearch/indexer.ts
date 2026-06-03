@@ -28,17 +28,25 @@ type OpenSearchClientLike = {
   deleteByQuery(params: { readonly index: string; readonly body: unknown; readonly refresh?: boolean }): Promise<unknown>;
 };
 
-const openSearchClient: OpenSearchClientLike = new Client({
-  ...AwsSigv4Signer({
-    region: getEnvValue('AWS_REGION') ?? 'us-east-1',
-    service: 'aoss',
-    getCredentials: () => {
-      const provider = defaultProvider();
-      return provider();
-    },
-  }),
-  node: OPENSEARCH_ENDPOINT,
-}) as unknown as OpenSearchClientLike;
+let openSearchClient: OpenSearchClientLike | undefined;
+
+function getOpenSearchClient(): OpenSearchClientLike {
+  if (!openSearchClient) {
+    openSearchClient = new Client({
+      ...AwsSigv4Signer({
+        region: getEnvValue('AWS_REGION') ?? 'us-east-1',
+        service: 'aoss',
+        getCredentials: () => {
+          const provider = defaultProvider();
+          return provider();
+        },
+      }),
+      node: OPENSEARCH_ENDPOINT,
+    }) as unknown as OpenSearchClientLike;
+  }
+
+  return openSearchClient;
+}
 
 export type OpenSearchIndexerErrorCode =
   | 'SCHEMA_OPENSEARCH_CONFIG_ERROR'
@@ -100,7 +108,7 @@ export async function ensureIndexExists(): Promise<void> {
   getEndpointOrThrow();
 
   try {
-    const existsResult = await openSearchClient.indices.exists({
+    const existsResult = await getOpenSearchClient().indices.exists({
       index: SCHEMA_NODES_INDEX,
     });
 
@@ -108,7 +116,7 @@ export async function ensureIndexExists(): Promise<void> {
       return;
     }
 
-    await openSearchClient.indices.create({
+    await getOpenSearchClient().indices.create({
       index: SCHEMA_NODES_INDEX,
       body: SCHEMA_NODES_INDEX_MAPPING,
     });
@@ -146,7 +154,7 @@ export async function bulkIndexSchemaNodes(nodes: readonly SchemaNode[]): Promis
     const isFinalBatch = chunkIndex === chunks.length - 1;
 
     try {
-      const response = await openSearchClient.bulk({
+      const response = await getOpenSearchClient().bulk({
         body,
         ...(isFinalBatch ? { refresh: 'wait_for' } : {}),
       });
@@ -184,7 +192,7 @@ export async function deleteSchemaDocuments(schemaId: string): Promise<void> {
   getEndpointOrThrow();
 
   try {
-    await openSearchClient.deleteByQuery({
+    await getOpenSearchClient().deleteByQuery({
       index: SCHEMA_NODES_INDEX,
       refresh: true,
       body: {

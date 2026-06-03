@@ -13,15 +13,25 @@ export {
   storeProcessedContent,
 } from './s3/index.js';
 export {
+  extractRelativeRefs,
+  isAllowedDependencyPath,
+  normalizeDependencyPath,
+  resolveDependencies,
+} from './cdm/index.js';
+export { computeSchemaDiff } from './diff/index.js';
+export {
   MetadataWriterError,
   NodeReaderError,
   NodeWriterError,
   batchWriteSchemaNodes,
   createSchemaMetadata,
+  getAllSchemaNodes,
   getSchemaMetadata,
   getNodeChildren,
   getParentChain,
   updateSchemaStatus,
+  updateSyncMetadata,
+  type SyncOutcomeMetadata,
 } from './dynamo/index.js';
 export {
   OpenSearchIndexerError,
@@ -50,6 +60,14 @@ export type {
   SchemaStatus,
 } from './types.js';
 export type { ParseResult } from './parser/index.js';
+export type {
+  CdmDependencyError,
+  CdmDependencyErrorCode,
+  CdmDependencyResult,
+  FileFetcher,
+  ResolveDependenciesOptions,
+  ResolvedDependency,
+} from './cdm/index.js';
 export type { SchemaStorageErrorCode } from './s3/index.js';
 export type { MetadataWriterErrorCode, NodeReaderErrorCode, NodeWriterErrorCode } from './dynamo/index.js';
 export type { OpenSearchIndexerErrorCode, OpenSearchQueryErrorCode } from './opensearch/index.js';

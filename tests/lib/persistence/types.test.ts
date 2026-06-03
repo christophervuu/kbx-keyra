@@ -5,13 +5,17 @@ import {
   toProjectDetail,
   toProjectMetadata,
   toSchemaMetadata,
+  type CdmReSyncStatus,
   type MappingItem,
   type MappingMetadata,
   type ProjectItem,
   type ProjectDetail,
   type ProjectMetadata,
+  type SchemaDiffEntry,
+  type SchemaDiffSummary,
   type SchemaMetadata,
   type SchemaMetadataItem,
+  type SchemaSyncResult,
 } from '../../../src/lib/persistence/types.js';
 
 /**
@@ -82,6 +86,25 @@ type DomainSchemaMetadata = {
   readonly updatedAt: string;
 };
 
+/**
+ * FS-077: UI domain mirror for SchemaSyncResult with three-mode contract (FS-077).
+ */
+type DomainSchemaSyncResult = {
+  readonly schemaId: string;
+  readonly status: 'no-op' | 'updated' | 'failed';
+  readonly synced: boolean;
+  readonly message: string;
+  readonly reason?: string;
+  readonly previousCommitSha?: string;
+  readonly currentCommitSha?: string;
+  readonly commitSha?: string;
+  readonly diffSummary?: {
+    readonly added: readonly string[];
+    readonly removed: readonly string[];
+    readonly modified: readonly string[];
+  };
+};
+
 describe('persistence types', () => {
   it('project item includes all domain project fields', () => {
     expectTypeOf<ProjectItem>().toMatchTypeOf<DomainProject>();
@@ -92,6 +115,104 @@ describe('persistence types', () => {
     expectTypeOf<ReturnType<typeof toProjectDetail>>().toMatchTypeOf<DomainProjectDetail>();
     expectTypeOf<ReturnType<typeof toMappingMetadata>>().toEqualTypeOf<DomainMappingMetadata>();
     expectTypeOf<ReturnType<typeof toSchemaMetadata>>().toEqualTypeOf<DomainSchemaMetadata>();
+  });
+
+  // ---------------------------------------------------------------------------
+  // FS-077 — Re-sync result & diff types
+  // ---------------------------------------------------------------------------
+
+  it('SchemaSyncResult includes canonical status and backward-compat synced field', () => {
+    // Canonical status field is required
+    expectTypeOf<SchemaSyncResult>().toHaveProperty('status');
+    // Backward-compat synced is also required
+    expectTypeOf<SchemaSyncResult>().toHaveProperty('synced');
+    // Both commitSha alias fields are optional strings
+    expectTypeOf<SchemaSyncResult['previousCommitSha']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<SchemaSyncResult['currentCommitSha']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<SchemaSyncResult['commitSha']>().toEqualTypeOf<string | undefined>();
+    // diffSummary is optional
+    expectTypeOf<SchemaSyncResult['diffSummary']>().toEqualTypeOf<SchemaDiffSummary | undefined>();
+  });
+
+  it('SchemaSyncResult satisfies UI domain contract', () => {
+    // The persistence type is a superset of the UI domain mirror
+    expectTypeOf<SchemaSyncResult>().toMatchTypeOf<DomainSchemaSyncResult>();
+  });
+
+  it('CdmReSyncStatus is a union of exactly three string literals', () => {
+    expectTypeOf<CdmReSyncStatus>().toEqualTypeOf<'no-op' | 'updated' | 'failed'>();
+  });
+
+  it('SchemaDiffSummary stores readonly string arrays for added/removed/modified', () => {
+    expectTypeOf<SchemaDiffSummary['added']>().toEqualTypeOf<readonly string[]>();
+    expectTypeOf<SchemaDiffSummary['removed']>().toEqualTypeOf<readonly string[]>();
+    expectTypeOf<SchemaDiffSummary['modified']>().toEqualTypeOf<readonly string[]>();
+  });
+
+  it('SchemaDiffEntry has path string and changeType union', () => {
+    expectTypeOf<SchemaDiffEntry>().toHaveProperty('path');
+    expectTypeOf<SchemaDiffEntry['changeType']>().toEqualTypeOf<'added' | 'removed' | 'modified'>();
+  });
+
+  it('constructs a no-op SchemaSyncResult', () => {
+    const result: SchemaSyncResult = {
+      schemaId: 'test-schema',
+      status: 'no-op',
+      synced: true,
+      message: 'No changes detected.',
+      currentCommitSha: 'abc123',
+      commitSha: 'abc123',
+      previousCommitSha: 'abc123',
+    };
+    expect(result.schemaId).toBe('test-schema');
+    expect(result.status).toBe('no-op');
+    expect(result.synced).toBe(true);
+    expect(result.message).toBe('No changes detected.');
+    expect(result.currentCommitSha).toBe('abc123');
+    expect(result.commitSha).toBe('abc123'); // backward compat
+    expect(result.previousCommitSha).toBe('abc123');
+    expect(result.diffSummary).toBeUndefined();
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('constructs an updated SchemaSyncResult with diffSummary', () => {
+    const diff: SchemaDiffSummary = {
+      added: ['/fields/newField'],
+      removed: [],
+      modified: ['/fields/existingField'],
+    };
+    const result: SchemaSyncResult = {
+      schemaId: 'test-schema',
+      status: 'updated',
+      synced: true,
+      message: 'Schema updated from CDM source.',
+      currentCommitSha: 'def456',
+      commitSha: 'def456',
+      previousCommitSha: 'abc123',
+      diffSummary: diff,
+    };
+    expect(result.status).toBe('updated');
+    expect(result.currentCommitSha).toBe('def456');
+    expect(result.previousCommitSha).toBe('abc123');
+    expect(result.diffSummary).toBe(diff);
+    expect(result.diffSummary?.added).toEqual(['/fields/newField']);
+    expect(result.diffSummary?.modified).toEqual(['/fields/existingField']);
+    expect(result.diffSummary?.removed).toEqual([]);
+  });
+
+  it('constructs a failed SchemaSyncResult with reason', () => {
+    const result: SchemaSyncResult = {
+      schemaId: 'test-schema',
+      status: 'failed',
+      synced: false,
+      message: 'Re-sync failed.',
+      reason: 'GitHub API rate-limited',
+    };
+    expect(result.status).toBe('failed');
+    expect(result.synced).toBe(false);
+    expect(result.reason).toBe('GitHub API rate-limited');
+    expect(result.currentCommitSha).toBeUndefined();
+    expect(result.diffSummary).toBeUndefined();
   });
 
   it('accepts persistence items and returns metadata without internal fields', () => {

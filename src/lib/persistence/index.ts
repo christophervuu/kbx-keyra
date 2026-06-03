@@ -70,7 +70,10 @@ export {
   schemaContent,
 } from './s3/index.js';
 export { create as createProject, delete as deleteProject, get as getProject, list as listProjects, projects, update as updateProject } from './projects.js';
+export { logSyncActivity, SyncActivityError, type LogSyncActivityInput } from './sync-activity.js';
+
 export type {
+  CdmReSyncStatus,
   MappingConfig,
   MappingConfigOptions,
   MappingRevisionItem,
@@ -91,7 +94,10 @@ export type {
   ProjectItem,
   ProjectDetail,
   ProjectMetadata,
+  SchemaDiffEntry,
+  SchemaDiffSummary,
   SchemaIngestStatus,
+  SyncActivityItem,
   SchemaMetadata,
   SchemaMetadataItem,
   SchemaNodeItem,
@@ -100,6 +106,7 @@ export type {
   SchemaRefType,
   SchemaScope,
   SchemaSourceInfo,
+  SchemaSyncResult,
   SchemaSyncStatus,
   UpdateMappingInput,
   UpdateProjectInput,

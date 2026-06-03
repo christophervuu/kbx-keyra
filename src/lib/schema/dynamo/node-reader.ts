@@ -27,6 +27,44 @@ export class NodeReaderError extends Error {
   }
 }
 
+/**
+ * Return all SchemaNode records for a given schemaId (partition-key query).
+ *
+ * Useful for snapshot comparisons such as pre-sync vs post-sync diff
+ * computation.  Nodes are returned sorted by path for deterministic output.
+ */
+export async function getAllSchemaNodes(schemaId: string): Promise<SchemaNode[]> {
+  const table = getNodesTableOrThrow();
+
+  try {
+    const result = await dynamoClient.send(
+      new QueryCommand({
+        TableName: table,
+        KeyConditionExpression: '#schemaId = :schemaId',
+        ExpressionAttributeNames: {
+          '#schemaId': 'schemaId',
+        },
+        ExpressionAttributeValues: {
+          ':schemaId': schemaId,
+        },
+      }),
+    );
+
+    const items = (result.Items ?? []) as QueryResultItem[];
+
+    return items
+      .map(asSchemaNode)
+      .filter((node): node is SchemaNode => node !== null)
+      .sort((a, b) => a.path.localeCompare(b.path));
+  } catch (error) {
+    throw new NodeReaderError(
+      'SCHEMA_DYNAMO_QUERY_ERROR',
+      `Failed getAllSchemaNodes query for schemaId '${schemaId}'`,
+      error,
+    );
+  }
+}
+
 function getNodesTableOrThrow(): string {
   const table = SCHEMA_NODES_TABLE?.trim();
   if (!table) {

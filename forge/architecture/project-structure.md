@@ -122,6 +122,7 @@ src/
       mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate) with revision/version compatibility fields
       schema-metadata.ts SchemaMetadata table CRUD + status transition update operation
       schema-nodes.ts   SchemaNodes partition query/batch-write/delete operations with retry/backoff
+      sync-activity.ts  CDM re-sync activity logger — writes outcome to SyncActivity DynamoDB table (FS-077 T-05)
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
       deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory) with immutable snapshot writes (FS-064 T-01)
@@ -143,9 +144,15 @@ src/
         parse-json-schema.ts JSON Schema parser → SchemaNode[]
         parse-xsd.ts      XSD parser → SchemaNode[]
         utils.ts          Shared parse result + node accumulation helpers
+      cdm/              CDM relative $ref dependency resolver (FS-077 T-02)
+        index.ts          CDM resolver barrel exports
+        dependency-resolver.ts Relative $ref resolver with folder allowlist, depth/cycle guards, and FETCH_FAILED/UNRESOLVED_REF/CYCLE_DETECTED errors
+      diff/             Schema node field-level diff utility (FS-077 T-04)
+        index.ts          Diff barrel export
+        diff-summary.ts   Pure computeSchemaDiff(): added/removed/modified via path + structural fingerprint (type, isArray, depth)
       dynamo/           DynamoDB metadata/node writer module (FS-056 T-04)
         index.ts          Dynamo writer barrel exports
-        metadata-writer.ts SchemaMetadata put/update/get operations
+        metadata-writer.ts SchemaMetadata put/update/get operations + updateSyncMetadata for CDM sync outcome fields (FS-077 T-05)
         node-writer.ts    SchemaNodes batch writer with retry/backoff
         node-reader.ts    SchemaNodes parent-path query helpers (parent chain + children)
       s3/               S3 schema content storage module (FS-056 T-03)
@@ -777,7 +784,7 @@ tests/
       list-schemas.test.ts CRUD list tests (multiple + empty) (FS-057 T-05)
       list-cdm-schemas.test.ts CDM browse tests (root guard + one-level navigation + read-only GitHub usage) (FS-076 T-02)
       link-cdm-schema.test.ts CDM link tests (metadata persistence, idempotent duplicate link, path validation, no write-path GitHub usage) (FS-076 T-03)
-      sync-cdm-schema.test.ts CDM sync tests (changed/unchanged/status-refresh/failure/malformed metadata + read-only GitHub usage) (FS-076 T-04)
+      sync-cdm-schema.test.ts CDM sync tests: full re-ingestion pipeline (AE-01), changed/unchanged/status-refresh/failure, diffSummary shape, node-write failure, ingestion exception, missing state machine ARN (FS-076 T-04 + FS-077 T-06)
       delete-schema.test.ts CRUD delete tests (204 + 409 references + 404) (FS-057 T-05)
       ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, parse errors, and OpenSearch warning behavior
       query-schema-nodes.test.ts Query endpoint tests for validation, schema existence, and 50-result cap (FS-057 T-06)
@@ -835,6 +842,10 @@ tests/
       parser/          Schema parser tests (FS-056 T-02)
         parse-json-schema.test.ts JSON Schema parser unit and performance tests
         parse-xsd.test.ts XSD parser unit tests
+      cdm/             CDM dependency resolver tests (FS-077 T-02)
+        dependency-resolver.test.ts $ref resolution, allowlist, cycle/depth/limit guards
+      diff/            Schema node diff summary tests (FS-077 T-04)
+        diff-summary.test.ts added/removed/modified classification, large-schema stability, deterministic ordering
       dynamo/          Schema DynamoDB writer tests (FS-056 T-04)
         metadata-writer.test.ts SchemaMetadata writer operation tests
         node-writer.test.ts SchemaNodes batch chunk/retry tests

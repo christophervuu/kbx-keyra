@@ -326,11 +326,67 @@ export interface LinkCdmSchemaInput {
   readonly name?: string;
 }
 
+// ---------------------------------------------------------------------------
+// CDM Re-sync Diff & Result Types (FS-077)
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal status of a CDM re-sync operation (FS-077).
+ */
+export type CdmReSyncStatus = 'no-op' | 'updated' | 'failed';
+
+/**
+ * A single field-level diff entry between prior and refreshed schema nodes (FS-077).
+ */
+export interface SchemaDiffEntry {
+  readonly path: string;
+  readonly changeType: 'added' | 'removed' | 'modified';
+}
+
+/**
+ * Field-level diff summary for a successful updated re-sync (FS-077).
+ */
+export interface SchemaDiffSummary {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+  readonly modified: readonly string[];
+}
+
+/**
+ * Result of a CDM re-sync operation (FS-077).
+ *
+ * Backward-compat fields (`synced`, `commitSha`, `message`) are retained
+ * for existing consumers. New consumers should prefer the canonical `status` field.
+ */
 export interface SchemaSyncResult {
   readonly schemaId: string;
+
+  /** Canonical three-mode outcome. */
+  readonly status: CdmReSyncStatus;
+
+  /**
+   * Derived from `status` for backward compat.
+   * `true` when status is `updated` or `no-op`; `false` when `failed`.
+   */
   readonly synced: boolean;
+
+  /** Human-readable message describing the result. */
+  readonly message: string;
+
+  /** Failure reason — present when status is `failed`. */
+  readonly reason?: string;
+
+  /** Commit SHA prior to this re-sync call. */
+  readonly previousCommitSha?: string;
+
+  /** Commit SHA after this re-sync call. */
+  readonly currentCommitSha?: string;
+
+  /** @deprecated Use `currentCommitSha`. Kept for backward compat. */
   readonly commitSha?: string;
-  readonly message?: string;
+
+  /** Field-level diff summary — present when status is `updated`. */
+  readonly diffSummary?: SchemaDiffSummary;
 }
 
 export interface PublishSchemaInput {
