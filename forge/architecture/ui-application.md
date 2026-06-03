@@ -2419,6 +2419,71 @@ Traceability-facing note:
 
 - Successful deploy/promote responses include deployment records carrying CDM traceability metadata (`cdmSchemaTraceability`) produced by backend; UI uses this for provenance display where deployment-history surfaces expose metadata fields.
 
+### FS-080 CDM resilience UX contract
+
+FS-080 extends CDM browse/link/sync UI behavior with explicit degraded-state, retry, and class-specific recovery guidance.
+
+Canonical backend failure classes consumed by UI:
+
+- `rate-limited`
+- `unauthorized-forbidden`
+- `not-found-path-mismatch`
+- `timeout-transient`
+
+UI ownership boundary:
+
+- Backend is canonical for failure-class normalization and retryability envelope semantics.
+- UI is canonical for class-to-copy mapping and user-action phrasing.
+
+Class-to-UX mapping contract:
+
+- `rate-limited`
+  - show wait/retry-later guidance
+  - render Retry affordance (manual user-triggered)
+  - if provided, render retry timing hint from `retry-after` / `retryAfterSeconds`
+- `unauthorized-forbidden`
+  - show permission/access guidance
+  - do not present as auto-recovering; explicit user remediation is required
+- `not-found-path-mismatch`
+  - show repository/path mismatch guidance
+  - treat as non-retryable until input/source metadata changes
+- `timeout-transient`
+  - show transient/network timeout guidance
+  - render Retry affordance for user-initiated recovery
+
+### Degraded browse-state behavior
+
+For CDM browse surfaces backed by `listCdmSchemas`:
+
+- Cache-hit outage fallback is rendered as **degraded/cached** (not healthy/fresh).
+- UI remains interactive and navigable with returned cached listing.
+- Retry action remains visible so users can re-attempt fresh fetch.
+
+Failure handling boundaries:
+
+- Cache miss during outage shows friendly failure state (no crash).
+- Cache older than stale-grace window is treated as explicit failure (not normal fallback display).
+- Degraded browse state must not relabel schema sync badges as `synced`; sync-status semantics remain backend-driven and independent.
+
+### Retry affordance and timing guidance
+
+Recovery affordances are explicit and user-driven across CDM read failures:
+
+- Re-sync actions remain manual-only (`Re-sync`), including after failure.
+- Error banners/cards expose retry controls only when response semantics are retryable or operationally recoverable.
+- When `retry-after` metadata exists, UI may show a human-readable wait hint (for example, “Try again in ~N seconds”).
+
+UI should not implement unbounded autonomous retry loops for CDM error surfaces.
+
+### Error and observability lineage handling in UI
+
+UI transport/error normalization preserves backend request lineage for support handoff and diagnostics:
+
+- `requestId` from backend envelope remains available through normalized UI error objects.
+- Optional correlation lineage (`x-correlation-id`) may be propagated by callers and should remain pass-through for trace joins.
+
+This supports FS-080 incident debugging requirements without changing feature-level interaction patterns.
+
 ### UI preference storage vs domain storage
 
 - Domain data (schema content/metadata, delete/promote, usage source records) always flows through `ApiAdapter`.

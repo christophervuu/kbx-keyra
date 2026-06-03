@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sharedMocks = vi.hoisted(() => ({
   parsePathParam: vi.fn(),
+  generateRequestId: vi.fn(),
   getItem: vi.fn(),
   updateItem: vi.fn(),
   putObject: vi.fn(),
@@ -14,6 +15,10 @@ const sharedMocks = vi.hoisted(() => ({
     VALIDATION_ERROR: 'VALIDATION_ERROR',
     RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
     SOURCE_NOT_FOUND: 'SOURCE_NOT_FOUND',
+    CDM_RATE_LIMITED: 'CDM_RATE_LIMITED',
+    CDM_UNAUTHORIZED_FORBIDDEN: 'CDM_UNAUTHORIZED_FORBIDDEN',
+    CDM_NOT_FOUND_PATH_MISMATCH: 'CDM_NOT_FOUND_PATH_MISMATCH',
+    CDM_TIMEOUT_TRANSIENT: 'CDM_TIMEOUT_TRANSIENT',
   },
 }));
 
@@ -85,8 +90,13 @@ describe('sync-cdm-schema handler', () => {
     env.CDM_ROOT_PATH = 'JSONSchemas/CommonDataModels';
     env.SCHEMAS_TABLE = 'Schemas';
     env.CONTENT_BUCKET = 'Content';
+    env.CDM_GITHUB_READ_MAX_ATTEMPTS = '3';
+    env.CDM_GITHUB_READ_BASE_DELAY_MS = '1';
+    env.CDM_GITHUB_READ_MAX_DELAY_MS = '1';
+    env.CDM_GITHUB_READ_JITTER_MS = '1';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('schema-1');
+    sharedMocks.generateRequestId.mockReset().mockReturnValue('req-sync-1');
     sharedMocks.getItem.mockReset().mockResolvedValue({
       schemaId: 'schema-1',
       format: 'json-schema',
@@ -108,29 +118,32 @@ describe('sync-cdm-schema handler', () => {
       .mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse
       .mockReset()
-      .mockImplementation((code, message, statusCode, retryable, requestId) => ({
+      .mockImplementation((code, message, statusCode, retryable, requestId, details, additionalHeaders) => ({
         statusCode,
-        body: JSON.stringify({ error: { code, message, statusCode, retryable, requestId } }),
+        headers: {
+          ...((additionalHeaders as Record<string, string> | undefined) ?? {}),
+        },
+        body: JSON.stringify({ error: { code, message, statusCode, retryable, requestId, ...(details !== undefined ? { details } : {}) } }),
       }));
 
     sharedMocks.validationError
       .mockReset()
-      .mockReturnValue({
+      .mockImplementation((message: string) => ({
         code: 'VALIDATION_ERROR',
-        message: 'Validation failure',
+        message,
         statusCode: 400,
         retryable: false,
         requestId: 'req-validation',
-      });
+      }));
     sharedMocks.serviceUnavailable
       .mockReset()
-      .mockReturnValue({
+      .mockImplementation((message: string) => ({
         code: 'SERVICE_UNAVAILABLE',
-        message: 'Service unavailable',
+        message,
         statusCode: 503,
         retryable: true,
         requestId: 'req-unavailable',
-      });
+      }));
     sharedMocks.internalError
       .mockReset()
       .mockReturnValue({
@@ -260,7 +273,7 @@ describe('sync-cdm-schema handler', () => {
     expect(activityCall[0].outcome).toBe('no-op');
   });
 
-  it('sync read failures return actionable service unavailable and persist sync-failed (AE-06)', async () => {
+  it('sync read failures return canonical rate-limited class and persist sync-failed (AE-06)', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 403,
@@ -279,10 +292,15 @@ describe('sync-cdm-schema handler', () => {
     expect(updateCall[1].syncStatus).toBe('sync-failed');
     expect(updateCall[1].lastSyncResult).toBe('failed');
     expect(updateCall[1].lastSyncReason).toBe('GitHub API rate limit');
-    expect(sharedMocks.serviceUnavailable).toHaveBeenCalledWith('GitHub rate limit reached. Please retry shortly.');
-    const parsed = JSON.parse(result.body) as { error: { message: string; code: string } };
-    expect(parsed.error.code).toBe('SERVICE_UNAVAILABLE');
-    expect(parsed.error.message).toBe('Service unavailable');
+    const parsed = JSON.parse(result.body) as {
+      error: { message: string; code: string; details?: { failureClass?: string; retryCount?: number } };
+    };
+    expect(parsed.error.code).toBe('CDM_RATE_LIMITED');
+    expect(parsed.error.message).toBe('GitHub rate limit reached. Please retry shortly.');
+    expect(parsed.error.details).toMatchObject({
+      failureClass: 'rate-limited',
+      retryCount: 2,
+    });
 
     expect(persistenceMock.logSyncActivity).toHaveBeenCalledTimes(1);
     const activityCall = persistenceMock.logSyncActivity.mock.calls[0] as [Record<string, unknown>];
@@ -384,7 +402,7 @@ describe('sync-cdm-schema handler', () => {
     );
   });
 
-  it('status-refresh read failures also persist sync-failed and return actionable service unavailable', async () => {
+  it('status-refresh read failures also persist sync-failed and return canonical rate-limited class', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 403,
@@ -403,15 +421,44 @@ describe('sync-cdm-schema handler', () => {
     expect(updateCall[1].syncStatus).toBe('sync-failed');
     expect(updateCall[1].lastSyncResult).toBe('failed');
     expect(updateCall[1].lastSyncReason).toBe('GitHub API rate limit');
-    expect(sharedMocks.serviceUnavailable).toHaveBeenCalledWith('GitHub rate limit reached. Please retry shortly.');
-    const parsed = JSON.parse(result.body) as { error: { code: string; message: string } };
-    expect(parsed.error.code).toBe('SERVICE_UNAVAILABLE');
-    expect(parsed.error.message).toBe('Service unavailable');
+    const parsed = JSON.parse(result.body) as {
+      error: { code: string; message: string; details?: { failureClass?: string; retryCount?: number } };
+    };
+    expect(parsed.error.code).toBe('CDM_RATE_LIMITED');
+    expect(parsed.error.message).toBe('GitHub rate limit reached. Please retry shortly.');
+    expect(parsed.error.details).toMatchObject({
+      failureClass: 'rate-limited',
+      retryCount: 2,
+    });
 
     expect(persistenceMock.logSyncActivity).toHaveBeenCalledTimes(1);
     const activityCall = persistenceMock.logSyncActivity.mock.calls[0] as [Record<string, unknown>];
     expect(activityCall[0].outcome).toBe('failed');
     expect(activityCall[0].reason).toBe('GitHub API rate limit');
+  });
+
+  it('emits terminal sync failure log with class + lineage identifiers for unexpected failures', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    sharedMocks.getItem.mockRejectedValueOnce(new Error('boom'));
+
+    const { handler } = await importHandler();
+    const result = await handler({ pathParameters: { id: 'schema-1' }, httpMethod: 'POST', headers: { 'x-correlation-id': 'corr-sync-1' } } as never);
+
+    expect(result.statusCode).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[sync-cdm-schema] terminal-sync-failure',
+      expect.objectContaining({
+        event: 'cdm-sync-terminal-failure',
+        operation: 'sync',
+        repo: 'KBXT/KBX-Canonicals',
+        path: 'schema-1',
+        requestId: 'req-sync-1',
+        correlationId: 'corr-sync-1',
+        failureClass: 'timeout-transient',
+      }),
+    );
+
+    errorSpy.mockRestore();
   });
 
   // -----------------------------------------------------------------------

@@ -1,7 +1,6 @@
 import {
-  ERROR_CODES,
   errorResponse,
-  internalError,
+  generateRequestId,
   jsonResponse,
   parseQueryParam,
   serviceUnavailable,
@@ -9,7 +8,12 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { CDM_ROOT_PATH, encodeGitHubPath, isWithinCdmRoot, normalizeCdmPath } from './cdm-path.js';
+import { encodeGitHubPath, isWithinCdmRoot, normalizeCdmPath } from './cdm-path.js';
+import {
+  executeGitHubReadWithRetry,
+  isCdmGitHubReadError,
+  toCdmFailureResponse,
+} from './cdm-github-read.js';
 
 interface GitHubContentsItem {
   readonly name: string;
@@ -31,10 +35,84 @@ interface GitHubFile {
   readonly htmlUrl?: string;
 }
 
+interface CdmListCacheEntry {
+  readonly files: readonly GitHubFile[];
+  readonly fetchedAtMs: number;
+}
+
+interface CachedResponseMeta {
+  readonly source: 'cache';
+  readonly degraded: true;
+  readonly stale: boolean;
+  readonly ageMs: number;
+}
+
+const CDM_LISTING_CACHE = new Map<string, CdmListCacheEntry>();
+
+const DEFAULT_TTL_MS: Record<'local' | 'dev' | 'prod', number> = {
+  local: 30_000,
+  dev: 60_000,
+  prod: 300_000,
+};
+
+const DEFAULT_STALE_GRACE_MS: Record<'local' | 'dev' | 'prod', number> = {
+  local: 0,
+  dev: 300_000,
+  prod: 900_000,
+};
+
 function getEnvValue(key: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.[key];
 }
+
+function parseEnvMs(key: string): number | null {
+  const raw = getEnvValue(key)?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return Math.floor(parsed);
+}
+
+function resolveRuntimeProfile(): 'local' | 'dev' | 'prod' {
+  const stage = getEnvValue('STAGE')?.trim().toLowerCase();
+  const nodeEnv = getEnvValue('NODE_ENV')?.trim().toLowerCase();
+
+  if (stage === 'prod' || stage === 'production' || nodeEnv === 'production') {
+    return 'prod';
+  }
+
+  if (stage === 'dev' || stage === 'development' || nodeEnv === 'development') {
+    return 'dev';
+  }
+
+  return 'local';
+}
+
+const RUNTIME_PROFILE = resolveRuntimeProfile();
+
+function resolveCacheTtlMs(): number {
+  const profileKey = `CDM_LIST_CACHE_TTL_${RUNTIME_PROFILE.toUpperCase()}_MS`;
+  return parseEnvMs(profileKey) ?? parseEnvMs('CDM_LIST_CACHE_TTL_MS') ?? DEFAULT_TTL_MS[RUNTIME_PROFILE];
+}
+
+function resolveStaleGraceMs(): number {
+  const profileKey = `CDM_LIST_CACHE_STALE_GRACE_${RUNTIME_PROFILE.toUpperCase()}_MS`;
+  return (
+    parseEnvMs(profileKey)
+    ?? parseEnvMs('CDM_LIST_CACHE_STALE_GRACE_MS')
+    ?? DEFAULT_STALE_GRACE_MS[RUNTIME_PROFILE]
+  );
+}
+
+const LIST_CACHE_TTL_MS = resolveCacheTtlMs();
+const LIST_CACHE_STALE_GRACE_MS = resolveStaleGraceMs();
 
 const GITHUB_API_BASE = getEnvValue('GITHUB_API_BASE')?.trim() || 'https://api.github.com';
 const GITHUB_TOKEN = getEnvValue('GITHUB_TOKEN')?.trim();
@@ -55,84 +133,151 @@ function toGitHubFile(item: GitHubContentsItem): GitHubFile {
   };
 }
 
-function isRateLimited(response: Response): boolean {
-  if (response.status === 429) {
-    return true;
+function cacheKeyForPath(path: string): string {
+  return `${CDM_REPO_OWNER}/${CDM_REPO_NAME}:${CDM_REPO_BRANCH}:${path}`;
+}
+
+function getCachedListing(path: string): CdmListCacheEntry | null {
+  return CDM_LISTING_CACHE.get(cacheKeyForPath(path)) ?? null;
+}
+
+function setCachedListing(path: string, files: readonly GitHubFile[]): void {
+  CDM_LISTING_CACHE.set(cacheKeyForPath(path), {
+    files,
+    fetchedAtMs: Date.now(),
+  });
+}
+
+function readCachedFallback(path: string): CachedResponseMeta & { readonly files: readonly GitHubFile[] } | null {
+  const entry = getCachedListing(path);
+  if (!entry) {
+    return null;
   }
 
-  return response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0';
+  const ageMs = Date.now() - entry.fetchedAtMs;
+  const staleCutoffMs = LIST_CACHE_TTL_MS + LIST_CACHE_STALE_GRACE_MS;
+
+  if (ageMs > staleCutoffMs) {
+    return null;
+  }
+
+  return {
+    files: entry.files,
+    source: 'cache',
+    degraded: true,
+    stale: ageMs > LIST_CACHE_TTL_MS,
+    ageMs,
+  };
+}
+
+function cacheHeaders(meta: CachedResponseMeta | { readonly source: 'fresh'; readonly degraded: false }): Record<string, string> {
+  if (meta.source === 'fresh') {
+    return {
+      'x-cdm-cache-source': 'fresh',
+      'x-cdm-cache-degraded': 'false',
+      'x-cdm-cache-stale': 'false',
+      'x-cdm-cache-age-ms': '0',
+      'x-cdm-cache-ttl-ms': String(LIST_CACHE_TTL_MS),
+      'x-cdm-cache-stale-grace-ms': String(LIST_CACHE_STALE_GRACE_MS),
+    };
+  }
+
+  return {
+    'x-cdm-cache-source': 'cache',
+    'x-cdm-cache-degraded': 'true',
+    'x-cdm-cache-stale': meta.stale ? 'true' : 'false',
+    'x-cdm-cache-age-ms': String(Math.max(0, Math.floor(meta.ageMs))),
+    'x-cdm-cache-ttl-ms': String(LIST_CACHE_TTL_MS),
+    'x-cdm-cache-stale-grace-ms': String(LIST_CACHE_STALE_GRACE_MS),
+  };
+}
+
+function isGitHubContentItem(value: unknown): value is GitHubContentsItem {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.name === 'string'
+    && typeof candidate.path === 'string'
+    && (candidate.type === 'file' || candidate.type === 'dir')
+    && typeof candidate.sha === 'string'
+  );
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const requestId = generateRequestId();
+  const correlationId = event.headers?.['x-correlation-id'] ?? event.headers?.['X-Correlation-Id'];
   const requestedPath = parseQueryParam(event, 'path');
   const normalizedPath = normalizeCdmPath(requestedPath);
 
   if (!normalizedPath || !isWithinCdmRoot(normalizedPath)) {
     const err = validationError('Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   if (!GITHUB_TOKEN) {
     const err = serviceUnavailable('CDM listing is temporarily unavailable. Please retry shortly.');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   const encodedPath = encodeGitHubPath(normalizedPath);
   const url = `${GITHUB_API_BASE}/repos/${CDM_REPO_OWNER}/${CDM_REPO_NAME}/contents/${encodedPath}?ref=${encodeURIComponent(CDM_REPO_BRANCH)}`;
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        'X-GitHub-Api-Version': '2022-11-28',
+    const { response } = await executeGitHubReadWithRetry({
+      url,
+      operation: 'browse',
+      repo: `${CDM_REPO_OWNER}/${CDM_REPO_NAME}`,
+      sourcePath: normalizedPath,
+      requestId,
+      correlationId,
+      init: {
+        method: 'GET',
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
       },
     });
 
-    if (response.status === 404) {
-      return errorResponse(ERROR_CODES.SOURCE_NOT_FOUND, `CDM path not found: ${normalizedPath}`, 404, false);
-    }
-
-    if (isRateLimited(response)) {
-      const err = serviceUnavailable('GitHub rate limit reached. Please retry shortly.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-    }
-
-    if (!response.ok) {
-      if (response.status >= 500) {
-        const err = serviceUnavailable('GitHub service is temporarily unavailable. Please retry shortly.');
-        return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-      }
-
-      const err = internalError('Failed to list CDM schemas from GitHub.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-    }
-
     const payload = (await response.json()) as unknown;
     if (!Array.isArray(payload)) {
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Requested CDM path is not a directory.', 400, false);
+      const err = validationError('Requested CDM path is not a directory.');
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     const files = payload
-      .filter((item): item is GitHubContentsItem => {
-        if (typeof item !== 'object' || item === null) {
-          return false;
-        }
-
-        const candidate = item as Record<string, unknown>;
-        return (
-          typeof candidate.name === 'string'
-          && typeof candidate.path === 'string'
-          && (candidate.type === 'file' || candidate.type === 'dir')
-          && typeof candidate.sha === 'string'
-        );
-      })
+      .filter(isGitHubContentItem)
       .map(toGitHubFile);
 
-    return jsonResponse(200, files);
-  } catch {
+    setCachedListing(normalizedPath, files);
+
+    return jsonResponse(200, files, undefined, cacheHeaders({ source: 'fresh', degraded: false }));
+  } catch (error) {
+    if (isCdmGitHubReadError(error)) {
+      if (error.failure.retryable) {
+        const cached = readCachedFallback(normalizedPath);
+        if (cached) {
+          return jsonResponse(200, cached.files, undefined, cacheHeaders(cached));
+        }
+      }
+
+      const mapped = toCdmFailureResponse(error);
+      return errorResponse(
+        mapped.code,
+        mapped.message,
+        mapped.statusCode,
+        mapped.retryable,
+        requestId,
+        mapped.details,
+        mapped.headers,
+      );
+    }
+
     const err = serviceUnavailable('Unable to reach GitHub right now. Please retry shortly.');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 }

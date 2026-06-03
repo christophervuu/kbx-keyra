@@ -11,14 +11,10 @@
             "id": "9fc165ccd6a75d01",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "forge/active/FS-079/tasks/T-03.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "T-03"
+              "title": "New tab"
             }
           }
         ]
@@ -182,11 +178,41 @@
   },
   "active": "9fc165ccd6a75d01",
   "lastOpenFiles": [
-    "forge/active/FS-079/tasks/T-04.md",
-    "forge/active/FS-079/tasks/T-03.md",
-    "forge/active/FS-079/tasks/T-02.md",
-    "forge/active/FS-079/tasks/T-01.md",
-    "src/lambda/deployment/cdm-deploy-guard.ts",
-    "forge/active/FS-078/tasks/T-07.md"
+    "forge/active/FS-080/tasks/T-05.md",
+    "forge/completed/FS-080/tasks/T-02.md",
+    "forge/completed/FS-080/tasks/T-05.md",
+    "forge/completed/FS-080/tasks/T-04.md",
+    "forge/completed/FS-080/tasks/T-03.md",
+    "forge/completed/FS-080/tasks/T-01.md",
+    "forge/completed/FS-080/tasks",
+    "forge/completed/FS-080/spec.md",
+    "forge/completed/FS-080",
+    "forge/completed/FS-079/tasks/T-04.md",
+    "forge/completed/FS-079/tasks/T-03.md",
+    "forge/completed/FS-079/tasks/T-02.md",
+    "forge/completed/FS-079/tasks/T-01.md",
+    "forge/completed/FS-079/tasks",
+    "forge/completed/FS-079/spec.md",
+    "forge/completed/FS-079",
+    "forge/completed/FS-078/tasks/T-07.md",
+    "forge/completed/FS-078/tasks/T-06.md",
+    "forge/completed/FS-078/tasks/T-05.md",
+    "forge/completed/FS-078/tasks/T-04.md",
+    "forge/completed/FS-078/tasks/T-02.md",
+    "forge/completed/FS-078/tasks/T-03.md",
+    "forge/completed/FS-078/tasks/T-01.md",
+    "forge/completed/FS-078/tasks",
+    "forge/completed/FS-078/spec.md",
+    "forge/completed/FS-078",
+    "forge/completed/FS-077/tasks/T-07.md",
+    "forge/completed/FS-077/tasks/T-06.md",
+    "forge/completed/FS-077/tasks/T-05.md",
+    "forge/completed/FS-077/tasks/T-04.md",
+    "forge/completed/FS-077/tasks/T-03.md",
+    "forge/completed/FS-077/tasks/T-02.md",
+    "forge/completed/FS-077/tasks",
+    "forge/completed/FS-077",
+    "forge/completed/FS-076/tasks",
+    "forge/completed/FS-076"
   ]
 }

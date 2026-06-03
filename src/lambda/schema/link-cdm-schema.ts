@@ -1,6 +1,7 @@
 import {
   ERROR_CODES,
   errorResponse,
+  generateRequestId,
   getItem,
   internalError,
   jsonResponse,
@@ -15,6 +16,11 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { CDM_ROOT_PATH, encodeGitHubPath, isWithinCdmRoot, normalizeCdmPath } from './cdm-path.js';
+import {
+  executeGitHubReadWithRetry,
+  isCdmGitHubReadError,
+  toCdmFailureResponse,
+} from './cdm-github-read.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
 
@@ -158,14 +164,6 @@ function sanitizeName(path: string): string {
   return lastSegment.replace(/\.(json|xsd|xml)$/i, '') || lastSegment;
 }
 
-function isRateLimited(response: Response): boolean {
-  if (response.status === 429) {
-    return true;
-  }
-
-  return response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0';
-}
-
 function isProjectSchemaRef(ref: ProjectSchemaRef, schemaId: string): boolean {
   return ref.schemaId === schemaId;
 }
@@ -179,82 +177,90 @@ function generateSchemaId(): string {
   return `schema-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function fetchGitHubFile(path: string, branch: string): Promise<GitHubContentFileResponse | 'not-found' | 'rate-limited' | 'service-unavailable' | 'invalid'> {
+function toGitHubContentFileResponse(payload: unknown): GitHubContentFileResponse | 'invalid' {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return 'invalid';
+  }
+
+  const candidate = payload as Record<string, unknown>;
+  if (
+    typeof candidate.path !== 'string'
+    || typeof candidate.name !== 'string'
+    || typeof candidate.sha !== 'string'
+    || (candidate.type !== 'file' && candidate.type !== 'dir')
+  ) {
+    return 'invalid';
+  }
+
+  return {
+    name: candidate.name,
+    path: candidate.path,
+    sha: candidate.sha,
+    type: candidate.type,
+    ...(typeof candidate.content === 'string' ? { content: candidate.content } : {}),
+    ...(typeof candidate.encoding === 'string' ? { encoding: candidate.encoding } : {}),
+    ...(typeof candidate.download_url === 'string' ? { download_url: candidate.download_url } : {}),
+  };
+}
+
+async function fetchGitHubFile(
+  path: string,
+  branch: string,
+  requestId: string,
+  correlationId?: string,
+): Promise<GitHubContentFileResponse | 'invalid'> {
   const encodedPath = encodeGitHubPath(path);
   const url = `${GITHUB_API_BASE}/repos/${CDM_REPO_OWNER}/${CDM_REPO_NAME}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
 
-  try {
-    const response = await fetch(url, {
+  const { response } = await executeGitHubReadWithRetry({
+    url,
+    operation: 'link',
+    repo: `${CDM_REPO_OWNER}/${CDM_REPO_NAME}`,
+    sourcePath: path,
+    requestId,
+    correlationId,
+    init: {
       method: 'GET',
       headers: {
         Accept: 'application/vnd.github+json',
         Authorization: `Bearer ${GITHUB_TOKEN}`,
         'X-GitHub-Api-Version': '2022-11-28',
       },
-    });
+    },
+  });
 
-    if (response.status === 404) {
-      return 'not-found';
-    }
-    if (isRateLimited(response)) {
-      return 'rate-limited';
-    }
-    if (!response.ok && response.status >= 500) {
-      return 'service-unavailable';
-    }
-    if (!response.ok) {
-      return 'invalid';
-    }
-
-    const payload = (await response.json()) as unknown;
-    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-      return 'invalid';
-    }
-
-    const candidate = payload as Record<string, unknown>;
-    if (
-      typeof candidate.path !== 'string'
-      || typeof candidate.name !== 'string'
-      || typeof candidate.sha !== 'string'
-      || (candidate.type !== 'file' && candidate.type !== 'dir')
-    ) {
-      return 'invalid';
-    }
-
-    return {
-      name: candidate.name,
-      path: candidate.path,
-      sha: candidate.sha,
-      type: candidate.type,
-      ...(typeof candidate.content === 'string' ? { content: candidate.content } : {}),
-      ...(typeof candidate.encoding === 'string' ? { encoding: candidate.encoding } : {}),
-      ...(typeof candidate.download_url === 'string' ? { download_url: candidate.download_url } : {}),
-    };
-  } catch {
-    return 'service-unavailable';
+  if (!response.ok) {
+    return 'invalid';
   }
+
+  const payload = (await response.json()) as unknown;
+  return toGitHubContentFileResponse(payload);
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const requestId = generateRequestId();
+  const correlationId = event.headers?.['x-correlation-id'] ?? event.headers?.['X-Correlation-Id'];
   const body = parseBody(event) as LinkCdmSchemaRequest | null;
   if (!body || typeof body.projectId !== 'string' || body.projectId.trim() === '' || typeof body.path !== 'string' || body.path.trim() === '') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required fields: projectId, path', 400, false);
+    const err = validationError('Missing required fields: projectId, path');
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   const normalizedPath = normalizeCdmPath(body.path);
   if (!normalizedPath || !isWithinCdmRoot(normalizedPath)) {
     const err = validationError(`Invalid path. Only ${CDM_ROOT_PATH}/* is allowed.`);
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   const format = inferFormat(normalizedPath);
   if (!format) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Unsupported CDM file format. Expected .json, .xsd, or .xml', 400, false);
+    const err = validationError('Unsupported CDM file format. Expected .json, .xsd, or .xml');
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   if (!GITHUB_TOKEN) {
     const err = serviceUnavailable('CDM linking is temporarily unavailable. Please retry shortly.');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   const branch = typeof body.branch === 'string' && body.branch.trim() !== '' ? body.branch.trim() : CDM_DEFAULT_BRANCH;
@@ -319,24 +325,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return jsonResponse(200, existing);
     }
 
-    const fetched = await fetchGitHubFile(normalizedPath, branch);
-    if (fetched === 'not-found') {
-      return errorResponse(ERROR_CODES.SOURCE_NOT_FOUND, `CDM file not found: ${normalizedPath}`, 404, false);
-    }
-    if (fetched === 'rate-limited') {
-      const err = serviceUnavailable('GitHub rate limit reached. Please retry shortly.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-    }
-    if (fetched === 'service-unavailable') {
-      const err = serviceUnavailable('Unable to reach GitHub right now. Please retry shortly.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-    }
+    const fetched = await fetchGitHubFile(normalizedPath, branch, requestId, correlationId);
     if (fetched === 'invalid') {
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid GitHub response while linking CDM schema', 400, false);
+      const err = validationError('Invalid GitHub response while linking CDM schema');
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     if (fetched.type !== 'file') {
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Selected CDM path must be a file.', 400, false);
+      const err = validationError('Selected CDM path must be a file.');
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     let contentString: string | null = null;
@@ -345,31 +342,55 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       contentString = decodeBase64Content(fetched.content);
     } else if (typeof fetched.download_url === 'string') {
       try {
-        const downloadResponse = await fetch(fetched.download_url, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${GITHUB_TOKEN}`,
+        const { response: downloadResponse } = await executeGitHubReadWithRetry({
+          url: fetched.download_url,
+          operation: 'link',
+          repo: `${CDM_REPO_OWNER}/${CDM_REPO_NAME}`,
+          sourcePath: normalizedPath,
+          requestId,
+          correlationId,
+          init: {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${GITHUB_TOKEN}`,
+            },
           },
         });
 
         if (!downloadResponse.ok) {
-          return errorResponse(ERROR_CODES.SERVICE_UNAVAILABLE, 'Failed to download CDM file content from GitHub', 503, true);
+          const err = serviceUnavailable('Failed to download CDM file content from GitHub');
+          return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
         }
 
         contentString = await downloadResponse.text();
-      } catch {
+      } catch (error) {
+        if (isCdmGitHubReadError(error)) {
+          const mapped = toCdmFailureResponse(error);
+          return errorResponse(
+            mapped.code,
+            mapped.message,
+            mapped.statusCode,
+            mapped.retryable,
+            requestId,
+            mapped.details,
+            mapped.headers,
+          );
+        }
+
         const err = serviceUnavailable('Unable to download CDM schema content right now. Please retry shortly.');
-        return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+        return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
       }
     }
 
     if (!contentString) {
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM file content is unavailable from GitHub response', 400, false);
+      const err = validationError('CDM file content is unavailable from GitHub response');
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     const normalizedContent = format === 'json-schema' ? ensureJsonSchema(contentString) : contentString;
     if (!normalizedContent) {
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM JSON schema content is invalid JSON', 400, false);
+      const err = validationError('CDM JSON schema content is invalid JSON');
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     const schemaId = generateSchemaId();
@@ -435,8 +456,21 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     return jsonResponse(201, metadata);
-  } catch {
+  } catch (error) {
+    if (isCdmGitHubReadError(error)) {
+      const mapped = toCdmFailureResponse(error);
+      return errorResponse(
+        mapped.code,
+        mapped.message,
+        mapped.statusCode,
+        mapped.retryable,
+        requestId,
+        mapped.details,
+        mapped.headers,
+      );
+    }
+
     const err = internalError('Failed to link CDM schema');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 }

@@ -3,6 +3,7 @@ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   ERROR_CODES,
   errorResponse,
+  generateRequestId,
   getItem,
   jsonResponse,
   parsePathParam,
@@ -13,6 +14,11 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { CDM_ROOT_PATH, encodeGitHubPath, isWithinCdmRoot } from './cdm-path.js';
+import {
+  executeGitHubReadWithRetry,
+  isCdmGitHubReadError,
+  toCdmFailureResponse,
+} from './cdm-github-read.js';
 import type { SchemaSyncResult } from '../../lib/persistence/types.js';
 import { logSyncActivity } from '../../lib/persistence/index.js';
 import {
@@ -118,68 +124,80 @@ function ensureJsonSchema(content: string): string | null {
   }
 }
 
-function isRateLimited(response: Response): boolean {
-  if (response.status === 429) {
-    return true;
+function toGitHubContentFileResponse(payload: unknown): GitHubContentFileResponse | 'invalid' {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return 'invalid';
   }
 
-  return response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0';
+  const candidate = payload as Record<string, unknown>;
+  if (
+    typeof candidate.path !== 'string'
+    || typeof candidate.name !== 'string'
+    || typeof candidate.sha !== 'string'
+    || (candidate.type !== 'file' && candidate.type !== 'dir')
+  ) {
+    return 'invalid';
+  }
+
+  return {
+    name: candidate.name,
+    path: candidate.path,
+    sha: candidate.sha,
+    type: candidate.type,
+    ...(typeof candidate.content === 'string' ? { content: candidate.content } : {}),
+    ...(typeof candidate.encoding === 'string' ? { encoding: candidate.encoding } : {}),
+    ...(typeof candidate.download_url === 'string' ? { download_url: candidate.download_url } : {}),
+  };
 }
 
-async function fetchGitHubFile(path: string, branch: string): Promise<GitHubContentFileResponse | 'not-found' | 'rate-limited' | 'service-unavailable' | 'invalid'> {
+async function fetchGitHubFile(
+  path: string,
+  branch: string,
+  requestId: string,
+  correlationId?: string,
+): Promise<GitHubContentFileResponse | 'invalid'> {
   const encodedPath = encodeGitHubPath(path);
   const url = `${GITHUB_API_BASE}/repos/${CDM_REPO_OWNER}/${CDM_REPO_NAME}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
 
-  try {
-    const response = await fetch(url, {
+  const { response } = await executeGitHubReadWithRetry({
+    url,
+    operation: 'sync',
+    repo: `${CDM_REPO_OWNER}/${CDM_REPO_NAME}`,
+    sourcePath: path,
+    requestId,
+    correlationId,
+    init: {
       method: 'GET',
       headers: {
         Accept: 'application/vnd.github+json',
         Authorization: `Bearer ${GITHUB_TOKEN}`,
         'X-GitHub-Api-Version': '2022-11-28',
       },
-    });
+    },
+  });
 
-    if (response.status === 404) {
-      return 'not-found';
-    }
-    if (isRateLimited(response)) {
-      return 'rate-limited';
-    }
-    if (!response.ok && response.status >= 500) {
-      return 'service-unavailable';
-    }
-    if (!response.ok) {
-      return 'invalid';
-    }
-
-    const payload = (await response.json()) as unknown;
-    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-      return 'invalid';
-    }
-
-    const candidate = payload as Record<string, unknown>;
-    if (
-      typeof candidate.path !== 'string'
-      || typeof candidate.name !== 'string'
-      || typeof candidate.sha !== 'string'
-      || (candidate.type !== 'file' && candidate.type !== 'dir')
-    ) {
-      return 'invalid';
-    }
-
-    return {
-      name: candidate.name,
-      path: candidate.path,
-      sha: candidate.sha,
-      type: candidate.type,
-      ...(typeof candidate.content === 'string' ? { content: candidate.content } : {}),
-      ...(typeof candidate.encoding === 'string' ? { encoding: candidate.encoding } : {}),
-      ...(typeof candidate.download_url === 'string' ? { download_url: candidate.download_url } : {}),
-    };
-  } catch {
-    return 'service-unavailable';
+  if (!response.ok) {
+    return 'invalid';
   }
+
+  const payload = (await response.json()) as unknown;
+  return toGitHubContentFileResponse(payload);
+}
+
+function reasonForFailureClass(failureClass: 'rate-limited' | 'unauthorized-forbidden' | 'not-found-path-mismatch' | 'timeout-transient'): string {
+  if (failureClass === 'rate-limited') {
+    return 'GitHub API rate limit';
+  }
+
+  if (failureClass === 'unauthorized-forbidden') {
+    return 'GitHub unauthorized or forbidden';
+  }
+
+  if (failureClass === 'not-found-path-mismatch') {
+    return 'CDM source file not found';
+  }
+
+  return 'GitHub API unavailable';
 }
 
 /**
@@ -211,14 +229,16 @@ function isReadOnlyStatusMode(event: APIGatewayProxyEvent): boolean {
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const requestId = generateRequestId();
+  const correlationId = event.headers?.['x-correlation-id'] ?? event.headers?.['X-Correlation-Id'];
   const schemaId = parsePathParam(event, 'id');
   if (!schemaId) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false, requestId);
   }
 
   if (!GITHUB_TOKEN) {
     const err = serviceUnavailable('CDM sync is temporarily unavailable. Please retry shortly.');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 
   const statusOnly = isReadOnlyStatusMode(event);
@@ -230,47 +250,31 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     if (!metadata) {
-      return errorResponse(ERROR_CODES.RESOURCE_NOT_FOUND, `Schema with id '${schemaId}' not found`, 404, false);
+      return errorResponse(ERROR_CODES.RESOURCE_NOT_FOUND, `Schema with id '${schemaId}' not found`, 404, false, requestId);
     }
 
     if (metadata.origin !== 'cdm' || metadata.source.type !== 'github') {
       const err = validationError('Schema is not a CDM-linked GitHub schema.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     const source = metadata.source;
     if (!source.branch || !source.path || !source.repo) {
       const err = validationError('CDM source metadata is incomplete. Re-link schema from CDM Library and retry.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     if (!isWithinCdmRoot(source.path)) {
       const err = validationError(`Invalid source path. Only ${CDM_ROOT_PATH}/* is allowed.`);
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
-    const fetched = await fetchGitHubFile(source.path, source.branch);
-    if (fetched === 'not-found') {
-      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'CDM source file not found' });
-      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'CDM source file not found' });
-      return errorResponse(ERROR_CODES.SOURCE_NOT_FOUND, `CDM source file not found: ${source.path}`, 404, false);
-    }
-    if (fetched === 'rate-limited') {
-      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'GitHub API rate limit' });
-      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'GitHub API rate limit' });
-      const err = serviceUnavailable('GitHub rate limit reached. Please retry shortly.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-    }
-    if (fetched === 'service-unavailable') {
-      await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'GitHub API unavailable' });
-      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'GitHub API unavailable' });
-      const err = serviceUnavailable('Unable to reach GitHub right now. Please retry shortly.');
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
-    }
+    const fetched = await fetchGitHubFile(source.path, source.branch, requestId, correlationId);
     if (fetched === 'invalid' || fetched.type !== 'file') {
       await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: new Date().toISOString(), lastSyncReason: 'Invalid GitHub response' });
       await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Invalid GitHub response' });
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid GitHub response while syncing CDM schema', 400, false);
+      const err = validationError('Invalid GitHub response while syncing CDM schema');
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     const currentCommit = source.commitSha;
@@ -321,10 +325,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       contentString = decodeBase64Content(fetched.content);
     } else if (typeof fetched.download_url === 'string') {
       try {
-        const downloadResponse = await fetch(fetched.download_url, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${GITHUB_TOKEN}`,
+        const { response: downloadResponse } = await executeGitHubReadWithRetry({
+          url: fetched.download_url,
+          operation: 'sync',
+          repo: `${CDM_REPO_OWNER}/${CDM_REPO_NAME}`,
+          sourcePath: source.path,
+          requestId,
+          correlationId,
+          init: {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${GITHUB_TOKEN}`,
+            },
           },
         });
 
@@ -332,29 +344,50 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'Failed to download CDM content' });
           await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Failed to download CDM content' });
           const err = serviceUnavailable('Unable to download CDM schema content right now. Please retry shortly.');
-          return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+          return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
         }
 
         contentString = await downloadResponse.text();
-      } catch {
+      } catch (error) {
+        if (isCdmGitHubReadError(error)) {
+          const mapped = toCdmFailureResponse(error);
+          await updateSyncMetadata(schemaId, {
+            syncStatus: 'sync-failed',
+            lastSyncResult: 'failed',
+            lastSyncTimestamp: now,
+            lastSyncReason: reasonForFailureClass(mapped.details.failureClass),
+          });
+          await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: reasonForFailureClass(mapped.details.failureClass) });
+
+          return errorResponse(
+            mapped.code,
+            mapped.message,
+            mapped.statusCode,
+            mapped.retryable,
+            requestId,
+            mapped.details,
+            mapped.headers,
+          );
+        }
+
         await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'Failed to download CDM content' });
         await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Failed to download CDM content' });
         const err = serviceUnavailable('Unable to download CDM schema content right now. Please retry shortly.');
-        return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+        return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
       }
     }
 
     if (!contentString) {
       await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'CDM file content unavailable from GitHub' });
       await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'CDM file content unavailable from GitHub' });
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM file content is unavailable from GitHub response', 400, false);
+      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM file content is unavailable from GitHub response', 400, false, requestId);
     }
 
     const normalizedContent = metadata.format === 'json-schema' ? ensureJsonSchema(contentString) : contentString;
     if (!normalizedContent) {
       await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: 'Invalid JSON content in CDM schema' });
       await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason: 'Invalid JSON content in CDM schema' });
-      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM JSON schema content is invalid JSON', 400, false);
+      return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'CDM JSON schema content is invalid JSON', 400, false, requestId);
     }
 
     await putObject({
@@ -514,6 +547,41 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     return jsonResponse(200, result);
   } catch (err) {
+    if (isCdmGitHubReadError(err)) {
+      const mapped = toCdmFailureResponse(err);
+      const now = new Date().toISOString();
+      const reason = reasonForFailureClass(mapped.details.failureClass);
+      await updateSyncMetadata(schemaId, {
+        syncStatus: 'sync-failed',
+        lastSyncResult: 'failed',
+        lastSyncTimestamp: now,
+        lastSyncReason: reason,
+      }).catch(() => {});
+      await logSyncActivityBestEffort({ schemaId, outcome: 'failed', reason });
+
+      return errorResponse(
+        mapped.code,
+        mapped.message,
+        mapped.statusCode,
+        mapped.retryable,
+        requestId,
+        mapped.details,
+        mapped.headers,
+      );
+    }
+
+    console.error('[sync-cdm-schema] terminal-sync-failure', {
+      event: 'cdm-sync-terminal-failure',
+      operation: statusOnly ? 'sync-status-read' : 'sync',
+      repo: `${CDM_REPO_OWNER}/${CDM_REPO_NAME}`,
+      path: schemaId,
+      requestId,
+      correlationId,
+      failureClass: 'timeout-transient',
+      statusCode: 500,
+      retryCount: 0,
+    });
+
     const now = new Date().toISOString();
     await updateSyncMetadata(schemaId, { syncStatus: 'sync-failed', lastSyncResult: 'failed', lastSyncTimestamp: now, lastSyncReason: err instanceof Error ? err.message : 'Unknown error' }).catch(() => {});
     await updateSchemaStatus(schemaId, 'error').catch(() => {});

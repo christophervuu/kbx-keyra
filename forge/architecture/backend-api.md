@@ -689,3 +689,106 @@ Each traceability entry includes:
 - `commitSha`
 
 This dual-location contract provides immutable snapshot provenance plus query-friendly record-level traceability.
+
+---
+
+## 15) CDM GitHub Resilience Addendum (FS-080)
+
+FS-080 codifies canonical backend resilience behavior for CDM GitHub **read** operations used by:
+
+- `GET /schemas/cdm` (browse)
+- `POST /schemas/cdm/link` (link/read + ingest)
+- `POST /schemas/:id/sync-cdm` and `GET /schemas/:id/sync-cdm` (manual re-sync / status-refresh read)
+
+### Canonical backend-owned failure taxonomy
+
+CDM GitHub read failures are normalized by backend into deterministic classes and stable error codes:
+
+| Failure class | Error code | Typical upstream conditions | Retryable |
+|---|---|---|---:|
+| `rate-limited` | `CDM_RATE_LIMITED` | GitHub 429 / explicit upstream rate-limit signals | true |
+| `unauthorized-forbidden` | `CDM_UNAUTHORIZED_FORBIDDEN` | GitHub 401/403 or credential scope denial | false |
+| `not-found-path-mismatch` | `CDM_NOT_FOUND_PATH_MISMATCH` | 404/not-found for canonical repo/path target | false |
+| `timeout-transient` | `CDM_TIMEOUT_TRANSIENT` | timeout/network/transient 5xx class failures | true |
+
+Contract requirements:
+
+- Backend owns normalization and emits canonical class metadata in error envelope details.
+- UI owns user-facing copy mapping keyed by backend class.
+- Unknown/ambiguous upstream failure states must fail safely as retryable transient (`timeout-transient`) rather than silently succeeding.
+
+### Retry/backoff contract for CDM GitHub read operations
+
+CDM GitHub reads use bounded automatic retries with exponential backoff + jitter.
+
+- Scope: GitHub-read portions of browse/link/sync only.
+- Bounded attempts (no unbounded loops).
+- Backoff shape: exponential growth with configured cap and jitter.
+- Tunables:
+  - `CDM_GITHUB_READ_MAX_ATTEMPTS`
+  - `CDM_GITHUB_READ_BASE_DELAY_MS`
+  - `CDM_GITHUB_READ_MAX_DELAY_MS`
+  - `CDM_GITHUB_READ_JITTER_MS`
+
+Terminal outcomes are always explicit success or explicit failure envelope; there is no success fallthrough on terminal failure.
+
+### Browse cache and stale-grace contract
+
+CDM browse (`GET /schemas/cdm`) includes bounded listing cache fallback semantics:
+
+- Cache key scope: repo + branch + path (within fixed `JSONSchemas/CommonDataModels` guard).
+- TTL defaults:
+  - local: `30s`
+  - dev: `60s`
+  - prod: `300s`
+- Outage-only stale grace beyond TTL is allowed with explicit degraded signaling.
+- Recommended prod stale grace upper bound: `15 minutes` max staleness.
+
+Safety constraints:
+
+- Cache fallback never masks sync-status truth (`synced` / `update-available` / `sync-failed`) for schema records.
+- Cache beyond stale grace is treated as failure (not usable fallback).
+- Path/root constraints are unchanged by cache behavior.
+
+### Error envelope details and headers for resilience semantics
+
+When CDM resilience failures are returned, backend error envelopes may include:
+
+- `error.details.failureClass`
+- `error.details.retryCount`
+- `error.details.retryAfterSeconds` (when available)
+
+Rate-limited responses propagate retry timing hints:
+
+- response header: `retry-after` (when upstream metadata is available)
+- mirrored numeric detail: `retryAfterSeconds` for UI timing guidance
+
+This extends the standard envelope without changing canonical envelope shape.
+
+### Sync explicit-failure invariant
+
+`POST /schemas/:id/sync-cdm` must never report success for terminal GitHub read failure paths.
+
+- Terminal sync failure returns explicit failure envelope with normalized CDM failure taxonomy.
+- Failure remains visible to user via persisted/returned sync-failed outcomes.
+- Structured terminal-failure telemetry is emitted with request lineage fields.
+
+### Observability contract for incident triage
+
+CDM GitHub read logic emits structured telemetry for both per-attempt and terminal events.
+
+Canonical event names:
+
+- `cdm-github-read-attempt`
+- `cdm-github-read-terminal`
+
+Required fields for debugging/tracing:
+
+- `operation`
+- repository/path context (`repo`, `path`)
+- `statusCode`
+- `retryCount`
+- `failureClass`
+- `retryAfter` (if present)
+- request lineage (`requestId`, optional `correlationId`)
+- terminal decision/summary fields (success/failure classification)

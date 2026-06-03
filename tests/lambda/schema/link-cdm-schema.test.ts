@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sharedMocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
+  generateRequestId: vi.fn(),
   getItem: vi.fn(),
   scan: vi.fn(),
   putItem: vi.fn(),
@@ -17,6 +18,10 @@ const sharedMocks = vi.hoisted(() => ({
     RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
     SOURCE_NOT_FOUND: 'SOURCE_NOT_FOUND',
     SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+    CDM_RATE_LIMITED: 'CDM_RATE_LIMITED',
+    CDM_UNAUTHORIZED_FORBIDDEN: 'CDM_UNAUTHORIZED_FORBIDDEN',
+    CDM_NOT_FOUND_PATH_MISMATCH: 'CDM_NOT_FOUND_PATH_MISMATCH',
+    CDM_TIMEOUT_TRANSIENT: 'CDM_TIMEOUT_TRANSIENT',
   },
 }));
 
@@ -53,11 +58,16 @@ describe('link-cdm-schema handler', () => {
     env.PROJECTS_TABLE = 'Projects';
     env.SCHEMAS_TABLE = 'Schemas';
     env.CONTENT_BUCKET = 'Content';
+    env.CDM_GITHUB_READ_MAX_ATTEMPTS = '3';
+    env.CDM_GITHUB_READ_BASE_DELAY_MS = '1';
+    env.CDM_GITHUB_READ_MAX_DELAY_MS = '1';
+    env.CDM_GITHUB_READ_JITTER_MS = '1';
 
     sharedMocks.parseBody.mockReset().mockReturnValue({
       projectId: 'proj-1',
       path: 'Encounter.json',
     });
+    sharedMocks.generateRequestId.mockReset().mockReturnValue('req-link-1');
     sharedMocks.getItem.mockReset().mockResolvedValue({
       projectId: 'proj-1',
       name: 'Project 1',
@@ -77,29 +87,32 @@ describe('link-cdm-schema handler', () => {
       .mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse
       .mockReset()
-      .mockImplementation((code, message, statusCode, retryable, requestId) => ({
+      .mockImplementation((code, message, statusCode, retryable, requestId, details, additionalHeaders) => ({
         statusCode,
-        body: JSON.stringify({ error: { code, message, statusCode, retryable, requestId } }),
+        headers: {
+          ...((additionalHeaders as Record<string, string> | undefined) ?? {}),
+        },
+        body: JSON.stringify({ error: { code, message, statusCode, retryable, requestId, ...(details !== undefined ? { details } : {}) } }),
       }));
 
     sharedMocks.validationError
       .mockReset()
-      .mockReturnValue({
+      .mockImplementation((message: string) => ({
         code: 'VALIDATION_ERROR',
-        message: 'Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.',
+        message,
         statusCode: 400,
         retryable: false,
         requestId: 'req-validation',
-      });
+      }));
     sharedMocks.serviceUnavailable
       .mockReset()
-      .mockReturnValue({
+      .mockImplementation((message: string) => ({
         code: 'SERVICE_UNAVAILABLE',
-        message: 'Service unavailable',
+        message,
         statusCode: 503,
         retryable: true,
         requestId: 'req-unavailable',
-      });
+      }));
     sharedMocks.internalError
       .mockReset()
       .mockReturnValue({
@@ -257,7 +270,7 @@ describe('link-cdm-schema handler', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns SOURCE_NOT_FOUND when requested CDM file is missing', async () => {
+  it('returns deterministic not-found-path-mismatch class when requested CDM file is missing', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 404,
@@ -271,8 +284,98 @@ describe('link-cdm-schema handler', () => {
     const result = await handler({ body: '{}' } as never);
 
     expect(result.statusCode).toBe(404);
-    const parsed = JSON.parse(result.body) as { error: { code: string } };
-    expect(parsed.error.code).toBe('SOURCE_NOT_FOUND');
+    const parsed = JSON.parse(result.body) as { error: { code: string; details?: { failureClass?: string; retryCount?: number } } };
+    expect(parsed.error.code).toBe('CDM_NOT_FOUND_PATH_MISMATCH');
+    expect(parsed.error.details).toMatchObject({
+      failureClass: 'not-found-path-mismatch',
+      retryCount: 0,
+    });
+  });
+
+  it('returns rate-limited class with retry-after metadata when GitHub is rate limited', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: {
+        get: vi.fn().mockImplementation((name: string) => (name.toLowerCase() === 'retry-after' ? '12' : null)),
+      },
+      json: vi.fn().mockResolvedValue({ message: 'Rate limited' }),
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' } as never);
+
+    expect(result.statusCode).toBe(503);
+    const parsed = JSON.parse(result.body) as {
+      error: { code: string; details?: { failureClass?: string; retryAfterSeconds?: number; retryCount?: number } };
+    };
+    expect(parsed.error.code).toBe('CDM_RATE_LIMITED');
+    expect(parsed.error.details).toMatchObject({
+      failureClass: 'rate-limited',
+      retryAfterSeconds: 12,
+      retryCount: 2,
+    });
+    expect((result as { headers?: Record<string, string> }).headers).toMatchObject({
+      'retry-after': '12',
+    });
+  });
+
+  it('retries transient 5xx failures up to max attempts before timeout-transient classification', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: {
+        get: vi.fn().mockReturnValue(null),
+      },
+      json: vi.fn().mockResolvedValue({ message: 'Service unavailable' }),
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' } as never);
+
+    expect(result.statusCode).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const parsed = JSON.parse(result.body) as { error: { code: string; details?: { failureClass?: string; retryCount?: number } } };
+    expect(parsed.error.code).toBe('CDM_TIMEOUT_TRANSIENT');
+    expect(parsed.error.details).toMatchObject({
+      failureClass: 'timeout-transient',
+      retryCount: 2,
+    });
+  });
+
+  it('emits retry attempt + terminal logs including operation/path and lineage IDs', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: {
+        get: vi.fn().mockReturnValue(null),
+      },
+      json: vi.fn().mockResolvedValue({ message: 'Service unavailable' }),
+    });
+
+    const { handler } = await importHandler();
+    await handler({ body: '{}', headers: { 'x-correlation-id': 'corr-link-1' } } as never);
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[cdm-github-read] terminal',
+      expect.objectContaining({
+        event: 'cdm-github-read-terminal',
+        operation: 'link',
+        repo: 'KBXT/KBX-Canonicals',
+        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        requestId: 'req-link-1',
+        correlationId: 'corr-link-1',
+        outcome: 'failed',
+        failureClass: 'timeout-transient',
+      }),
+    );
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('uses read-only GitHub APIs only (AE-09)', async () => {
