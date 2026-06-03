@@ -484,13 +484,53 @@ export interface SmartFixResult {
   readonly applyGuard: SmartFixApplyGuard;
 }
 
+export type ValidationIssueCategory =
+  | 'correctness'
+  | 'completeness'
+  | 'maintainability'
+  | 'risk';
+
+export type ValidationIssueSeverity = 'info' | 'warning' | 'error';
+
+export interface ValidationIssueReference {
+  readonly ruleIndex?: number;
+  readonly targetPath?: string;
+}
+
+export interface ValidationIssue {
+  readonly id: string;
+  readonly category: ValidationIssueCategory;
+  readonly severity: ValidationIssueSeverity;
+  readonly affectedRules: readonly ValidationIssueReference[];
+  readonly description: string;
+  readonly recommendation: string;
+}
+
+export interface ValidationSummary {
+  readonly totalIssues: number;
+  readonly bySeverity: Readonly<Record<ValidationIssueSeverity, number>>;
+  readonly byCategory: Readonly<Record<ValidationIssueCategory, number>>;
+}
+
+export interface ValidationSampleDataInput {
+  readonly contentType: 'application/json' | 'text/json' | 'application/xml' | 'text/xml';
+  readonly content: string;
+}
+
 export interface ValidateMappingsInput {
-  readonly mappingIds: readonly string[];
+  readonly mappingId: string;
+  readonly sampleData?: ValidationSampleDataInput;
 }
 
 export interface ValidationReport {
-  readonly valid: boolean;
-  readonly diagnostics: readonly Diagnostic[];
+  readonly summary: ValidationSummary;
+  readonly issues: readonly ValidationIssue[];
+  readonly notes?: string;
+  readonly meta?: {
+    readonly generatedAt?: string;
+    readonly model?: string;
+    readonly promptId?: string;
+  };
 }
 
 export interface SchemaSearchResult {

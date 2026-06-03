@@ -1,4 +1,4 @@
-export { useEngineValidation, useMappingEditor, useExpressionBuilder } from './hooks';
+export { useEngineValidation, useMappingEditor, useExpressionBuilder, useAiValidation } from './hooks';
 export type {
   EditorLoadState,
   MappingEditorActions,
@@ -7,6 +7,8 @@ export type {
   BuilderStep,
   ExpressionBuilderOptions,
   ExpressionBuilderResult,
+  AiValidationState,
+  UseAiValidationReturn,
 } from './hooks';
 export { MappingEditorPage, RuleList, ExpressionBuilderPanel, RawDslEditor, ChainBuilderShell, EntryPointSelector, ChainSourceCard, StaticValueInput } from './components';
 export type {

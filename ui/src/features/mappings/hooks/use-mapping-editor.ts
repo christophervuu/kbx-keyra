@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAiValidation } from './use-ai-validation';
+import type { AiValidationState } from './use-ai-validation';
 import { useEngineValidation } from './use-engine-validation';
 import type { EngineValidationState } from './use-engine-validation';
 import type { SaveStatus } from '../components/EditorTopBar';
@@ -8,6 +10,7 @@ import type { UnsavedChangeSummary } from '../types';
 import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
 import { useAdapter } from '@/lib/api';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
+import type { ValidationSampleDataInput } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Draft types
@@ -136,6 +139,13 @@ export interface MappingEditorActions {
    * `reason` is null when navigation is safe.
    */
   canNavigateAway: () => { allowed: boolean; reason: 'unsaved' | null };
+
+  /** Trigger AI validation for the current mapping (manual-only). */
+  runAiValidation: (options?: { sampleData?: ValidationSampleDataInput }) => void;
+  /** Retry the last AI validation request for the current mapping. */
+  retryAiValidation: () => void;
+  /** Reset AI validation state for the current mapping. */
+  resetAiValidation: () => void;
 }
 
 export interface UseMappingEditorResult {
@@ -222,6 +232,9 @@ export interface UseMappingEditorResult {
 
   /** Validation state from engine */
   validation: EngineValidationState;
+
+  /** AI validation lifecycle/report state (advisory, independent from engine validation). */
+  aiValidation: AiValidationState;
 
   /**
    * The current draft rules map (read-only snapshot).
@@ -371,6 +384,12 @@ function isDraftChanged(
  */
 export function useMappingEditor(mappingId: string, onRuleApplied?: () => void): UseMappingEditorResult {
   const adapter = useAdapter();
+  const {
+    state: aiValidationState,
+    run: runAiValidationInternal,
+    retry: retryAiValidationInternal,
+    reset: resetAiValidationInternal,
+  } = useAiValidation();
 
   // Load states
   const [loadState, setLoadState] = useState<EditorLoadState>('loading');
@@ -932,11 +951,33 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, adapter, mappingId]);
+  }, [config, version, adapter, mappingId, draftKey]);
 
   const retry = useCallback(() => {
     void loadData();
   }, [loadData]);
+
+  const runAiValidation = useCallback(
+    (options?: { sampleData?: ValidationSampleDataInput }) => {
+      runAiValidationInternal({
+        mappingId,
+        sampleData: options?.sampleData,
+      });
+    },
+    [mappingId, runAiValidationInternal],
+  );
+
+  const retryAiValidation = useCallback(() => {
+    retryAiValidationInternal();
+  }, [retryAiValidationInternal]);
+
+  const resetAiValidation = useCallback(() => {
+    resetAiValidationInternal();
+  }, [resetAiValidationInternal]);
+
+  useEffect(() => {
+    resetAiValidationInternal();
+  }, [mappingId, resetAiValidationInternal]);
 
   // ---------------------------------------------------------------------------
   // Actions — FS-039 draft rules API
@@ -1086,6 +1127,9 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       discardDraftRestore,
       retry,
       canNavigateAway,
+      runAiValidation,
+      retryAiValidation,
+      resetAiValidation,
     }),
     [
       addRule, updateRule, deleteRule, deleteRuleByTarget, reorderRules,
@@ -1093,6 +1137,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       updateDraft, commitDraft, revertDraft, revertAllDrafts, getDraftExpression,
       getUnsavedChangeSummary, applyRule, save, createVersion, acceptDraftRestore,
       discardDraftRestore, retry, canNavigateAway,
+      runAiValidation, retryAiValidation, resetAiValidation,
     ],
   );
 
@@ -1131,6 +1176,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     unsavedRuleCount: unsavedChangeCount, // deprecated alias
     saveError,
     validation,
+    aiValidation: aiValidationState,
     draftRules,
     actions,
   };

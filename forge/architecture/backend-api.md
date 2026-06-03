@@ -470,6 +470,72 @@ Failure/edge semantics:
 - Model output contract failures return `INVALID_MODEL_OUTPUT` (500, non-retryable).
 - Provider/runtime failures return normalized canonical envelopes (`TIMEOUT`, `SERVICE_UNAVAILABLE`, etc.).
 
+### Validate Mappings endpoint contract (FS-072)
+
+`POST /ai/validate-mappings`
+
+Canonical request payload (V1):
+
+```json
+{
+  "mappingId": "map_123",
+  "sampleData": {
+    "contentType": "application/json",
+    "content": "{\"invoice\":{\"currency\":\"USD\"}}"
+  }
+}
+```
+
+Canonical success payload:
+
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "totalIssues": 2,
+      "errors": 1,
+      "warnings": 1,
+      "info": 0
+    },
+    "issues": [
+      {
+        "id": "issue_1",
+        "category": "correctness",
+        "severity": "error",
+        "description": "Potential null-path access without fallback.",
+        "recommendation": "Wrap with default(...).",
+        "affectedRules": [
+          {
+            "ruleIndex": 3,
+            "targetPath": "Order.Header.Currency"
+          }
+        ]
+      }
+    ],
+    "meta": {
+      "generatedAt": "2026-06-02T12:00:00.000Z"
+    }
+  }
+}
+```
+
+Failure/edge semantics:
+
+- V1 is **single-mapping only**; batch requests are rejected with canonical `VALIDATION_ERROR` (400).
+- Optional `sampleData` is bounded and validated at request boundary:
+  - allowed content types: JSON/XML text only (`application/json`, `application/xml`, `text/xml`)
+  - max payload size: 1 MB
+  - oversized payloads are rejected with clear `VALIDATION_ERROR` (no silent truncation)
+- Backend owns mapping/schema context retrieval and request assembly for runtime invocation.
+- Structured output is mandatory; invalid contract/enum output returns `INVALID_MODEL_OUTPUT` (500, non-retryable).
+- Canonical V1 enums are backend-enforced:
+  - `issues[].category`: `correctness | completeness | maintainability | risk`
+  - `issues[].severity`: `info | warning | error`
+- `affectedRules[]` is expected to include stable rule references (`ruleIndex`, `targetPath`, or both) for UI navigation.
+- Runtime/provider/timeout failures use shared normalization (`TIMEOUT`, `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR`) via `normalizeAIError(...)`.
+- AI validation report semantics are additive/advisory only; deterministic engine diagnostics remain authoritative for validation correctness gates.
+
 ## 12) Cross-References
 
 - `forge/architecture/phase-1-readiness.md` — backend boundary and Phase 1 constraints

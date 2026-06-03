@@ -40,6 +40,7 @@ src/
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
       smart-fix.ts    AI smart-fix lambda handler: rule-level diagnostic correction with context guardrails, stale apply guard metadata, and validation-aware suggestion response (FS-071 T-01)
+      validate-mappings.ts AI validate-mappings lambda handler: single-mapping AI quality review with backend-owned mapping/schema context assembly, optional bounded sample-data input (JSON/XML text <=1 MB), canonical advisory report parsing/enum enforcement, and normalized error envelopes (FS-072 T-01)
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
     schema/           Schema ingestion/query lambdas (FS-056)
       create-schema.ts  POST /schemas handler (FS-057 T-05)
@@ -490,6 +491,8 @@ ui/
           RuleForm.test.tsx          Component tests (14 tests: add/edit modes, validation, callbacks)
           RuleList.tsx               Rule list container (DnD reorder, CRUD state, multi-select, bulk actions, copy/paste, summary bar, keyboard nav, aria-activedescendant, empty/missing states)
           RuleList.test.tsx          Component tests (107 tests: rendering, CRUD, DnD reorder, move buttons, multi-select, bulk ops, copy/paste, announcements)
+          AiValidationPanel.tsx      FS-072 AI validation report panel for Rules view: advisory labeling, structured summary + issues (category/severity/recommendation), run/retry/reset actions, and issue-to-rule link/fallback rendering
+          AiValidationPanel.test.tsx FS-072 component tests for advisory distinction, canonical category/severity rendering, resolvable rule-link navigation, and unresolvable-reference fallback
           RuleRow.tsx                Individual rule row (checkbox-first tab order, drag handle, move up/down, target, expression, type badge, validation icon, edit/copy/delete, isFocused ring, id for aria-activedescendant)
           SourceFieldPicker.tsx      Schema field picker: search input + autocomplete, removable field pills, type indicators, multi-select, static value toggle with type dropdown (T-05); FS-052 T-02: removed TYPE_ICON, uses SourceFieldOptionRow + SourceFieldChipBadge, wired PreviewContext for test data
           SourceFieldPicker.test.tsx Component tests (15 tests: field mode, static mode, multi-select, remove, empty schema); FS-052 T-02: added type badge + test data tests (5 new tests)
@@ -582,6 +585,8 @@ ui/
           use-suggest-expression.test.ts FS-042 hook unit tests (state transitions, offline/network/rate-limit mapping, abort semantics, unmount cleanup)
           use-smart-fix.ts               FS-071 Smart Fix hook: async lifecycle state (`idle|loading|success-valid|success-invalid|stale-mismatch|error`), run/retry/rerunOnLatest/dismiss/reset actions, stale-mismatch classification, and non-mutation request handling
           use-smart-fix.test.ts          FS-071 hook unit tests (valid/invalid/stale/error transitions, retry + rerun-on-latest behavior, and dismiss/failure non-mutation guarantees)
+          use-ai-validation.ts           FS-072 AI Validation hook: async lifecycle state (`idle|loading|success|error`), manual run/retry/reset actions, optional sampleData passthrough, abort-on-reinvoke/unmount/reset, and normalized error mapping
+          use-ai-validation.test.ts      FS-072 hook unit tests (success/failure transitions, retry/reset behavior, optional sampleData wiring, and in-flight abort/non-mutation semantics)
           use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, metadata, and FEATURE_NOT_ENABLED passthrough
           use-auto-map-workspace.test.ts FS-048 hook unit tests for generation, hydration, lifecycle actions, refresh paths, filtering, and summary derivation
           use-suggestion-preview.ts      FS-048 lazy per-expression preview hook (debounced evaluateExpression, source-data guard, error isolation)
@@ -747,6 +752,7 @@ tests/
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
       suggest-expression.test.ts Tests for ai suggest-expression lambda request validation, mapping, and status handling
       smart-fix.test.ts     Tests for ai smart-fix lambda request validation, context guardrails, stale snapshot conflict handling, and validation-aware response shaping (FS-071 T-01)
+      validate-mappings.test.ts Tests for ai validate-mappings lambda request validation, V1 single-mapping enforcement, sample-data constraints, structured report shape/enum enforcement, and normalized failure mapping (FS-072 T-01)
       auto-map.test.ts      Tests for ai auto-map lambda request validation, AI status mapping, and parse-level rule validation enrichment
       fixtures/       Local runner fixtures for AI handler requests and assertions
         auto-map-event.json Single-event API Gateway fixture for local auto-map invocation

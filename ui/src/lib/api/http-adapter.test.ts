@@ -953,7 +953,7 @@ describe('HttpAdapter (CRUD)', () => {
           diagnostics: [{ code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch' }],
         }),
     ],
-    ['validateMappings', (adapter: HttpAdapter) => adapter.validateMappings({ mappingIds: ['m-1'] })],
+    ['validateMappings', (adapter: HttpAdapter) => adapter.validateMappings({ mappingId: 'm-1' })],
   ])('%s surfaces FEATURE_NOT_ENABLED when backend capability is gated', async (_method, invoke) => {
     const featureGated = new FeatureNotEnabledError('gated');
     vi.mocked(httpRequest).mockRejectedValueOnce(featureGated);
@@ -966,16 +966,66 @@ describe('HttpAdapter (CRUD)', () => {
   });
 
   it('validateMappings maps to POST /ai/validate-mappings', async () => {
-    vi.mocked(httpRequest).mockResolvedValueOnce({ valid: true, diagnostics: [] });
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      summary: {
+        totalIssues: 0,
+        bySeverity: { info: 0, warning: 0, error: 0 },
+        byCategory: { correctness: 0, completeness: 0, maintainability: 0, risk: 0 },
+      },
+      issues: [],
+    });
     const adapter = new HttpAdapter(API_URL);
 
-    await adapter.validateMappings({ mappingIds: ['m-1'] });
+    await adapter.validateMappings({ mappingId: 'm-1' });
 
     expect(httpRequest).toHaveBeenCalledWith({
       baseUrl: API_URL,
       path: '/ai/validate-mappings',
       method: 'POST',
-      body: { mappingIds: ['m-1'] },
+      body: { mappingId: 'm-1' },
+    });
+  });
+
+  it('validateMappings passes optional sampleData payload', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      summary: {
+        totalIssues: 1,
+        bySeverity: { info: 0, warning: 1, error: 0 },
+        byCategory: { correctness: 0, completeness: 1, maintainability: 0, risk: 0 },
+      },
+      issues: [
+        {
+          id: 'issue-1',
+          category: 'completeness',
+          severity: 'warning',
+          affectedRules: [{ ruleIndex: 0, targetPath: 'Order.Header.CurrencyCode' }],
+          description: 'Missing fallback behavior.',
+          recommendation: 'Add explicit fallback.',
+        },
+      ],
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.validateMappings({
+      mappingId: 'm-1',
+      sampleData: {
+        contentType: 'application/json',
+        content: '{"InvoiceCurrency":null}',
+      },
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/validate-mappings',
+      method: 'POST',
+      body: {
+        mappingId: 'm-1',
+        sampleData: {
+          contentType: 'application/json',
+          content: '{"InvoiceCurrency":null}',
+        },
+      },
     });
   });
 

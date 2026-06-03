@@ -536,6 +536,32 @@ AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`) use 
 - Stale snapshot protection is hard-gated at handler contract level:
   - rule version/hash mismatches map to canonical `CONFLICT` response for UI rerun flows.
 
+### Validate Mappings canonical contract (FS-072)
+
+`src/lambda/ai/validate-mappings.ts` is a canonical thin handler over `invokeAI('ai-validation', ...)` and enforces these production constraints:
+
+- Request contract is single-mapping, backend-context-driven:
+  - required: `mappingId`
+  - optional: `sampleData: { contentType, content }`
+- V1 scope is **single mapping only**. Batch input is rejected with canonical `VALIDATION_ERROR`.
+- Backend owns mapping/schema retrieval and AI prompt context assembly prior to invocation.
+- Optional sample-data contract is strictly validated before invocation:
+  - content types: JSON/XML text only (`application/json`, `application/xml`, `text/xml`)
+  - size cap: **1 MB max**
+  - payloads over cap are rejected (no silent truncation)
+- Handler invokes AI Validation prompt through shared runtime and requires structured-output success before response success.
+- Structured report contract is enforced as:
+  - `summary` (high-level counts/signal)
+  - `issues[]` where each issue includes `category`, `severity`, `affectedRules[]`, `description`, `recommendation`
+  - optional generation metadata (`generatedAt`, prompt/model traces when available)
+- Canonical V1 issue taxonomy is enforced at the backend boundary:
+  - `category`: `correctness | completeness | maintainability | risk`
+  - `severity`: `info | warning | error`
+- Rule references must be stable and UI-linkable (`ruleIndex`, `targetPath`, or both) via `affectedRules[]`.
+- Invalid or schema-nonconforming model output is rejected as `INVALID_MODEL_OUTPUT` (never a partial success payload).
+- Feature semantics are advisory-only: AI validation augments deterministic validation but never replaces authoritative engine diagnostics.
+- Trigger semantics are manual-only in V1; runtime/handler does not introduce auto-refresh behavior on rule edits.
+
 Lambda handlers do not:
 - Read from DynamoDB directly
 - Call the OpenAI SDK directly

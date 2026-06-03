@@ -6,6 +6,7 @@ import { Button } from '@/components';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { ConfirmDialog } from '@/features/mappings/components';
 import {
+  AiValidationPanel,
   ArrayBuilder,
   AutoMapWorkspace,
   BuilderEmptyState,
@@ -505,25 +506,48 @@ export default function MappingEditor() {
   // Right column: Target Worklist (target view) or RuleList (rules view)
   const targetWorklistContent =
     view === 'rules' ? (
-      <RuleList
-        rules={editor.rules}
-        schemasLoaded={editor.schemasLoaded}
-        summary={editor.validation.summary}
-        coveragePercent={editor.validation.coveragePercent}
-        isValidating={editor.validation.isValidating}
-        diagnosticsForRule={editor.validation.diagnosticsForRule}
-        selectedRuleIndex={selectedRuleIndex}
-        onRuleSelect={setSelectedRuleIndex}
-        view={view}
-        onViewToggle={handleViewToggle}
-        onAddRule={editor.actions.addRule}
-        onEditRule={editor.actions.updateRule}
-        onDeleteRule={editor.actions.deleteRule}
-        onReorderRule={editor.actions.reorderRules}
-        onBulkDelete={editor.actions.bulkDelete}
-        onBulkDuplicate={editor.actions.bulkDuplicate}
-        onPasteRules={editor.actions.pasteRules}
-      />
+      <div className="flex h-full min-h-0 flex-col" data-testid="rules-view-panel">
+        <AiValidationPanel
+          status={editor.aiValidation.status}
+          report={editor.aiValidation.report}
+          error={editor.aiValidation.error}
+          rules={editor.rules}
+          onRun={() => {
+            editor.actions.runAiValidation();
+          }}
+          onRetry={() => {
+            editor.actions.retryAiValidation();
+          }}
+          onReset={() => {
+            editor.actions.resetAiValidation();
+          }}
+          onNavigateToRule={(ruleIndex) => {
+            setSelectedRuleIndex(ruleIndex);
+          }}
+        />
+
+        <div className="min-h-0 flex-1">
+          <RuleList
+            rules={editor.rules}
+            schemasLoaded={editor.schemasLoaded}
+            summary={editor.validation.summary}
+            coveragePercent={editor.validation.coveragePercent}
+            isValidating={editor.validation.isValidating}
+            diagnosticsForRule={editor.validation.diagnosticsForRule}
+            selectedRuleIndex={selectedRuleIndex}
+            onRuleSelect={setSelectedRuleIndex}
+            view={view}
+            onViewToggle={handleViewToggle}
+            onAddRule={editor.actions.addRule}
+            onEditRule={editor.actions.updateRule}
+            onDeleteRule={editor.actions.deleteRule}
+            onReorderRule={editor.actions.reorderRules}
+            onBulkDelete={editor.actions.bulkDelete}
+            onBulkDuplicate={editor.actions.bulkDuplicate}
+            onPasteRules={editor.actions.pasteRules}
+          />
+        </div>
+      </div>
     ) : (
       <TargetWorklist
         nodes={editor.parsedTargetSchema?.nodes ?? []}

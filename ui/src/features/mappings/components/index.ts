@@ -58,6 +58,8 @@ export { RuleForm } from './RuleForm';
 export type { RuleFormProps, RuleFormMode } from './RuleForm';
 export { RuleList } from './RuleList';
 export type { RuleListProps } from './RuleList';
+export { AiValidationPanel } from './AiValidationPanel';
+export type { AiValidationPanelProps } from './AiValidationPanel';
 export { RuleRow } from './RuleRow';
 export type { RuleRowProps } from './RuleRow';
 export { SourceFieldPicker } from './SourceFieldPicker';

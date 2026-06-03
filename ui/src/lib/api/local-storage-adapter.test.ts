@@ -318,7 +318,7 @@ describe('LocalStorageAdapter', () => {
           diagnostics: [{ code: 'KEYRA-E001', severity: 'error', message: 'Invalid expression' }],
         }),
     ],
-    ['validateMappings', (adapter: LocalStorageAdapter) => adapter.validateMappings({ mappingIds: ['m'] })],
+    ['validateMappings', (adapter: LocalStorageAdapter) => adapter.validateMappings({ mappingId: 'm' })],
     ['listCdmSchemas', (adapter: LocalStorageAdapter) => adapter.listCdmSchemas()],
     [
       'previewOnServer',

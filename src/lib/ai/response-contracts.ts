@@ -53,7 +53,81 @@ export const RESPONSE_SCHEMA_CONTRACTS: Readonly<Record<CanonicalPromptId, Respo
     promptId: PROMPT_IDS.AI_VALIDATION,
     schema: {
       type: 'object',
-      additionalProperties: true,
+      properties: {
+        summary: {
+          type: 'object',
+          properties: {
+            totalIssues: { type: 'number' },
+            bySeverity: {
+              type: 'object',
+              properties: {
+                info: { type: 'number' },
+                warning: { type: 'number' },
+                error: { type: 'number' },
+              },
+              required: ['info', 'warning', 'error'],
+              additionalProperties: false,
+            },
+            byCategory: {
+              type: 'object',
+              properties: {
+                correctness: { type: 'number' },
+                completeness: { type: 'number' },
+                maintainability: { type: 'number' },
+                risk: { type: 'number' },
+              },
+              required: ['correctness', 'completeness', 'maintainability', 'risk'],
+              additionalProperties: false,
+            },
+          },
+          required: ['totalIssues', 'bySeverity', 'byCategory'],
+          additionalProperties: false,
+        },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', minLength: 1 },
+              category: {
+                type: 'string',
+                enum: ['correctness', 'completeness', 'maintainability', 'risk'],
+              },
+              severity: {
+                type: 'string',
+                enum: ['info', 'warning', 'error'],
+              },
+              affectedRules: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    ruleIndex: { type: 'number' },
+                    targetPath: { type: 'string', minLength: 1 },
+                  },
+                  additionalProperties: false,
+                },
+              },
+              description: { type: 'string', minLength: 1 },
+              recommendation: { type: 'string', minLength: 1 },
+            },
+            required: ['id', 'category', 'severity', 'affectedRules', 'description', 'recommendation'],
+            additionalProperties: false,
+          },
+        },
+        notes: { type: 'string' },
+        meta: {
+          type: 'object',
+          properties: {
+            generatedAt: { type: 'string' },
+            model: { type: 'string' },
+            promptId: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+      },
+      required: ['summary', 'issues'],
+      additionalProperties: false,
     },
   },
   [PROMPT_IDS.AUTO_MAP]: {

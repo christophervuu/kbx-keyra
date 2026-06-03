@@ -58,6 +58,11 @@ export type {
   SmartFixState,
   UseSmartFixReturn,
 } from './use-smart-fix';
+export { useAiValidation } from './use-ai-validation';
+export type {
+  AiValidationState,
+  UseAiValidationReturn,
+} from './use-ai-validation';
 // FS-048 auto-map workspace hook
 export { useAutoMapWorkspace } from './use-auto-map-workspace';
 export type {

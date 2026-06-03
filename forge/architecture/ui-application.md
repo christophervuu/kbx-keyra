@@ -449,6 +449,59 @@ Draft mutation semantics:
 - Accept applies only to in-memory draft state (`updateDraft`) for the selected field and immediately re-enters normal validation flow.
 - Dismiss, error, stale-mismatch, and retry flows do not mutate draft or persisted mapping state.
 
+### AI Validation canonical review model (FS-072)
+
+AI Validation is a mapping-quality **advisory report** flow and remains explicitly distinct from deterministic validation diagnostics.
+
+Canonical UI→API request contract:
+
+- required: `mappingId`
+- optional: `sampleData: { contentType, content }`
+- request path: `ApiAdapter.validateMappings` → `HttpAdapter` → `POST /ai/validate-mappings`
+
+Canonical hook/UI state model:
+
+- `useAiValidation` lifecycle: `idle | loading | success | error`
+- command surface: `run`, `retry`, `reset`
+- request cancellation semantics:
+  - reinvoking `run` aborts prior in-flight request
+  - `reset` aborts in-flight request and clears state
+  - unmount aborts in-flight request
+
+Canonical Mapping Editor integration behavior:
+
+- `useMappingEditor` exposes AI validation orchestration via:
+  - state: `aiValidation`
+  - actions: `runAiValidation`, `retryAiValidation`, `resetAiValidation`
+- Trigger model is **manual-only** in V1:
+  - editing rules does not auto-run AI validation
+  - user must explicitly click Validate with AI / Retry
+
+Canonical report rendering behavior (`AiValidationPanel`):
+
+- Placement: Rules view, rendered above `RuleList`.
+- Labeling: clearly marked as AI-generated guidance/advisory.
+- Report sections:
+  - summary counts/signal
+  - issue list with canonical V1 category/severity badges
+  - per-issue description and recommendation
+- Canonical V1 enums surfaced in UI:
+  - `category`: `correctness | completeness | maintainability | risk`
+  - `severity`: `info | warning | error`
+
+Rule-link behavior:
+
+- `affectedRules[]` references attempt resolution in this order:
+  1. valid `ruleIndex`
+  2. fallback by `targetPath`
+- When unresolved/stale, panel renders non-click fallback text/chip and does not crash.
+
+Deterministic-vs-AI boundary semantics:
+
+- Deterministic engine diagnostics remain the authoritative validation channel.
+- AI Validation findings are additive and non-blocking guidance.
+- AI Validation failures do not mutate mapping draft state or deterministic diagnostics.
+
 ---
 
 ## State Management
