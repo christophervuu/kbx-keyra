@@ -47,6 +47,7 @@ This document was authored after T-01 and T-02 of FS-064 and reflects implemente
 | `configHash` | — | String | SHA-256 of config content |
 | `deployedAt` | — | String | ISO 8601 |
 | `deployedBy` | — | String | User identifier (`"system"` for programmatic deploys in Phase 1) |
+| `cdmSchemaTraceability` | — | Array (optional) | FS-079 traceability entries for referenced CDM schemas (`schemaId`, optional `schemaName`, `referenceRole`, `repo`, `path`, `commitSha`) |
 | `promotedFrom` | — | String | Environment promoted from — absent if direct deploy |
 | `rollbackOf` | — | String | SK (`environmentDeployedAt`) of the deployment this entry rolls back — absent if not a rollback |
 
@@ -81,11 +82,16 @@ Bucket: configured via `STORAGE_BUCKET` environment variable.
 
 | Key Pattern | Content | Mutability |
 |-------------|---------|------------|
-| `deployments/{mappingId}/{ENV}/{deployedAt}.json` | Config snapshot at deploy time (full mapping config JSON) | Immutable — never overwritten or deleted |
+| `deployments/{mappingId}/{ENV}/{deployedAt}.json` | Deployment snapshot payload `{ config, metadata }`; FS-079 metadata may include `cdmSchemaTraceability[]` | Immutable — never overwritten or deleted |
 
 Key builder: `deploymentSnapshotKey(mappingId, environment, deployedAt)` in `src/lib/persistence/config.ts`.
 
 Snapshot copies are written from the revision's or version's existing S3 object at deploy time via `src/lib/persistence/s3/deployment-snapshot.ts`. Once written, they are never mutated — rollback replays a snapshot by referencing its key rather than modifying it.
+
+FS-079 dual-location traceability rule:
+- when a deploy/promote succeeds with referenced CDM schemas, traceability is written to:
+  1. `DeploymentItem.cdmSchemaTraceability`
+  2. snapshot body metadata (`metadata.cdmSchemaTraceability`)
 
 ---
 
@@ -118,6 +124,38 @@ Enforced at the API layer in `deploy-mapping.ts`. The persistence layer accepts 
 | `PROMOTION_REQUIRES_VERSION` | 400 | Promote was attempted on a revision-backed deployment |
 | `SOURCE_NOT_FOUND` | 404 | Referenced revision or version does not exist |
 | `SNAPSHOT_INTEGRITY_ERROR` | 500 | Version config snapshot is missing from S3 (should not occur under normal operation) |
+| `DEPLOY_BLOCKED_CDM_SCHEMA_STATE` | 409 | Deploy/promote blocked because one or more referenced CDM schemas are not deployable (FS-079) |
+
+### FS-079 CDM deploy-context guardrail
+
+Deploy and promote handlers run a CDM pre-check before any deployment create writes.
+
+Enforcement points:
+- `src/lambda/deployment/deploy-mapping.ts`
+- `src/lambda/deployment/promote-deployment.ts`
+
+Shared guard:
+- `src/lambda/deployment/cdm-deploy-guard.ts`
+
+Guard output contract:
+- `issues[]` with per-schema:
+  - `schemaId`
+  - optional `schemaName`
+  - `referenceRole` (`source` | `target`)
+  - `reason`
+  - `remediationKey`
+
+Stable reason taxonomy:
+- `unsynced`
+- `update-failed`
+- `metadata-incomplete`
+- `ingest-not-ready`
+- `schema-missing`
+
+Blocking semantics:
+- all issues are returned in one response (no first-failure short-circuit)
+- any issue blocks deploy/promote and no deployment persistence write occurs
+- non-CDM referenced schemas are ignored by this guard
 
 ---
 
@@ -246,14 +284,14 @@ src/lib/persistence/
   config.ts                 deploymentSnapshotKey(), deploymentHistorySortKey(), deploymentCurrentKey()
   types.ts                  DeploymentItem, DeploymentCurrentItem, CreateDeploymentInput, DeploymentEnvironment
   s3/
-    deployment-snapshot.ts  Write config snapshot to S3 at deployments/{mappingId}/{ENV}/{ts}.json
+    deployment-snapshot.ts  Write deployment snapshot payload (`{ config, metadata }`) to S3 at deployments/{mappingId}/{ENV}/{ts}.json
 ```
 
 **Key functions in `deployments.ts`:**
 
 | Function | Description |
 |----------|-------------|
-| `create(input)` | Writes DeploymentItem + DeploymentCurrentItem + S3 snapshot atomically |
+| `create(input)` | Writes DeploymentItem + DeploymentCurrentItem + S3 snapshot atomically; persists optional `cdmSchemaTraceability` to both item and snapshot metadata |
 | `getCurrent(mappingId, env)` | Returns `DeploymentCurrentItem \| null` for a single environment |
 | `getCurrentAll(mappingId)` | Returns `{ DEV, QA, PROD }` current items (parallel reads) |
 | `listHistory(mappingId, env?, limit?)` | Paginated query on Deployments table, descending by SK |

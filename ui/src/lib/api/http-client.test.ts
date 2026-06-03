@@ -606,6 +606,76 @@ describe('httpRequest', () => {
     });
   });
 
+  it('preserves backend error details payload on HttpClientError and AppError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          backendErrorResponse(
+            {
+              error: {
+                code: 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE',
+                message: 'Deployment blocked: referenced CDM schema state is not deployable',
+                statusCode: 409,
+                retryable: false,
+                details: {
+                  issues: [
+                    {
+                      schemaId: 'schema-source',
+                      referenceRole: 'source',
+                      reason: 'unsynced',
+                      remediationKey: 're-sync-schema',
+                    },
+                  ],
+                },
+              },
+            },
+            { status: 409 },
+          ),
+        ),
+    );
+
+    const error = await httpRequest({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/mappings/map-1/deploy',
+      method: 'POST',
+      body: {
+        environment: 'DEV',
+        sourceType: 'revision',
+        sourceNumber: 3,
+      },
+      retry: false,
+    }).catch((err: unknown) => err as HttpClientError);
+
+    expect(error).toMatchObject<HttpClientError>({
+      code: 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE',
+      statusCode: 409,
+      retryable: false,
+    });
+    expect(error.details).toEqual({
+      issues: [
+        {
+          schemaId: 'schema-source',
+          referenceRole: 'source',
+          reason: 'unsynced',
+          remediationKey: 're-sync-schema',
+        },
+      ],
+    });
+
+    expect(toAppError(error).details).toEqual({
+      issues: [
+        {
+          schemaId: 'schema-source',
+          referenceRole: 'source',
+          reason: 'unsynced',
+          remediationKey: 're-sync-schema',
+        },
+      ],
+    });
+  });
+
   it('parses backend error envelope when requestId is missing', async () => {
     vi.stubGlobal(
       'fetch',

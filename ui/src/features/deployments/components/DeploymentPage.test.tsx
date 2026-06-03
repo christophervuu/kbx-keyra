@@ -55,6 +55,20 @@ const DEPLOY_RECORD: DeploymentRecord = {
   deployedBy: 'alice',
 };
 
+function createDeployBlockedError(issues: unknown[]): Error {
+  const error = new Error('Deployment blocked: referenced CDM schema state is not deployable') as Error & {
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    details?: unknown;
+  };
+  error.code = 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE';
+  error.statusCode = 409;
+  error.retryable = false;
+  error.details = { issues };
+  return error;
+}
+
 // ---------------------------------------------------------------------------
 // Mock adapter factory
 // ---------------------------------------------------------------------------
@@ -296,6 +310,102 @@ describe('DeploymentPage', () => {
     await waitFor(() => screen.getByTestId('deploy-error-banner'));
 
     expect(screen.getByTestId('deploy-error-banner').textContent).toContain('permission denied');
+  });
+
+  it('renders schema-specific deploy-block reasons and remediation CTAs from backend issues', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockRejectedValue(
+        createDeployBlockedError([
+          {
+            schemaId: 'schema-source',
+            schemaName: 'Order Source',
+            referenceRole: 'source',
+            reason: 'unsynced',
+            remediationKey: 're-sync-schema',
+          },
+          {
+            schemaId: 'schema-target',
+            referenceRole: 'target',
+            reason: 'schema-missing',
+            remediationKey: 'relink-cdm-schema',
+          },
+        ]),
+      ),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+
+    await waitFor(() => screen.getByTestId('cdm-block-list'));
+    expect(screen.getByTestId('cdm-block-issue-source-schema-source').textContent).toContain(
+      'Source schema: Order Source — Not synced yet',
+    );
+    expect(screen.getByTestId('cdm-block-issue-target-schema-target').textContent).toContain(
+      'Target schema: schema-target — Schema is missing',
+    );
+
+    const sourceCta = screen.getByTestId('cdm-remediation-cta-source-schema-source');
+    expect(sourceCta.textContent).toContain('Open schema to re-sync');
+    expect(sourceCta.getAttribute('href')).toBe('/schemas/schema-source');
+
+    const targetCta = screen.getByTestId('cdm-remediation-cta-target-schema-target');
+    expect(targetCta.textContent).toContain('Open schema library to relink');
+    expect(targetCta.getAttribute('href')).toBe('/schemas');
+  });
+
+  it('clears prior deploy-block messaging after successful retry', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi
+        .fn()
+        .mockRejectedValueOnce(
+          createDeployBlockedError([
+            {
+              schemaId: 'schema-source',
+              referenceRole: 'source',
+              reason: 'update-failed',
+              remediationKey: 'retry-sync',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(DEPLOY_RECORD),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('cdm-block-list'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-success-banner'));
+
+    expect(screen.queryByTestId('cdm-block-list')).toBeNull();
+  });
+
+  it('keeps generic error treatment for non-CDM deployment failures', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Conflict: duplicate deployment request'), {
+          code: 'CONFLICT',
+          statusCode: 409,
+          retryable: false,
+        }),
+      ),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+
+    await waitFor(() => screen.getByTestId('deploy-error-banner'));
+    expect(screen.getByTestId('deploy-error-banner').textContent).toContain('duplicate deployment request');
+    expect(screen.queryByTestId('cdm-block-list')).toBeNull();
   });
 
   it('dismisses success banner on close', async () => {

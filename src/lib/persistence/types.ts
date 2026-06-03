@@ -293,6 +293,21 @@ export type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
 
 export type DeploymentSourceType = 'revision' | 'version';
 
+export type DeploymentSchemaReferenceRole = 'source' | 'target';
+
+export interface DeploymentCdmSchemaTraceabilityEntry {
+  readonly schemaId: string;
+  readonly schemaName?: string;
+  readonly referenceRole: DeploymentSchemaReferenceRole;
+  readonly repo: string;
+  readonly path: string;
+  readonly commitSha: string;
+}
+
+export interface DeploymentSnapshotMetadata {
+  readonly cdmSchemaTraceability?: readonly DeploymentCdmSchemaTraceabilityEntry[];
+}
+
 /**
  * DynamoDB Deployments table item.
  */
@@ -307,6 +322,7 @@ export interface DeploymentItem {
   readonly configHash: string;
   readonly deployedAt: ISODateString;
   readonly deployedBy: string;
+  readonly cdmSchemaTraceability?: readonly DeploymentCdmSchemaTraceabilityEntry[];
   readonly promotedFrom?: DeploymentEnvironment;
   readonly rollbackOf?: string;
 }
@@ -351,6 +367,7 @@ export interface CreateDeploymentInput {
   readonly sourceNumber: number;
   readonly deployedBy: string;
   readonly config: MappingConfig;
+  readonly cdmSchemaTraceability?: readonly DeploymentCdmSchemaTraceabilityEntry[];
   readonly promotedFrom?: DeploymentEnvironment;
   readonly rollbackOf?: string;
 }

@@ -632,3 +632,60 @@ CDM browse/link/sync flows must use GitHub read endpoints only.
 
 - Forbidden in CDM flow paths: content/ref/tree write operations.
 - Regression tests assert no write-style endpoint usage patterns in these handlers.
+
+---
+
+## 14) Deployment Guardrail Addendum (FS-079)
+
+FS-079 adds backend-enforced deploy-context gating for CDM-referenced mappings.
+
+### Guard enforcement scope
+
+- Applied to deployment entrypoints:
+  - `POST /mappings/:mappingId/deploy`
+  - `POST /mappings/:mappingId/promote`
+- Not applied to save/edit/version-create flows (`Save ≠ Deploy` remains true).
+- Guard executes before any deployment persistence write call.
+
+### Blocking envelope contract
+
+When one or more referenced CDM schemas are not deployable, handlers return:
+
+- HTTP `409`
+- `error.code = DEPLOY_BLOCKED_CDM_SCHEMA_STATE`
+- standard envelope fields (`message`, `statusCode`, `retryable`, `requestId`)
+- `error.details.issues[]` with per-schema entries:
+  - `schemaId`
+  - optional `schemaName`
+  - `referenceRole` (`source` | `target`)
+  - `reason` (stable enum)
+  - `remediationKey`
+
+Stable reason taxonomy:
+- `unsynced`
+- `update-failed`
+- `metadata-incomplete`
+- `ingest-not-ready`
+- `schema-missing`
+
+Blocking semantics:
+- all issues are returned in one response (no first-failure short-circuit)
+- when blocked, deploy/promote handlers perform no deployment create writes
+- non-CDM referenced schemas are ignored by this guardrail
+
+### Successful deploy/promote traceability contract
+
+On successful deploy/promote with referenced CDM schemas, traceability is persisted in both locations:
+
+1. Deployment item metadata (`DeploymentItem.cdmSchemaTraceability[]`)
+2. Snapshot body metadata (`metadata.cdmSchemaTraceability[]`)
+
+Each traceability entry includes:
+- `schemaId`
+- optional `schemaName`
+- `referenceRole` (`source` | `target`)
+- `repo`
+- `path`
+- `commitSha`
+
+This dual-location contract provides immutable snapshot provenance plus query-friendly record-level traceability.

@@ -33,7 +33,10 @@ function toDeploymentCurrentItem(item: DeploymentItem): DeploymentCurrentItem {
 export async function create(input: CreateDeploymentInput): Promise<DeploymentItem> {
   const deployedAt = nowIso();
   const configHash = await computeConfigHash(input.config);
-  const configS3Key = await putDeploymentSnapshot(input.mappingId, input.environment, deployedAt, input.config);
+  const snapshotMetadata = {
+    ...(input.cdmSchemaTraceability ? { cdmSchemaTraceability: input.cdmSchemaTraceability } : {}),
+  };
+  const configS3Key = await putDeploymentSnapshot(input.mappingId, input.environment, deployedAt, input.config, snapshotMetadata);
 
   const item: DeploymentItem = {
     mappingId: input.mappingId,
@@ -45,6 +48,7 @@ export async function create(input: CreateDeploymentInput): Promise<DeploymentIt
     configHash,
     deployedAt,
     deployedBy: input.deployedBy,
+    ...(input.cdmSchemaTraceability ? { cdmSchemaTraceability: input.cdmSchemaTraceability } : {}),
     ...(input.promotedFrom ? { promotedFrom: input.promotedFrom } : {}),
     ...(input.rollbackOf ? { rollbackOf: input.rollbackOf } : {}),
   };

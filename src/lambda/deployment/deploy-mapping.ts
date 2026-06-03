@@ -1,6 +1,7 @@
 import {
   ERROR_CODES,
   errorResponse,
+  generateRequestId,
   getItem,
   internalError,
   jsonResponse,
@@ -12,6 +13,7 @@ import {
 import { create as createDeployment } from '../../lib/persistence/deployments.js';
 import { getConfig as getRevisionConfig } from '../../lib/persistence/mapping-revisions.js';
 import { get as getVersion, getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
+import { validateCdmDeployGuard } from './cdm-deploy-guard.js';
 
 type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
 type DeploymentSourceType = 'revision' | 'version';
@@ -24,6 +26,8 @@ interface DeployRequest {
 
 interface MappingMetadata {
   readonly mappingId: string;
+  readonly sourceSchemaId?: string;
+  readonly targetSchemaId?: string;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -107,6 +111,27 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(ERROR_CODES.RESOURCE_NOT_FOUND, `Mapping with id '${mappingId}' not found`, 404, false);
     }
 
+    const cdmGuard = await validateCdmDeployGuard(mapping);
+    if (cdmGuard.blocked) {
+      const requestId = generateRequestId();
+      return jsonResponse(
+        409,
+        {
+          error: {
+            code: ERROR_CODES.DEPLOY_BLOCKED_CDM_SCHEMA_STATE,
+            message: 'Deployment blocked: referenced CDM schema state is not deployable',
+            statusCode: 409,
+            retryable: false,
+            requestId,
+            details: {
+              issues: cdmGuard.issues,
+            },
+          },
+        },
+        requestId,
+      );
+    }
+
     if (request.sourceType === 'revision') {
       const config = await getRevisionConfig(mappingId, request.sourceNumber);
       if (!config) {
@@ -124,6 +149,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         sourceType: 'revision',
         sourceNumber: request.sourceNumber,
         deployedBy: 'system',
+        ...(cdmGuard.cdmTraceability.length > 0 ? { cdmSchemaTraceability: cdmGuard.cdmTraceability } : {}),
         config,
       });
 
@@ -156,6 +182,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       sourceType: 'version',
       sourceNumber: version.version,
       deployedBy: 'system',
+      ...(cdmGuard.cdmTraceability.length > 0 ? { cdmSchemaTraceability: cdmGuard.cdmTraceability } : {}),
       config,
     });
 

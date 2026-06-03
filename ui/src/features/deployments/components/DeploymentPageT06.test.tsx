@@ -112,6 +112,20 @@ const ROLLBACK_RECORD: DeploymentRecord = {
   rollbackOf: 'DEV#2026-01-02T10:00:00Z',
 };
 
+function createDeployBlockedError(issues: unknown[]): Error {
+  const error = new Error('Promotion blocked: referenced CDM schema state is not deployable') as Error & {
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    details?: unknown;
+  };
+  error.code = 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE';
+  error.statusCode = 409;
+  error.retryable = false;
+  error.details = { issues };
+  return error;
+}
+
 // ---------------------------------------------------------------------------
 // Mock adapter factory
 // ---------------------------------------------------------------------------
@@ -324,6 +338,35 @@ describe('T-06: Promote button visibility (AE-07)', () => {
 
     await waitFor(() => screen.getByTestId('deploy-success-banner'));
     expect(screen.getByTestId('deploy-success-banner').textContent).toContain('promoted');
+  });
+
+  it('shows schema-specific block messaging for promote guardrail failures', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      promoteDeployment: vi.fn().mockRejectedValue(
+        createDeployBlockedError([
+          {
+            schemaId: 'schema-target',
+            schemaName: 'Order Target',
+            referenceRole: 'target',
+            reason: 'metadata-incomplete',
+            remediationKey: 'relink-cdm-schema',
+          },
+        ]),
+      ),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('promote-btn-DEV'));
+    await user.click(screen.getByTestId('promote-btn-DEV'));
+
+    await waitFor(() => screen.getByTestId('cdm-block-list'));
+    expect(screen.getByTestId('cdm-block-issue-target-schema-target').textContent).toContain(
+      'Target schema: Order Target — Schema metadata is incomplete',
+    );
+    const cta = screen.getByTestId('cdm-remediation-cta-target-schema-target');
+    expect(cta.textContent).toContain('Open schema library to relink');
+    expect(cta.getAttribute('href')).toBe('/schemas');
   });
 });
 

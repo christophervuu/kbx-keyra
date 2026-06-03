@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "forge/active/FS-078/tasks/T-07.md",
+                "file": "forge/active/FS-079/tasks/T-03.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "T-07"
+              "title": "T-03"
             }
           }
         ]
@@ -182,6 +182,11 @@
   },
   "active": "9fc165ccd6a75d01",
   "lastOpenFiles": [
-    "forge/active/FS-079/tasks/T-01.md"
+    "forge/active/FS-079/tasks/T-04.md",
+    "forge/active/FS-079/tasks/T-03.md",
+    "forge/active/FS-079/tasks/T-02.md",
+    "forge/active/FS-079/tasks/T-01.md",
+    "src/lambda/deployment/cdm-deploy-guard.ts",
+    "forge/active/FS-078/tasks/T-07.md"
   ]
 }

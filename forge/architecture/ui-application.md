@@ -2394,6 +2394,31 @@ UI consumption contract notes:
 - Backend is the canonical source of CDM sync-status normalization.
 - UI consumes canonical enum values for primary rendering; defensive display fallback maps unknown/legacy status values to `sync-failed` to preserve cross-surface safety and consistency.
 
+### FS-079 deployment guardrail messaging contract
+
+Deployment UI consumes backend CDM deploy-block responses and renders schema-specific remediation guidance.
+
+Canonical contract:
+
+- Trigger surfaces: deployment and promotion actions in deployment workflows.
+- Blocking source of truth: backend `DEPLOY_BLOCKED_CDM_SCHEMA_STATE` envelope (HTTP 409).
+- UI renders `error.details.issues[]` entries with:
+  - schema identity (`schemaId`, optional `schemaName`)
+  - `referenceRole` (`source` | `target`)
+  - stable reason enum (`unsynced`, `update-failed`, `metadata-incomplete`, `ingest-not-ready`, `schema-missing`)
+  - remediation CTA mapping derived from `remediationKey`
+
+Interaction semantics:
+
+- Block messaging is rendered for both deploy and promote failures of this class.
+- UI should display all issues returned by backend in one render pass (no local first-failure truncation).
+- Successful retry clears prior block state and returns to normal success feedback.
+- Generic deployment-error handling remains unchanged for non-guardrail failures.
+
+Traceability-facing note:
+
+- Successful deploy/promote responses include deployment records carrying CDM traceability metadata (`cdmSchemaTraceability`) produced by backend; UI uses this for provenance display where deployment-history surfaces expose metadata fields.
+
 ### UI preference storage vs domain storage
 
 - Domain data (schema content/metadata, delete/promote, usage source records) always flows through `ApiAdapter`.

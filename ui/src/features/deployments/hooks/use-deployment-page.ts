@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAdapter } from '@/lib/api';
 import type { CurrentDeployments, DeploymentRecord, DeploymentSourceType } from '@/lib/api/types';
+import { toAppError } from '@/lib/state/app-error';
 import type { Environment, MappingRevision, MappingVersion } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -44,7 +45,14 @@ export interface UseDeploymentPageResult {
   /** Whether a deploy/promote/rollback action is in progress */
   isDeploying: boolean;
   /** Feedback message after a deploy/promote/rollback (success or error) */
-  deployFeedback: { kind: 'success' | 'error'; message: string } | null;
+  deployFeedback:
+    | { kind: 'success'; message: string }
+    | {
+      kind: 'error';
+      message: string;
+      cdmBlockIssues?: readonly CdmDeployBlockUiIssue[];
+    }
+    | null;
   /** Clear the deploy feedback banner */
   clearDeployFeedback: () => void;
 
@@ -57,6 +65,100 @@ export interface UseDeploymentPageResult {
 
   /** Refresh all data */
   refresh: () => void;
+}
+
+export type CdmDeployBlockUiIssueReason =
+  | 'unsynced'
+  | 'update-failed'
+  | 'metadata-incomplete'
+  | 'ingest-not-ready'
+  | 'schema-missing';
+
+export type CdmDeployBlockUiIssueRemediation =
+  | 're-sync-schema'
+  | 'retry-sync'
+  | 'relink-cdm-schema'
+  | 'complete-ingestion';
+
+export interface CdmDeployBlockUiIssue {
+  readonly schemaId: string;
+  readonly schemaName?: string;
+  readonly referenceRole: 'source' | 'target';
+  readonly reason: CdmDeployBlockUiIssueReason;
+  readonly remediationKey: CdmDeployBlockUiIssueRemediation;
+}
+
+interface CdmDeployBlockDetails {
+  readonly issues?: unknown;
+}
+
+function isReferenceRole(value: unknown): value is CdmDeployBlockUiIssue['referenceRole'] {
+  return value === 'source' || value === 'target';
+}
+
+function isIssueReason(value: unknown): value is CdmDeployBlockUiIssueReason {
+  return (
+    value === 'unsynced' ||
+    value === 'update-failed' ||
+    value === 'metadata-incomplete' ||
+    value === 'ingest-not-ready' ||
+    value === 'schema-missing'
+  );
+}
+
+function isRemediationKey(value: unknown): value is CdmDeployBlockUiIssueRemediation {
+  return (
+    value === 're-sync-schema' ||
+    value === 'retry-sync' ||
+    value === 'relink-cdm-schema' ||
+    value === 'complete-ingestion'
+  );
+}
+
+function parseCdmDeployBlockIssues(error: unknown): readonly CdmDeployBlockUiIssue[] | undefined {
+  const appError = toAppError(error);
+  if (appError.code !== 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE') {
+    return undefined;
+  }
+
+  const details = appError.details as CdmDeployBlockDetails | undefined;
+  if (!details || !Array.isArray(details.issues)) {
+    return [];
+  }
+
+  const parsed: CdmDeployBlockUiIssue[] = [];
+  for (const issue of details.issues) {
+    if (!issue || typeof issue !== 'object') {
+      continue;
+    }
+
+    const typed = issue as {
+      schemaId?: unknown;
+      schemaName?: unknown;
+      referenceRole?: unknown;
+      reason?: unknown;
+      remediationKey?: unknown;
+    };
+
+    if (
+      typeof typed.schemaId !== 'string' ||
+      !isReferenceRole(typed.referenceRole) ||
+      !isIssueReason(typed.reason) ||
+      !isRemediationKey(typed.remediationKey)
+    ) {
+      continue;
+    }
+
+    parsed.push({
+      schemaId: typed.schemaId,
+      ...(typeof typed.schemaName === 'string' ? { schemaName: typed.schemaName } : {}),
+      referenceRole: typed.referenceRole,
+      reason: typed.reason,
+      remediationKey: typed.remediationKey,
+    });
+  }
+
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +181,7 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const [deployFeedback, setDeployFeedback] = useState<{
     kind: 'success' | 'error';
     message: string;
+    cdmBlockIssues?: readonly CdmDeployBlockUiIssue[];
   } | null>(null);
 
   const mountedRef = useRef(true);
@@ -201,9 +304,11 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         void loadHistory(input.environment);
       } catch (err) {
         if (!mountedRef.current) return;
+        const cdmBlockIssues = parseCdmDeployBlockIssues(err);
         setDeployFeedback({
           kind: 'error',
           message: err instanceof Error ? err.message : 'Deploy failed',
+          ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
         });
       } finally {
         if (mountedRef.current) {
@@ -237,9 +342,11 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         void loadHistory(toEnvironment);
       } catch (err) {
         if (!mountedRef.current) return;
+        const cdmBlockIssues = parseCdmDeployBlockIssues(err);
         setDeployFeedback({
           kind: 'error',
           message: err instanceof Error ? err.message : 'Promote failed',
+          ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
         });
       } finally {
         if (mountedRef.current) {

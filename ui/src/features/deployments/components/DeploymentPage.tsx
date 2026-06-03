@@ -6,6 +6,7 @@ import { EnvironmentComparisonPanel } from './EnvironmentComparisonPanel';
 import { EnvironmentSelector } from './EnvironmentSelector';
 import { RevisionDeploySection } from './RevisionDeploySection';
 import { VersionDeploySection } from './VersionDeploySection';
+import type { CdmDeployBlockUiIssue } from '../hooks/use-deployment-page';
 import { useDeploymentPage } from '../hooks/use-deployment-page';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -65,12 +66,67 @@ function CurrentDeploymentStrip({
 // ---------------------------------------------------------------------------
 
 interface FeedbackBannerProps {
-  kind: 'success' | 'error';
-  message: string;
+  feedback:
+    | { kind: 'success'; message: string }
+    | { kind: 'error'; message: string; cdmBlockIssues?: readonly CdmDeployBlockUiIssue[] };
   onDismiss: () => void;
 }
 
-function FeedbackBanner({ kind, message, onDismiss }: FeedbackBannerProps) {
+function issueReasonLabel(reason: CdmDeployBlockUiIssue['reason']): string {
+  switch (reason) {
+    case 'unsynced':
+      return 'Not synced yet';
+    case 'update-failed':
+      return 'Last sync failed';
+    case 'metadata-incomplete':
+      return 'Schema metadata is incomplete';
+    case 'ingest-not-ready':
+      return 'Schema ingestion is still in progress';
+    case 'schema-missing':
+      return 'Schema is missing';
+  }
+}
+
+function issueRoleLabel(role: CdmDeployBlockUiIssue['referenceRole']): string {
+  return role === 'source' ? 'Source' : 'Target';
+}
+
+function issueRemediationText(issue: CdmDeployBlockUiIssue): string {
+  switch (issue.remediationKey) {
+    case 're-sync-schema':
+      return 'Re-sync this schema, then retry deployment.';
+    case 'retry-sync':
+      return 'Retry schema sync, then retry deployment.';
+    case 'relink-cdm-schema':
+      return 'Relink this CDM schema, then retry deployment.';
+    case 'complete-ingestion':
+      return 'Wait for schema ingestion to finish, then retry deployment.';
+  }
+}
+
+function remediationActionLabel(remediationKey: CdmDeployBlockUiIssue['remediationKey']): string {
+  switch (remediationKey) {
+    case 're-sync-schema':
+      return 'Open schema to re-sync';
+    case 'retry-sync':
+      return 'Open schema to retry sync';
+    case 'relink-cdm-schema':
+      return 'Open schema library to relink';
+    case 'complete-ingestion':
+      return 'Open schema and check status';
+  }
+}
+
+function remediationActionPath(issue: CdmDeployBlockUiIssue): string {
+  if (issue.remediationKey === 'relink-cdm-schema') {
+    return PATHS.SCHEMA_LIBRARY;
+  }
+
+  return PATHS.SCHEMA_DETAIL.replace(':schemaId', issue.schemaId);
+}
+
+function FeedbackBanner({ feedback, onDismiss }: FeedbackBannerProps) {
+  const { kind, message } = feedback;
   if (kind === 'success') {
     return (
       <div
@@ -101,6 +157,38 @@ function FeedbackBanner({ kind, message, onDismiss }: FeedbackBannerProps) {
     >
       <AlertCircle size={16} aria-hidden="true" className="shrink-0" />
       <span className="flex-1">{message}</span>
+      {feedback.cdmBlockIssues && feedback.cdmBlockIssues.length > 0 && (
+        <div className="w-full rounded border border-red-700/40 bg-slate-950/40 p-3" data-testid="cdm-block-list">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-red-200">
+            Resolve these schema issues before retrying:
+          </p>
+          <ul className="space-y-2">
+            {feedback.cdmBlockIssues.map((issue) => (
+              <li
+                key={`${issue.referenceRole}-${issue.schemaId}-${issue.reason}`}
+                className="rounded border border-red-900/40 bg-red-950/20 p-2"
+                data-testid={`cdm-block-issue-${issue.referenceRole}-${issue.schemaId}`}
+              >
+                <p className="text-sm text-red-100">
+                  <span className="font-semibold">{issueRoleLabel(issue.referenceRole)} schema:</span>{' '}
+                  {issue.schemaName ?? issue.schemaId} — {issueReasonLabel(issue.reason)}
+                </p>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <p className="text-xs text-red-200">{issueRemediationText(issue)}</p>
+                  <Link
+                    to={remediationActionPath(issue)}
+                    aria-label={remediationActionLabel(issue.remediationKey)}
+                    className="shrink-0 rounded border border-red-700/50 px-2 py-1 text-xs text-red-200 hover:bg-red-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                    data-testid={`cdm-remediation-cta-${issue.referenceRole}-${issue.schemaId}`}
+                  >
+                    {remediationActionLabel(issue.remediationKey)}
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <button
         type="button"
         onClick={onDismiss}
@@ -196,8 +284,7 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
       {deployFeedback && (
         <div className="mb-6">
           <FeedbackBanner
-            kind={deployFeedback.kind}
-            message={deployFeedback.message}
+            feedback={deployFeedback}
             onDismiss={clearDeployFeedback}
           />
         </div>

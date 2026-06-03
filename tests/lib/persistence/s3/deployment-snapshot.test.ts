@@ -57,6 +57,43 @@ describe('persistence s3/deployment-snapshot', () => {
     expect(command.input.Bucket).toBe('keyra-storage');
     expect(command.input.Key).toBe('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
     expect(command.input.ContentType).toBe('application/json');
+    const payload = JSON.parse(command.input.Body);
+    expect(payload.config).toEqual(makeConfig());
+    expect(payload.metadata).toEqual({});
+  });
+
+  it('put stores snapshot metadata when provided', async () => {
+    s3SendMock.mockResolvedValue({});
+    const mod = await importModule();
+
+    await mod.put('mapping-1', 'DEV', '2026-06-01T00:00:00.000Z', makeConfig(), {
+      cdmSchemaTraceability: [
+        {
+          schemaId: 'schema-1',
+          schemaName: 'CDM Schema',
+          referenceRole: 'source',
+          repo: 'KBXT/KBX-Canonicals',
+          path: 'JSONSchemas/CommonDataModels/Order.json',
+          commitSha: 'abc123',
+        },
+      ],
+    });
+
+    const command = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Body: string };
+    };
+
+    const payload = JSON.parse(command.input.Body);
+    expect(payload.metadata.cdmSchemaTraceability).toEqual([
+      {
+        schemaId: 'schema-1',
+        schemaName: 'CDM Schema',
+        referenceRole: 'source',
+        repo: 'KBXT/KBX-Canonicals',
+        path: 'JSONSchemas/CommonDataModels/Order.json',
+        commitSha: 'abc123',
+      },
+    ]);
   });
 
   it('exports deploymentSnapshot object with expected operations', async () => {

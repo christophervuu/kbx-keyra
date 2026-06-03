@@ -1,6 +1,7 @@
 import {
   ERROR_CODES,
   errorResponse,
+  generateRequestId,
   getItem,
   internalError,
   jsonResponse,
@@ -11,6 +12,7 @@ import {
 } from '../shared/index.js';
 import { create as createDeployment, getCurrent } from '../../lib/persistence/deployments.js';
 import { getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
+import { validateCdmDeployGuard } from './cdm-deploy-guard.js';
 
 type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
 
@@ -21,6 +23,8 @@ interface PromoteRequest {
 
 interface MappingMetadata {
   readonly mappingId: string;
+  readonly sourceSchemaId?: string;
+  readonly targetSchemaId?: string;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -82,6 +86,27 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(ERROR_CODES.RESOURCE_NOT_FOUND, `Mapping with id '${mappingId}' not found`, 404, false);
     }
 
+    const cdmGuard = await validateCdmDeployGuard(mapping);
+    if (cdmGuard.blocked) {
+      const requestId = generateRequestId();
+      return jsonResponse(
+        409,
+        {
+          error: {
+            code: ERROR_CODES.DEPLOY_BLOCKED_CDM_SCHEMA_STATE,
+            message: 'Promotion blocked: referenced CDM schema state is not deployable',
+            statusCode: 409,
+            retryable: false,
+            requestId,
+            details: {
+              issues: cdmGuard.issues,
+            },
+          },
+        },
+        requestId,
+      );
+    }
+
     const source = await getCurrent(mappingId, request.fromEnvironment);
     if (!source) {
       return errorResponse(
@@ -117,6 +142,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       sourceType: 'version',
       sourceNumber: source.sourceNumber,
       deployedBy: 'system',
+      ...(cdmGuard.cdmTraceability.length > 0 ? { cdmSchemaTraceability: cdmGuard.cdmTraceability } : {}),
       promotedFrom: request.fromEnvironment,
       config,
     });

@@ -82,6 +82,7 @@ src/
       save-version.ts   Backward-compatible shim exporting create-version handler
       index.ts          Mapping lambda barrel exports
     deployment/       Deployment policy lambdas (FS-064 T-02)
+      cdm-deploy-guard.ts Reusable CDM deploy-context validation guard for deploy/promote handlers (FS-079 T-01)
       deploy-mapping.ts POST /mappings/:mappingId/deploy handler (revision/version deploy with environment policy enforcement)
       promote-deployment.ts POST /mappings/:mappingId/promote handler (version-backed promotion only)
       rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)

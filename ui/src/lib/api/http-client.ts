@@ -21,6 +21,7 @@ interface ErrorDetails {
   statusCode?: unknown;
   retryable?: unknown;
   requestId?: unknown;
+  details?: unknown;
 }
 
 interface BackendErrorEnvelope {
@@ -46,6 +47,7 @@ export class HttpClientError extends Error {
   readonly code?: string;
   readonly requestId?: string;
   readonly retryable: boolean;
+  readonly details?: unknown;
 
   constructor(
     message: string,
@@ -54,6 +56,7 @@ export class HttpClientError extends Error {
       code?: string;
       requestId?: string;
       retryable: boolean;
+      details?: unknown;
       cause?: unknown;
     },
   ) {
@@ -63,6 +66,7 @@ export class HttpClientError extends Error {
     this.code = options.code;
     this.requestId = options.requestId;
     this.retryable = options.retryable;
+    this.details = options.details;
 
     if (options.cause !== undefined) {
       (this as Error & { cause?: unknown }).cause = options.cause;
@@ -215,6 +219,7 @@ async function parseErrorResponse(response: Response): Promise<HttpClientError> 
       code: getErrorCode(backendEnvelope.error),
       requestId: getRequestId(backendEnvelope.error),
       retryable: envelopeRetryable,
+      details: backendEnvelope.error.details,
     });
   }
 

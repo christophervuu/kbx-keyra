@@ -4,6 +4,7 @@ export interface AppError {
   statusCode?: number;
   requestId?: string;
   retryable: boolean;
+  details?: unknown;
   cause?: unknown;
 }
 
@@ -18,6 +19,7 @@ export function toAppError(error: unknown): AppError {
       statusCode?: number;
       requestId?: string;
       retryable?: boolean;
+      details?: unknown;
     };
 
     return {
@@ -26,6 +28,7 @@ export function toAppError(error: unknown): AppError {
       statusCode: errorWithExtras.statusCode,
       requestId: errorWithExtras.requestId,
       retryable: errorWithExtras.retryable ?? true,
+      details: errorWithExtras.details,
       cause: error,
     };
   }

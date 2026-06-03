@@ -108,6 +108,9 @@ describe('persistence deployments', () => {
     expect(result.sourceNumber).toBe(5);
     expect(result.configS3Key).toBe('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
     expect(result.environmentDeployedAt.startsWith('DEV#')).toBe(true);
+    expect(result.cdmSchemaTraceability).toBeUndefined();
+
+    expect(putSnapshotMock).toHaveBeenCalledWith('mapping-1', 'DEV', expect.any(String), expect.any(Object), {});
 
     const deploymentPut = dynamoSendMock.mock.calls[0]?.[0] as {
       input: { TableName: string; Item: DeploymentItem };
@@ -120,6 +123,51 @@ describe('persistence deployments', () => {
     };
     expect(currentPut.input.TableName).toBe('keyra-deployment-current');
     expect(currentPut.input.Item.mappingIdEnvironment).toBe('mapping-1#DEV');
+  });
+
+  it('create persists cdmSchemaTraceability in both deployment item and snapshot metadata', async () => {
+    putSnapshotMock.mockResolvedValue('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
+    dynamoSendMock.mockResolvedValue({});
+
+    const mod = await importModule();
+    const traceability = [
+      {
+        schemaId: 'schema-1',
+        schemaName: 'CDM Source',
+        referenceRole: 'source' as const,
+        repo: 'KBXT/KBX-Canonicals',
+        path: 'JSONSchemas/CommonDataModels/Order.json',
+        commitSha: 'abc123',
+      },
+      {
+        schemaId: 'schema-2',
+        schemaName: 'CDM Target',
+        referenceRole: 'target' as const,
+        repo: 'KBXT/KBX-Canonicals',
+        path: 'JSONSchemas/CommonDataModels/Invoice.json',
+        commitSha: 'def456',
+      },
+    ];
+
+    const result = await mod.create(
+      makeCreateInput({
+        cdmSchemaTraceability: traceability,
+      }),
+    );
+
+    expect(putSnapshotMock).toHaveBeenCalledWith(
+      'mapping-1',
+      'DEV',
+      expect.any(String),
+      expect.any(Object),
+      { cdmSchemaTraceability: traceability },
+    );
+
+    const deploymentPut = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { Item: DeploymentItem };
+    };
+    expect(deploymentPut.input.Item.cdmSchemaTraceability).toEqual(traceability);
+    expect(result.cdmSchemaTraceability).toEqual(traceability);
   });
 
   it('getCurrent returns current item or null', async () => {
