@@ -311,6 +311,25 @@ describe('WorkspaceSuggestionCard — validation badges', () => {
     expect(screen.queryByTestId('validation-badge-valid')).not.toBeInTheDocument();
     expect(screen.queryByTestId('validation-badge-invalid')).not.toBeInTheDocument();
   });
+
+  it('renders invalid validation badge when backend-normalized missing validation is provided', () => {
+    renderCard(
+      makeItem({
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              severity: 'error',
+              code: 'VALIDATION_MISSING',
+              message: 'No validation status returned',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(screen.getByTestId('validation-badge-invalid')).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

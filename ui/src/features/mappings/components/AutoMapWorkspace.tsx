@@ -233,17 +233,23 @@ function ErrorBody({
 interface EmptyBodyProps {
   onExitWorkspace: () => void;
   onRefreshAll: () => void;
+  noContextReason?: string | null;
 }
 
-function EmptyBody({ onExitWorkspace, onRefreshAll }: EmptyBodyProps) {
+function EmptyBody({ onExitWorkspace, onRefreshAll, noContextReason }: EmptyBodyProps) {
+  const isNoContext = typeof noContextReason === 'string' && noContextReason.trim() !== '';
   return (
     <div
       className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center"
       data-testid="workspace-empty"
     >
-      <p className="text-sm font-medium text-slate-300">No suggestions generated</p>
-      <p className="text-xs text-slate-500">
-        No eligible target fields were found in this section, or all fields are already mapped.
+      <p className="text-sm font-medium text-slate-300">
+        {isNoContext ? 'No relevant source context found' : 'No suggestions generated'}
+      </p>
+      <p className="text-xs text-slate-500" data-testid="workspace-empty-reason">
+        {isNoContext
+          ? noContextReason
+          : 'No eligible target fields were found in this section, or all fields are already mapped.'}
       </p>
       <div className="flex gap-2">
         <button
@@ -490,7 +496,11 @@ export function AutoMapWorkspace({
           onRestorePrevious={onRestorePrevious}
         />
       ) : status === 'success' && items.length === 0 ? (
-        <EmptyBody onExitWorkspace={onExitWorkspace} onRefreshAll={onRefreshAll} />
+        <EmptyBody
+          onExitWorkspace={onExitWorkspace}
+          onRefreshAll={onRefreshAll}
+          noContextReason={summary.noContextReason}
+        />
       ) : (
         /* Card list — scrollable */
         <div

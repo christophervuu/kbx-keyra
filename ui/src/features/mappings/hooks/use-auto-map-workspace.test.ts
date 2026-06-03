@@ -59,6 +59,20 @@ const SUGGESTION_INVALID = {
 
 const MOCK_RESULT: AutoMapSectionResult = {
   suggestions: [SUGGESTION_A, SUGGESTION_B],
+  retrievalMeta: {
+    mode: 'section',
+    chunkCount: 1,
+    retrievalCandidatesCount: 4,
+    retrievalSelectedCount: 2,
+    noContext: false,
+  },
+  validationMeta: {
+    validationPassCount: 2,
+    validationFailCount: 0,
+  },
+  dedupMeta: {
+    duplicatesCollapsed: 0,
+  },
 };
 
 const MOCK_RULES: readonly MappingRule[] = [];
@@ -159,6 +173,121 @@ describe('useAutoMapWorkspace', () => {
     expect(result.current.items[0].targetPath).toBe('Order.Id');
     expect(result.current.items[0].status).toBe('suggested');
     expect(result.current.sectionPath).toBe(SECTION_PATH);
+    expect(result.current.summary.mode).toBe('section');
+    expect(result.current.summary.chunkCount).toBe(1);
+    expect(result.current.summary.retrievalCandidatesCount).toBe(4);
+    expect(result.current.summary.retrievalSelectedCount).toBe(2);
+    expect(result.current.summary.validationPassCount).toBe(2);
+    expect(result.current.summary.validationFailCount).toBe(0);
+    expect(result.current.summary.duplicatesCollapsed).toBe(0);
+    expect(result.current.summary.noContext).toBe(false);
+
+    expect((params.adapter as { autoMapSection: ReturnType<typeof vi.fn> }).autoMapSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'section',
+        sectionPath: SECTION_PATH,
+      }),
+    );
+  });
+
+  it('trims section path before request payload', async () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap('  Order  ');
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect((params.adapter as { autoMapSection: ReturnType<typeof vi.fn> }).autoMapSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'section',
+        sectionPath: 'Order',
+      }),
+    );
+  });
+
+  it('sends whole mode request when section path is root', async () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap('');
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect((params.adapter as { autoMapSection: ReturnType<typeof vi.fn> }).autoMapSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'whole',
+        sectionPath: undefined,
+      }),
+    );
+  });
+
+  it('normalizes suggestions missing validation payload as invalid', async () => {
+    const adapterMock = makeAdapter({
+      suggestions: [
+        {
+          target: 'Order.Id',
+          expression: 'source.orderId',
+          explanation: 'Maps order id',
+          confidence: 'high',
+        },
+      ],
+    });
+    const params = makeParams({
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(result.current.items[0]?.validation).toEqual({
+      valid: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'VALIDATION_MISSING',
+          message: 'No validation status returned',
+        },
+      ],
+    });
+  });
+
+  it('surfaces no-context metadata in summary for explicit empty runs (AE-06)', async () => {
+    const adapterMock = makeAdapter({
+      suggestions: [],
+      retrievalMeta: {
+        mode: 'whole',
+        noContext: true,
+        noContextReason: 'No relevant source context found for target scope',
+      },
+      validationMeta: {
+        validationPassCount: 0,
+        validationFailCount: 0,
+      },
+    });
+    const params = makeParams({
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap('');
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(result.current.items).toHaveLength(0);
+    expect(result.current.summary.mode).toBe('whole');
+    expect(result.current.summary.noContext).toBe(true);
+    expect(result.current.summary.noContextReason).toBe('No relevant source context found for target scope');
   });
 
   it('sets error when no eligible targets exist', async () => {

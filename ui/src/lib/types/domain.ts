@@ -354,6 +354,7 @@ export interface AutoMapResult {
 export interface AutoMapSectionInput {
   readonly projectId: string;
   readonly mappingId: string;
+  readonly mode?: 'section' | 'whole';
   readonly sectionPath?: string;
   readonly targetSection?: string;
   readonly sourceContext?: string;
@@ -373,6 +374,21 @@ export interface AutoMapSuggestion {
 export interface AutoMapSectionResult {
   readonly suggestions: readonly AutoMapSuggestion[];
   readonly diagnostics?: readonly Diagnostic[];
+  readonly retrievalMeta?: {
+    readonly mode?: 'section' | 'whole';
+    readonly retrievalCandidatesCount?: number;
+    readonly retrievalSelectedCount?: number;
+    readonly chunkCount?: number;
+    readonly noContext?: boolean;
+    readonly noContextReason?: string;
+  };
+  readonly validationMeta?: {
+    readonly validationPassCount?: number;
+    readonly validationFailCount?: number;
+  };
+  readonly dedupMeta?: {
+    readonly duplicatesCollapsed?: number;
+  };
 }
 
 export type SuggestionReviewStatus = 'pending' | 'accepted' | 'edited' | 'dismissed';

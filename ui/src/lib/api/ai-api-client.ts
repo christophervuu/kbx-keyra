@@ -279,7 +279,14 @@ function isAutoMapSectionResult(value: unknown): value is AutoMapSectionResult {
     return false;
   }
 
-  return (value as { suggestions: unknown[] }).suggestions.every((suggestion) => {
+  const typedValue = value as {
+    suggestions: unknown[];
+    retrievalMeta?: unknown;
+    validationMeta?: unknown;
+    dedupMeta?: unknown;
+  };
+
+  const suggestionsValid = typedValue.suggestions.every((suggestion) => {
     if (typeof suggestion !== 'object' || suggestion === null) {
       return false;
     }
@@ -336,6 +343,78 @@ function isAutoMapSectionResult(value: unknown): value is AutoMapSectionResult {
       );
     });
   });
+
+  if (!suggestionsValid) {
+    return false;
+  }
+
+  if (typedValue.retrievalMeta !== undefined) {
+    const retrievalMeta = typedValue.retrievalMeta as {
+      mode?: unknown;
+      retrievalCandidatesCount?: unknown;
+      retrievalSelectedCount?: unknown;
+      chunkCount?: unknown;
+      noContext?: unknown;
+      noContextReason?: unknown;
+    };
+
+    if (typeof retrievalMeta !== 'object' || retrievalMeta === null) {
+      return false;
+    }
+
+    if (
+      retrievalMeta.mode !== undefined &&
+      retrievalMeta.mode !== 'section' &&
+      retrievalMeta.mode !== 'whole'
+    ) {
+      return false;
+    }
+
+    if (
+      (retrievalMeta.retrievalCandidatesCount !== undefined && typeof retrievalMeta.retrievalCandidatesCount !== 'number') ||
+      (retrievalMeta.retrievalSelectedCount !== undefined && typeof retrievalMeta.retrievalSelectedCount !== 'number') ||
+      (retrievalMeta.chunkCount !== undefined && typeof retrievalMeta.chunkCount !== 'number') ||
+      (retrievalMeta.noContext !== undefined && typeof retrievalMeta.noContext !== 'boolean') ||
+      (retrievalMeta.noContextReason !== undefined && typeof retrievalMeta.noContextReason !== 'string')
+    ) {
+      return false;
+    }
+  }
+
+  if (typedValue.validationMeta !== undefined) {
+    const validationMeta = typedValue.validationMeta as {
+      validationPassCount?: unknown;
+      validationFailCount?: unknown;
+    };
+
+    if (typeof validationMeta !== 'object' || validationMeta === null) {
+      return false;
+    }
+
+    if (
+      (validationMeta.validationPassCount !== undefined && typeof validationMeta.validationPassCount !== 'number') ||
+      (validationMeta.validationFailCount !== undefined && typeof validationMeta.validationFailCount !== 'number')
+    ) {
+      return false;
+    }
+  }
+
+  if (typedValue.dedupMeta !== undefined) {
+    const dedupMeta = typedValue.dedupMeta as { duplicatesCollapsed?: unknown };
+
+    if (typeof dedupMeta !== 'object' || dedupMeta === null) {
+      return false;
+    }
+
+    if (
+      dedupMeta.duplicatesCollapsed !== undefined &&
+      typeof dedupMeta.duplicatesCollapsed !== 'number'
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 type AIErrorEnvelope = {
@@ -533,6 +612,10 @@ export async function autoMapSectionHttp(
     body.sectionPath = input.sectionPath;
   }
 
+  if (input.mode !== undefined) {
+    body.mode = input.mode;
+  }
+
   if (input.targetSection !== undefined && input.targetSection !== null) {
     body.targetSection = input.targetSection;
   }
@@ -602,6 +685,9 @@ export async function autoMapSectionHttp(
     return {
       suggestions: parsed.data.suggestions,
       diagnostics: parsed.data.diagnostics,
+      retrievalMeta: parsed.data.retrievalMeta,
+      validationMeta: parsed.data.validationMeta,
+      dedupMeta: parsed.data.dedupMeta,
     };
   } catch (error) {
     if (

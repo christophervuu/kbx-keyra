@@ -166,7 +166,7 @@ src/
     ai/
       explain-rule.ts       First consumer Lambda — thin handler shell
       suggest-expression.ts Second consumer Lambda — NL to rule handler
-      auto-map.ts           Auto-map Lambda handler for section-level suggestion generation
+      auto-map.ts           Auto-map Lambda handler for section/whole retrieval-backed suggestion generation
 ```
 
 ---
@@ -562,6 +562,40 @@ AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`) use 
 - Feature semantics are advisory-only: AI validation augments deterministic validation but never replaces authoritative engine diagnostics.
 - Trigger semantics are manual-only in V1; runtime/handler does not introduce auto-refresh behavior on rule edits.
 
+### Auto-Map canonical contract (FS-073)
+
+`src/lambda/ai/auto-map.ts` is a canonical thin handler over shared runtime invocation and enforces these production constraints:
+
+- Single endpoint + mode contract:
+  - route: `POST /ai/auto-map`
+  - request includes `mode: 'section' | 'whole'`
+  - section mode scopes generation to a target section path; whole mode scopes generation to full target coverage for the mapping
+- Backend owns context retrieval. Client-provided full-schema context blobs are non-canonical.
+- Retrieval path is OpenSearch-first over ingested schema nodes (`fieldName` / `path` / `description`) with weighted hybrid lexical scoring and heuristic boosts.
+- No direct full-schema prompting path exists as a fallback.
+- Large-schema strategy is chunked generation with bounded parallelism:
+  - default chunk target: 50–100 target fields per chunk
+  - in-Lambda parallel chunk invocation cap: max 4
+  - over-budget workloads are delegated to Step Functions orchestration
+- Chunk outputs are merged and deduplicated to one target-unique suggestion set.
+- Dedup precedence is deterministic:
+  1. validation status (`valid` over invalid/parse-failed)
+  2. confidence (`high` > `medium` > `low`)
+  3. target-type-aware tie-break (scalar-preferred), then stable lexical fallback
+- Every candidate suggestion is validation-enriched before success response:
+  - normalized `validation` object is attached per suggestion/rule
+  - invalid candidates remain reviewable outcomes (not silent drops) unless superseded by deterministic dedup rules
+- Minimum Auto-Map telemetry/metadata contract includes:
+  - request/run identity: `requestId`, `mappingId`, `mode`
+  - chunking: `chunkCount`, `chunkIds`
+  - retrieval: `retrievalCandidatesCount`, `retrievalSelectedCount`
+  - validation: `validationPassCount`, `validationFailCount`
+  - dedup: conflict counters + `dedupDecisions` (winner/loser + reason)
+  - per-rule lineage: `sourceChunkRef`
+  - timing/model traces: stage durations + model/prompt version when available
+- No-context retrieval is a success outcome, not an error:
+  - returns zero suggestions with explicit no-context reason metadata for workspace empty-state rendering
+
 Lambda handlers do not:
 - Read from DynamoDB directly
 - Call the OpenAI SDK directly
@@ -617,7 +651,8 @@ console.log(result);
 - All AI calls go through API Gateway -> Lambda. The UI never calls GitHub Models directly.
 - Browser-side provider invocation is prohibited by dual policy guardrails: UI ESLint restricted imports and path-based static scanning (`scripts/check-ui-ai-guardrails.ts`).
 - AI output is **suggestion-only** — no auto-commit to mapping state.
-- Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix). Step Functions are reserved for future long-running operations like large-schema auto-map.
+- Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix).
+- Auto-Map may use Step Functions for over-budget large-schema workloads while keeping `invokeAI()` as the per-chunk execution unit.
 - Backend mode UI integration must use `HttpAdapter` as the only canonical production adapter path.
 - Deprecated shortcut patterns (including HybridAdapter-style alternate routing) are non-canonical.
 
@@ -654,7 +689,7 @@ This fallback is transitional and is not a second canonical retrieval architectu
 
 ## Future Considerations
 
-- **RAG integration**: Auto-map and smart-fix will add OpenSearch retrieval to the orchestration pipeline. This will be an additional step between prompt loading and rendering — the architecture is designed to accommodate it.
-- **Step Functions**: Large auto-map operations may use Step Functions for parallel chunk processing. The shared runtime's `invokeAI()` will remain the per-chunk execution unit.
+- **Retrieval evolution**: Auto-Map retrieval is canonical and OpenSearch-first. Future work may tune ranking heuristics or add additional retrieval signals while preserving the same handler/runtime boundaries.
+- **Step Functions scaling**: Auto-Map over-budget workloads may be delegated to Step Functions; `invokeAI()` remains the per-chunk execution unit.
 - **Prompt authoring UI**: A future admin interface may write to the PromptRegistry table. The runtime only reads from it.
 - **Batch field descriptions**: `describe-fields` may need chunking logic for large schemas. This is Lambda-specific logic, not shared runtime logic.

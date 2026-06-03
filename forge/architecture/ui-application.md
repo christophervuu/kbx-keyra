@@ -354,7 +354,7 @@ Current slices:
 - **Explain Rule (FS-041, hardened by FS-069):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
 - **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
 - **Smart Fix (FS-071):** `HttpAdapter.smartFix` → `useSmartFix` → `SmartFixInline` (rendered in `ScalarFieldBuilder`)
-- **Auto-Map Review Workspace (FS-046 → FS-048):** `HttpAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+- **Auto-Map Review Workspace (FS-046 → FS-048, hardened by FS-073):** `HttpAdapter.autoMapSection`/`autoMap` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
 - **Phase 2 route-complete adapter surface (FS-068):** `HttpAdapter.autoMap` / `smartFix` / `validateMappings` map to canonical `/ai/*` routes; temporarily unavailable backend capability is surfaced as `FEATURE_NOT_ENABLED`
 
 Explain Rule UI semantics (current canonical behavior):
@@ -376,7 +376,7 @@ Non-canonical/prohibited shortcut patterns:
 - New production use of legacy `ai-api-client.ts` call loops is prohibited by repository guardrails.
 - Reintroducing legacy Auto-Map drawer/review loop surfaces retired in FS-065 is prohibited.
 
-The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion, section-level review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
+The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). FS-073 extends this to canonical backend mode semantics (`mode: 'section' | 'whole'`) on the shared `/ai/auto-map` endpoint while preserving one workspace interaction model. See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
 
 ### Suggest Expression canonical review model (FS-070)
 
@@ -974,6 +974,7 @@ Persistent re-entry affordance:
 - Refresh actions: `refreshAll`, `refreshUnmapped`, `refreshStale`
 - Filtering: `activeFilters`, `toggleFilter`, `clearFilters`, `filteredItems`
 - Persistence + metadata: `sectionPath`, `generatedAt`, `previousSuggestionsAvailable`, `restorePreviousSuggestions`, `hasPersistedSuggestions`
+- Run metadata summary surfaced to workspace consumers: mode/chunk/retrieval/validation/dedup counters + explicit no-context reason when present
 - Draft-model integration: acceptance/edit actions call `updateDraft(targetPath, expression)` so AI suggestions remain suggestion-only and flow through unsaved-change tracking
 
 #### Suggestion Persistence Model
@@ -1057,13 +1058,16 @@ Bulk actions:
 
 All actions are state-derived and disable safely when not applicable.
 
-#### Showcase vs RAG-Ready Design Decisions
+#### Canonical backend contract alignment (FS-073)
 
-The workspace remains backend-strategy agnostic:
+The workspace now assumes retrieval-backed backend behavior as canonical:
 
-- Current showcase mode passes optional source-context text to AI generation
-- Future RAG backend can ignore client context and retrieve server-side context
-- UI contracts (`autoMapSection`, workspace persistence, lifecycle model) stay stable across backend evolution
+- UI does not construct or require full source-schema prompt context blobs.
+- Canonical transport remains a single endpoint: `POST /ai/auto-map` with request `mode: 'section' | 'whole'`.
+- `useAutoMapWorkspace` sends mode-aware requests and normalizes review data for both section and whole runs.
+- Response metadata consumed by UI includes retrieval/chunk/validation/dedup summaries and per-suggestion validation.
+- No-context retrieval is handled as successful empty-result UX, with explicit empty-state guidance rather than generic error treatment.
+- UI contracts (`autoMapSection`, workspace persistence, lifecycle model) remain stable while backend retrieval/chunk internals evolve.
 
 #### Drawer Retirement Note
 

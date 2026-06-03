@@ -6,6 +6,7 @@ import { httpRequest } from './http-client';
 
 import { toAppError } from '@/lib/state/app-error';
 import type {
+  AutoMapSectionResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -655,6 +656,46 @@ describe('HttpAdapter (CRUD)', () => {
         projectId: 'p-1',
         mappingId: 'm-1',
         sectionPath: 'Order.Header',
+      },
+    });
+  });
+
+  it('autoMapSection forwards mode and preserves retrieval/validation metadata', async () => {
+    const payload: AutoMapSectionResult = {
+      suggestions: [],
+      retrievalMeta: {
+        mode: 'whole',
+        noContext: true,
+        noContextReason: 'No relevant source context found for target scope',
+      },
+      validationMeta: {
+        validationPassCount: 0,
+        validationFailCount: 0,
+      },
+      dedupMeta: {
+        duplicatesCollapsed: 0,
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.autoMapSection({
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        mode: 'whole',
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        mode: 'whole',
       },
     });
   });

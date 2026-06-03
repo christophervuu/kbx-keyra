@@ -25,6 +25,15 @@ const EMPTY_SUMMARY: AutoMapWorkspaceSummary = {
   lowConfidence: 0,
   generatedAt: null,
   lastRefreshedAt: null,
+  mode: null,
+  chunkCount: null,
+  retrievalCandidatesCount: null,
+  retrievalSelectedCount: null,
+  validationPassCount: null,
+  validationFailCount: null,
+  duplicatesCollapsed: null,
+  noContext: false,
+  noContextReason: null,
 };
 
 function makeSummary(overrides: Partial<AutoMapWorkspaceSummary> = {}): AutoMapWorkspaceSummary {

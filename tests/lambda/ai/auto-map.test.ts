@@ -4,6 +4,9 @@ import type { APIGatewayProxyEvent } from '../../../src/lambda/shared/index.js';
 
 const invokeAIMock = vi.hoisted(() => vi.fn());
 const parseMock = vi.hoisted(() => vi.fn());
+const searchSchemaNodesMock = vi.hoisted(() => vi.fn());
+const getItemMock = vi.hoisted(() => vi.fn());
+const sfnSendMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/lib/ai/index.js', () => {
   return {
@@ -37,6 +40,42 @@ vi.mock('../../../src/engine/registry/function-registry.js', () => {
   };
 });
 
+vi.mock('../../../src/lib/schema/index.js', () => {
+  return {
+    searchSchemaNodes: searchSchemaNodesMock,
+  };
+});
+
+vi.mock('../../../src/lambda/shared/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/lambda/shared/index.js')>(
+    '../../../src/lambda/shared/index.js',
+  );
+
+  return {
+    ...actual,
+    getItem: getItemMock,
+  };
+});
+
+vi.mock('@aws-sdk/client-sfn', () => {
+  class MockStartExecutionCommand {
+    readonly input: unknown;
+
+    constructor(input: unknown) {
+      this.input = input;
+    }
+  }
+
+  class MockSFNClient {
+    send = sfnSendMock;
+  }
+
+  return {
+    SFNClient: MockSFNClient,
+    StartExecutionCommand: MockStartExecutionCommand,
+  };
+});
+
 function createEvent(body: string | null): APIGatewayProxyEvent {
   return {
     body,
@@ -46,8 +85,17 @@ function createEvent(body: string | null): APIGatewayProxyEvent {
 
 describe('aiAutoMap handler', () => {
   beforeEach(() => {
+    process.env.MAPPINGS_TABLE = 'KeyRa-Mappings';
+    delete process.env.AUTO_MAP_CHUNK_TARGET;
+    delete process.env.AUTO_MAP_MAX_CONCURRENCY;
+    delete process.env.AUTO_MAP_STEP_FUNCTIONS_ARN;
+    delete process.env.AUTO_MAP_STEP_FUNCTIONS_TARGET_THRESHOLD;
+    delete process.env.AUTO_MAP_STEP_FUNCTIONS_CHUNK_THRESHOLD;
     invokeAIMock.mockReset();
     parseMock.mockReset();
+    searchSchemaNodesMock.mockReset();
+    getItemMock.mockReset();
+    sfnSendMock.mockReset();
     vi.resetModules();
   });
 
@@ -112,7 +160,7 @@ describe('aiAutoMap handler', () => {
         suggestions: Array<{
           target: string;
           expression: string;
-          validation?: {
+          validation: {
             valid: boolean;
             diagnostics: Array<{
               code: string;
@@ -134,6 +182,10 @@ describe('aiAutoMap handler', () => {
       diagnostics: [],
     });
     expect(parsedBody.data.suggestions[0]?.target).toBe('Order.Header.DocumentType');
+    expect(parsedBody.data.suggestions[0]?.validation).toEqual({
+      valid: true,
+      diagnostics: [],
+    });
 
     expect(invokeAIMock).toHaveBeenCalledWith('auto-map', {
       targetSection:
@@ -141,7 +193,483 @@ describe('aiAutoMap handler', () => {
       sourceContext:
         '- InvoiceAmount (number)\n- InvDate (string, MM/DD/YYYY)\n- InvoiceCurrency (string)\n- Header.Currency (string)',
       businessContext: 'AP invoice to ShipmentOrder mapping',
+      mode: 'whole',
+      chunkId: 'chunk-1',
+      chunkCount: '1',
     });
+  });
+
+  it('assembles retrieval-backed source context for section mode (AE-01)', async () => {
+    getItemMock.mockResolvedValueOnce({
+      mappingId: 'm-1',
+      sourceSchemaId: 'schema-source-1',
+    });
+
+    searchSchemaNodesMock
+      .mockResolvedValueOnce([
+        {
+          path: 'Invoice.DocumentType',
+          fieldName: 'DocumentType',
+          type: 'string',
+          depth: 1,
+          isArray: false,
+          embeddingText: 'Invoice document type field',
+          score: 8,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          path: 'Invoice.CurrencyCode',
+          fieldName: 'CurrencyCode',
+          type: 'string',
+          depth: 1,
+          isArray: false,
+          embeddingText: 'Invoice currency code',
+          score: 7,
+        },
+      ])
+      .mockResolvedValue([]);
+
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'source("Invoice.DocumentType")',
+            explanation: 'Map document type',
+            confidence: 'high',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+
+    parseMock.mockReturnValue({ ast: {}, diagnostics: [] });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mappingId: 'm-1',
+          mode: 'section',
+          sectionPath: 'Order.Header',
+          targetSection:
+            '- Order.Header.DocumentType (string)\n- Order.Header.CurrencyCode (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(searchSchemaNodesMock).toHaveBeenCalled();
+
+    const invokeVars = invokeAIMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(invokeVars.mode).toBe('section');
+    expect(typeof invokeVars.sourceContext).toBe('string');
+    expect((invokeVars.sourceContext as string).length).toBeGreaterThan(0);
+
+    const parsed = JSON.parse(response.body) as {
+      data: { retrievalMeta: { mappingId: string; mode: string; retrievalSelectedCount: number } };
+    };
+
+    expect(parsed.data.retrievalMeta.mappingId).toBe('m-1');
+    expect(parsed.data.retrievalMeta.mode).toBe('section');
+    expect(parsed.data.retrievalMeta.retrievalSelectedCount).toBeGreaterThan(0);
+  });
+
+  it('returns deterministic no-context success response (AE-06)', async () => {
+    getItemMock.mockResolvedValueOnce({
+      mappingId: 'm-1',
+      sourceSchemaId: 'schema-source-1',
+    });
+    searchSchemaNodesMock.mockResolvedValue([]);
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mappingId: 'm-1',
+          mode: 'whole',
+          targetSection:
+            '- Order.Header.DocumentType (string)\n- Order.Header.CurrencyCode (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(invokeAIMock).not.toHaveBeenCalled();
+
+    const parsed = JSON.parse(response.body) as {
+      success: boolean;
+      data: {
+        rules: unknown[];
+        suggestions: unknown[];
+        retrievalMeta: { noContext: boolean; noContextReason?: string; mode: string };
+      };
+    };
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.data.rules).toEqual([]);
+    expect(parsed.data.suggestions).toEqual([]);
+    expect(parsed.data.retrievalMeta.noContext).toBe(true);
+    expect(parsed.data.retrievalMeta.mode).toBe('whole');
+    expect(parsed.data.retrievalMeta.noContextReason).toContain('No relevant source context');
+  });
+
+  it('returns RESOURCE_NOT_FOUND when mapping cannot be resolved for retrieval', async () => {
+    getItemMock.mockResolvedValueOnce(null);
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mappingId: 'missing-mapping',
+          mode: 'section',
+          sectionPath: 'Order.Header',
+          targetSection: '- Order.Header.DocumentType (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(404);
+    const parsed = JSON.parse(response.body) as { error: { code: string } };
+    expect(parsed.error.code).toBe('RESOURCE_NOT_FOUND');
+    expect(invokeAIMock).not.toHaveBeenCalled();
+  });
+
+  it('chunks broad target scopes and enforces concurrency cap (AE-02)', async () => {
+    const lines = Array.from({ length: 320 }, (_, index) => `- Order.Field${index + 1} (string)`);
+    const targetSection = lines.join('\n');
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    invokeAIMock.mockImplementation(async (_promptId: string, variables: Record<string, unknown>) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+
+      return {
+        success: true,
+        data: {
+          rules: [
+            {
+              target: `Order.Generated.${String(variables.chunkId ?? 'chunk')}`,
+              expression: 'source("Invoice.Amount")',
+              explanation: 'generated',
+              confidence: 'medium',
+            },
+          ],
+        },
+        promptId: 'auto-map',
+        model: 'openai/gpt-4.1',
+      };
+    });
+
+    parseMock.mockReturnValue({ ast: {}, diagnostics: [] });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mode: 'whole',
+          targetSection,
+          sourceContext: '- Invoice.Amount (number)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(invokeAIMock.mock.calls.length).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+
+    const parsed = JSON.parse(response.body) as {
+      data: { retrievalMeta: { chunkCount: number; maxConcurrency: number; chunkTarget: number } };
+    };
+
+    expect(parsed.data.retrievalMeta.chunkCount).toBeGreaterThan(1);
+    expect(parsed.data.retrievalMeta.maxConcurrency).toBe(4);
+    expect(parsed.data.retrievalMeta.chunkTarget).toBeGreaterThanOrEqual(50);
+    expect(parsed.data.retrievalMeta.chunkTarget).toBeLessThanOrEqual(100);
+  });
+
+  it('routes over-budget whole-mode requests to Step Functions handoff (AE-02)', async () => {
+    process.env.AUTO_MAP_STEP_FUNCTIONS_ARN = 'arn:aws:states:us-east-1:111111111111:stateMachine:AutoMap';
+    process.env.AUTO_MAP_STEP_FUNCTIONS_TARGET_THRESHOLD = '10';
+    process.env.AUTO_MAP_STEP_FUNCTIONS_CHUNK_THRESHOLD = '2';
+
+    sfnSendMock.mockResolvedValue({
+      executionArn: 'arn:aws:states:us-east-1:111111111111:execution:AutoMap:exec-1',
+    });
+
+    const lines = Array.from({ length: 12 }, (_, index) => `- Order.Field${index + 1} (string)`);
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mode: 'whole',
+          mappingId: 'm-1',
+          sourceSchemaId: 'schema-source-1',
+          targetSection: lines.join('\n'),
+          sourceContext: '- Invoice.Amount (number)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(202);
+    expect(sfnSendMock).toHaveBeenCalledTimes(1);
+    expect(invokeAIMock).not.toHaveBeenCalled();
+
+    const parsed = JSON.parse(response.body) as {
+      data: {
+        orchestration: { queued: boolean; executionArn: string };
+      };
+    };
+
+    expect(parsed.data.orchestration.queued).toBe(true);
+    expect(parsed.data.orchestration.executionArn).toContain(':execution:');
+  });
+
+  it('deduplicates conflicting targets deterministically and records dedup decisions (AE-03)', async () => {
+    invokeAIMock
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          rules: [
+            {
+              target: 'Order.Header.DocumentType',
+              expression: 'source("Invoice.DocType")',
+              explanation: 'first candidate',
+              confidence: 'high',
+            },
+          ],
+        },
+        promptId: 'auto-map',
+        model: 'openai/gpt-4.1',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          rules: [
+            {
+              target: 'Order.Header.DocumentType',
+              expression: 'source("Invoice.DocumentType")',
+              explanation: 'second candidate',
+              confidence: 'high',
+            },
+          ],
+        },
+        promptId: 'auto-map',
+        model: 'openai/gpt-4.1',
+      });
+
+    parseMock
+      .mockReturnValueOnce({ ast: {}, diagnostics: [{ severity: 'error', message: 'invalid expr' }] })
+      .mockReturnValueOnce({ ast: {}, diagnostics: [] });
+
+    process.env.AUTO_MAP_CHUNK_TARGET = '50';
+
+    const lines = Array.from({ length: 60 }, (_, index) => `- Order.Header.Field${index + 1} (string)`);
+    lines[0] = '- Order.Header.DocumentType (string)';
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mode: 'whole',
+          targetSection: lines.join('\n'),
+          sourceContext: '- Invoice.DocumentType (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    const parsed = JSON.parse(response.body) as {
+      data: {
+        rules: Array<{ target: string; expression: string; validation?: { valid: boolean } }>;
+        dedupMeta: {
+          duplicatesCollapsed: number;
+          outputRuleCount: number;
+          dedupDecisions: Array<{ target: string; reason: string }>;
+        };
+      };
+    };
+
+    const dedupedRule = parsed.data.rules.find((rule) => rule.target === 'Order.Header.DocumentType');
+    expect(dedupedRule?.expression).toBe('source("Invoice.DocumentType")');
+    expect(dedupedRule?.validation?.valid).toBe(true);
+
+    expect(parsed.data.dedupMeta.duplicatesCollapsed).toBeGreaterThanOrEqual(1);
+    expect(parsed.data.dedupMeta.outputRuleCount).toBe(parsed.data.rules.length);
+    expect(parsed.data.dedupMeta.dedupDecisions.some((decision) => decision.target === 'Order.Header.DocumentType')).toBe(true);
+    expect(parsed.data.dedupMeta.dedupDecisions.some((decision) => decision.reason === 'validation')).toBe(true);
+  });
+
+  it('normalizes invalid expression diagnostics and tracks validation telemetry (AE-04)', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'if(source("Invoice.DocumentType"',
+            explanation: 'invalid candidate',
+            confidence: 'low',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+
+    parseMock.mockReturnValue({
+      ast: {},
+      diagnostics: [{ severity: 'error', message: 'Unexpected token' }],
+    });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetSection: '- Order.Header.DocumentType (string)',
+          sourceContext: '- Invoice.DocumentType (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+
+    const parsed = JSON.parse(response.body) as {
+      data: {
+        suggestions: Array<{
+          validation: {
+            valid: boolean;
+            diagnostics: Array<{
+              code: string;
+              severity: 'error' | 'warning' | 'info';
+              message: string;
+            }>;
+          };
+        }>;
+        validationMeta: {
+          validationPassCount: number;
+          validationFailCount: number;
+          outcomes: Array<{ target: string | null; valid: boolean; sourceChunkRef: string | null }>;
+        };
+      };
+    };
+
+    expect(parsed.data.suggestions).toHaveLength(1);
+    expect(parsed.data.suggestions[0]?.validation.valid).toBe(false);
+    expect(parsed.data.suggestions[0]?.validation.diagnostics).toEqual([
+      {
+        code: 'PARSE_ERROR',
+        severity: 'error',
+        message: 'Unexpected token',
+      },
+    ]);
+
+    expect(parsed.data.validationMeta.validationPassCount).toBe(0);
+    expect(parsed.data.validationMeta.validationFailCount).toBe(1);
+    expect(parsed.data.validationMeta.outcomes).toHaveLength(1);
+    expect(parsed.data.validationMeta.outcomes[0]).toMatchObject({
+      target: 'Order.Header.DocumentType',
+      valid: false,
+      sourceChunkRef: 'chunk-1',
+    });
+  });
+
+  it('returns mixed valid/invalid validation outcomes with matching telemetry counts (AE-04)', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'source("Invoice.DocumentType")',
+            explanation: 'valid candidate',
+            confidence: 'high',
+          },
+          {
+            target: 'Order.Header.CurrencyCode',
+            expression: 'if(source("Invoice.CurrencyCode"',
+            explanation: 'invalid candidate',
+            confidence: 'low',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+
+    parseMock
+      .mockReturnValueOnce({ ast: {}, diagnostics: [] })
+      .mockReturnValueOnce({ ast: {}, diagnostics: [{ severity: 'error', message: 'Unexpected token' }] });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetSection:
+            '- Order.Header.DocumentType (string)\n- Order.Header.CurrencyCode (string)',
+          sourceContext: '- Invoice.DocumentType (string)\n- Invoice.CurrencyCode (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+
+    const parsed = JSON.parse(response.body) as {
+      data: {
+        suggestions: Array<{
+          target: string;
+          validation: {
+            valid: boolean;
+            diagnostics: Array<{
+              code: string;
+              severity: 'error' | 'warning' | 'info';
+              message: string;
+            }>;
+          };
+        }>;
+        validationMeta: {
+          validationPassCount: number;
+          validationFailCount: number;
+          outcomes: Array<{ target: string | null; valid: boolean; sourceChunkRef: string | null }>;
+        };
+      };
+    };
+
+    expect(parsed.data.suggestions).toHaveLength(2);
+    expect(parsed.data.suggestions.find((item) => item.target === 'Order.Header.DocumentType')?.validation).toEqual({
+      valid: true,
+      diagnostics: [],
+    });
+    expect(parsed.data.suggestions.find((item) => item.target === 'Order.Header.CurrencyCode')?.validation).toEqual({
+      valid: false,
+      diagnostics: [
+        {
+          code: 'PARSE_ERROR',
+          severity: 'error',
+          message: 'Unexpected token',
+        },
+      ],
+    });
+
+    expect(parsed.data.validationMeta.validationPassCount).toBe(1);
+    expect(parsed.data.validationMeta.validationFailCount).toBe(1);
+    expect(parsed.data.validationMeta.outcomes).toHaveLength(2);
+    expect(parsed.data.validationMeta.outcomes.every((outcome) => outcome.sourceChunkRef === 'chunk-1')).toBe(true);
   });
 
   it('returns plain 400 body for missing targetSection as existing contract', async () => {

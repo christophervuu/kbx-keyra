@@ -61,7 +61,10 @@ describe('HybridAdapter (deprecated retained path)', () => {
   });
 
   it('routes autoMapSection through ai-api-client helper', async () => {
-    vi.mocked(autoMapSectionHttp).mockResolvedValueOnce({ suggestions: [] });
+    vi.mocked(autoMapSectionHttp).mockResolvedValueOnce({
+      suggestions: [],
+      retrievalMeta: { mode: 'section' },
+    });
     const adapter = new HybridAdapter('http://localhost:3001/api');
 
     await expect(
@@ -70,7 +73,7 @@ describe('HybridAdapter (deprecated retained path)', () => {
         mappingId: 'm-1',
         sectionPath: 'Order.Header',
       }),
-    ).resolves.toEqual({ suggestions: [] });
+    ).resolves.toEqual({ suggestions: [], retrievalMeta: { mode: 'section' } });
 
     expect(autoMapSectionHttp).toHaveBeenCalledWith('http://localhost:3001/api', {
       projectId: 'p-1',

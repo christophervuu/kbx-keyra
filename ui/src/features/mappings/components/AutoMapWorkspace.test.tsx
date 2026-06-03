@@ -24,6 +24,15 @@ const EMPTY_SUMMARY: AutoMapWorkspaceSummary = {
   lowConfidence: 0,
   generatedAt: null,
   lastRefreshedAt: null,
+  mode: null,
+  chunkCount: null,
+  retrievalCandidatesCount: null,
+  retrievalSelectedCount: null,
+  validationPassCount: null,
+  validationFailCount: null,
+  duplicatesCollapsed: null,
+  noContext: false,
+  noContextReason: null,
 };
 
 function makeSummary(overrides: Partial<AutoMapWorkspaceSummary> = {}): AutoMapWorkspaceSummary {
@@ -185,6 +194,23 @@ describe('AutoMapWorkspace', () => {
     );
     await userEvent.click(screen.getByTestId('workspace-empty-back'));
     expect(onExitWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it('renders explicit no-context reason in empty state', () => {
+    render(
+      <AutoMapWorkspace
+        {...DEFAULT_PROPS}
+        status="success"
+        items={[]}
+        filteredItems={[]}
+        summary={makeSummary({ noContext: true, noContextReason: 'No relevant source context found for target scope' })}
+      />,
+    );
+
+    expect(screen.getByText('No relevant source context found')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-empty-reason')).toHaveTextContent(
+      'No relevant source context found for target scope',
+    );
   });
 
   // -------------------------------------------------------------------------

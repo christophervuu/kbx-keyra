@@ -16,6 +16,7 @@ import type {
 import type { ApiAdapter } from '@/lib/api/types';
 import type {
   AutoMapSectionInput,
+  AutoMapSectionResult,
   AutoMapSuggestion,
   MappingRule,
   ParsedSchema,
@@ -145,6 +146,59 @@ function deriveSourceContext(schema: ParsedSchema | null | undefined): string | 
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
+function normalizeSectionPath(path: string): string {
+  return path.trim();
+}
+
+function normalizeSuggestionValidation(suggestion: AutoMapSuggestion): {
+  valid: boolean;
+  diagnostics: readonly {
+    severity: string;
+    code: string;
+    message: string;
+  }[];
+} {
+  const diagnostics = suggestion.validation?.diagnostics ?? [];
+  const normalizedDiagnostics = diagnostics.map((item) => ({
+    severity: item.severity,
+    code: item.code,
+    message: item.message,
+  }));
+
+  if (suggestion.validation && typeof suggestion.validation.valid === 'boolean') {
+    return {
+      valid: suggestion.validation.valid,
+      diagnostics: normalizedDiagnostics,
+    };
+  }
+
+  return {
+    valid: false,
+    diagnostics: [
+      {
+        severity: 'error',
+        code: 'VALIDATION_MISSING',
+        message: 'No validation status returned',
+      },
+    ],
+  };
+}
+
+function extractRunMeta(result: AutoMapSectionResult): WorkspaceRunMeta {
+  const mode = result.retrievalMeta?.mode;
+  return {
+    mode: mode === 'section' || mode === 'whole' ? mode : null,
+    chunkCount: result.retrievalMeta?.chunkCount ?? null,
+    retrievalCandidatesCount: result.retrievalMeta?.retrievalCandidatesCount ?? null,
+    retrievalSelectedCount: result.retrievalMeta?.retrievalSelectedCount ?? null,
+    validationPassCount: result.validationMeta?.validationPassCount ?? null,
+    validationFailCount: result.validationMeta?.validationFailCount ?? null,
+    duplicatesCollapsed: result.dedupMeta?.duplicatesCollapsed ?? null,
+    noContext: result.retrievalMeta?.noContext === true,
+    noContextReason: result.retrievalMeta?.noContextReason ?? null,
+  };
+}
+
 function suggestionToWorkspaceItem(
   suggestion: AutoMapSuggestion,
   rules: readonly MappingRule[],
@@ -156,7 +210,7 @@ function suggestionToWorkspaceItem(
     suggestedExpression: suggestion.expression,
     explanation: suggestion.explanation,
     confidence: suggestion.confidence,
-    validation: suggestion.validation,
+    validation: normalizeSuggestionValidation(suggestion),
     status: overrideStatus ?? 'suggested',
     isNew: existingRule === undefined,
     existingExpressionAtGeneration: existingRule?.expression ?? null,
@@ -240,12 +294,47 @@ const EMPTY_WORKSPACE_SUMMARY: AutoMapWorkspaceSummary = {
   stale: 0,
   generatedAt: null,
   lastRefreshedAt: null,
+  mode: null,
+  chunkCount: null,
+  retrievalCandidatesCount: null,
+  retrievalSelectedCount: null,
+  validationPassCount: null,
+  validationFailCount: null,
+  duplicatesCollapsed: null,
+  noContext: false,
+  noContextReason: null,
+};
+
+type WorkspaceRunMeta = Pick<
+  AutoMapWorkspaceSummary,
+  | 'mode'
+  | 'chunkCount'
+  | 'retrievalCandidatesCount'
+  | 'retrievalSelectedCount'
+  | 'validationPassCount'
+  | 'validationFailCount'
+  | 'duplicatesCollapsed'
+  | 'noContext'
+  | 'noContextReason'
+>;
+
+const EMPTY_RUN_META: WorkspaceRunMeta = {
+  mode: null,
+  chunkCount: null,
+  retrievalCandidatesCount: null,
+  retrievalSelectedCount: null,
+  validationPassCount: null,
+  validationFailCount: null,
+  duplicatesCollapsed: null,
+  noContext: false,
+  noContextReason: null,
 };
 
 function computeSummary(
   items: readonly SuggestionWorkspaceItem[],
   generatedAt: string | null,
   lastRefreshedAt: string | null,
+  runMeta: WorkspaceRunMeta,
 ): AutoMapWorkspaceSummary {
   return {
     total: items.length,
@@ -264,6 +353,15 @@ function computeSummary(
     lowConfidence: items.filter((i) => i.confidence === 'low').length,
     generatedAt,
     lastRefreshedAt,
+    mode: runMeta.mode,
+    chunkCount: runMeta.chunkCount,
+    retrievalCandidatesCount: runMeta.retrievalCandidatesCount,
+    retrievalSelectedCount: runMeta.retrievalSelectedCount,
+    validationPassCount: runMeta.validationPassCount,
+    validationFailCount: runMeta.validationFailCount,
+    duplicatesCollapsed: runMeta.duplicatesCollapsed,
+    noContext: runMeta.noContext,
+    noContextReason: runMeta.noContextReason,
   };
 }
 
@@ -345,10 +443,16 @@ export function useAutoMapWorkspace({
   const [items, setItems] = useState<readonly SuggestionWorkspaceItem[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [runMeta, setRunMeta] = useState<WorkspaceRunMeta>(EMPTY_RUN_META);
   const [summary, setSummary] = useState<AutoMapWorkspaceSummary>(EMPTY_WORKSPACE_SUMMARY);
   const [activeFilters, setActiveFilters] = useState<Set<SuggestionFilter>>(
     () => new Set(['needsReview']),
   );
+
+  const runMetaRef = useRef<WorkspaceRunMeta>(EMPTY_RUN_META);
+  useEffect(() => {
+    runMetaRef.current = runMeta;
+  }, [runMeta]);
 
   // Previous suggestions snapshot for error recovery (AE-15)
   const [previousItems, setPreviousItems] = useState<readonly SuggestionWorkspaceItem[] | null>(null);
@@ -403,12 +507,14 @@ export function useAutoMapWorkspace({
       nextGeneratedAt: string | null,
       nextLastRefreshedAt: string | null,
       path: string | null,
+      nextRunMeta: WorkspaceRunMeta,
     ) => {
       setItems(nextItems);
       setGeneratedAt(nextGeneratedAt);
       generatedAtRef.current = nextGeneratedAt;
       setLastRefreshedAt(nextLastRefreshedAt);
-      setSummary(computeSummary(nextItems, nextGeneratedAt, nextLastRefreshedAt));
+      setRunMeta(nextRunMeta);
+      setSummary(computeSummary(nextItems, nextGeneratedAt, nextLastRefreshedAt, nextRunMeta));
 
       if (path !== null) {
         const persistedItems = nextItems.map(workspaceItemToPersistedItem);
@@ -450,7 +556,7 @@ export function useAutoMapWorkspace({
         });
         if (!changed) return prev;
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAtRef.current, null));
+        setSummary(computeSummary(nextItems, generatedAtRef.current, null, runMetaRef.current));
         if (path !== null) {
           saveAutoMapSuggestions(mappingId, path, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAtRef.current ?? undefined,
@@ -496,7 +602,11 @@ export function useAutoMapWorkspace({
       setStatus('loading');
       setError(null);
 
-      const targetSection = deriveEligibleTargets(parsedTargetSchemaRef.current, path);
+      const normalizedPath = normalizeSectionPath(path);
+      const targetSection = deriveEligibleTargets(
+        parsedTargetSchemaRef.current,
+        normalizedPath === '' ? null : normalizedPath,
+      );
       if (targetSection === '') {
         setStatus('error');
         setError(NO_ELIGIBLE_TARGETS_MESSAGE);
@@ -506,13 +616,15 @@ export function useAutoMapWorkspace({
       const input: AutoMapSectionInput = {
         projectId,
         mappingId,
-        sectionPath: path,
+        mode: normalizedPath === '' ? 'whole' : 'section',
+        sectionPath: normalizedPath === '' ? undefined : normalizedPath,
         targetSection,
         sourceContext: deriveSourceContext(parsedSourceSchemaRef.current),
       };
 
       try {
         const result = await adapterRef.current.autoMapSection(input);
+        const nextRunMeta = extractRunMeta(result);
 
         if (requestIdRef.current !== currentRequestId || controller.signal.aborted) return;
 
@@ -549,7 +661,7 @@ export function useAutoMapWorkspace({
         const now = new Date().toISOString();
         const merged = mergeItems(existingItems, freshItems);
 
-        commitItems(merged, generatedAtRef.current ?? now, now, path);
+        commitItems(merged, generatedAtRef.current ?? now, now, path, nextRunMeta);
         setStatus('success');
       } catch (err) {
         if (requestIdRef.current !== currentRequestId || controller.signal.aborted) return;
@@ -566,10 +678,11 @@ export function useAutoMapWorkspace({
 
   const triggerAutoMap = useCallback(
     (path: string): void => {
-      setSectionPath(path);
+      const normalizedPath = normalizeSectionPath(path);
+      setSectionPath(normalizedPath);
 
       // Check for persisted suggestions first (AE-02)
-      const persisted = loadAutoMapSuggestions(mappingId, path);
+      const persisted = loadAutoMapSuggestions(mappingId, normalizedPath);
       if (persisted !== null) {
         const restoredItems = persisted.items.map(persistedItemToWorkspaceItem);
         const restoredAt = persisted.generatedAt;
@@ -577,16 +690,17 @@ export function useAutoMapWorkspace({
         setGeneratedAt(restoredAt);
         generatedAtRef.current = restoredAt;
         setLastRefreshedAt(restoredAt);
-        setSummary(computeSummary(restoredItems, restoredAt, restoredAt));
+        setRunMeta(EMPTY_RUN_META);
+        setSummary(computeSummary(restoredItems, restoredAt, restoredAt, EMPTY_RUN_META));
         setStatus('success');
         setError(null);
         // Run staleness detection on restored items (AE-03)
-        applyStaleDetection(restoredItems, rulesRef.current, path);
+        applyStaleDetection(restoredItems, rulesRef.current, normalizedPath);
         return;
       }
 
       // No persisted suggestions — fetch fresh
-      void runFetch(path, 'all', []);
+      void runFetch(normalizedPath, 'all', []);
     },
     [mappingId, runFetch, applyStaleDetection],
   );
@@ -629,7 +743,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: nextStatus };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         // Persist updated state
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
@@ -652,7 +766,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: 'accepted' };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAt ?? undefined,
@@ -676,7 +790,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: 'edited' };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAt ?? undefined,
@@ -704,7 +818,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: 'suggested' };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAt ?? undefined,
@@ -727,7 +841,7 @@ export function useAutoMapWorkspace({
         return { ...item, status: 'accepted' };
       });
       const nextItems = next as readonly SuggestionWorkspaceItem[];
-      setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+      setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
       if (sectionPath !== null) {
         saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
           generatedAt: generatedAt ?? undefined,
@@ -758,7 +872,7 @@ export function useAutoMapWorkspace({
     setItems(previousItems);
     setGeneratedAt(restoredAt);
     setLastRefreshedAt(restoredAt);
-    setSummary(computeSummary(previousItems, restoredAt, restoredAt));
+    setSummary(computeSummary(previousItems, restoredAt, restoredAt, runMetaRef.current));
     setStatus('success');
     setError(null);
     setPreviousItems(null);

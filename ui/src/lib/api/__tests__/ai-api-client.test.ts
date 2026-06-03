@@ -556,6 +556,7 @@ describe('autoMapSectionHttp', () => {
   const input = {
     projectId: 'project-1',
     mappingId: 'mapping-1',
+    mode: 'section' as const,
     sectionPath: 'Order.Header',
     sourceContext: '- Invoice.InvoiceAmount (number)\n- Invoice.CurrencyCode (string)',
   };
@@ -568,6 +569,15 @@ describe('autoMapSectionHttp', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+
+  function successDataWithSuggestions(
+    overrides: Record<string, unknown> = {},
+  ): { suggestions: unknown[] } & Record<string, unknown> {
+    return {
+      suggestions: [],
+      ...overrides,
+    };
+  }
 
   it('returns AutoMapSectionResult on success', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
@@ -587,6 +597,20 @@ describe('autoMapSectionHttp', () => {
               },
             },
           ],
+          retrievalMeta: {
+            mode: 'section',
+            chunkCount: 1,
+            retrievalCandidatesCount: 5,
+            retrievalSelectedCount: 2,
+            noContext: false,
+          },
+          validationMeta: {
+            validationPassCount: 1,
+            validationFailCount: 0,
+          },
+          dedupMeta: {
+            duplicatesCollapsed: 0,
+          },
         },
       }),
     });
@@ -607,25 +631,80 @@ describe('autoMapSectionHttp', () => {
         },
       ],
       diagnostics: undefined,
+      retrievalMeta: {
+        mode: 'section',
+        chunkCount: 1,
+        retrievalCandidatesCount: 5,
+        retrievalSelectedCount: 2,
+        noContext: false,
+      },
+      validationMeta: {
+        validationPassCount: 1,
+        validationFailCount: 0,
+      },
+      dedupMeta: {
+        duplicatesCollapsed: 0,
+      },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/auto-map`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId: input.projectId,
-        mappingId: input.mappingId,
-        sectionPath: input.sectionPath,
-        sourceContext: input.sourceContext,
-      }),
-      signal: expect.any(AbortSignal),
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe(`${apiUrl}/ai/auto-map`);
+    const init = call?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(String(init.body))).toEqual({
+      projectId: input.projectId,
+      mappingId: input.mappingId,
+      sectionPath: input.sectionPath,
+      mode: input.mode,
+      sourceContext: input.sourceContext,
     });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('passes mode when provided and preserves no-context metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          suggestions: [],
+          retrievalMeta: {
+            mode: 'whole',
+            noContext: true,
+            noContextReason: 'No relevant source context found for target scope',
+          },
+        },
+      }),
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      autoMapSectionHttp(apiUrl, {
+        ...input,
+        mode: 'whole',
+      }),
+    ).resolves.toEqual({
+      suggestions: [],
+      diagnostics: undefined,
+      retrievalMeta: {
+        mode: 'whole',
+        noContext: true,
+        noContextReason: 'No relevant source context found for target scope',
+      },
+      validationMeta: undefined,
+      dedupMeta: undefined,
+    });
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(calledBody.mode).toBe('whole');
   });
 
   it('sends targetSection in request body when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+      json: vi.fn().mockResolvedValue({ success: true, data: successDataWithSuggestions() }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -646,7 +725,7 @@ describe('autoMapSectionHttp', () => {
   it('omits targetSection from request body when undefined', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+      json: vi.fn().mockResolvedValue({ success: true, data: successDataWithSuggestions() }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -659,7 +738,7 @@ describe('autoMapSectionHttp', () => {
   it('omits sectionPath from request body when undefined (header mode)', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+      json: vi.fn().mockResolvedValue({ success: true, data: successDataWithSuggestions() }),
     });
     vi.stubGlobal('fetch', fetchMock);
 

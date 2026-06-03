@@ -146,6 +146,15 @@ export interface AutoMapWorkspaceSummary extends AutoMapReviewSummary {
   readonly stale: number;
   readonly generatedAt: ISODateString | null;
   readonly lastRefreshedAt: ISODateString | null;
+  readonly mode: 'section' | 'whole' | null;
+  readonly chunkCount: number | null;
+  readonly retrievalCandidatesCount: number | null;
+  readonly retrievalSelectedCount: number | null;
+  readonly validationPassCount: number | null;
+  readonly validationFailCount: number | null;
+  readonly duplicatesCollapsed: number | null;
+  readonly noContext: boolean;
+  readonly noContextReason: string | null;
 }
 
 /**
