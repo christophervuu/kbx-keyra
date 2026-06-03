@@ -477,7 +477,7 @@ export async function handler(event: APIGatewayProxyEvent) {
 }
 ```
 
-AI handlers (`explain-rule`, `suggest-expression`, `auto-map`) use shared failure normalization and canonical envelope responses through `errorResponse(...)`.
+AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`) use shared failure normalization and canonical envelope responses through `errorResponse(...)`.
 
 `suggest-expression` validates (`mappingId`, `instruction`, `targetPath`, `targetType`) and routes through canonical prompt ID resolution (`nl-to-rule` alias -> `natural-language-to-dsl`).
 
@@ -511,6 +511,30 @@ AI handlers (`explain-rule`, `suggest-expression`, `auto-map`) use shared failur
 - Uses prompt-registry + structured-output path via `invokeAI()`; success is gated by shared contract validation (`response-contracts.ts` + `output-parser.ts`)
 - Normalizes success data to concise explanation output (1–2 sentences target, hard token clamp) with optional metadata passthrough (`confidence`, `limitations[]`)
 - Remains read-only assistance: explain invocation never mutates mapping rules or persistence state
+
+### Smart Fix canonical contract (FS-071)
+
+`src/lambda/ai/smart-fix.ts` is a canonical thin handler over `invokeAI('smart-fix', ...)` and enforces these production constraints:
+
+- Request contract is rule-scoped and diagnostic-driven:
+  - required: `mappingId`, `ruleIndex`, `targetPath`, `failingExpression`, `diagnostics[]`
+  - optional: `targetType`, `diagnosticScope`, `selectedDiagnosticIndex`, `ruleVersion`, `ruleHash`
+- Backend owns mapping/schema retrieval and context assembly prior to invocation.
+- Context assembly is bounded with deterministic truncation:
+  - ~64KB raw text or ~8k token-equivalent
+  - truncation priority: latest/high-severity diagnostics first, then lower-priority context.
+- Handler invokes Smart Fix prompt via shared runtime and validates structured output contract before success.
+- On success, candidate corrected expression is engine-validated before response success payload is returned.
+- Success payload includes review/apply metadata:
+  - `originalExpression`, `suggestedExpression`, `explanation`
+  - `validation: { valid, diagnostics[] }`
+  - `readyToApply`
+  - `diagnosticsScopeApplied`
+  - `context` usage/truncation metadata
+  - `applyGuard: { ruleVersion, ruleHash }`
+- Validation-invalid outcomes are returned as suggestion results with `readyToApply: false` (not transport failures).
+- Stale snapshot protection is hard-gated at handler contract level:
+  - rule version/hash mismatches map to canonical `CONFLICT` response for UI rerun flows.
 
 Lambda handlers do not:
 - Read from DynamoDB directly

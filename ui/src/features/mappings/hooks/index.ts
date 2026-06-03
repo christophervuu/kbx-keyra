@@ -53,6 +53,11 @@ export type {
   SuggestExpressionState,
   UseSuggestExpressionReturn,
 } from './use-suggest-expression';
+export { useSmartFix } from './use-smart-fix';
+export type {
+  SmartFixState,
+  UseSmartFixReturn,
+} from './use-smart-fix';
 // FS-048 auto-map workspace hook
 export { useAutoMapWorkspace } from './use-auto-map-workspace';
 export type {

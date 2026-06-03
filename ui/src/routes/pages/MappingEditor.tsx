@@ -437,6 +437,17 @@ export default function MappingEditor() {
     return editor.rules.find((r) => r.target === selectedTargetPath)?.expression ?? '';
   }, [selectedTargetPath, editor.rules]);
 
+  const selectedRuleIndexForSmartFix = useMemo(() => {
+    if (!selectedTargetPath) return null;
+    const idx = editor.rules.findIndex((r) => r.target === selectedTargetPath);
+    return idx >= 0 ? idx : null;
+  }, [selectedTargetPath, editor.rules]);
+
+  const selectedRuleDiagnosticsForSmartFix = useMemo(() => {
+    if (selectedRuleIndexForSmartFix === null) return [];
+    return editor.validation.diagnosticsForRule(selectedRuleIndexForSmartFix);
+  }, [editor.validation, selectedRuleIndexForSmartFix]);
+
   // ---------------------------------------------------------------------------
   // Route-level navigation guard (unsaved changes)
   // useBlocker must be called unconditionally (Rules of Hooks)
@@ -664,6 +675,9 @@ export default function MappingEditor() {
         unsavedChangeCount={editor.unsavedChangeCount}
         onViewUnsavedChanges={() => { setIsChangesOverlayOpen(true); }}
         onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
+        currentRuleIndex={selectedRuleIndexForSmartFix}
+        currentRuleDiagnostics={selectedRuleDiagnosticsForSmartFix}
+        currentRuleVersion={editor.currentRevision}
         savedRules={editor.rules}
         className="h-full"
       />

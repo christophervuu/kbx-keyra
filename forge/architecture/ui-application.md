@@ -108,7 +108,7 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Center panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Center panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest AI vertical slices wired (FS-041/FS-042) with inline `ExplanationPanel` / `SuggestExpressionInline`; savedRules prop drives per-field diff (FS-040 T-05)
+        ScalarFieldBuilder.tsx Center panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest + Smart Fix AI slices wired (FS-041/FS-042/FS-071) with inline `ExplanationPanel` / `SuggestExpressionInline` / `SmartFixInline`; Smart Fix includes rule-diagnostic request context, validation-gated Accept, stale conflict rerun CTA, and non-mutating dismiss/error behavior
         SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
         AutoMapWorkspace.tsx        FS-048 center-panel Auto-Map review workspace shell: sticky header, toolbar slot, refresh confirmation slot, no-source-data slot, loading/error/empty/list states, completion banner
         WorkspaceHeader.tsx         FS-048 workspace header (section path, summary counts, last refreshed metadata, Back to Editor)
@@ -353,6 +353,7 @@ AI features are integrated as thin vertical slices with a stable layering patter
 Current slices:
 - **Explain Rule (FS-041, hardened by FS-069):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
 - **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
+- **Smart Fix (FS-071):** `HttpAdapter.smartFix` → `useSmartFix` → `SmartFixInline` (rendered in `ScalarFieldBuilder`)
 - **Auto-Map Review Workspace (FS-046 → FS-048):** `HttpAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
 - **Phase 2 route-complete adapter surface (FS-068):** `HttpAdapter.autoMap` / `smartFix` / `validateMappings` map to canonical `/ai/*` routes; temporarily unavailable backend capability is surfaced as `FEATURE_NOT_ENABLED`
 
@@ -411,6 +412,42 @@ Draft mutation semantics:
 
 - Accept applies only to in-memory draft state (`updateDraft`) for the active target field.
 - No implicit save/persist occurs from suggestion generation, invalid outcomes, dismiss, or retry flows.
+
+### Smart Fix canonical review model (FS-071)
+
+Smart Fix is a rule-diagnostic correction flow with explicit review semantics and stale protection.
+
+Canonical UI→API request contract:
+
+- `mappingId`
+- `ruleIndex`
+- `targetPath`
+- `failingExpression`
+- `diagnostics[]` (default: all diagnostics for selected rule)
+- optional `diagnosticScope: 'all' | 'single'`
+- optional `selectedDiagnosticIndex`
+- optional `targetType`
+- optional stale snapshot fields: `ruleVersion`, `ruleHash`
+
+Canonical hook/UI state model:
+
+- `useSmartFix` lifecycle: `idle | loading | success-valid | success-invalid | stale-mismatch | error`
+- command surface: `run`, `retry`, `rerunOnLatest`, `dismiss`, `reset`
+- stale conflicts are represented as dedicated `stale-mismatch` state (not generic errors)
+
+Canonical `SmartFixInline` review behavior:
+
+- Shows original expression, suggested expression, explanation, and validation diagnostics.
+- Surface is explicitly labeled as AI-generated assistance and non-persistent.
+- Explicit user actions: **Accept**, **Edit**, **Dismiss**.
+- **Strict apply block:** one-click Accept is allowed only for validation-valid suggestions.
+- Invalid suggestions remain review-only until edited into a valid expression (no “Apply anyway” path).
+- Stale mismatch blocks direct apply and offers **Re-run on latest rule** CTA.
+
+Draft mutation semantics:
+
+- Accept applies only to in-memory draft state (`updateDraft`) for the selected field and immediately re-enters normal validation flow.
+- Dismiss, error, stale-mismatch, and retry flows do not mutate draft or persisted mapping state.
 
 ---
 

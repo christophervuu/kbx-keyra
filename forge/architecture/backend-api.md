@@ -325,11 +325,11 @@ The naming above reflects the currently implemented lambda surface. Infrastructu
 
 ---
 
-## 11) AI Handler API Conventions (FS-066/FS-067 Addendum)
+## 11) AI Handler API Conventions (FS-066/FS-067/FS-071 Addendum)
 
 This architecture primarily covers non-AI handlers, but Phase 2 introduced cross-cutting API conventions that AI handlers now follow consistently:
 
-- AI handlers (`src/lambda/ai/{explain-rule,suggest-expression,auto-map}.ts`) are thin request/response shells and delegate invocation to shared runtime (`invokeAI(...)`).
+- AI handlers (`src/lambda/ai/{explain-rule,suggest-expression,smart-fix,auto-map}.ts`) are thin request/response shells and delegate invocation to shared runtime (`invokeAI(...)`).
 - Current canonical backend AI route surface used by the UI adapter includes `/ai/explain-rule`, `/ai/suggest-expression`, `/ai/auto-map`, `/ai/smart-fix`, and `/ai/validate-mappings` (endpoint rollout may be phased; temporary gating should use canonical error semantics).
 - AI handler failures are normalized through `normalizeAIError(...)` into canonical backend error envelope semantics before returning `errorResponse(...)`.
 - AI handler responses use the same canonical error envelope contract in Section 5 (`code`, `message`, `statusCode`, `retryable`, `requestId`).
@@ -396,6 +396,79 @@ Failure/edge semantics:
   - diagnostics populated
   - `readyToApply: false`
   (UI must treat these as reviewable-but-not-apply-ready, not transport errors.)
+
+### Smart Fix endpoint contract (FS-071)
+
+`POST /ai/smart-fix`
+
+Canonical request payload:
+
+```json
+{
+  "mappingId": "map_123",
+  "ruleIndex": 4,
+  "targetPath": "Order.Header.Currency",
+  "targetType": "string",
+  "failingExpression": "source(\"Invoice.Currency\")",
+  "diagnostics": [
+    {
+      "code": "TYPE_MISMATCH",
+      "severity": "error",
+      "message": "Expression returns number but target expects string"
+    }
+  ],
+  "diagnosticScope": "all",
+  "ruleVersion": 12,
+  "ruleHash": "fnv1a-91e713ad"
+}
+```
+
+Canonical success payload:
+
+```json
+{
+  "success": true,
+  "data": {
+    "originalExpression": "source(\"Invoice.Currency\")",
+    "suggestedExpression": "default(source(\"Invoice.CurrencyCode\"), \"USD\")",
+    "explanation": "Switches to the string currency code and adds USD fallback.",
+    "validation": {
+      "valid": true,
+      "diagnostics": []
+    },
+    "readyToApply": true,
+    "diagnosticsScopeApplied": "all",
+    "context": {
+      "truncated": false,
+      "approxTokenCount": 420,
+      "byteLength": 1960,
+      "totalDiagnosticCount": 2,
+      "includedDiagnosticCount": 2,
+      "sourceNodeCount": 120,
+      "includedSourceNodeCount": 52,
+      "targetNodeCount": 70,
+      "includedTargetNodeCount": 30
+    },
+    "applyGuard": {
+      "ruleVersion": 12,
+      "ruleHash": "fnv1a-91e713ad"
+    }
+  }
+}
+```
+
+Failure/edge semantics:
+
+- Missing or invalid Smart Fix identity fields (`mappingId`, `ruleIndex`, `targetPath`, `failingExpression`, diagnostics payload shape) return canonical `VALIDATION_ERROR` (400).
+- Diagnostic scope defaults to `all`; `diagnosticScope=single` requires a valid `selectedDiagnosticIndex`.
+- Context assembly is backend-owned and bounded (~64KB / ~8k token-equivalent), prioritizing latest/high-severity diagnostics first when truncation is required.
+- Smart Fix suggestions are always validated by backend engine validation before response success payload is returned.
+- Validation-invalid suggestions are returned as successful review payloads with `validation.valid: false` and `readyToApply: false`.
+- Rule snapshot conflicts use hard stale protection:
+  - `ruleVersion` mismatch or `ruleHash` mismatch returns canonical `CONFLICT` (409)
+  - UI must block direct apply and offer re-run on latest rule.
+- Model output contract failures return `INVALID_MODEL_OUTPUT` (500, non-retryable).
+- Provider/runtime failures return normalized canonical envelopes (`TIMEOUT`, `SERVICE_UNAVAILABLE`, etc.).
 
 ## 12) Cross-References
 

@@ -34,6 +34,7 @@ import { ExplanationPanel } from './ExplanationPanel';
 import { LogicStepList } from './LogicStepList';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
+import { SmartFixInline } from './SmartFixInline';
 import { StaticValueInput } from './StaticValueInput';
 import { SuggestExpressionInline } from './SuggestExpressionInline';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
@@ -43,6 +44,7 @@ import { useBuilderValidation } from '../hooks/use-builder-validation';
 import { useDropZone } from '../hooks/use-drop-zone';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useExplainRule } from '../hooks/use-explain-rule';
+import { useSmartFix } from '../hooks/use-smart-fix';
 import { useSuggestExpression } from '../hooks/use-suggest-expression';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type {
@@ -63,7 +65,7 @@ import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 
-import type { ParsedSchema, MappingRule } from '@/lib/types/domain';
+import type { Diagnostic, ParsedSchema, MappingRule, SmartFixInput } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -129,6 +131,12 @@ export interface ScalarFieldBuilderProps {
   unsavedChangeCount?: number;
   /** Opens the unsaved changes modal */
   onViewUnsavedChanges?: () => void;
+  /** Selected rule index for Smart Fix request context */
+  currentRuleIndex?: number | null;
+  /** Rule diagnostics for Smart Fix request context (default scope: all diagnostics for selected rule) */
+  currentRuleDiagnostics?: readonly Diagnostic[];
+  /** Rule version snapshot for Smart Fix stale-apply guard */
+  currentRuleVersion?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,10 +161,19 @@ const STATUS_CLASSES: Record<TargetFieldStatus, string> = {
 };
 
 const AI_EXPLAIN_TOOLTIP = 'Explain this expression using AI';
-const AI_FIX_TOOLTIP = 'AI-powered fix suggestions \u2014 available in a future release';
+const AI_FIX_TOOLTIP = 'Generate AI-powered fix suggestions for current diagnostics';
 
 /** Regex for a trivial bare source reference — no confirmation needed on reset */
 const TRIVIAL_EXPRESSION_RE = /^source\("[^"]*"\)$/;
+
+function computeRuleHash(expression: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < expression.length; i += 1) {
+    hash ^= expression.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -434,6 +451,9 @@ export function ScalarFieldBuilder({
   getDraftExpression,
   onExpressionChange,
   onClearMapping,
+  currentRuleIndex = null,
+  currentRuleDiagnostics = [],
+  currentRuleVersion = 0,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
@@ -475,9 +495,18 @@ export function ScalarFieldBuilder({
     reset: resetSuggest,
   } = useSuggestExpression();
 
+  const smartFix = useSmartFix();
+  const [smartFixApplyConflict, setSmartFixApplyConflict] = useState<string | null>(null);
+
   // Reset suggestion panel when the selected field changes
   useEffect(() => {
     resetSuggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargetPath]);
+
+  useEffect(() => {
+    smartFix.reset();
+    setSmartFixApplyConflict(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath]);
 
@@ -674,6 +703,79 @@ export function ScalarFieldBuilder({
 
   // Reset draft is enabled when expression is non-empty
   const canResetDraft = expression.trim().length > 0;
+  const canRunSmartFix =
+    currentRuleIndex !== null
+    && currentRuleIndex >= 0
+    && expression.trim().length > 0
+    && currentRuleDiagnostics.length > 0;
+
+  const buildSmartFixInput = useCallback((): SmartFixInput | null => {
+    if (
+      currentRuleIndex === null
+      || currentRuleIndex < 0
+      || expression.trim().length === 0
+      || currentRuleDiagnostics.length === 0
+    ) {
+      return null;
+    }
+
+    const trimmedExpression = expression.trim();
+
+    return {
+      mappingId,
+      ruleIndex: currentRuleIndex,
+      targetPath: selectedTargetPath,
+      targetType: selectedTargetType,
+      failingExpression: trimmedExpression,
+      diagnostics: currentRuleDiagnostics,
+      diagnosticScope: 'all',
+      ruleVersion: currentRuleVersion,
+      ruleHash: computeRuleHash(trimmedExpression),
+    };
+  }, [
+    currentRuleDiagnostics,
+    currentRuleIndex,
+    currentRuleVersion,
+    expression,
+    mappingId,
+    selectedTargetPath,
+    selectedTargetType,
+  ]);
+
+  const handleSmartFixAccept = useCallback((nextExpression: string) => {
+    const result = smartFix.state.result;
+    if (result === null) {
+      return;
+    }
+
+    if (result.applyGuard.ruleVersion !== currentRuleVersion) {
+      setSmartFixApplyConflict('Rule version mismatch. Re-run fix on latest rule before applying.');
+      return;
+    }
+
+    updateDraft(selectedTargetPath, nextExpression);
+    onExpressionChangeRef.current?.(nextExpression);
+    hydrateFromExpression(nextExpression, { warningOnFailure: false });
+    setSmartFixApplyConflict(null);
+    smartFix.dismiss();
+  }, [
+    currentRuleVersion,
+    expression,
+    hydrateFromExpression,
+    selectedTargetPath,
+    smartFix,
+    updateDraft,
+  ]);
+
+  const handleSmartFixRerunLatest = useCallback(() => {
+    const latestInput = buildSmartFixInput();
+    if (latestInput === null) {
+      return;
+    }
+
+    setSmartFixApplyConflict(null);
+    smartFix.rerunOnLatest(latestInput);
+  }, [buildSmartFixInput, smartFix]);
 
   // FS-038 T-12: Chain state update handlers
   const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
@@ -1022,6 +1124,24 @@ export function ScalarFieldBuilder({
         </div>
       )}
 
+      {(smartFix.state.status !== 'idle' || smartFixApplyConflict !== null) && (
+        <div className="px-4 pb-3">
+          <SmartFixInline
+            state={smartFix.state}
+            targetPath={selectedTargetPath}
+            targetType={selectedTargetType}
+            localStaleMessage={smartFixApplyConflict}
+            onAccept={handleSmartFixAccept}
+            onRetry={smartFix.retry}
+            onRerunLatest={handleSmartFixRerunLatest}
+            onDismiss={() => {
+              setSmartFixApplyConflict(null);
+              smartFix.dismiss();
+            }}
+          />
+        </div>
+      )}
+
       {/* ------------------------------------------------------------------ */}
       {/* AI Actions + Reset draft + Discard (FS-040 T-04)                  */}
       {/* ------------------------------------------------------------------ */}
@@ -1100,15 +1220,33 @@ export function ScalarFieldBuilder({
           </button>
           <button
             type="button"
-            disabled
-            aria-disabled="true"
-            title={AI_FIX_TOOLTIP}
-            aria-label={`Fix — ${AI_FIX_TOOLTIP}`}
+            disabled={!canRunSmartFix || smartFix.state.status === 'loading'}
+            aria-disabled={!canRunSmartFix || smartFix.state.status === 'loading'}
+            title={canRunSmartFix ? AI_FIX_TOOLTIP : 'Fix requires rule diagnostics'}
+            aria-label={canRunSmartFix ? `Fix — ${AI_FIX_TOOLTIP}` : 'Fix — rule diagnostics required'}
             data-testid="ai-fix-btn"
-            className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
+            onClick={() => {
+              const input = buildSmartFixInput();
+              if (input === null) {
+                return;
+              }
+              setSmartFixApplyConflict(null);
+              smartFix.run(input);
+            }}
+            className={[
+              'flex items-center gap-1 rounded border px-2 py-1 text-xs transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+              !canRunSmartFix || smartFix.state.status === 'loading'
+                ? 'cursor-not-allowed border-slate-700 text-slate-600 opacity-50'
+                : 'cursor-pointer border-slate-600 text-slate-400 hover:border-blue-500/60 hover:text-blue-300',
+            ].join(' ')}
           >
-            <Wrench size={12} aria-hidden="true" />
-            Fix
+            {smartFix.state.status === 'loading' ? (
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Wrench size={12} aria-hidden="true" />
+            )}
+            {smartFix.state.status === 'loading' ? 'Fixing…' : 'Fix'}
           </button>
 
           {/* Reset draft button — clears expression; confirmation for non-trivial */}

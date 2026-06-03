@@ -800,22 +800,159 @@ describe('HttpAdapter (CRUD)', () => {
     expect(input).toEqual(before);
   });
 
-  it('smartFix maps to POST /ai/smart-fix', async () => {
-    vi.mocked(httpRequest).mockResolvedValueOnce({ updatedRules: [] });
+  it('smartFix maps to POST /ai/smart-fix with rule-scoped request payload', async () => {
+    const payload = {
+      originalExpression: 'source("Invoice.Total")',
+      suggestedExpression: 'default(source("Invoice.Total"), 0)',
+      explanation: 'Defaults missing Invoice.Total to 0 to prevent null propagation.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      diagnosticsScopeApplied: 'all' as const,
+      context: {
+        truncated: false,
+        approxTokenCount: 312,
+        byteLength: 2012,
+        totalDiagnosticCount: 2,
+        includedDiagnosticCount: 2,
+        sourceNodeCount: 120,
+        includedSourceNodeCount: 56,
+        targetNodeCount: 80,
+        includedTargetNodeCount: 37,
+      },
+      applyGuard: {
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
     const adapter = new HttpAdapter(API_URL);
 
-    await adapter.smartFix({ mappingId: 'm-1', diagnostics: [] });
+    await expect(
+      adapter.smartFix({
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        targetType: 'number',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [
+          { code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch', path: 'Order.Total' },
+          { code: 'KEYRA-W003', severity: 'warning', message: 'Null propagated', path: 'Order.Total' },
+        ],
+        diagnosticScope: 'all',
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      }),
+    ).resolves.toEqual(payload);
 
     expect(httpRequest).toHaveBeenCalledWith({
       baseUrl: API_URL,
       path: '/ai/smart-fix',
       method: 'POST',
-      body: { mappingId: 'm-1', diagnostics: [] },
+      body: {
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        targetType: 'number',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [
+          { code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch', path: 'Order.Total' },
+          { code: 'KEYRA-W003', severity: 'warning', message: 'Null propagated', path: 'Order.Total' },
+        ],
+        diagnosticScope: 'all',
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      },
     });
   });
 
+  it('smartFix preserves invalid suggestion responses for edit-to-valid gating', async () => {
+    const payload = {
+      originalExpression: 'source("Invoice.Total")',
+      suggestedExpression: 'concat(source("Invoice.Total"), "USD")',
+      explanation: 'Converts amount to a formatted currency string.',
+      validation: {
+        valid: false,
+        diagnostics: [
+          {
+            code: 'TYPE_MISMATCH',
+            severity: 'error',
+            message: 'Expression returns string but target type is number',
+            path: 'Order.Total',
+          },
+        ],
+      },
+      readyToApply: false,
+      diagnosticsScopeApplied: 'single' as const,
+      context: {
+        truncated: true,
+        approxTokenCount: 7900,
+        byteLength: 64000,
+        totalDiagnosticCount: 14,
+        includedDiagnosticCount: 8,
+        sourceNodeCount: 450,
+        includedSourceNodeCount: 120,
+        targetNodeCount: 310,
+        includedTargetNodeCount: 88,
+      },
+      applyGuard: {
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.smartFix({
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        targetType: 'number',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [
+          { code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch', path: 'Order.Total' },
+          { code: 'KEYRA-W003', severity: 'warning', message: 'Null propagated', path: 'Order.Total' },
+        ],
+        diagnosticScope: 'single',
+        selectedDiagnosticIndex: 0,
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      }),
+    ).resolves.toEqual(payload);
+  });
+
+  it('smartFix preserves stale mismatch errors for re-run gating', async () => {
+    const normalizedError = Object.assign(new Error('Rule snapshot is stale. Re-run fix on latest rule before applying.'), {
+      code: 'CONFLICT',
+      statusCode: 409,
+      retryable: false,
+    });
+    vi.mocked(httpRequest).mockRejectedValueOnce(normalizedError);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.smartFix({
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [{ code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch' }],
+      }),
+    ).rejects.toBe(normalizedError);
+  });
+
   it.each([
-    ['smartFix', (adapter: HttpAdapter) => adapter.smartFix({ mappingId: 'm-1', diagnostics: [] })],
+    [
+      'smartFix',
+      (adapter: HttpAdapter) =>
+        adapter.smartFix({
+          mappingId: 'm-1',
+          ruleIndex: 0,
+          targetPath: 'Order.Total',
+          failingExpression: 'source("Invoice.Total")',
+          diagnostics: [{ code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch' }],
+        }),
+    ],
     ['validateMappings', (adapter: HttpAdapter) => adapter.validateMappings({ mappingIds: ['m-1'] })],
   ])('%s surfaces FEATURE_NOT_ENABLED when backend capability is gated', async (_method, invoke) => {
     const featureGated = new FeatureNotEnabledError('gated');

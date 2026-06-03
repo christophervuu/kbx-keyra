@@ -10,7 +10,7 @@ import { usePreviewSetters } from '../context/preview-context';
 
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
-import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode, SuggestExpressionResult } from '@/lib/types/domain';
+import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode, SmartFixResult, SuggestExpressionResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -78,6 +78,9 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   updateDraft: vi.fn(),
   revertDraft: vi.fn(),
   getDraftExpression: () => null,
+  currentRuleIndex: null,
+  currentRuleDiagnostics: [],
+  currentRuleVersion: 0,
 };
 
 // Default mock adapter used by renderBuilder when no adapter override is provided
@@ -97,6 +100,29 @@ function makeDefaultAdapter(): Partial<ApiAdapter> {
         byteLength: 512,
       },
     } satisfies SuggestExpressionResult),
+    smartFix: vi.fn().mockResolvedValue({
+      originalExpression: 'source("firstName")',
+      suggestedExpression: 'trim(source("firstName"))',
+      explanation: 'Trim surrounding whitespace from first name.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      diagnosticsScopeApplied: 'all',
+      context: {
+        truncated: false,
+        approxTokenCount: 100,
+        byteLength: 500,
+        totalDiagnosticCount: 1,
+        includedDiagnosticCount: 1,
+        sourceNodeCount: 10,
+        includedSourceNodeCount: 10,
+        targetNodeCount: 10,
+        includedTargetNodeCount: 10,
+      },
+      applyGuard: {
+        ruleVersion: 1,
+        ruleHash: 'fnv1a-c8f6f0de',
+      },
+    } satisfies SmartFixResult),
   };
 }
 
@@ -347,9 +373,25 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('ai-explain-btn')).toBeDisabled();
   });
 
-  it('renders AI Fix button as disabled', () => {
+  it('renders AI Fix button as disabled when no rule diagnostics are provided', () => {
     renderBuilder();
     expect(screen.getByTestId('ai-fix-btn')).toBeDisabled();
+  });
+
+  it('enables AI Fix button when rule diagnostics are provided', () => {
+    renderBuilder({
+      currentExpression: 'source("firstName")',
+      currentRuleIndex: 0,
+      currentRuleVersion: 1,
+      currentRuleDiagnostics: [
+        {
+          code: 'TYPE_MISMATCH',
+          severity: 'error',
+          message: 'Expected string.',
+        },
+      ],
+    });
+    expect(screen.getByTestId('ai-fix-btn')).not.toBeDisabled();
   });
 
   it('AI buttons have descriptive per-action tooltips (FS-040 T-04)', () => {
@@ -366,7 +408,7 @@ describe('ScalarFieldBuilder', () => {
     );
     expect(screen.getByTestId('ai-fix-btn')).toHaveAttribute(
       'title',
-      'AI-powered fix suggestions \u2014 available in a future release',
+      'Fix requires rule diagnostics',
     );
   });
 
@@ -1398,6 +1440,295 @@ describe('ScalarFieldBuilder', () => {
       fireEvent.click(screen.getByRole('button', { name: /dismiss suggestion/i }));
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
       expect(updateDraft).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Smart Fix (FS-071)', () => {
+    it('runs Smart Fix and renders review panel with original/suggested/explanation', async () => {
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('smart-fix-inline')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('smart-fix-original-expression')).toHaveTextContent('source("firstName")');
+      expect(screen.getByRole('textbox', { name: /smart fix expression editor/i })).toHaveValue('trim(source("firstName"))');
+      expect(screen.getByTestId('smart-fix-explanation')).toHaveTextContent('Trim whitespace around the name.');
+      expect(screen.getByTestId('smart-fix-assistance-label')).toHaveTextContent(
+        'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
+      );
+    });
+
+    it('accept applies expression and dismiss closes panel', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'trim(source("firstName"))');
+      expect(screen.queryByTestId('smart-fix-inline')).not.toBeInTheDocument();
+    });
+
+    it('invalid suggestion gates accept until user edits to valid expression', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'source(',
+        explanation: 'Attempted fix.',
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              code: 'PARSE_ERROR',
+              severity: 'error',
+              message: 'Expression could not be parsed.',
+            },
+          ],
+        },
+        readyToApply: false,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'PARSE_ERROR',
+              severity: 'error',
+              message: 'Expression could not be parsed.',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeDisabled();
+      expect(screen.getByTestId('smart-fix-validation')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('smart-fix-edit-btn'));
+      const editor = screen.getByRole('textbox', { name: /smart fix expression editor/i });
+      fireEvent.change(editor, { target: { value: 'source("firstName")' } });
+
+      expect(screen.getByRole('button', { name: /accept smart fix/i })).not.toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    });
+
+    it('stale mismatch blocks accept and offers rerun latest CTA', async () => {
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 99,
+          ruleHash: 'fnv1a-deadbeef',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+
+      expect(screen.getByTestId('smart-fix-stale')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /re-run fix on latest rule/i })).toBeInTheDocument();
+    });
+
+    it('dismiss does not mutate draft state', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /dismiss smart fix/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /dismiss smart fix/i }));
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('smart-fix-inline')).not.toBeInTheDocument();
     });
   });
 });

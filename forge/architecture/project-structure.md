@@ -36,9 +36,10 @@ src/
     registry/         Function registration and lookup mechanism
     functions/        Built-in DSL function implementations (grouped by category)
   lambda/             AWS Lambda function handlers (current Phase 0 implementation)
-    ai/               AI lambdas (showcase slices)
+    ai/               AI lambdas (showcase + canonical Phase 2 slices)
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
+      smart-fix.ts    AI smart-fix lambda handler: rule-level diagnostic correction with context guardrails, stale apply guard metadata, and validation-aware suggestion response (FS-071 T-01)
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
     schema/           Schema ingestion/query lambdas (FS-056)
       create-schema.ts  POST /schemas handler (FS-057 T-05)
@@ -464,6 +465,7 @@ ui/
           ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
           SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
           SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
+          SmartFixInline.tsx          FS-071 inline Smart Fix panel: original/suggested expression review, explanation, validation diagnostics, explicit Accept/Edit/Dismiss actions, stale mismatch re-run CTA, retry/error states
           AutoMapWorkspace.tsx         FS-048 center-panel Auto-Map workspace shell with loading/error/empty/success states, sticky header integration, toolbar/confirmation/no-source slots, and completion banner
           WorkspaceHeader.tsx          FS-048 workspace header (section path, summary counters, relative refresh timestamp, Back to Editor)
           WorkspaceSuggestionCard.tsx  FS-048 enriched suggestion card: lifecycle badges (`suggested|accepted|edited|dismissed|stale`), expand/collapse, diagnostics, stale warning, per-item actions
@@ -578,6 +580,8 @@ ui/
           use-explain-rule.test.ts       FS-041 hook unit tests (idle state, loading, success, error, dismiss, re-explain, abort on re-invocation, offline error, cleanup on unmount)
           use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping with FEATURE_NOT_ENABLED passthrough
           use-suggest-expression.test.ts FS-042 hook unit tests (state transitions, offline/network/rate-limit mapping, abort semantics, unmount cleanup)
+          use-smart-fix.ts               FS-071 Smart Fix hook: async lifecycle state (`idle|loading|success-valid|success-invalid|stale-mismatch|error`), run/retry/rerunOnLatest/dismiss/reset actions, stale-mismatch classification, and non-mutation request handling
+          use-smart-fix.test.ts          FS-071 hook unit tests (valid/invalid/stale/error transitions, retry + rerun-on-latest behavior, and dismiss/failure non-mutation guarantees)
           use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, metadata, and FEATURE_NOT_ENABLED passthrough
           use-auto-map-workspace.test.ts FS-048 hook unit tests for generation, hydration, lifecycle actions, refresh paths, filtering, and summary derivation
           use-suggestion-preview.ts      FS-048 lazy per-expression preview hook (debounced evaluateExpression, source-data guard, error isolation)
@@ -742,6 +746,7 @@ tests/
     ai/               AI lambda handler tests
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
       suggest-expression.test.ts Tests for ai suggest-expression lambda request validation, mapping, and status handling
+      smart-fix.test.ts     Tests for ai smart-fix lambda request validation, context guardrails, stale snapshot conflict handling, and validation-aware response shaping (FS-071 T-01)
       auto-map.test.ts      Tests for ai auto-map lambda request validation, AI status mapping, and parse-level rule validation enrichment
       fixtures/       Local runner fixtures for AI handler requests and assertions
         auto-map-event.json Single-event API Gateway fixture for local auto-map invocation

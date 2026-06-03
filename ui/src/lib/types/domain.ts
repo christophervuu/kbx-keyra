@@ -440,12 +440,48 @@ export interface ExplainRuleResult {
 
 export interface SmartFixInput {
   readonly mappingId: string;
+  readonly ruleIndex: number;
+  readonly targetPath: string;
+  readonly targetType?: string;
+  readonly failingExpression: string;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly diagnosticScope?: 'all' | 'single';
+  readonly selectedDiagnosticIndex?: number;
+  readonly ruleVersion?: number;
+  readonly ruleHash?: string;
+}
+
+export interface SmartFixValidationResult {
+  readonly valid: boolean;
   readonly diagnostics: readonly Diagnostic[];
 }
 
+export interface SmartFixContextMeta {
+  readonly truncated: boolean;
+  readonly approxTokenCount: number;
+  readonly byteLength: number;
+  readonly totalDiagnosticCount: number;
+  readonly includedDiagnosticCount: number;
+  readonly sourceNodeCount: number;
+  readonly includedSourceNodeCount: number;
+  readonly targetNodeCount: number;
+  readonly includedTargetNodeCount: number;
+}
+
+export interface SmartFixApplyGuard {
+  readonly ruleVersion: number;
+  readonly ruleHash: string;
+}
+
 export interface SmartFixResult {
-  readonly updatedRules: readonly MappingRule[];
-  readonly notes?: readonly string[];
+  readonly originalExpression: string;
+  readonly suggestedExpression: string;
+  readonly explanation: string;
+  readonly validation: SmartFixValidationResult;
+  readonly readyToApply: boolean;
+  readonly diagnosticsScopeApplied: 'all' | 'single';
+  readonly context: SmartFixContextMeta;
+  readonly applyGuard: SmartFixApplyGuard;
 }
 
 export interface ValidateMappingsInput {

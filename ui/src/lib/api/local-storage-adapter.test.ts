@@ -307,7 +307,17 @@ describe('LocalStorageAdapter', () => {
           expression: 'source("Invoice.Total")',
         }),
     ],
-    ['smartFix', (adapter: LocalStorageAdapter) => adapter.smartFix({ mappingId: 'm', diagnostics: [] })],
+    [
+      'smartFix',
+      (adapter: LocalStorageAdapter) =>
+        adapter.smartFix({
+          mappingId: 'm',
+          ruleIndex: 0,
+          targetPath: 'Order.Total',
+          failingExpression: 'source("Invoice.Total")',
+          diagnostics: [{ code: 'KEYRA-E001', severity: 'error', message: 'Invalid expression' }],
+        }),
+    ],
     ['validateMappings', (adapter: LocalStorageAdapter) => adapter.validateMappings({ mappingIds: ['m'] })],
     ['listCdmSchemas', (adapter: LocalStorageAdapter) => adapter.listCdmSchemas()],
     [
