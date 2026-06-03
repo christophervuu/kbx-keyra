@@ -580,6 +580,17 @@ Telemetry and traceability requirements:
 - Feature-level review audit events (`suggestion_generated`, `suggestion_viewed`, `suggestion_edited`, `suggestion_accepted`, `suggestion_dismissed`, `apply_blocked_invalid`, `apply_blocked_stale`) are required at integration boundaries.
 - Correlation continuity is mandatory across feature event -> API envelope -> runtime telemetry using shared identifiers (`requestId`, optional `correlationId`).
 
+### FS-075 verification/governance addendum
+
+FS-075 codifies the runtime-facing verification boundary for Phase 2 acceptance:
+
+- Deterministic acceptance gate is mandatory in CI and must pass before merge/release (`npm run test:phase2:deterministic-gate`).
+- Prompt/runtime drift checks are mandatory and mode-scoped:
+  - PR mode: warning-budget policy (`npm run test:phase2:prompt-eval:pr`)
+  - Release mode: strict policy (`npm run test:phase2:prompt-eval:release`)
+- Golden corpus/versioning contract is tuple-scoped (`promptId + model/runtime tuple`) and is the canonical drift key.
+- Runtime outputs remain suggestion-only under all generate/refresh/retry/failure paths; acceptance gate policy treats any implicit commit instruction or behavior as a hard failure condition.
+
 ### Auto-Map canonical contract (FS-073)
 
 `src/lambda/ai/auto-map.ts` is a canonical thin handler over shared runtime invocation and enforces these production constraints:

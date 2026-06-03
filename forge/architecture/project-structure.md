@@ -12,9 +12,10 @@ This is a living document. Update it when the project structure changes. Do not 
 src/        Backend and shared source code
 ui/         Frontend source code (React / TypeScript / Vite)
 tests/      Test files
-scripts/    Local tooling/runner scripts (includes UI AI guardrail static policy check)
+scripts/    Local tooling/runner scripts (includes UI backend-only guardrail and no-browser-secret policy checks, FS-075 deterministic Phase 2 gate runner, and FS-075 prompt eval runner for PR/release threshold modes)
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
+.github/    CI workflow definitions (includes FS-075 Phase 2 acceptance gate workflow)
 docker-compose.test.yml  Persistence integration local stack (DynamoDB Local + LocalStack S3)
 template.yaml            AWS SAM template (Phase 1 infrastructure scaffold)
 samconfig.toml           AWS SAM deploy configuration environments

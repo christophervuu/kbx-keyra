@@ -386,6 +386,50 @@ describe('useAutoMapWorkspace', () => {
     expect(result.current.items.find((i) => i.targetPath === 'Order.Status')?.status).toBe('suggested');
   });
 
+  it('generate/refresh/retry/failure lifecycle does not mutate drafts before explicit accept', async () => {
+    const updateDraft = vi.fn();
+    const adapterMock = {
+      autoMapSection: vi
+        .fn()
+        .mockResolvedValueOnce(MOCK_RESULT)
+        .mockRejectedValueOnce(new Error('Network error: Could not reach server'))
+        .mockResolvedValueOnce(MOCK_RESULT),
+    };
+    const params = makeParams({
+      updateDraft,
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    // Initial generate
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    expect(updateDraft).not.toHaveBeenCalled();
+
+    // Refresh failure should remain non-mutating
+    act(() => {
+      result.current.refreshAll();
+    });
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(updateDraft).not.toHaveBeenCalled();
+
+    // Retry via refresh should remain non-mutating
+    act(() => {
+      result.current.refreshAll();
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    expect(updateDraft).not.toHaveBeenCalled();
+
+    // Explicit accept is the first mutation path
+    act(() => {
+      result.current.acceptSuggestion('Order.Id');
+    });
+    expect(updateDraft).toHaveBeenCalledTimes(1);
+    expect(updateDraft).toHaveBeenCalledWith('Order.Id', 'source.orderId');
+  });
+
   // -------------------------------------------------------------------------
   // AE-05: Bulk accept all valid
   // -------------------------------------------------------------------------
@@ -584,6 +628,36 @@ describe('useAutoMapWorkspace', () => {
     expect(setSelectedTargetPath).not.toHaveBeenCalled();
     expect(exitWorkspace).not.toHaveBeenCalled();
     expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('stale');
+  });
+
+  it('editSuggestion is blocked for invalid suggestions (no draft mutation or navigation)', async () => {
+    const updateDraft = vi.fn();
+    const setSelectedTargetPath = vi.fn();
+    const exitWorkspace = vi.fn();
+    const adapterMock = makeAdapter({
+      suggestions: [SUGGESTION_INVALID],
+    });
+    const params = makeParams({
+      updateDraft,
+      setSelectedTargetPath,
+      exitWorkspace,
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => {
+      result.current.editSuggestion('Order.Status');
+    });
+
+    expect(updateDraft).not.toHaveBeenCalled();
+    expect(setSelectedTargetPath).not.toHaveBeenCalled();
+    expect(exitWorkspace).not.toHaveBeenCalled();
+    expect(result.current.items.find((i) => i.targetPath === 'Order.Status')?.status).toBe('suggested');
   });
 
   // -------------------------------------------------------------------------

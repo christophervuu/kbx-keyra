@@ -322,6 +322,23 @@ The naming above reflects the currently implemented lambda surface. Infrastructu
 - `npm run typecheck`
 - scoped vitest suites for touched lambda domains
 - `npm run test:integration` (when DynamoDB Local is available)
+- `npm run test:phase2:deterministic-gate` (FS-075 deterministic acceptance baseline; includes AE-07 Phase 1 non-regression suites)
+
+### FS-075 Phase 2 acceptance gate (cross-cutting)
+
+FS-075 adds a CI-enforced acceptance path that combines backend AI safety checks with Phase 1 regression coverage:
+
+- PR required gate runs:
+  - `npm run test:phase2:deterministic-gate`
+  - `npm run test:phase2:prompt-eval:pr` (warning-budget policy)
+- Pre-release gate runs:
+  - `npm run test:phase2:deterministic-gate`
+  - `npm run test:phase2:prompt-eval:release` (strict hard-fail policy unless explicitly waived)
+
+The deterministic gate matrix now includes explicit AE-07 checks for:
+- persistence model non-regression (`tests/lib/persistence/*.test.ts`)
+- schema ingestion/query non-regression (`tests/integration/schema-ingestion/inline-path.test.ts`, `tests/integration/schema-ingestion/step-functions-path.test.ts`, `tests/lambda/schema/query-schema-nodes.test.ts`)
+- adapter parity non-regression (`ui/src/lib/api/http-adapter.test.ts`, `ui/src/lib/api/local-storage-adapter.test.ts`)
 
 ---
 

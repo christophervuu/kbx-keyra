@@ -1,0 +1,91 @@
+name: Phase 2 Acceptance Gate
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'ui/src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'forge/active/FS-075/**'
+      - 'package.json'
+      - 'ui/package.json'
+      - '.github/workflows/phase2-acceptance-gate.yml'
+  workflow_dispatch:
+    inputs:
+      run_release_gate:
+        description: 'Run strict pre-release gate (release prompt-eval mode)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  phase2-pr-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run deterministic acceptance checks
+        run: npm run test:phase2:deterministic-gate
+
+      - name: Run prompt eval (PR warning-budget mode)
+        run: npm run test:phase2:prompt-eval:pr
+
+      - name: Upload PR prompt-eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-prompt-eval-pr-report
+          path: forge/active/FS-075/prompt-eval-report.pr.json
+          if-no-files-found: ignore
+
+  phase2-release-gate:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_release_gate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run deterministic acceptance checks
+        run: npm run test:phase2:deterministic-gate
+
+      - name: Run prompt eval (release strict mode)
+        run: npm run test:phase2:prompt-eval:release
+
+      - name: Upload release prompt-eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-prompt-eval-release-report
+          path: forge/active/FS-075/prompt-eval-report.release.json
+          if-no-files-found: ignore

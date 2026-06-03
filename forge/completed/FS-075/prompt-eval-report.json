@@ -1,0 +1,102 @@
+{
+  "mode": "release",
+  "generatedAt": "2026-06-03T04:02:29.269Z",
+  "corpusId": "FS-075-prompt-goldens",
+  "policy": {
+    "targetScore": 0.9,
+    "hardFloor": 0.9,
+    "warningBudget": 0,
+    "strictMissingRequired": true,
+    "description": "Pre-release gate is strict: no warnings or missing required signals unless explicitly waived."
+  },
+  "summary": {
+    "totalCases": 5,
+    "averageScore": 0.942,
+    "warnings": 0,
+    "errors": 2,
+    "warningBudgetUsed": 0,
+    "warningBudget": 0
+  },
+  "driftIssues": [
+    {
+      "caseId": "EXPLAIN-001",
+      "featureId": "explain-rule",
+      "severity": "error",
+      "reason": "Missing required signals in strict mode: document type"
+    },
+    {
+      "caseId": "AIVAL-001",
+      "featureId": "ai-validation",
+      "severity": "error",
+      "reason": "Score 0.88 below hard floor 0.90"
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "EXPLAIN-001",
+      "versionKey": "explain-rule::openai/gpt-4.1-mini@ai-runtime-v1",
+      "observedOutput": "The expression maps negative amounts to Credit Memo and all other cases to Invoice document type.",
+      "score": 0.96,
+      "requiredHits": [
+        "credit memo",
+        "invoice"
+      ],
+      "missingRequired": [
+        "document type"
+      ],
+      "forbiddenHits": []
+    },
+    {
+      "caseId": "SUGGEST-001",
+      "versionKey": "nl-to-rule::openai/gpt-4.1-mini@ai-runtime-v1",
+      "observedOutput": "default(source(\"InvoiceCurrency\"), \"USD\")",
+      "score": 1,
+      "requiredHits": [
+        "default(",
+        "source(",
+        "usd"
+      ],
+      "missingRequired": [],
+      "forbiddenHits": []
+    },
+    {
+      "caseId": "SMARTFIX-001",
+      "versionKey": "smart-fix::openai/gpt-4.1@ai-runtime-v1",
+      "observedOutput": "Fix by using default(source(\"Invoice.Total\"), 0) to avoid null-number failures.",
+      "score": 0.94,
+      "requiredHits": [
+        "default(",
+        "source(",
+        "fix"
+      ],
+      "missingRequired": [],
+      "forbiddenHits": []
+    },
+    {
+      "caseId": "AIVAL-001",
+      "versionKey": "validate-mappings::openai/gpt-4.1@ai-runtime-v1",
+      "observedOutput": "Warning: Rule 4 may produce null output; recommendation: add fallback.",
+      "score": 0.88,
+      "requiredHits": [
+        "warning",
+        "recommendation",
+        "rule"
+      ],
+      "missingRequired": [],
+      "forbiddenHits": []
+    },
+    {
+      "caseId": "AUTOMAP-001",
+      "versionKey": "auto-map::openai/gpt-4.1@ai-runtime-v1",
+      "observedOutput": "{\"rules\":[{\"target\":\"Order.Header.CurrencyCode\",\"expression\":\"default(source(\\\"Invoice.Currency\\\"), \\\"USD\\\")\",\"confidence\":\"high\"}]}",
+      "score": 0.93,
+      "requiredHits": [
+        "target",
+        "expression",
+        "confidence"
+      ],
+      "missingRequired": [],
+      "forbiddenHits": []
+    }
+  ]
+}

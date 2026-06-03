@@ -701,50 +701,62 @@ describe('LocalStorageAdapter', () => {
   });
 
   it('promoteDeployment requires version-backed source', async () => {
-    const adapter = new LocalStorageAdapter();
-    const project = await adapter.createProject({
-      name: 'Project',
-      description: 'desc',
-      slug: 'project',
-    });
+    vi.useFakeTimers();
+    try {
+      const adapter = new LocalStorageAdapter();
+      const project = await adapter.createProject({
+        name: 'Project',
+        description: 'desc',
+        slug: 'project',
+      });
 
-    const created = await adapter.createMapping({
-      projectId: project.projectId,
-      name: 'Mapping A',
-      sourceSchemaRef: SOURCE_SCHEMA_REF,
-      targetSchemaRef: TARGET_SCHEMA_REF,
-      rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
-    });
+      const created = await adapter.createMapping({
+        projectId: project.projectId,
+        name: 'Mapping A',
+        sourceSchemaRef: SOURCE_SCHEMA_REF,
+        targetSchemaRef: TARGET_SCHEMA_REF,
+        rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
+      });
 
-    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
-    await adapter.createVersion(created.mappingId);
+      await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
+      await adapter.createVersion(created.mappingId);
 
-    await adapter.deployMapping(created.mappingId, {
-      environment: 'DEV',
-      sourceType: 'revision',
-      sourceNumber: 1,
-    });
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+      await adapter.deployMapping(created.mappingId, {
+        environment: 'DEV',
+        sourceType: 'revision',
+        sourceNumber: 1,
+      });
 
-    await expect(
-      adapter.promoteDeployment(created.mappingId, {
+      await expect(
+        adapter.promoteDeployment(created.mappingId, {
+          fromEnvironment: 'DEV',
+          toEnvironment: 'QA',
+        }),
+      ).rejects.toMatchObject({
+        code: 'PROMOTION_REQUIRES_VERSION',
+        message: 'Promotion requires a version-backed source deployment',
+        statusCode: 400,
+        retryable: false,
+      });
+
+      vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'));
+      await adapter.deployMapping(created.mappingId, {
+        environment: 'DEV',
+        sourceType: 'version',
+        sourceNumber: 1,
+      });
+
+      const promoted = await adapter.promoteDeployment(created.mappingId, {
         fromEnvironment: 'DEV',
         toEnvironment: 'QA',
-      }),
-    ).rejects.toThrow('Promotion requires a version-backed source deployment');
+      });
 
-    await adapter.deployMapping(created.mappingId, {
-      environment: 'DEV',
-      sourceType: 'version',
-      sourceNumber: 1,
-    });
-
-    const promoted = await adapter.promoteDeployment(created.mappingId, {
-      fromEnvironment: 'DEV',
-      toEnvironment: 'QA',
-    });
-
-    expect(promoted.sourceType).toBe('version');
-    expect(promoted.promotedFrom).toBe('DEV');
+      expect(promoted.sourceType).toBe('version');
+      expect(promoted.promotedFrom).toBe('DEV');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rollbackDeployment creates rollback entry and current staleness summary', async () => {

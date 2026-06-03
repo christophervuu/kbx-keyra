@@ -149,6 +149,10 @@ GitHub Actions parity gate:
 
 Parity gate behavior: failure in either project (`localStorage` or `httpBackend`) fails the workflow.
 
+### FS-075 acceptance-gate integration posture
+
+FS-075 adds a separate CI workflow (`.github/workflows/phase2-acceptance-gate.yml`) that enforces Phase 2 AI acceptance criteria across deterministic checks and prompt-eval policy modes. E2E parity remains an independent gate focused on adapter behavior; it is not replaced by FS-075 and continues to run as its own required quality signal.
+
 ## Phase Evolution
 
 Phase 0.5/Phase 1 parity mode is now implemented (dual adapter projects + mock backend).
