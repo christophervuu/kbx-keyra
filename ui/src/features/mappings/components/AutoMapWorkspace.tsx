@@ -4,6 +4,7 @@ import { useCallback, useContext, useState, type ReactNode } from 'react';
 import { WorkspaceHeader } from './WorkspaceHeader';
 import { WorkspaceSuggestionCard } from './WorkspaceSuggestionCard';
 import { PreviewContext } from '../context/preview-context';
+import type { BatchAcceptResult } from '../hooks';
 import { useExpressionPreview } from '../hooks/use-expression-preview';
 import type { AutoMapWorkspaceSummary, SuggestionWorkspaceItem } from '../types';
 
@@ -32,6 +33,8 @@ export interface AutoMapWorkspaceProps {
   onRefreshUnmapped?: () => void;
   /** Called to bulk-accept valid pending suggestions */
   onAcceptAllValid?: () => void;
+  batchAcceptResult?: BatchAcceptResult | null;
+  onClearBatchAcceptResult?: () => void;
   /** Called to exit the workspace and return to the editor */
   onExitWorkspace: () => void;
   /** Called when a suggestion is accepted */
@@ -358,6 +361,8 @@ export function AutoMapWorkspace({
   onRefreshAll,
   onRefreshUnmapped,
   onAcceptAllValid,
+  batchAcceptResult,
+  onClearBatchAcceptResult,
   onExitWorkspace,
   onAccept,
   onEdit,
@@ -470,6 +475,8 @@ export function AutoMapWorkspace({
         lastRefreshedAt={generatedAt}
         onExitWorkspace={onExitWorkspace}
         onAcceptAllValid={onAcceptAllValid}
+        batchAcceptResult={batchAcceptResult}
+        onClearBatchAcceptResult={onClearBatchAcceptResult}
         onRefreshUnmapped={onRefreshUnmapped}
         onRefreshAll={onRefreshAll}
         onToggleExpandAll={toggleExpandAll}

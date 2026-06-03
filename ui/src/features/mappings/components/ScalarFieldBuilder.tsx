@@ -984,7 +984,6 @@ export function ScalarFieldBuilder({
               onToggleMode={() => { setMode('editor'); }}
               onClearMapping={() => { onClearMapping?.(selectedTargetPath); }}
               onExpressionClick={() => { setMode('editor'); }}
-              parsedSourceSchema={parsedSourceSchema}
               onExpressionAccept={(expr) => {
                 updateDraft(selectedTargetPath, expr);
               }}
@@ -1105,6 +1104,7 @@ export function ScalarFieldBuilder({
             state={suggestState}
             targetPath={selectedTargetPath}
             targetType={selectedTargetType}
+            currentExpression={currentExpression || null}
             onGenerate={(instruction) => {
               generateSuggestion({
                 mappingId,
@@ -1130,6 +1130,7 @@ export function ScalarFieldBuilder({
             state={smartFix.state}
             targetPath={selectedTargetPath}
             targetType={selectedTargetType}
+            currentExpression={currentExpression || null}
             localStaleMessage={smartFixApplyConflict}
             onAccept={handleSmartFixAccept}
             onRetry={smartFix.retry}

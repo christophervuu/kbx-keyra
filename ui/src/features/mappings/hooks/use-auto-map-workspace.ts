@@ -15,6 +15,8 @@ import type {
 
 import type { ApiAdapter } from '@/lib/api/types';
 import type {
+  SuggestionActionEligibility,
+  SuggestionApplyBlockReason,
   AutoMapSectionInput,
   AutoMapSectionResult,
   AutoMapSuggestion,
@@ -93,6 +95,8 @@ export interface UseAutoMapWorkspaceResult {
   dismissSuggestion: (targetPath: string) => void;
   undoDismiss: (targetPath: string) => void;
   bulkAcceptAllValid: () => void;
+  lastBatchAcceptResult: BatchAcceptResult | null;
+  clearBatchAcceptResult: () => void;
 
   // Refresh
   refreshAll: () => void;
@@ -112,6 +116,21 @@ export interface UseAutoMapWorkspaceResult {
   generatedAt: string | null;
   previousSuggestionsAvailable: boolean;
   restorePreviousSuggestions: () => void;
+}
+
+export interface BatchAcceptSkipEntry {
+  readonly targetPath: string;
+  readonly reasons: readonly SuggestionApplyBlockReason[];
+  readonly primaryReason: SuggestionApplyBlockReason;
+}
+
+export interface BatchAcceptResult {
+  readonly attempted: number;
+  readonly applied: number;
+  readonly skipped: number;
+  readonly skippedByReason: Readonly<Record<SuggestionApplyBlockReason, number>>;
+  readonly skippedItems: readonly BatchAcceptSkipEntry[];
+  readonly completedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +200,37 @@ function normalizeSuggestionValidation(suggestion: AutoMapSuggestion): {
         message: 'No validation status returned',
       },
     ],
+  };
+}
+
+function deriveSuggestionActionEligibility(item: {
+  status: SuggestionLifecycleStatus;
+  validation?: { valid: boolean };
+}): SuggestionActionEligibility {
+  const blockReasons: SuggestionApplyBlockReason[] = [];
+
+  if (item.validation?.valid !== true) {
+    blockReasons.push('invalid');
+  }
+
+  if (item.status === 'stale') {
+    blockReasons.push('stale');
+  }
+
+  if (item.status === 'dismissed') {
+    blockReasons.push('dismissed');
+  }
+
+  if (item.status === 'accepted' || item.status === 'edited') {
+    blockReasons.push('already-reviewed');
+  }
+
+  const canAccept = blockReasons.length === 0;
+
+  return {
+    canAccept,
+    canBatchAccept: canAccept && item.status === 'suggested',
+    blockReasons,
   };
 }
 
@@ -448,6 +498,7 @@ export function useAutoMapWorkspace({
   const [activeFilters, setActiveFilters] = useState<Set<SuggestionFilter>>(
     () => new Set(['needsReview']),
   );
+  const [lastBatchAcceptResult, setLastBatchAcceptResult] = useState<BatchAcceptResult | null>(null);
 
   const runMetaRef = useRef<WorkspaceRunMeta>(EMPTY_RUN_META);
   useEffect(() => {
@@ -601,6 +652,7 @@ export function useAutoMapWorkspace({
 
       setStatus('loading');
       setError(null);
+      setLastBatchAcceptResult(null);
 
       const normalizedPath = normalizeSectionPath(path);
       const targetSection = deriveEligibleTargets(
@@ -680,6 +732,7 @@ export function useAutoMapWorkspace({
     (path: string): void => {
       const normalizedPath = normalizeSectionPath(path);
       setSectionPath(normalizedPath);
+      setLastBatchAcceptResult(null);
 
       // Check for persisted suggestions first (AE-02)
       const persisted = loadAutoMapSuggestions(mappingId, normalizedPath);
@@ -760,7 +813,9 @@ export function useAutoMapWorkspace({
     (targetPath: string): void => {
       setItems((prev) => {
         const item = prev.find((i) => i.targetPath === targetPath);
-        if (!item || item.status === 'accepted') return prev;
+        if (!item) return prev;
+        const eligibility = deriveSuggestionActionEligibility(item);
+        if (!eligibility.canAccept) return prev;
         updateDraftRef.current(targetPath, item.suggestedExpression);
         const idx = prev.findIndex((i) => i.targetPath === targetPath);
         const next = [...prev];
@@ -783,6 +838,8 @@ export function useAutoMapWorkspace({
       setItems((prev) => {
         const item = prev.find((i) => i.targetPath === targetPath);
         if (!item) return prev;
+        const eligibility = deriveSuggestionActionEligibility(item);
+        if (!eligibility.canAccept) return prev;
         updateDraftRef.current(targetPath, item.suggestedExpression);
         setSelectedTargetPathRef.current(targetPath);
         exitWorkspaceRef.current();
@@ -832,14 +889,45 @@ export function useAutoMapWorkspace({
 
   const bulkAcceptAllValid = useCallback((): void => {
     setItems((prev) => {
+      const skippedByReason: Record<SuggestionApplyBlockReason, number> = {
+        invalid: 0,
+        stale: 0,
+        dismissed: 0,
+        'already-reviewed': 0,
+        'not-ready': 0,
+      };
+      const skippedItems: BatchAcceptSkipEntry[] = [];
+      let applied = 0;
+
       const next = prev.map((item): SuggestionWorkspaceItem => {
-        if (item.status !== 'suggested') return item;
-        const isValid =
-          item.validation === undefined || item.validation.valid === true;
-        if (!isValid) return item;
+        const eligibility = deriveSuggestionActionEligibility(item);
+        if (!eligibility.canBatchAccept) {
+          const primaryReason = eligibility.blockReasons[0] ?? 'not-ready';
+          skippedByReason[primaryReason] += 1;
+          skippedItems.push({
+            targetPath: item.targetPath,
+            reasons: eligibility.blockReasons,
+            primaryReason,
+          });
+          return item;
+        }
+
         updateDraftRef.current(item.targetPath, item.suggestedExpression);
+        applied += 1;
         return { ...item, status: 'accepted' };
       });
+
+      const computedResult: BatchAcceptResult = {
+        attempted: prev.length,
+        applied,
+        skipped: prev.length - applied,
+        skippedByReason,
+        skippedItems,
+        completedAt: new Date().toISOString(),
+      };
+
+      setLastBatchAcceptResult(computedResult);
+
       const nextItems = next as readonly SuggestionWorkspaceItem[];
       setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
       if (sectionPath !== null) {
@@ -850,6 +938,10 @@ export function useAutoMapWorkspace({
       return nextItems;
     });
   }, [generatedAt, lastRefreshedAt, mappingId, sectionPath]);
+
+  const clearBatchAcceptResult = useCallback(() => {
+    setLastBatchAcceptResult(null);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Staleness (for T-04)
@@ -921,6 +1013,8 @@ export function useAutoMapWorkspace({
     dismissSuggestion,
     undoDismiss,
     bulkAcceptAllValid,
+    lastBatchAcceptResult,
+    clearBatchAcceptResult,
     refreshAll,
     refreshUnmapped,
     refreshStale,

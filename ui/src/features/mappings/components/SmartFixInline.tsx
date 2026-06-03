@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Loader2, RefreshCw, Sparkles, WandSparkles, X } f
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SmartFixState } from '../hooks/use-smart-fix';
+import { AiGeneratedStateLabel, AiSuggestionComparisonBlock } from './AiSuggestionReviewPrimitives';
 
 import { defaultRegistry, inferExpressionType, parse } from '@/lib/engine';
 import type { Diagnostic } from '@/lib/types/domain';
@@ -10,6 +11,7 @@ export interface SmartFixInlineProps {
   state: SmartFixState;
   targetPath: string;
   targetType: string;
+  currentExpression?: string | null;
   localStaleMessage?: string | null;
   onAccept: (expression: string) => void;
   onRetry: () => void;
@@ -92,6 +94,7 @@ export function SmartFixInline({
   state,
   targetPath,
   targetType,
+  currentExpression = null,
   localStaleMessage = null,
   onAccept,
   onRetry,
@@ -215,20 +218,20 @@ export function SmartFixInline({
             </button>
           </div>
 
-          <p className="mb-2 text-[11px] text-slate-400" data-testid="smart-fix-assistance-label">
-            AI-generated assistance. Suggestions are not persisted until you explicitly accept.
-          </p>
+          <AiGeneratedStateLabel testId="smart-fix-assistance-label" />
 
           <p className="mb-2 text-xs text-slate-500">
             Fix suggestion for <span className="font-mono text-slate-400">{targetPath}</span>
           </p>
 
-          <div className="mb-2 rounded border border-slate-700 bg-slate-900/60 p-2">
-            <p className="mb-1 text-[11px] text-slate-500">Original expression</p>
-            <code className="block whitespace-pre-wrap break-all text-xs text-slate-300" data-testid="smart-fix-original-expression">
-              {state.result.originalExpression}
-            </code>
-          </div>
+          <AiSuggestionComparisonBlock
+            testId="smart-fix-comparison"
+            currentExpression={currentExpression ?? state.result.originalExpression}
+            suggestedExpression={state.result.suggestedExpression}
+            currentLabel="Current expression"
+            suggestedLabel="Generated fix"
+            emptyCurrentText="No existing expression"
+          />
 
           <div aria-live="polite">
             <div className="mb-1 flex items-center justify-between gap-2">

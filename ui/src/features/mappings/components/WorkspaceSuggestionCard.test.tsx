@@ -221,6 +221,13 @@ describe('WorkspaceSuggestionCard — expanded', () => {
     expect(screen.getByText('source.orderId')).toBeInTheDocument();
   });
 
+  it('renders generated-state label copy', () => {
+    renderCard(makeItem());
+    expect(screen.getByTestId('suggestion-generated-label-Order.Id')).toHaveTextContent(
+      'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
+    );
+  });
+
   it('renders New rule badge for new suggestions', () => {
     renderCard(makeItem({ isNew: true }));
     expect(screen.getByTestId('badge-new')).toBeInTheDocument();

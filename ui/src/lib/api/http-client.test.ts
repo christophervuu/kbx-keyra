@@ -557,6 +557,55 @@ describe('httpRequest', () => {
     });
   });
 
+  it('preserves backend correlation lineage fields from error envelope (requestId/code/status/retryable)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          backendErrorResponse(
+            {
+              error: {
+                code: 'CONFLICT',
+                message: 'Rule snapshot is stale. Re-run fix on latest rule before applying.',
+                statusCode: 409,
+                retryable: false,
+                requestId: 'req-corr-409',
+              },
+            },
+            { status: 409 },
+          ),
+        ),
+    );
+
+    const error = await httpRequest({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/ai/smart-fix',
+      method: 'POST',
+      body: {
+        mappingId: 'mapping-1',
+        ruleIndex: 0,
+      },
+      retry: false,
+    }).catch((err: unknown) => err as HttpClientError);
+
+    expect(error).toMatchObject<HttpClientError>({
+      code: 'CONFLICT',
+      statusCode: 409,
+      retryable: false,
+      requestId: 'req-corr-409',
+    });
+    expect(error.message).toContain('stale');
+
+    // AppError normalization retains request lineage fields for UI↔API correlation.
+    expect(toAppError(error)).toMatchObject({
+      code: 'CONFLICT',
+      statusCode: 409,
+      retryable: false,
+      requestId: 'req-corr-409',
+    });
+  });
+
   it('parses backend error envelope when requestId is missing', async () => {
     vi.stubGlobal(
       'fetch',

@@ -70,6 +70,8 @@ export type {
   UseAutoMapWorkspaceResult,
   SuggestionFilter,
   SuggestionWorkspaceItem,
+  BatchAcceptResult,
+  BatchAcceptSkipEntry,
 } from './use-auto-map-workspace';
 // FS-048 suggestion preview hook
 export { useSuggestionPreview } from './use-suggestion-preview';

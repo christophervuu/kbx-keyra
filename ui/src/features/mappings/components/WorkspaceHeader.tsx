@@ -1,6 +1,7 @@
-import { ArrowLeft, CheckCheck, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CheckCheck, RefreshCw, XCircle } from 'lucide-react';
 
 import { formatRelativeTime } from './VersionHistoryDrawer';
+import type { BatchAcceptResult } from '../hooks';
 import type { AutoMapWorkspaceSummary } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -20,6 +21,8 @@ export interface WorkspaceHeaderProps {
   onRefreshUnmapped?: () => void;
   onRefreshAll?: () => void;
   onToggleExpandAll?: () => void;
+  batchAcceptResult?: BatchAcceptResult | null;
+  onClearBatchAcceptResult?: () => void;
   allExpanded?: boolean;
   isRefreshing?: boolean;
   /** Optional className for the outer container */
@@ -75,6 +78,8 @@ export function WorkspaceHeader({
   onRefreshUnmapped,
   onRefreshAll,
   onToggleExpandAll,
+  batchAcceptResult = null,
+  onClearBatchAcceptResult,
   allExpanded = false,
   isRefreshing = false,
   className = '',
@@ -272,6 +277,51 @@ export function WorkspaceHeader({
           )}
         </div>
       </div>
+
+      {batchAcceptResult && (
+        <div
+          data-testid="workspace-batch-result"
+          className="mt-2 flex flex-wrap items-start justify-between gap-2 rounded border border-slate-700/80 bg-slate-900/70 px-2.5 py-2"
+        >
+          <div className="min-w-0">
+            <p className="text-[11px] text-slate-200" data-testid="workspace-batch-result-summary">
+              Batch accept applied {batchAcceptResult.applied} of {batchAcceptResult.attempted} suggestion
+              {batchAcceptResult.attempted === 1 ? '' : 's'}.
+              {batchAcceptResult.skipped > 0
+                ? ` Skipped ${batchAcceptResult.skipped} ineligible suggestion${batchAcceptResult.skipped === 1 ? '' : 's'}.`
+                : ''}
+            </p>
+            {batchAcceptResult.skipped > 0 && (
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-400" data-testid="workspace-batch-result-reasons">
+                {Object.entries(batchAcceptResult.skippedByReason)
+                  .filter(([, count]) => count > 0)
+                  .map(([reason, count]) => (
+                    <span
+                      key={reason}
+                      className="rounded border border-slate-700 px-1.5 py-0.5"
+                      data-testid={`workspace-batch-skip-${reason}`}
+                    >
+                      {reason}: {count}
+                    </span>
+                  ))}
+              </div>
+            )}
+          </div>
+
+          {onClearBatchAcceptResult && (
+            <button
+              type="button"
+              data-testid="workspace-batch-result-dismiss"
+              onClick={onClearBatchAcceptResult}
+              className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[10px] text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              aria-label="Dismiss batch accept summary"
+            >
+              <XCircle size={11} aria-hidden="true" />
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

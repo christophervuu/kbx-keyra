@@ -14,6 +14,7 @@ import { AlertTriangle, Check, Loader2, Sparkles, X } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 
 import type { SuggestExpressionState } from '../hooks/use-suggest-expression';
+import { AiGeneratedStateLabel, AiSuggestionComparisonBlock } from './AiSuggestionReviewPrimitives';
 
 import { defaultRegistry, inferExpressionType, parse } from '@/lib/engine';
 import type { Diagnostic } from '@/lib/types/domain';
@@ -28,6 +29,7 @@ export interface SuggestExpressionInlineProps {
   /** Target field context for display */
   targetPath: string;
   targetType: string;
+  currentExpression?: string | null;
   /** Callback: user clicks Generate */
   onGenerate: (instruction: string) => void;
   /** Callback: user clicks Accept */
@@ -116,6 +118,7 @@ export function SuggestExpressionInline({
   state,
   targetPath,
   targetType,
+  currentExpression = null,
   onGenerate,
   onAccept,
   onDismiss,
@@ -300,9 +303,16 @@ export function SuggestExpressionInline({
             </button>
           </div>
 
-          <p className="mb-2 text-[11px] text-slate-400" data-testid="suggest-expression-assistance-label">
-            AI-generated assistance. Suggestions are not persisted until you explicitly accept.
-          </p>
+          <AiGeneratedStateLabel testId="suggest-expression-assistance-label" />
+
+          <AiSuggestionComparisonBlock
+            testId="suggest-expression-comparison"
+            currentExpression={currentExpression}
+            suggestedExpression={state.result.expression}
+            currentLabel="Current expression"
+            suggestedLabel="Generated suggestion"
+            emptyCurrentText="No existing expression"
+          />
 
           {/* Result area */}
           <div aria-live="polite">

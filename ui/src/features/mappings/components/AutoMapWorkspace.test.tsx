@@ -64,6 +64,8 @@ const DEFAULT_PROPS = {
   previousSuggestionsAvailable: false,
   onRestorePrevious: vi.fn(),
   generatedAt: null,
+  batchAcceptResult: null,
+  onClearBatchAcceptResult: vi.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -437,6 +439,43 @@ describe('WorkspaceHeader', () => {
     expect(screen.getByTestId('bulk-refresh-unmapped')).toBeInTheDocument();
     expect(screen.getByTestId('bulk-refresh-all')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-toggle-expand-all')).toBeInTheDocument();
+  });
+
+  it('renders batch accept result summary with skip reason badges and dismiss action', async () => {
+    const onClearBatchAcceptResult = vi.fn();
+    render(
+      <WorkspaceHeader
+        {...BASE_PROPS}
+        batchAcceptResult={{
+          attempted: 4,
+          applied: 2,
+          skipped: 2,
+          skippedByReason: {
+            invalid: 1,
+            stale: 1,
+            dismissed: 0,
+            'already-reviewed': 0,
+            'not-ready': 0,
+          },
+          skippedItems: [
+            { targetPath: 'Order.Status', reasons: ['invalid'], primaryReason: 'invalid' },
+            { targetPath: 'Order.Id', reasons: ['stale'], primaryReason: 'stale' },
+          ],
+          completedAt: new Date().toISOString(),
+        }}
+        onClearBatchAcceptResult={onClearBatchAcceptResult}
+      />,
+    );
+
+    expect(screen.getByTestId('workspace-batch-result')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-batch-result-summary')).toHaveTextContent(
+      'Batch accept applied 2 of 4 suggestions. Skipped 2 ineligible suggestions.',
+    );
+    expect(screen.getByTestId('workspace-batch-skip-invalid')).toHaveTextContent('invalid: 1');
+    expect(screen.getByTestId('workspace-batch-skip-stale')).toHaveTextContent('stale: 1');
+
+    await userEvent.click(screen.getByTestId('workspace-batch-result-dismiss'));
+    expect(onClearBatchAcceptResult).toHaveBeenCalledOnce();
   });
 });
 

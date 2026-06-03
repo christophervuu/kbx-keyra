@@ -30,6 +30,7 @@ const DEFAULT_PROPS: ChainBuilderShellProps = {
   onToggleMode: vi.fn(),
   onClearMapping: vi.fn(),
   onExpressionClick: vi.fn(),
+  onExpressionAccept: vi.fn(),
   children: <div data-testid="test-children">Builder content</div>,
 };
 
@@ -39,6 +40,15 @@ function makeDefaultAdapter(): Partial<ApiAdapter> {
     suggestExpression: vi.fn().mockResolvedValue({
       expression: 'source("email")',
       explanation: 'Maps email.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 10,
+        includedNodeCount: 10,
+        truncated: false,
+        approxTokenCount: 64,
+        byteLength: 512,
+      },
     } satisfies SuggestExpressionResult),
   };
 }
@@ -228,56 +238,7 @@ describe('ChainBuilderShell — Clear button', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Pinned Expression section (AE-03)
-// ---------------------------------------------------------------------------
-
-describe('ChainBuilderShell — pinned Expression section', () => {
-  it('renders the pinned sections container', () => {
-    renderShell();
-    expect(screen.getByTestId('chain-shell-pinned-sections')).toBeInTheDocument();
-  });
-
-  it('renders LiveExpressionDisplay', () => {
-    renderShell({ expression: 'source("x")' });
-    expect(screen.getByTestId('live-expression-display')).toBeInTheDocument();
-  });
-
-  it('shows expression placeholder when expression is empty', () => {
-    renderShell({ expression: '' });
-    expect(screen.getByTestId('live-expression-placeholder')).toBeInTheDocument();
-  });
-
-  it('shows expression content when expression is non-empty', () => {
-    renderShell({ expression: 'source("customer.email")' });
-    const code = screen.getByTestId('live-expression-code');
-    expect(code.textContent).toContain('source');
-  });
-
-  it('fires onExpressionClick when expression is clicked', async () => {
-    const user = userEvent.setup();
-    const onExpressionClick = vi.fn();
-    renderShell({ expression: 'source("x")', onExpressionClick });
-    await user.click(screen.getByTestId('live-expression-code'));
-    expect(onExpressionClick).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Pinned Result section (AE-03)
-// ---------------------------------------------------------------------------
-
-describe('ChainBuilderShell — pinned Result section', () => {
-  it('renders LiveResultDisplay', () => {
-    renderShell();
-    expect(screen.getByTestId('live-result-display')).toBeInTheDocument();
-  });
-
-  it('shows "Load test data" when sourceDataAvailable is false', () => {
-    renderShell({ sourceDataAvailable: false, expression: 'source("x")' });
-    expect(screen.getByTestId('live-result-no-data')).toBeInTheDocument();
-  });
-});
+// NOTE: legacy pinned expression/result sections were retired from ChainBuilderShell.
 
 // ---------------------------------------------------------------------------
 // Scrollable content area
@@ -461,6 +422,15 @@ describe('ChainBuilderShell — Suggest Expression (FS-042)', () => {
     const suggestExpression = vi.fn().mockResolvedValue({
       expression: 'source("email")',
       explanation: 'Maps email.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 10,
+        includedNodeCount: 10,
+        truncated: false,
+        approxTokenCount: 64,
+        byteLength: 512,
+      },
     } satisfies SuggestExpressionResult);
     renderShell({ onExpressionAccept }, { suggestExpression });
 
@@ -481,5 +451,44 @@ describe('ChainBuilderShell — Suggest Expression (FS-042)', () => {
     expect(onExpressionAccept).toHaveBeenCalledWith('source("email")');
     // Panel should close after accept
     expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+  });
+
+  it('uses canonical suggest payload and renders current-vs-generated comparison', async () => {
+    const suggestExpression = vi.fn().mockResolvedValue({
+      expression: 'source("email")',
+      explanation: 'Maps email.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 10,
+        includedNodeCount: 10,
+        truncated: false,
+        approxTokenCount: 64,
+        byteLength: 512,
+      },
+    } satisfies SuggestExpressionResult);
+
+    renderShell({ expression: 'source("customer.email")' }, { suggestExpression });
+
+    fireEvent.click(screen.getByTestId('chain-shell-ai-suggest'));
+    fireEvent.change(screen.getByRole('textbox', { name: /natural language instruction/i }), {
+      target: { value: 'map email' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('suggest-expression-comparison')).toBeInTheDocument();
+    });
+
+    const payload = suggestExpression.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      instruction: 'map email',
+      targetPath: 'customer.email',
+      targetType: 'string',
+    });
+    expect(payload).not.toHaveProperty('sourceContext');
+
+    expect(screen.getByText('Current expression')).toBeInTheDocument();
+    expect(screen.getByText('Generated suggestion')).toBeInTheDocument();
   });
 });

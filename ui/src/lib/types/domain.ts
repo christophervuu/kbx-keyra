@@ -391,6 +391,29 @@ export interface AutoMapSectionResult {
   };
 }
 
+export type AiSuggestionLifecycleStatus =
+  | 'suggested'
+  | 'accepted'
+  | 'edited'
+  | 'dismissed'
+  | 'stale';
+
+export type SuggestionApplyBlockReason =
+  | 'invalid'
+  | 'stale'
+  | 'dismissed'
+  | 'already-reviewed'
+  | 'not-ready';
+
+export interface SuggestionActionEligibility {
+  /** Whether one-click Accept/apply is allowed. */
+  readonly canAccept: boolean;
+  /** Whether this item is eligible for Batch Accept operations. */
+  readonly canBatchAccept: boolean;
+  /** Deterministic reasons why apply is blocked. Empty when apply is allowed. */
+  readonly blockReasons: readonly SuggestionApplyBlockReason[];
+}
+
 export type SuggestionReviewStatus = 'pending' | 'accepted' | 'edited' | 'dismissed';
 
 export interface SuggestionReviewItem {

@@ -378,6 +378,21 @@ Non-canonical/prohibited shortcut patterns:
 
 The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). FS-073 extends this to canonical backend mode semantics (`mode: 'section' | 'whole'`) on the shared `/ai/auto-map` endpoint while preserving one workspace interaction model. See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
 
+### Cross-feature AI suggestion review contract (FS-074)
+
+FS-074 hardens a shared, reusable review contract across Explain Rule, Suggest Expression, Smart Fix, AI Validation follow-on recommendation surfaces, and Auto-Map workspace cards.
+
+Canonical invariants:
+
+- **Generated vs committed is explicit:** AI outputs are rendered as generated review artifacts and must be visually/behaviorally distinct from committed/draft mapping content.
+- **Mutation boundary is explicit:** mapping mutations are allowed only from explicit user review actions (`Accept`, or `Edit` + explicit apply). Generate/refresh/retry/failure paths must not mutate draft or persisted mapping state.
+- **Universal V1 apply guards:**
+  - validation-invalid suggestions are blocked from apply until edited into a valid expression
+  - stale suggestions are blocked from acceptance until refreshed against latest draft/rule state
+- **Explain Rule remains generated/discard-only:** no accept-to-mutate path exists for explanations.
+- **Batch accept is deterministic and eligibility-scoped:** only eligible suggestions are applied; ineligible items are skipped with deterministic reason accounting (`invalid`, `stale`, `dismissed`, `already-reviewed`/non-pending states).
+- **Audit traceability requirement:** minimum feature-level review events are `suggestion_generated`, `suggestion_viewed`, `suggestion_edited`, `suggestion_accepted`, `suggestion_dismissed`, `apply_blocked_invalid`, `apply_blocked_stale`, with request lineage continuity through API/runtime correlation identifiers.
+
 ### Suggest Expression canonical review model (FS-070)
 
 Suggest Expression uses backend-owned retrieval and validation-aware review semantics.
@@ -1009,7 +1024,7 @@ Transition model:
 | suggested | dismiss | dismissed | none |
 | dismissed | undoDismiss | suggested | none |
 | suggested/dismissed | stale-detected | stale | none |
-| stale | accept | accepted | `updateDraft(...)` |
+| stale | accept | stale | none (blocked; refresh required before apply) |
 | stale | dismiss | dismissed | none |
 | stale | refresh | suggested | replaced by refreshed suggestion |
 
@@ -1022,7 +1037,7 @@ Transition model:
 - rule expression changed since generation for same target
 - rule added for a target that was previously unmapped (`isNew` at generation)
 
-Stale markers are advisory UX signals, not hard blockers.
+Stale markers are hard-blocking review guards in V1; acceptance remains disabled until refresh/regeneration on latest state.
 
 #### Refresh / Regenerate Merge Strategy
 
@@ -1055,6 +1070,8 @@ Bulk actions:
 - Refresh Unmapped
 - Refresh Stale
 - Refresh All (with inline confirmation banner)
+
+`Accept All Valid` applies only eligibility-passing items and records deterministic skip accounting for ineligible entries (`invalid`, `stale`, `dismissed`, already-reviewed/non-pending statuses) without mutating skipped suggestions.
 
 All actions are state-derived and disable safely when not applicable.
 

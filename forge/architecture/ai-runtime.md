@@ -562,6 +562,24 @@ AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`) use 
 - Feature semantics are advisory-only: AI validation augments deterministic validation but never replaces authoritative engine diagnostics.
 - Trigger semantics are manual-only in V1; runtime/handler does not introduce auto-refresh behavior on rule edits.
 
+### Cross-feature suggestion-review hardening contract (FS-074)
+
+FS-074 adds system-level guardrails for all suggestion-producing AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`, and advisory recommendation-bearing validation flows).
+
+Canonical guarantees:
+
+- Handler/runtime outputs are **review artifacts only**; generated content is never treated as an implicit mutation instruction.
+- Success/error/retry/refresh request lifecycles must remain non-mutating; mapping state changes only through explicit UI review actions that invoke mapping mutation APIs separately.
+- Validation-invalid suggestion outcomes remain successful review payloads with apply gating metadata (for example `readyToApply: false` + diagnostics) rather than transport errors.
+- Stale-guard metadata (for example `ruleVersion`/`ruleHash`) is first-class apply-protection context; stale conflicts resolve as explicit conflict/block outcomes, not silent apply fallthrough.
+- Explain Rule remains read-only assistance with no rule-mutation path.
+
+Telemetry and traceability requirements:
+
+- Runtime baseline telemetry (`ai.invoke.start|success|failure`) remains required for all handler invocations.
+- Feature-level review audit events (`suggestion_generated`, `suggestion_viewed`, `suggestion_edited`, `suggestion_accepted`, `suggestion_dismissed`, `apply_blocked_invalid`, `apply_blocked_stale`) are required at integration boundaries.
+- Correlation continuity is mandatory across feature event -> API envelope -> runtime telemetry using shared identifiers (`requestId`, optional `correlationId`).
+
 ### Auto-Map canonical contract (FS-073)
 
 `src/lambda/ai/auto-map.ts` is a canonical thin handler over shared runtime invocation and enforces these production constraints:

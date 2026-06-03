@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React, { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -1148,6 +1148,47 @@ describe('ScalarFieldBuilder', () => {
       );
     });
 
+    it('AE-05: retrying Explain after failure does not mutate draft/expression state', async () => {
+      const updateDraft = vi.fn();
+      const revertDraft = vi.fn();
+      const getDraftExpression = vi.fn().mockReturnValue(null);
+      const explainRule = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Could not reach the Explain service. Check your connection and try again.'))
+        .mockResolvedValueOnce({
+          explanation: 'Maps first name from source.',
+        } satisfies ExplainRuleResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft,
+          revertDraft,
+          getDraftExpression,
+        },
+        { explainRule },
+      );
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      const editor = screen.getByRole('textbox', { name: 'DSL expression editor' }) as HTMLTextAreaElement;
+      const before = editor.value;
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toHaveTextContent('Maps first name from source.');
+      });
+
+      expect(explainRule).toHaveBeenCalledTimes(2);
+      expect(editor.value).toBe(before);
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(revertDraft).not.toHaveBeenCalled();
+    });
+
     it('AE-03: shows network error message + Try again and preserves expression/draft state', async () => {
       const netMsg = 'Could not reach the Explain service. Check your connection and try again.';
       const explainRule = vi.fn().mockRejectedValue(new Error(netMsg));
@@ -1441,6 +1482,59 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
       expect(updateDraft).not.toHaveBeenCalled();
     });
+
+    it('AE-05: failed Suggest generation + retry preserves draft until explicit accept', async () => {
+      const updateDraft = vi.fn();
+      const suggestExpression = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Could not reach the Suggest service. Check your connection and try again.'))
+        .mockResolvedValueOnce({
+          expression: 'source("firstName")',
+          explanation: 'Maps first name.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 10,
+            includedNodeCount: 10,
+            truncated: false,
+            approxTokenCount: 128,
+            byteLength: 512,
+          },
+        } satisfies SuggestExpressionResult);
+
+      renderBuilder({ updateDraft }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      fireEvent.change(screen.getByRole('textbox', { name: /natural language instruction/i }), {
+        target: { value: 'map first name' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+      });
+      expect(updateDraft).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+      // Still no mutation on lifecycle events alone.
+      expect(updateDraft).not.toHaveBeenCalled();
+
+      if (!screen.queryByRole('button', { name: /generate expression/i })) {
+        fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      }
+
+      fireEvent.change(screen.getByRole('textbox', { name: /natural language instruction/i }), {
+        target: { value: 'map first name again' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    });
   });
 
   describe('Smart Fix (FS-071)', () => {
@@ -1491,7 +1585,12 @@ describe('ScalarFieldBuilder', () => {
         expect(screen.getByTestId('smart-fix-inline')).toBeInTheDocument();
       });
 
-      expect(screen.getByTestId('smart-fix-original-expression')).toHaveTextContent('source("firstName")');
+      const comparison = screen.getByTestId('smart-fix-comparison');
+      expect(comparison).toBeInTheDocument();
+      expect(within(comparison).getByText('Current expression')).toBeInTheDocument();
+      expect(within(comparison).getByText('Generated fix')).toBeInTheDocument();
+      expect(within(comparison).getByText('source("firstName")')).toBeInTheDocument();
+      expect(within(comparison).getByText('trim(source("firstName"))')).toBeInTheDocument();
       expect(screen.getByRole('textbox', { name: /smart fix expression editor/i })).toHaveValue('trim(source("firstName"))');
       expect(screen.getByTestId('smart-fix-explanation')).toHaveTextContent('Trim whitespace around the name.');
       expect(screen.getByTestId('smart-fix-assistance-label')).toHaveTextContent(
@@ -1675,6 +1774,99 @@ describe('ScalarFieldBuilder', () => {
 
       expect(screen.getByTestId('smart-fix-stale')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /re-run fix on latest rule/i })).toBeInTheDocument();
+    });
+
+    it('AE-05: stale rerun flow does not mutate draft until explicit Smart Fix accept', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi
+        .fn()
+        .mockResolvedValueOnce({
+          originalExpression: 'source("firstName")',
+          suggestedExpression: 'trim(source("firstName"))',
+          explanation: 'Trim whitespace around the name.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          diagnosticsScopeApplied: 'all',
+          context: {
+            truncated: false,
+            approxTokenCount: 90,
+            byteLength: 480,
+            totalDiagnosticCount: 1,
+            includedDiagnosticCount: 1,
+            sourceNodeCount: 10,
+            includedSourceNodeCount: 10,
+            targetNodeCount: 10,
+            includedTargetNodeCount: 10,
+          },
+          applyGuard: {
+            ruleVersion: 99,
+            ruleHash: 'fnv1a-deadbeef',
+          },
+        } satisfies SmartFixResult)
+        .mockResolvedValueOnce({
+          originalExpression: 'source("firstName")',
+          suggestedExpression: 'source("firstName")',
+          explanation: 'Use latest rule snapshot.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          diagnosticsScopeApplied: 'all',
+          context: {
+            truncated: false,
+            approxTokenCount: 60,
+            byteLength: 320,
+            totalDiagnosticCount: 1,
+            includedDiagnosticCount: 1,
+            sourceNodeCount: 10,
+            includedSourceNodeCount: 10,
+            targetNodeCount: 10,
+            includedTargetNodeCount: 10,
+          },
+          applyGuard: {
+            ruleVersion: 1,
+            ruleHash: 'fnv1a-c8f6f0de',
+          },
+        } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      // First accept attempt is blocked by stale apply guard.
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('smart-fix-stale')).toBeInTheDocument();
+      });
+      expect(updateDraft).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: /re-run fix on latest rule/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      // Rerun lifecycle remains non-mutating.
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(smartFix).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
     });
 
     it('dismiss does not mutate draft state', async () => {

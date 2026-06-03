@@ -579,6 +579,8 @@ export default function MappingEditor() {
       onRefreshAll={autoMapWorkspace.refreshAll}
       onRefreshUnmapped={autoMapWorkspace.refreshUnmapped}
       onAcceptAllValid={autoMapWorkspace.bulkAcceptAllValid}
+      batchAcceptResult={autoMapWorkspace.lastBatchAcceptResult}
+      onClearBatchAcceptResult={autoMapWorkspace.clearBatchAcceptResult}
       onExitWorkspace={exitAutoMapWorkspace}
       onAccept={autoMapWorkspace.acceptSuggestion}
       onEdit={autoMapWorkspace.editSuggestion}

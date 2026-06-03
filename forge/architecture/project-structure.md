@@ -464,6 +464,7 @@ ui/
           UnsavedDiffPanel.tsx         FS-040 T-05 collapsible per-field diff panel: trigger button with unsaved badge, expanded view shows last-saved vs current draft (syntax-highlighted), status badge (no-mapping/new/modified/removed/unchanged), "Revert to saved" action for modified/removed states
           UnsavedDiffPanel.test.tsx    FS-040 T-05 component tests (trigger, expand/collapse, status badges, revert button visibility, ARIA)
           ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
+          AiSuggestionReviewPrimitives.tsx FS-074 shared AI suggestion review primitives: generated-state label copy and reusable current-vs-generated comparison block used across Suggest/SmartFix/Workspace cards
           SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
           SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
           SmartFixInline.tsx          FS-071 inline Smart Fix panel: original/suggested expression review, explanation, validation diagnostics, explicit Accept/Edit/Dismiss actions, stale mismatch re-run CTA, retry/error states

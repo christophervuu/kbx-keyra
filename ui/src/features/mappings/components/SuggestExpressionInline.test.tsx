@@ -6,7 +6,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -108,12 +108,14 @@ function makeProps(
     onGenerate: (instruction: string) => void;
     onAccept: (expression: string) => void;
     onDismiss: () => void;
+    currentExpression: string | null;
   }> = {},
 ) {
   return {
     state,
     targetPath: TARGET_PATH,
     targetType: TARGET_TYPE,
+    currentExpression: 'source("Order.Currency")',
     onGenerate: vi.fn(),
     onAccept: vi.fn(),
     onDismiss: vi.fn(),
@@ -347,6 +349,27 @@ describe('SuggestExpressionInline', () => {
     expect(screen.getByTestId('suggest-expression-assistance-label')).toHaveTextContent(
       'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
     );
+  });
+
+  it('renders current-vs-generated comparison context on success', () => {
+    render(<SuggestExpressionInline {...makeProps(SUCCESS_STATE)} />);
+
+    const comparison = screen.getByTestId('suggest-expression-comparison');
+    expect(comparison).toBeInTheDocument();
+    expect(within(comparison).getByText('Current expression')).toBeInTheDocument();
+    expect(within(comparison).getByText('Generated suggestion')).toBeInTheDocument();
+    expect(within(comparison).getByText('source("Order.Currency")')).toBeInTheDocument();
+    expect(within(comparison).getByText('default(source("Invoice.CurrencyCode"), "USD")')).toBeInTheDocument();
+  });
+
+  it('shows no-existing expression copy in comparison when currentExpression is null', () => {
+    render(
+      <SuggestExpressionInline
+        {...makeProps(SUCCESS_STATE, { currentExpression: null })}
+      />,
+    );
+
+    expect(screen.getByText('No existing expression')).toBeInTheDocument();
   });
 
   it('calls onDismiss when Dismiss is clicked on success', async () => {

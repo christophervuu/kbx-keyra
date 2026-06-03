@@ -329,10 +329,17 @@ The naming above reflects the currently implemented lambda surface. Infrastructu
 
 This architecture primarily covers non-AI handlers, but Phase 2 introduced cross-cutting API conventions that AI handlers now follow consistently:
 
+FS-074 cross-feature hardening clarification:
+
+- AI suggestion endpoints are suggestion/review contracts only; they do not return implicit commit instructions or mutate mapping state as part of generation/refresh/retry/failure handling.
+- Apply-eligibility guard metadata (`readyToApply`, validation diagnostics, stale-guard snapshots where applicable) is part of the API contract so the UI can enforce explicit accept/edit/dismiss semantics.
+- Invalid/stale apply attempts must surface as explicit blocked outcomes (or conflict envelopes for stale snapshot mismatches), never as silent fallback apply paths.
+
 - AI handlers (`src/lambda/ai/{explain-rule,suggest-expression,smart-fix,auto-map}.ts`) are thin request/response shells and delegate invocation to shared runtime (`invokeAI(...)`).
 - Current canonical backend AI route surface used by the UI adapter includes `/ai/explain-rule`, `/ai/suggest-expression`, `/ai/auto-map`, `/ai/smart-fix`, and `/ai/validate-mappings` (endpoint rollout may be phased; temporary gating should use canonical error semantics).
 - AI handler failures are normalized through `normalizeAIError(...)` into canonical backend error envelope semantics before returning `errorResponse(...)`.
 - AI handler responses use the same canonical error envelope contract in Section 5 (`code`, `message`, `statusCode`, `retryable`, `requestId`).
+- Request-lineage continuity is required end-to-end: `requestId` is preserved from handler envelope/header to UI client error normalization; optional `correlationId` may be propagated for cross-layer audit joins.
 - Browser clients must access AI via backend API routes only (UI -> `ApiAdapter`/`HttpAdapter` -> API Gateway -> Lambda). Direct browser-side provider invocation is prohibited by repository guardrails.
 - UI canonical adapter policy for AI is `HttpAdapter` in backend mode and deterministic offline-unavailable behavior in `LocalStorageAdapter`; temporary backend capability gaps should surface as standardized `FEATURE_NOT_ENABLED` to UI clients (no hybrid/browser provider fallback).
 
