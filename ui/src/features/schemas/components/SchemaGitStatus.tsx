@@ -1,4 +1,4 @@
-import type { SchemaOrigin, SchemaSourceInfo } from '@/lib/types';
+import type { SchemaOrigin, SchemaSourceInfo, SchemaSyncStatus } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -7,6 +7,8 @@ import type { SchemaOrigin, SchemaSourceInfo } from '@/lib/types';
 export interface SchemaGitStatusProps {
   source: SchemaSourceInfo;
   origin: SchemaOrigin;
+  /** Canonical schema sync status from metadata */
+  syncStatus?: SchemaSyncStatus;
   /** Whether the schema has local edits since the last sync */
   hasLocalChanges?: boolean;
   /** ISO timestamp used as "last synced" label (typically metadata.updatedAt) */
@@ -35,7 +37,7 @@ function truncateSha(sha: string | undefined): string {
   return sha ? sha.slice(0, 7) : '—';
 }
 
-type SyncState = 'synced' | 'not-synced' | 'local-changes';
+type SyncState = SchemaSyncStatus;
 
 function deriveSyncState(
   origin: SchemaOrigin,
@@ -71,6 +73,54 @@ function SyncIndicator({ state }: { state: SyncState }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
         </svg>
         Synced
+      </span>
+    );
+  }
+  if (state === 'update-available') {
+    return (
+      <span
+        data-testid="git-status-indicator-update-available"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-400"
+      >
+        <svg
+          aria-hidden="true"
+          className="h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+          />
+        </svg>
+        Update available
+      </span>
+    );
+  }
+  if (state === 'sync-failed') {
+    return (
+      <span
+        data-testid="git-status-indicator-sync-failed"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-red-400"
+      >
+        <svg
+          aria-hidden="true"
+          className="h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 8v4m0 4h.01M4.93 19.07a10 10 0 1114.14 0 10 10 0 01-14.14 0z"
+          />
+        </svg>
+        Sync failed
       </span>
     );
   }
@@ -136,6 +186,7 @@ function SyncIndicator({ state }: { state: SyncState }) {
 export function SchemaGitStatus({
   source,
   origin,
+  syncStatus,
   hasLocalChanges = false,
   lastSyncedAt,
 }: SchemaGitStatusProps) {
@@ -159,7 +210,7 @@ export function SchemaGitStatus({
 
   // ---- GitHub source ----
   const { repo, branch, path, commitSha } = source;
-  const syncState = deriveSyncState(origin, commitSha, hasLocalChanges);
+  const syncState = syncStatus ?? deriveSyncState(origin, commitSha, hasLocalChanges);
 
   return (
     <section

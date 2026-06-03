@@ -100,9 +100,9 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `listCdmSchemas(path?)` | throws offline-mode error | backend integration/proxy for CDM listing | integration | pagination/filter semantics TBD |
-| `linkCdmSchema(input)` | throws offline-mode error | schema-link endpoint | integration | idempotency expectations TBD |
-| `syncCdmSchema(schemaId)` | throws offline-mode error | sync endpoint | integration | sync status lifecycle contract required |
+| `listCdmSchemas(path?)` | `HttpAdapter` -> `GET /schemas/cdm` in backend mode; local throws deterministic offline-unavailable error | maintain root-scoped CDM listing behavior | integration | fixed root `JSONSchemas/CommonDataModels`; one-directory-level per request (client-driven navigation) |
+| `linkCdmSchema(input)` | `HttpAdapter` -> `POST /schemas/cdm/link` in backend mode; local throws deterministic offline-unavailable error | maintain schema-link endpoint with canonical source metadata persistence | integration | idempotent duplicate-link success for same project + repo/branch/path |
+| `syncCdmSchema(schemaId)` | `HttpAdapter` -> `POST /schemas/:id/sync-cdm` for explicit re-sync; supports `GET /schemas/:id/sync-cdm` via `statusOnly` option for lightweight status-refresh | preserve manual-only re-sync + passive update-available detection path | integration | sync states: `synced`, `update-available`, `sync-failed`; status-refresh does not mutate content |
 | `listPublishedSchemas(path?)` | throws offline-mode error | published schema list endpoint | integration | branching/path scope unresolved |
 | `publishSchemaToGitHub(schemaId, input)` | throws offline-mode error | publish endpoint | integration | commit strategy and conflict behavior TBD |
 | `linkPublishedSchema(input)` | throws offline-mode error | link endpoint | integration | not-found/auth failure normalization needed |
@@ -298,12 +298,18 @@ Frontend implementation currently constrains backend design in these ways:
 - Mapping engine architecture is strongly aligned after T-05 reconciliation.
 - UI routing and adapter bootstrap behavior align with implementation after T-06 updates.
 - Project structure now reflects actual repository shape after T-04 updates.
+- FS-076 CDM foundation is now implemented (read-only browse/link/manual re-sync + status-refresh), including persisted `repoId` metadata and `sourceRepoId` projection.
 
 ### Intentionally simplified / changed in Phase 0
 - XSD validation remains permissive stub.
 - Local-only adapter remains primary data plane.
 - AI/GitHub/deployment remain partial in breadth, but retained AI paths are now canonically routed through `HttpAdapter`.
 - Template/search subsystems have placeholder behavior.
+
+FS-076 clarification for GitHub scope:
+
+- CDM integration is no longer placeholder in backend mode.
+- This implemented slice remains strictly read-only against GitHub (no write/publish behavior in CDM browse/link/sync flows).
 
 ### Still unresolved for Phase 1 planning
 - Pagination strategy for list-heavy surfaces.

@@ -1,21 +1,21 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { Button } from '@/components/Button';
-import { InlineEditableText } from '@/components/InlineEditableText';
-import { PATHS } from '@/routes/paths';
-import type { ParsedSchema, SchemaMetadata, UpdateSchemaInput } from '@/lib/types';
-
-import { useSchemaDetail } from '../hooks/use-schema-detail';
-import { useSchemaEditor } from '../hooks/use-schema-editor';
-import { useSchemaUsage } from '../hooks/use-schema-usage';
+import { InferredSchemaBanner } from './InferredSchemaBanner';
+import { ReplaceFileDialog } from './ReplaceFileDialog';
 import { SchemaActions } from './SchemaActions';
 import { SchemaGitStatus } from './SchemaGitStatus';
 import { SchemaTreeView } from './SchemaTreeView';
 import { SchemaUsageSection } from './SchemaUsageSection';
-import { InferredSchemaBanner } from './InferredSchemaBanner';
 import { ViewRawModal } from './ViewRawModal';
-import { ReplaceFileDialog } from './ReplaceFileDialog';
+import { useSchemaDetail } from '../hooks/use-schema-detail';
+import { useSchemaEditor } from '../hooks/use-schema-editor';
+import { useSchemaUsage } from '../hooks/use-schema-usage';
+
+import { Button } from '@/components/Button';
+import { InlineEditableText } from '@/components/InlineEditableText';
+import type { ParsedSchema, SchemaMetadata } from '@/lib/types';
+import { PATHS } from '@/routes/paths';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -337,6 +337,7 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
       <SchemaGitStatus
         source={metadata.source}
         origin={metadata.origin}
+        syncStatus={metadata.syncStatus}
         hasLocalChanges={metadata.syncStatus === 'local-changes'}
         lastSyncedAt={metadata.updatedAt}
       />
@@ -417,6 +418,7 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
         usageMappings={usageMappings}
         isEditing={isEditing}
         onScopePromoted={() => void retry()}
+        onResynced={() => void retry()}
       />
 
       {/* View Raw modal */}
@@ -433,7 +435,7 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
         onClose={() => setShowReplace(false)}
         schemaId={schemaId}
         currentFormat={metadata.format}
-        onReplaced={(_newDetail) => {
+        onReplaced={() => {
           setShowReplace(false);
           void retry();
         }}

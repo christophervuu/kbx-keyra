@@ -98,6 +98,60 @@ describe('persistence schema-metadata', () => {
     expect(result.syncStatus).toBe('synced');
   });
 
+  it('create projects sourceRepoId when github source includes repoId', async () => {
+    sendMock.mockResolvedValue({});
+    const mod = await importModule();
+
+    const result = await mod.create(
+      makeCreateInput({
+        origin: 'cdm',
+        source: {
+          type: 'github',
+          repo: 'KBXT/KBX-Canonicals',
+          repoId: 1052821334,
+          branch: 'main',
+          path: 'JSONSchemas/CommonDataModels/Patient.json',
+          commitSha: 'abc123',
+        },
+      }),
+    );
+
+    expect(result.source).toEqual({
+      type: 'github',
+      repo: 'KBXT/KBX-Canonicals',
+      repoId: 1052821334,
+      branch: 'main',
+      path: 'JSONSchemas/CommonDataModels/Patient.json',
+      commitSha: 'abc123',
+    });
+    expect(result.sourceRepoId).toBe(1052821334);
+  });
+
+  it('create accepts canonical FS-076 sync statuses and legacy statuses', async () => {
+    sendMock.mockResolvedValue({});
+    const mod = await importModule();
+
+    const canonical = await mod.create(
+      makeCreateInput({
+        syncStatus: 'update-available',
+      }),
+    );
+    const failure = await mod.create(
+      makeCreateInput({
+        syncStatus: 'sync-failed',
+      }),
+    );
+    const legacy = await mod.create(
+      makeCreateInput({
+        syncStatus: 'local-changes',
+      }),
+    );
+
+    expect(canonical.syncStatus).toBe('update-available');
+    expect(failure.syncStatus).toBe('sync-failed');
+    expect(legacy.syncStatus).toBe('local-changes');
+  });
+
   it('get returns item or null', async () => {
     const mod = await importModule();
     sendMock.mockResolvedValueOnce({ Item: makeItem() });

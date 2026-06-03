@@ -160,6 +160,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
 
         {/* Section 4 — Schemas */}
         <SchemaManagementSection
+          projectId={projectId}
           schemas={schemas}
           onUpload={handleOpenSchemaUpload}
           onLink={addSchemaRef}

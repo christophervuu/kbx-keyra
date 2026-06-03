@@ -87,6 +87,7 @@ function RemoveConfirmDialog({
 // ---------------------------------------------------------------------------
 
 export interface SchemaManagementSectionProps {
+  projectId: string;
   schemas: SchemaCardData[];
   onUpload: () => void;
   onLink: (ref: SchemaRef) => Promise<void>;
@@ -103,6 +104,7 @@ export interface SchemaManagementSectionProps {
  * Section B — Schema Management: cards, upload/link actions, remove with confirm.
  */
 export function SchemaManagementSection({
+  projectId,
   schemas,
   onUpload,
   onLink,
@@ -211,6 +213,7 @@ export function SchemaManagementSection({
       {/* Link schema picker */}
       {showLinkPicker && (
         <SchemaLinkPicker
+          projectId={projectId}
           attachedSchemaIds={attachedIds}
           onConfirm={(ref) => void handleLinkConfirm(ref)}
           onClose={() => setShowLinkPicker(false)}

@@ -16,7 +16,21 @@ export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 
 export type SchemaScope = 'global' | 'project';
 
-export type SchemaSyncStatus = 'synced' | 'not-synced' | 'local-changes';
+/**
+ * Canonical CDM sync states (FS-076):
+ * - synced
+ * - update-available
+ * - sync-failed
+ *
+ * Legacy values are retained for backward compatibility with existing
+ * local/published schema records until migration is complete.
+ */
+export type SchemaSyncStatus =
+  | 'synced'
+  | 'update-available'
+  | 'sync-failed'
+  | 'not-synced'
+  | 'local-changes';
 
 export type MappingStatus = 'draft' | 'ready' | 'has-errors';
 
@@ -129,6 +143,7 @@ export interface MappingMetadata {
 export interface GitHubSourceInfo {
   readonly type: 'github';
   readonly repo: string;
+  readonly repoId?: number;
   readonly branch: string;
   readonly path: string;
   readonly commitSha?: string;
@@ -304,8 +319,9 @@ export interface GitHubFile {
 }
 
 export interface LinkCdmSchemaInput {
-  readonly repo: string;
-  readonly branch: string;
+  readonly projectId: string;
+  readonly repo?: string;
+  readonly branch?: string;
   readonly path: string;
   readonly name?: string;
 }

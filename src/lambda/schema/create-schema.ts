@@ -17,7 +17,7 @@ type SchemaFormat = 'json-schema' | 'xsd';
 type SchemaOrigin = 'cdm' | 'published' | 'local';
 type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 type SchemaScope = 'global' | 'project';
-type SchemaSyncStatus = 'synced' | 'not-synced' | 'local-changes';
+type SchemaSyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
 
 interface SchemaNodeRecord {
   readonly schemaId: string;
@@ -39,6 +39,7 @@ interface SchemaSourceUpload {
 interface SchemaSourceGitHub {
   readonly type: 'github';
   readonly repo: string;
+  readonly repoId?: number;
   readonly branch: string;
   readonly path: string;
   readonly commitSha?: string;
@@ -135,7 +136,13 @@ function asSchemaScope(value: unknown): SchemaScope {
 }
 
 function asSchemaSyncStatus(value: unknown): SchemaSyncStatus {
-  if (value === 'synced' || value === 'not-synced' || value === 'local-changes') {
+  if (
+    value === 'synced'
+    || value === 'update-available'
+    || value === 'sync-failed'
+    || value === 'not-synced'
+    || value === 'local-changes'
+  ) {
     return value;
   }
 
@@ -154,6 +161,7 @@ function asSource(value: unknown): SchemaSource {
       return {
         type: 'github',
         repo: source.repo,
+        ...(typeof source.repoId === 'number' ? { repoId: source.repoId } : {}),
         branch: source.branch,
         path: source.path,
         ...(typeof source.commitSha === 'string' ? { commitSha: source.commitSha } : {}),

@@ -172,7 +172,16 @@ export interface ApiAdapter {
   // GitHub: CDM Repo (read-only)
   listCdmSchemas(path?: string): Promise<GitHubFile[]>;
   linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata>;
-  syncCdmSchema(schemaId: string): Promise<SchemaSyncResult>;
+  syncCdmSchema(
+    schemaId: string,
+    options?: {
+      /**
+       * When true, performs lightweight status refresh (GET /schemas/:id/sync-cdm)
+       * to surface update-available without mutating schema content.
+       */
+      statusOnly?: boolean;
+    },
+  ): Promise<SchemaSyncResult>;
 
   // GitHub: Non-CDM Repo (read-write)
   listPublishedSchemas(path?: string): Promise<GitHubFile[]>;

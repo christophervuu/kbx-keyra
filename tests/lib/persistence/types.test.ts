@@ -67,12 +67,13 @@ type DomainSchemaMetadata = {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
-  readonly syncStatus: 'synced' | 'not-synced' | 'local-changes';
+  readonly syncStatus: 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
   readonly source:
     | { readonly type: 'upload' }
     | {
         readonly type: 'github';
         readonly repo: string;
+        readonly repoId?: number;
         readonly branch: string;
         readonly path: string;
         readonly commitSha?: string;

@@ -85,6 +85,7 @@ function renderSection(
       React.createElement(SchemaManagementSection, {
         schemas,
         onUpload: overrides.onUpload ?? vi.fn(),
+        projectId: 'project-1',
         onLink: overrides.onLink ?? vi.fn().mockResolvedValue(undefined),
         onRemove: overrides.onRemove ?? vi.fn().mockResolvedValue(undefined),
         onView: overrides.onView ?? vi.fn(),

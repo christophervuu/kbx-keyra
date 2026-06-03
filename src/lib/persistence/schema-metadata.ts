@@ -14,6 +14,10 @@ function createSchemaId(): string {
 
 export async function create(input: CreateSchemaMetadataInput): Promise<SchemaMetadataItem> {
   const timestamp = nowIso();
+  const projectedSourceRepoId =
+    input.source.type === 'github' && typeof input.source.repoId === 'number'
+      ? input.source.repoId
+      : undefined;
 
   const item: SchemaMetadataItem = {
     schemaId: createSchemaId(),
@@ -27,6 +31,7 @@ export async function create(input: CreateSchemaMetadataInput): Promise<SchemaMe
     inferred: input.inferred,
     syncStatus: input.syncStatus ?? 'not-synced',
     source: input.source,
+    sourceRepoId: projectedSourceRepoId,
     createdAt: timestamp,
     updatedAt: timestamp,
   };

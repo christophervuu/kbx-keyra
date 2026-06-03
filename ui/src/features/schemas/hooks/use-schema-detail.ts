@@ -84,7 +84,20 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
           // Non-fatal — parsedSchema stays null
         }
 
-        setSchema(detail);
+        let resolvedDetail = detail;
+
+        // Best-effort lightweight CDM status refresh (FS-076 T-06):
+        // surface update-available/sync-failed without content mutation.
+        if (detail.metadata.origin === 'cdm') {
+          try {
+            await adapter.syncCdmSchema(schemaId, { statusOnly: true });
+            resolvedDetail = await adapter.getSchema(schemaId);
+          } catch {
+            // Non-fatal. Keep the initially loaded detail.
+          }
+        }
+
+        setSchema(resolvedDetail);
         setParsedSchema(parsed);
       } catch (err) {
         if (cancelledRef.current) return;

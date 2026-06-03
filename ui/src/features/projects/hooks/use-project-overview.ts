@@ -51,7 +51,7 @@ function buildSchemaCardData(detail: SchemaDetail): SchemaCardData {
     origin: metadata.origin,
     scope: 'project-level',
     fieldCount: metadata.fieldCount,
-    syncStatus: metadata.status,
+    syncStatus: metadata.syncStatus,
     isInferred: false,
   };
 }

@@ -5,7 +5,7 @@ codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/project/create-project.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["CreateProjectFunction"]
 
@@ -30,12 +30,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.4a2e1fc2-fb4e-47a3-b754-87570ad02657]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/project/list-projects.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["ListProjectsFunction"]
 
@@ -60,12 +61,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.0396f18b-5d5f-49f2-9db8-31865788bc9f]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/project/get-project.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["GetProjectFunction"]
 
@@ -90,12 +92,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.287ac93b-44e1-4aa0-975a-a3f6a494bad9]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/project/update-project.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["UpdateProjectFunction"]
 
@@ -120,12 +123,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.a6d8cca8-d8a6-4650-b41b-1209ebdecb69]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/project/delete-project.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["DeleteProjectFunction"]
 
@@ -150,12 +154,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.9a60bd2d-807a-481f-a48d-8f0d3e0c055c]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/create-mapping.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["CreateMappingFunction"]
 
@@ -180,12 +185,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.fea376c4-6224-4265-80f5-6a892263eefb]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/get-mapping.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["GetMappingFunction"]
 
@@ -210,12 +216,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.b9b2f906-e06d-4634-8813-9c79f13d4361]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/update-mapping.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["UpdateMappingFunction"]
 
@@ -240,12 +247,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.d7d5bd17-faff-4724-9912-b5c7ae88f2a3]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/delete-mapping.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["DeleteMappingFunction"]
 
@@ -270,12 +278,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.9a6e7cf0-7c46-48d4-81f4-b78709828dc8]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/duplicate-mapping.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["DuplicateMappingFunction"]
 
@@ -300,12 +309,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.26297962-c03a-476a-b7c4-39721be84eb0]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/list-mappings.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["ListMappingsFunction"]
 
@@ -330,12 +340,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.1e1b4ecc-6687-486f-a43a-9a1bc570f620]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/list-versions.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["ListVersionsFunction"]
 
@@ -360,12 +371,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.6fbfbd5b-b491-4741-a581-61f293bb649f]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/get-version.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["GetVersionFunction"]
 
@@ -390,12 +402,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.569e498c-a676-4aea-999e-5ee8c81fea8e]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/mapping/save-version.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["SaveVersionFunction"]
 
@@ -420,12 +433,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.3bd585c1-a8cc-42c8-b971-36755f7f1398]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/create-schema.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["CreateSchemaFunction"]
 
@@ -450,12 +464,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.97d1c970-af9d-4945-a068-78429205de0d]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/list-schemas.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["ListSchemasFunction"]
 
@@ -480,12 +495,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.5df5af15-d16a-41bd-9d24-f987eb0f99f7]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/get-schema.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["GetSchemaFunction"]
 
@@ -510,12 +526,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.78b900af-348f-4a15-ac88-b45e3f3b782c]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/delete-schema.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["DeleteSchemaFunction"]
 
@@ -540,12 +557,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.203f1e40-b529-4284-8f22-a7b1a95acc85]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/query-schema-nodes.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["QuerySchemaNodesFunction"]
 
@@ -570,12 +588,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.6b3d09a8-0092-449e-afe2-3ff8419e6af8]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/ingest-schema.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["IngestSchemaFunction"]
 
@@ -600,12 +619,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.9f66d4a9-e942-495c-bc7a-c7e334019139]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/process-batch.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["ProcessBatchFunction"]
 
@@ -630,12 +650,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.ba985ca3-926c-42cf-b5cc-87e3bdced16d]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/schema/orchestration-tasks.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["OrchestrationTasksFunction"]
 
@@ -660,12 +681,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.88864e63-51cb-4960-9f31-b7a5a4bab8b5]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/deployment/deploy-mapping.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["DeployMappingFunction"]
 
@@ -681,12 +703,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.fc5a5b2c-0280-4680-941e-4811eb7068be]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/deployment/promote-deployment.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["PromoteDeploymentFunction"]
 
@@ -702,12 +725,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.80f7918a-2f37-4b6f-bb25-1cfb4b4d70c1]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/deployment/rollback-deployment.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["RollbackDeploymentFunction"]
 
@@ -723,12 +747,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.734c53d3-df28-4551-9230-0be38a4c42d6]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/deployment/list-deployments.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["ListDeploymentsFunction"]
 
@@ -744,12 +769,13 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.548e3609-a9f8-4318-9cce-3b38de3f9889]
 codeuri = "/Users/christophervuu/repos/kbx-keyra"
 runtime = "nodejs24.x"
 architecture = "x86_64"
 handler = "src/lambda/deployment/get-current-deployments.handler"
-manifest_hash = "3b8c8ed59affbf68c497f3f2240e11ca"
+manifest_hash = "78d61e411ac8b68151458e9e6afc69a0"
 packagetype = "Zip"
 functions = ["GetCurrentDeploymentsFunction"]
 
@@ -761,6 +787,7 @@ Minify = false
 Target = "node20"
 Sourcemap = true
 External = ["@aws-sdk/*"]
+
 
 
 

@@ -126,6 +126,50 @@ describe('create-schema handler', () => {
     expect(result.statusCode).toBe(400);
   });
 
+  it('accepts FS-076 canonical sync statuses and github repoId in source', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'CDM Schema',
+      format: 'json-schema',
+      origin: 'cdm',
+      syncStatus: 'update-available',
+      source: {
+        type: 'github',
+        repo: 'KBXT/KBX-Canonicals',
+        repoId: 1052821334,
+        branch: 'main',
+        path: 'JSONSchemas/CommonDataModels/Patient.json',
+        commitSha: 'deadbeef',
+      },
+      content: {
+        type: 'object',
+        properties: {
+          patientId: { type: 'string' },
+        },
+      },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+
+    const metadataPutCall = sharedMocks.putItem.mock.calls.find((call) => {
+      const arg = call[0] as { Item?: Record<string, unknown> } | undefined;
+      return typeof arg?.Item?.schemaId === 'string' && typeof arg?.Item?.name === 'string';
+    });
+    const metadataItem = metadataPutCall?.[0] as { Item: Record<string, unknown> };
+
+    expect(metadataItem.Item.syncStatus).toBe('update-available');
+    expect(metadataItem.Item.source).toEqual({
+      type: 'github',
+      repo: 'KBXT/KBX-Canonicals',
+      repoId: 1052821334,
+      branch: 'main',
+      path: 'JSONSchemas/CommonDataModels/Patient.json',
+      commitSha: 'deadbeef',
+    });
+  });
+
   it('maps S3 service errors to error response envelope', async () => {
     sharedMocks.putObject.mockRejectedValue(
       new sharedMocks.S3ServiceError('S3 transient failure during putObject', {

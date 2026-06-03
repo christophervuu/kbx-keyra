@@ -843,6 +843,116 @@ Resources:
             Path: /schemas
             Method: get
 
+  ListCdmSchemasFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listcdmschemas
+      CodeUri: .
+      Handler: src/lambda/schema/list-cdm-schemas.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_ROOT_PATH: JSONSchemas/CommonDataModels
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/cdm
+            Method: get
+
+  LinkCdmSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-linkcdmschema
+      CodeUri: .
+      Handler: src/lambda/schema/link-cdm-schema.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_REPO_ID: '1052821334'
+          CDM_ROOT_PATH: JSONSchemas/CommonDataModels
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/cdm/link
+            Method: post
+
+  SyncCdmSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-synccdmschema
+      CodeUri: .
+      Handler: src/lambda/schema/sync-cdm-schema.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_REPO_ID: '1052821334'
+          CDM_ROOT_PATH: JSONSchemas/CommonDataModels
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiPostEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/sync-cdm
+            Method: post
+        ApiGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/sync-cdm
+            Method: get
+
   GetSchemaFunction:
     Type: AWS::Serverless::Function
     Metadata:

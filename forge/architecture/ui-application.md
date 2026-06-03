@@ -335,6 +335,19 @@ This gives deterministic `toAppError()` output for intentionally gated adapter m
 
 In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw deterministic offline-unavailable errors via centralized `offlineModeError()` (`Error("Not available in offline mode")`) to enforce Phase 0 boundaries. In `HttpAdapter`, canonical backend methods use the shared HTTP client utility and normalized `HttpClientError` semantics; explicitly deferred methods throw structured `FeatureNotEnabledError` and temporarily unavailable backend endpoints are surfaced as `FEATURE_NOT_ENABLED` without hybrid fallback.
 
+FS-076 CDM integration status (implemented foundation):
+
+- `HttpAdapter.listCdmSchemas(path?)` -> `GET /schemas/cdm` (client-driven directory navigation)
+- `HttpAdapter.linkCdmSchema(input)` -> `POST /schemas/cdm/link`
+- `HttpAdapter.syncCdmSchema(schemaId)` -> `POST /schemas/:id/sync-cdm` (explicit manual re-sync)
+- `HttpAdapter.syncCdmSchema(schemaId, { statusOnly: true })` -> `GET /schemas/:id/sync-cdm` (lightweight status-refresh)
+
+CDM constraints represented in UI architecture:
+
+- Browse results are scoped to `JSONSchemas/CommonDataModels` with one-directory-level-per-request semantics.
+- CDM schemas are treated as read-only in schema surfaces (no edit/replace/remove/publish/promote actions).
+- CDM flows are read-only against GitHub from the UI perspective (no publish/write pathway in this integration slice).
+
 Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Phase 0:
 - `listTemplates()` returns `[]`
 - `querySchemaNodes(schemaId, query)` returns `[]`
@@ -2322,11 +2335,24 @@ Schema editing is intentionally split into three layers:
 
 This separation keeps row-level interactions deterministic/testable while concentrating persistence concerns in a single hook.
 
+### Project Overview CDM link flow (FS-076)
+
+Project Overview includes a CDM linking path in schema management:
+
+- Entry point: Schema management section action labeled **Link from CDM Library**.
+- Picker loading uses `ApiAdapter.listCdmSchemas(path?)` and supports client-driven directory navigation (one directory level per request).
+- Confirm action uses `ApiAdapter.linkCdmSchema({ projectId, path })` and attaches the returned schema to the project overview surface.
+
+CDM-linked cards in Project Overview:
+
+- Show CDM/read-only provenance and sync-state badges driven by `metadata.syncStatus`.
+- Hide remove action for CDM entries to enforce read-only behavior at the project schema surface.
+
 ### Action visibility rules (origin x scope x format)
 
 Current implementation in `SchemaActions` uses metadata-driven conditional rendering:
 
-- CDM schemas: Re-sync (placeholder), View Raw
+- CDM schemas: Re-sync (active) and View Raw only; edit/replace/remove/promote/sync-to-GitHub actions are hidden
 - Non-CDM schemas:
   - Edit when `format === 'json-schema'` and not already editing
   - Auto-describe (placeholder)
@@ -2337,6 +2363,12 @@ Current implementation in `SchemaActions` uses metadata-driven conditional rende
 - `scope === 'project'`: additional Promote to Global action + confirm flow
 
 Promote/Remove flows use shared `ConfirmDialog` and adapter mutations (`updateSchema`, `deleteSchema`) with post-action page refresh/navigation.
+
+CDM sync-state presentation contract:
+
+- `SchemaGitStatus` renders CDM sync states from metadata (`syncStatus`) including `synced`, `update-available`, and `sync-failed`.
+- Schema detail load performs best-effort status-refresh read (`syncCdmSchema(..., { statusOnly: true })`) followed by metadata re-fetch for trustworthy passive status display.
+- Explicit Re-sync action remains manual-only and does not imply background auto-sync.
 
 ### UI preference storage vs domain storage
 

@@ -81,6 +81,11 @@ describe('SchemaCard', () => {
     expect(onRemove).toHaveBeenCalledWith('schema-1');
   });
 
+  it('hides Remove action for CDM schemas (read-only enforcement)', () => {
+    renderCard({ origin: 'cdm' });
+    expect(screen.queryByRole('button', { name: /remove schema customer schema/i })).not.toBeInTheDocument();
+  });
+
   // AE-13: color-coded origin badges
   it('AE-13: CDM origin shows blue badge', () => {
     renderCard({ origin: 'cdm' });
@@ -135,6 +140,18 @@ describe('SchemaCard', () => {
     renderCard({ origin: 'published', syncStatus: 'local-changes' });
     expect(screen.getByTestId('sync-status-local-changes')).toBeInTheDocument();
     expect(screen.getByText('Local changes')).toBeInTheDocument();
+  });
+
+  it('AE-13: shows "Update available" indicator for update-available non-local schema', () => {
+    renderCard({ origin: 'cdm', syncStatus: 'update-available' });
+    expect(screen.getByTestId('sync-status-update-available')).toBeInTheDocument();
+    expect(screen.getByText('Update available')).toBeInTheDocument();
+  });
+
+  it('AE-13: shows "Sync failed" indicator for sync-failed non-local schema', () => {
+    renderCard({ origin: 'cdm', syncStatus: 'sync-failed' });
+    expect(screen.getByTestId('sync-status-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
   it('AE-13: no sync indicator for local-origin schemas', () => {

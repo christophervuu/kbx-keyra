@@ -1,9 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import type { GitHubSourceInfo, UploadSourceInfo } from '@/lib/types/domain';
-
 import { SchemaGitStatus } from '../SchemaGitStatus';
+
+import type { GitHubSourceInfo, UploadSourceInfo } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -49,9 +49,21 @@ describe('SchemaGitStatus', () => {
   });
 
   it('shows synced indicator for CDM schema with commitSha', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" syncStatus="synced" />);
     expect(screen.getByTestId('git-status-indicator-synced')).toBeInTheDocument();
     expect(screen.getByText('Synced')).toBeInTheDocument();
+  });
+
+  it('shows update-available indicator', () => {
+    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" syncStatus="update-available" />);
+    expect(screen.getByTestId('git-status-indicator-update-available')).toBeInTheDocument();
+    expect(screen.getByText('Update available')).toBeInTheDocument();
+  });
+
+  it('shows sync-failed indicator', () => {
+    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" syncStatus="sync-failed" />);
+    expect(screen.getByTestId('git-status-indicator-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
   it('shows synced indicator for published schema with commitSha', () => {

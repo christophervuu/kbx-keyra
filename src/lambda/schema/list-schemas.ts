@@ -18,8 +18,9 @@ interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
-  readonly syncStatus: 'synced' | 'not-synced' | 'local-changes';
+  readonly syncStatus: 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
   readonly source: Record<string, unknown>;
+  readonly sourceRepoId?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

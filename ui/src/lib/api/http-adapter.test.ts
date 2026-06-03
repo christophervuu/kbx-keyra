@@ -558,6 +558,84 @@ describe('HttpAdapter (CRUD)', () => {
     expect(result.PROD.status).toBe('not-deployed');
   });
 
+  it('listCdmSchemas maps to GET /schemas/cdm', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listCdmSchemas();
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm',
+      method: 'GET',
+    });
+  });
+
+  it('listCdmSchemas maps optional path as encoded query parameter', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listCdmSchemas('JSONSchemas/CommonDataModels/Patient Folder');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm?path=JSONSchemas%2FCommonDataModels%2FPatient%20Folder',
+      method: 'GET',
+    });
+  });
+
+  it('linkCdmSchema maps to POST /schemas/cdm/link with projectId + path payload', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.linkCdmSchema({
+      projectId: 'project-1',
+      repo: 'KBXT/KBX-Canonicals',
+      branch: 'main',
+      path: 'JSONSchemas/CommonDataModels/Encounter.json',
+      name: 'Encounter',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm/link',
+      method: 'POST',
+      body: {
+        projectId: 'project-1',
+        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        branch: 'main',
+        name: 'Encounter',
+      },
+    });
+  });
+
+  it('syncCdmSchema maps to POST /schemas/:id/sync-cdm', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1', synced: true });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.syncCdmSchema('schema-cdm-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/schema-cdm-1/sync-cdm',
+      method: 'POST',
+      body: {},
+    });
+  });
+
+  it('syncCdmSchema maps statusOnly=true to GET /schemas/:id/sync-cdm', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1', synced: false, message: 'Update available from CDM source.' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.syncCdmSchema('schema-cdm-1', { statusOnly: true });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/schema-cdm-1/sync-cdm',
+      method: 'GET',
+    });
+  });
+
   it('propagates errors from httpRequest unchanged', async () => {
     const error = new Error('boom');
     vi.mocked(httpRequest).mockRejectedValueOnce(error);
@@ -574,9 +652,6 @@ describe('HttpAdapter (CRUD)', () => {
     ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'QA')],
     ['rollback', (a: HttpAdapter) => a.rollback('m-1', 'DEV', 1)],
     ['getDeploymentDiff', (a: HttpAdapter) => a.getDeploymentDiff('m-1', 1, 2)],
-    ['listCdmSchemas', (a: HttpAdapter) => a.listCdmSchemas()],
-    ['linkCdmSchema', (a: HttpAdapter) => a.linkCdmSchema({ repo: 'r', branch: 'b', path: '/a.xsd' })],
-    ['syncCdmSchema', (a: HttpAdapter) => a.syncCdmSchema('s-1')],
     ['listPublishedSchemas', (a: HttpAdapter) => a.listPublishedSchemas()],
     [
       'publishSchemaToGitHub',

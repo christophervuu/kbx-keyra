@@ -18,18 +18,19 @@ Scope:
 - Mapping CRUD + duplicate endpoints
 - Mapping revision + version endpoints
 - Schema create/get/list/delete + schema query endpoints
+- CDM read-only browse/link/sync endpoints (`KBXT/KBX-Canonicals` CommonDataModels scope)
 - Shared handler module conventions under `src/lambda/shared/`
 
 Out of scope:
 - Detailed AI runtime internals under `src/lib/ai/` (covered by `ai-runtime.md`)
-- Deployment/GitHub/Activity/Preview/Auth architecture
+- Deployment, published-schema GitHub write flows, Activity/Preview/Auth architecture
 - IaC resource authoring details (covered by `infrastructure.md`)
 
 ---
 
 ## 2) Route Table (Phase 1)
 
-Phase 1 exposes 21 routes. Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
+Phase 1 exposes 24 routes in this architecture slice (including FS-076 CDM read-only integration). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
 
 | Method | Path | Handler File | Lambda Name (logical) | Description |
 |---|---|---|---|---|
@@ -51,9 +52,13 @@ Phase 1 exposes 21 routes. Logical Lambda names follow the naming conventions do
 | POST | `/mappings/:mappingId/versions` | `src/lambda/mapping/create-version.ts` (`save-version.ts` shim) | `CreateMappingVersionFunction` | Create version milestone from latest revision (supports implicit save) |
 | POST | `/schemas` | `src/lambda/schema/create-schema.ts` | `CreateSchemaFunction` | Create schema (inline or ingesting kickoff) |
 | GET | `/schemas` | `src/lambda/schema/list-schemas.ts` | `ListSchemasFunction` | List schemas |
+| GET | `/schemas/cdm` | `src/lambda/schema/list-cdm-schemas.ts` | `ListCdmSchemasFunction` | List one directory level of CDM entries under fixed CommonDataModels root |
+| POST | `/schemas/cdm/link` | `src/lambda/schema/link-cdm-schema.ts` | `LinkCdmSchemaFunction` | Link CDM schema file to project with canonical source metadata; idempotent for duplicate same-project repo/branch/path |
 | GET | `/schemas/:id` | `src/lambda/schema/get-schema.ts` | `GetSchemaFunction` | Get schema detail |
 | DELETE | `/schemas/:id` | `src/lambda/schema/delete-schema.ts` | `DeleteSchemaFunction` | Delete schema (conflict when referenced) |
 | POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (OpenSearch-first, max 50; gated PK-scoped degraded fallback) |
+| POST | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Explicit manual CDM re-sync (updates content/metadata only when upstream changed) |
+| GET | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Lightweight CDM status-refresh read (`update-available` without content mutation) |
 
 ---
 
@@ -255,9 +260,12 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 | `mapping/save-version` | compatibility shim delegating to `create-version` |
 | `schema/create-schema` | put schema metadata; inline mode puts schema nodes |
 | `schema/list-schemas` | scan schemas |
+| `schema/list-cdm-schemas` | root-guarded optional path validation + one-level GitHub read-only listing under CommonDataModels |
+| `schema/link-cdm-schema` | validate root-scoped CDM file path + project, fetch GitHub file/commit (read-only), persist/project CDM source metadata, and attach to project |
 | `schema/get-schema` | get schema metadata |
 | `schema/delete-schema` | get schema + scan/query project refs + delete schema + delete schema nodes |
 | `schema/query-schema-nodes` | get schema + OpenSearch query via `searchSchemaNodes`; on explicit degraded gate, fallback to PK-scoped schemaId query + in-memory substring filter |
+| `schema/sync-cdm-schema` | read linked source metadata, perform GitHub read-only compare/fetch, persist sync status and optional content/commitSha updates |
 
 ---
 
@@ -568,3 +576,44 @@ Failure/edge semantics:
 - `forge/architecture/persistence-model.md` — authoritative persistence model decisions
 - `forge/architecture/infrastructure.md` — resource inventory and environment mapping
 - `forge/active/FS-057/spec.md` — behavior-level acceptance and error envelope contract
+
+---
+
+## 13) CDM Read-Only Integration Addendum (FS-076)
+
+FS-076 introduces a constrained GitHub integration slice for canonical CDM schemas.
+
+### Fixed scope and browse semantics
+
+- Repository: `KBXT/KBX-Canonicals`
+- Repository ID: `1052821334`
+- Root: `JSONSchemas/CommonDataModels`
+- Root guard rejects out-of-scope/traversal paths deterministically before upstream calls.
+- Browse is one directory level per request; client drives navigation by requesting child paths.
+
+### Link metadata contract (AE-02)
+
+Successful CDM link persists canonical source metadata:
+
+- `origin: 'cdm'`
+- `repo: 'KBXT/KBX-Canonicals'`
+- `repoId: 1052821334`
+- `branch`, `path`, `commitSha`
+
+`repoId` is also projected for query/index usage (`sourceRepoId`) to support filtering/reporting.
+
+Duplicate link attempts within the same project for the same `repo+branch+path` are idempotent success.
+
+### Sync semantics (AE-03/AE-04/AE-05/AE-06)
+
+- `POST /schemas/:id/sync-cdm` is manual-only explicit re-sync.
+- `GET /schemas/:id/sync-cdm` is lightweight status-refresh read.
+- Status-refresh can set/return `update-available` without content mutation.
+- GitHub read failures persist `sync-failed` and surface canonical actionable service-unavailable semantics.
+
+### No-write GitHub invariant (AE-09)
+
+CDM browse/link/sync flows must use GitHub read endpoints only.
+
+- Forbidden in CDM flow paths: content/ref/tree write operations.
+- Regression tests assert no write-style endpoint usage patterns in these handlers.

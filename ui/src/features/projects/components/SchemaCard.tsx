@@ -64,9 +64,11 @@ function ScopeBadge({ scope }: { scope: string }) {
  *
  * | Status         | Icon          | Color  |
  * |----------------|---------------|--------|
- * | synced         | CheckCircle   | Green  |
- * | not-synced     | AlertTriangle | Amber  |
- * | local-changes  | PenLine       | Amber  |
+ * | synced            | CheckCircle   | Green  |
+ * | update-available  | AlertTriangle | Amber  |
+ * | sync-failed       | AlertTriangle | Red    |
+ * | not-synced        | AlertTriangle | Amber  |
+ * | local-changes     | PenLine       | Amber  |
  */
 function SyncStatusIndicator({ syncStatus }: { syncStatus: string }) {
   const config: Record<string, { icon: ReactNode; cls: string; label: string }> = {
@@ -79,6 +81,16 @@ function SyncStatusIndicator({ syncStatus }: { syncStatus: string }) {
       icon: <AlertTriangle size={12} aria-hidden="true" />,
       cls: 'text-amber-400',
       label: 'Not synced',
+    },
+    'update-available': {
+      icon: <AlertTriangle size={12} aria-hidden="true" />,
+      cls: 'text-amber-400',
+      label: 'Update available',
+    },
+    'sync-failed': {
+      icon: <AlertTriangle size={12} aria-hidden="true" />,
+      cls: 'text-red-400',
+      label: 'Sync failed',
     },
     'local-changes': {
       icon: <PenLine size={12} aria-hidden="true" />,
@@ -126,6 +138,7 @@ export interface SchemaCardProps {
  */
 export function SchemaCard({ schema, usageCount, onView, onRemove }: SchemaCardProps) {
   const usageLabel = usageCount === 0 ? 'Not used' : `Used by ${usageCount} mapping${usageCount !== 1 ? 's' : ''}`;
+  const isReadOnlyCdm = schema.origin === 'cdm';
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-slate-700 bg-slate-900 p-4">
@@ -142,15 +155,17 @@ export function SchemaCard({ schema, usageCount, onView, onRemove }: SchemaCardP
             <Eye size={14} aria-hidden="true" />
             View
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Remove schema ${schema.name}`}
-            onClick={() => onRemove(schema.schemaId)}
-            className="text-red-400 hover:text-red-300"
-          >
-            <Trash2 size={14} aria-hidden="true" />
-          </Button>
+          {!isReadOnlyCdm && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Remove schema ${schema.name}`}
+              onClick={() => onRemove(schema.schemaId)}
+              className="text-red-400 hover:text-red-300"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </Button>
+          )}
         </div>
       </div>
 

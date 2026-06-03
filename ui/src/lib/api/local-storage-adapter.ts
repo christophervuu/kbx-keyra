@@ -1233,8 +1233,14 @@ export class LocalStorageAdapter implements ApiAdapter {
     throw this.offlineModeError();
   }
 
-  async syncCdmSchema(schemaId: string): Promise<SchemaSyncResult> {
+  async syncCdmSchema(
+    schemaId: string,
+    options?: {
+      statusOnly?: boolean;
+    },
+  ): Promise<SchemaSyncResult> {
     void schemaId;
+    void options;
     throw this.offlineModeError();
   }
 

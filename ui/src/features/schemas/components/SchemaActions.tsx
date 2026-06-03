@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import type { UsageMapping } from '../hooks/use-schema-usage';
+
 import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAdapter } from '@/lib/api';
 import type { SchemaDetail } from '@/lib/types';
 import { PATHS } from '@/routes/paths';
-
-import type { UsageMapping } from '../hooks/use-schema-usage';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -27,6 +27,8 @@ export interface SchemaActionsProps {
   isEditing: boolean;
   /** Called after scope is successfully updated to 'global' */
   onScopePromoted?: () => void;
+  /** Called after successful re-sync to refresh Schema Detail state */
+  onResynced?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +93,7 @@ export function SchemaActions({
   usageMappings,
   isEditing,
   onScopePromoted,
+  onResynced,
 }: SchemaActionsProps) {
   const adapter = useAdapter();
   const navigate = useNavigate();
@@ -106,7 +109,25 @@ export function SchemaActions({
   const [showRemoveBlocked, setShowRemoveBlocked] = useState(false);
   const [isPromoting, setIsPromoting] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
+  const [resyncError, setResyncError] = useState<string | null>(null);
+  const [resyncMessage, setResyncMessage] = useState<string | null>(null);
   const [promoteError, setPromoteError] = useState<string | null>(null);
+
+  async function handleResync() {
+    setIsResyncing(true);
+    setResyncError(null);
+    setResyncMessage(null);
+    try {
+      const result = await adapter.syncCdmSchema(metadata.schemaId);
+      setResyncMessage(result.message || 'CDM schema sync completed.');
+      onResynced?.();
+    } catch {
+      setResyncError('Unable to re-sync right now. Please verify repository access and try again.');
+    } finally {
+      setIsResyncing(false);
+    }
+  }
 
   // --- Promote to Global ---
   async function handlePromoteConfirm() {
@@ -155,13 +176,17 @@ export function SchemaActions({
       </h2>
 
       <div className="flex flex-wrap gap-2">
-        {/* --- CDM: Re-sync placeholder --- */}
+        {/* --- CDM: Re-sync action --- */}
         {isCdm && (
-          <PlaceholderButton
-            label="Re-sync from GitHub"
-            tooltip="Re-sync available when backend is connected"
-            testId="action-resync"
-          />
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="action-resync"
+            onClick={() => void handleResync()}
+            loading={isResyncing}
+          >
+            Re-sync from GitHub
+          </Button>
         )}
 
         {/* --- Non-CDM actions --- */}
@@ -237,6 +262,36 @@ export function SchemaActions({
           View Raw
         </Button>
       </div>
+
+      {isCdm && resyncError && (
+        <div
+          role="alert"
+          data-testid="resync-error"
+          className="mt-3 rounded border border-amber-600/30 bg-amber-950/40 p-3 text-sm text-amber-200"
+        >
+          <p>{resyncError}</p>
+          <div className="mt-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleResync()}
+              disabled={isResyncing}
+            >
+              Retry re-sync
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isCdm && !resyncError && resyncMessage && (
+        <p
+          role="status"
+          data-testid="resync-success"
+          className="mt-3 text-sm text-slate-300"
+        >
+          {resyncMessage}
+        </p>
+      )}
 
       {/* ---- Promote confirmation ---- */}
       <ConfirmDialog

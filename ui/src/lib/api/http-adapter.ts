@@ -478,18 +478,43 @@ export class HttpAdapter extends LocalStorageAdapter {
   }
 
   override async listCdmSchemas(path?: string): Promise<GitHubFile[]> {
-    void path;
-    throw this.featureNotEnabled('listCdmSchemas');
+    const query = typeof path === 'string' && path.trim() !== ''
+      ? `?path=${encodeURIComponent(path.trim())}`
+      : '';
+
+    return httpRequest<GitHubFile[]>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/cdm${query}`,
+      method: 'GET',
+    });
   }
 
   override async linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata> {
-    void input;
-    throw this.featureNotEnabled('linkCdmSchema');
+    return httpRequest<SchemaMetadata>({
+      baseUrl: this.apiUrl,
+      path: '/schemas/cdm/link',
+      method: 'POST',
+      body: {
+        projectId: input.projectId,
+        path: input.path,
+        ...(typeof input.branch === 'string' && input.branch.trim() !== '' ? { branch: input.branch.trim() } : {}),
+        ...(typeof input.name === 'string' && input.name.trim() !== '' ? { name: input.name.trim() } : {}),
+      },
+    });
   }
 
-  override async syncCdmSchema(schemaId: string): Promise<SchemaSyncResult> {
-    void schemaId;
-    throw this.featureNotEnabled('syncCdmSchema');
+  override async syncCdmSchema(
+    schemaId: string,
+    options?: {
+      statusOnly?: boolean;
+    },
+  ): Promise<SchemaSyncResult> {
+    return httpRequest<SchemaSyncResult>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(schemaId)}/sync-cdm`,
+      method: options?.statusOnly ? 'GET' : 'POST',
+      ...(options?.statusOnly ? {} : { body: {} }),
+    });
   }
 
   override async listPublishedSchemas(path?: string): Promise<GitHubFile[]> {

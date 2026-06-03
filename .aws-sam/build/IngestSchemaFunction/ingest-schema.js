@@ -30,9 +30,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
 ));
 var __toCommonJS = (mod2) => __copyProps(__defProp({}, "__esModule", { value: true }), mod2);
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/ms/index.js
+// node_modules/ms/index.js
 var require_ms = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/ms/index.js"(exports2, module2) {
+  "node_modules/ms/index.js"(exports2, module2) {
     var s = 1e3;
     var m = s * 60;
     var h = m * 60;
@@ -146,9 +146,9 @@ var require_ms = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/common.js
+// node_modules/debug/src/common.js
 var require_common = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/common.js"(exports2, module2) {
+  "node_modules/debug/src/common.js"(exports2, module2) {
     function setup(env) {
       createDebug.debug = createDebug;
       createDebug.default = createDebug;
@@ -323,9 +323,9 @@ var require_common = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/browser.js
+// node_modules/debug/src/browser.js
 var require_browser = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/browser.js"(exports2, module2) {
+  "node_modules/debug/src/browser.js"(exports2, module2) {
     exports2.formatArgs = formatArgs;
     exports2.save = save;
     exports2.load = load;
@@ -493,124 +493,9 @@ var require_browser = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/node_modules/has-flag/index.js
-var require_has_flag = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/node_modules/has-flag/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = (flag, argv = process.argv) => {
-      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
-      const position = argv.indexOf(prefix + flag);
-      const terminatorPosition = argv.indexOf("--");
-      return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
-    };
-  }
-});
-
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/node_modules/supports-color/index.js
-var require_supports_color = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/node_modules/supports-color/index.js"(exports2, module2) {
-    "use strict";
-    var os = require("os");
-    var tty = require("tty");
-    var hasFlag = require_has_flag();
-    var { env } = process;
-    var forceColor;
-    if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
-      forceColor = 0;
-    } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
-      forceColor = 1;
-    }
-    if ("FORCE_COLOR" in env) {
-      if (env.FORCE_COLOR === "true") {
-        forceColor = 1;
-      } else if (env.FORCE_COLOR === "false") {
-        forceColor = 0;
-      } else {
-        forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
-      }
-    }
-    function translateLevel(level) {
-      if (level === 0) {
-        return false;
-      }
-      return {
-        level,
-        hasBasic: true,
-        has256: level >= 2,
-        has16m: level >= 3
-      };
-    }
-    function supportsColor(haveStream, streamIsTTY) {
-      if (forceColor === 0) {
-        return 0;
-      }
-      if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
-        return 3;
-      }
-      if (hasFlag("color=256")) {
-        return 2;
-      }
-      if (haveStream && !streamIsTTY && forceColor === void 0) {
-        return 0;
-      }
-      const min = forceColor || 0;
-      if (env.TERM === "dumb") {
-        return min;
-      }
-      if (process.platform === "win32") {
-        const osRelease = os.release().split(".");
-        if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
-          return Number(osRelease[2]) >= 14931 ? 3 : 2;
-        }
-        return 1;
-      }
-      if ("CI" in env) {
-        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => sign in env) || env.CI_NAME === "codeship") {
-          return 1;
-        }
-        return min;
-      }
-      if ("TEAMCITY_VERSION" in env) {
-        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
-      }
-      if (env.COLORTERM === "truecolor") {
-        return 3;
-      }
-      if ("TERM_PROGRAM" in env) {
-        const version = parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-        switch (env.TERM_PROGRAM) {
-          case "iTerm.app":
-            return version >= 3 ? 3 : 2;
-          case "Apple_Terminal":
-            return 2;
-        }
-      }
-      if (/-256(color)?$/i.test(env.TERM)) {
-        return 2;
-      }
-      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
-        return 1;
-      }
-      if ("COLORTERM" in env) {
-        return 1;
-      }
-      return min;
-    }
-    function getSupportLevel(stream) {
-      const level = supportsColor(stream, stream && stream.isTTY);
-      return translateLevel(level);
-    }
-    module2.exports = {
-      supportsColor: getSupportLevel,
-      stdout: translateLevel(supportsColor(true, tty.isatty(1))),
-      stderr: translateLevel(supportsColor(true, tty.isatty(2)))
-    };
-  }
-});
-
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/node.js
+// node_modules/debug/src/node.js
 var require_node = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/node.js"(exports2, module2) {
+  "node_modules/debug/src/node.js"(exports2, module2) {
     var tty = require("tty");
     var util = require("util");
     exports2.init = init;
@@ -626,7 +511,7 @@ var require_node = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = require_supports_color();
+      const supportsColor = require("supports-color");
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports2.colors = [
           20,
@@ -782,9 +667,9 @@ var require_node = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/index.js
+// node_modules/debug/src/index.js
 var require_src = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/debug/src/index.js"(exports2, module2) {
+  "node_modules/debug/src/index.js"(exports2, module2) {
     if (typeof process === "undefined" || process.type === "renderer" || process.browser === true || process.__nwjs) {
       module2.exports = require_browser();
     } else {
@@ -793,9 +678,9 @@ var require_src = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/errors.js
+// node_modules/@opensearch-project/opensearch/lib/errors.js
 var require_errors = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/errors.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/errors.js"(exports2, module2) {
     "use strict";
     var OpenSearchClientError = class extends Error {
       constructor(message) {
@@ -922,9 +807,9 @@ var require_errors = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/package.json
+// node_modules/@opensearch-project/opensearch/package.json
 var require_package = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/package.json"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/package.json"(exports2, module2) {
     module2.exports = {
       name: "@opensearch-project/opensearch",
       description: "The official OpenSearch client for Node.js",
@@ -1068,9 +953,9 @@ var require_package = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Transport.js
+// node_modules/@opensearch-project/opensearch/lib/Transport.js
 var require_Transport = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Transport.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/Transport.js"(exports2, module2) {
     "use strict";
     var debug = require_src()("opensearch");
     var os = require("os");
@@ -1637,9 +1522,9 @@ var require_Transport = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/hpagent/index.js
+// node_modules/hpagent/index.js
 var require_hpagent = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/hpagent/index.js"(exports2, module2) {
+  "node_modules/hpagent/index.js"(exports2, module2) {
     "use strict";
     var https = require("https");
     var http = require("http");
@@ -1746,9 +1631,9 @@ var require_hpagent = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Connection.js
+// node_modules/@opensearch-project/opensearch/lib/Connection.js
 var require_Connection = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Connection.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/Connection.js"(exports2, module2) {
     "use strict";
     var assert = require("assert");
     var { inspect } = require("util");
@@ -2015,9 +1900,9 @@ var require_Connection = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/BaseConnectionPool.js
+// node_modules/@opensearch-project/opensearch/lib/pool/BaseConnectionPool.js
 var require_BaseConnectionPool = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/BaseConnectionPool.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/pool/BaseConnectionPool.js"(exports2, module2) {
     "use strict";
     var { URL } = require("url");
     var debug = require_src()("opensearch");
@@ -2223,9 +2108,9 @@ var require_BaseConnectionPool = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/ConnectionPool.js
+// node_modules/@opensearch-project/opensearch/lib/pool/ConnectionPool.js
 var require_ConnectionPool = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/ConnectionPool.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/pool/ConnectionPool.js"(exports2, module2) {
     "use strict";
     var BaseConnectionPool = require_BaseConnectionPool();
     var assert = require("assert");
@@ -2415,9 +2300,9 @@ var require_ConnectionPool = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/CloudConnectionPool.js
+// node_modules/@opensearch-project/opensearch/lib/pool/CloudConnectionPool.js
 var require_CloudConnectionPool = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/CloudConnectionPool.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/pool/CloudConnectionPool.js"(exports2, module2) {
     "use strict";
     var BaseConnectionPool = require_BaseConnectionPool();
     var noop = () => {
@@ -2461,9 +2346,9 @@ var require_CloudConnectionPool = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/index.js
+// node_modules/@opensearch-project/opensearch/lib/pool/index.js
 var require_pool = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/pool/index.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/pool/index.js"(exports2, module2) {
     "use strict";
     var BaseConnectionPool = require_BaseConnectionPool();
     var ConnectionPool2 = require_ConnectionPool();
@@ -2476,9 +2361,9 @@ var require_pool = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Helpers.js
+// node_modules/@opensearch-project/opensearch/lib/Helpers.js
 var require_Helpers = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Helpers.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/Helpers.js"(exports2, module2) {
     "use strict";
     var { Readable } = require("stream");
     var { promisify } = require("util");
@@ -3112,9 +2997,9 @@ var require_Helpers = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/secure-json-parse/index.js
+// node_modules/secure-json-parse/index.js
 var require_secure_json_parse = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/secure-json-parse/index.js"(exports2, module2) {
+  "node_modules/secure-json-parse/index.js"(exports2, module2) {
     "use strict";
     var hasBuffer = typeof Buffer !== "undefined";
     var suspectProtoRx = /"(?:_|\\u005[Ff])(?:_|\\u005[Ff])(?:p|\\u0070)(?:r|\\u0072)(?:o|\\u006[Ff])(?:t|\\u0074)(?:o|\\u006[Ff])(?:_|\\u005[Ff])(?:_|\\u005[Ff])"\s*:/;
@@ -3216,9 +3101,9 @@ var require_secure_json_parse = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/json11/dist/cjs/index.cjs
+// node_modules/json11/dist/cjs/index.cjs
 var require_cjs = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/json11/dist/cjs/index.cjs"(exports2) {
+  "node_modules/json11/dist/cjs/index.cjs"(exports2) {
     "use strict";
     Object.defineProperty(exports2, Symbol.toStringTag, { value: "Module" });
     var Space_Separator = /[\u1680\u2000-\u200A\u202F\u205F\u3000]/;
@@ -4365,9 +4250,9 @@ var require_cjs = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Serializer.js
+// node_modules/@opensearch-project/opensearch/lib/Serializer.js
 var require_Serializer = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Serializer.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/Serializer.js"(exports2, module2) {
     "use strict";
     var { stringify } = require("querystring");
     var debug = require_src()("opensearch");
@@ -4481,9 +4366,9 @@ var require_Serializer = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/utils.js
+// node_modules/@opensearch-project/opensearch/api/utils.js
 var require_utils = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/utils.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/utils.js"(exports2, module2) {
     "use strict";
     var result = { body: null, statusCode: null, headers: null, warnings: null };
     var kConfigErr = /* @__PURE__ */ Symbol("configuration error");
@@ -4532,9 +4417,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/delete.js
+// node_modules/@opensearch-project/opensearch/api/asynchronousSearch/delete.js
 var require_delete = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/asynchronousSearch/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -4551,9 +4436,9 @@ var require_delete = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/get.js
+// node_modules/@opensearch-project/opensearch/api/asynchronousSearch/get.js
 var require_get = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/asynchronousSearch/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -4570,9 +4455,9 @@ var require_get = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/search.js
+// node_modules/@opensearch-project/opensearch/api/asynchronousSearch/search.js
 var require_search = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/search.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/asynchronousSearch/search.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchFunc(params, options, callback) {
@@ -4587,9 +4472,9 @@ var require_search = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/stats.js
+// node_modules/@opensearch-project/opensearch/api/asynchronousSearch/stats.js
 var require_stats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/asynchronousSearch/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function statsFunc(params, options, callback) {
@@ -4604,9 +4489,9 @@ var require_stats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/_api.js
+// node_modules/@opensearch-project/opensearch/api/asynchronousSearch/_api.js
 var require_api = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/asynchronousSearch/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/asynchronousSearch/_api.js"(exports2, module2) {
     "use strict";
     function AsynchronousSearchApi(bindObj) {
       this.delete = require_delete().bind(bindObj);
@@ -4618,9 +4503,9 @@ var require_api = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/aliases.js
+// node_modules/@opensearch-project/opensearch/api/cat/aliases.js
 var require_aliases = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/aliases.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/aliases.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function aliasesFunc(params, options, callback) {
@@ -4636,9 +4521,9 @@ var require_aliases = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/allocation.js
+// node_modules/@opensearch-project/opensearch/api/cat/allocation.js
 var require_allocation = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/allocation.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/allocation.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function allocationFunc(params, options, callback) {
@@ -4654,9 +4539,9 @@ var require_allocation = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/allPitSegments.js
+// node_modules/@opensearch-project/opensearch/api/cat/allPitSegments.js
 var require_allPitSegments = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/allPitSegments.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/allPitSegments.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function allPitSegmentsFunc(params, options, callback) {
@@ -4671,9 +4556,9 @@ var require_allPitSegments = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/clusterManager.js
+// node_modules/@opensearch-project/opensearch/api/cat/clusterManager.js
 var require_clusterManager = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/clusterManager.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/clusterManager.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function clusterManagerFunc(params, options, callback) {
@@ -4688,9 +4573,9 @@ var require_clusterManager = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/count.js
+// node_modules/@opensearch-project/opensearch/api/cat/count.js
 var require_count = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/count.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/count.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function countFunc(params, options, callback) {
@@ -4706,9 +4591,9 @@ var require_count = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/fielddata.js
+// node_modules/@opensearch-project/opensearch/api/cat/fielddata.js
 var require_fielddata = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/fielddata.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/fielddata.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function fielddataFunc(params, options, callback) {
@@ -4724,9 +4609,9 @@ var require_fielddata = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/health.js
+// node_modules/@opensearch-project/opensearch/api/cat/health.js
 var require_health = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/health.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/health.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function healthFunc(params, options, callback) {
@@ -4741,9 +4626,9 @@ var require_health = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/help.js
+// node_modules/@opensearch-project/opensearch/api/cat/help.js
 var require_help = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/help.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/help.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function helpFunc(params, options, callback) {
@@ -4758,9 +4643,9 @@ var require_help = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/indices.js
+// node_modules/@opensearch-project/opensearch/api/cat/indices.js
 var require_indices = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/indices.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/indices.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function indicesFunc(params, options, callback) {
@@ -4776,9 +4661,9 @@ var require_indices = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/master.js
+// node_modules/@opensearch-project/opensearch/api/cat/master.js
 var require_master = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/master.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/master.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function masterFunc(params, options, callback) {
@@ -4793,9 +4678,9 @@ var require_master = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/nodeattrs.js
+// node_modules/@opensearch-project/opensearch/api/cat/nodeattrs.js
 var require_nodeattrs = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/nodeattrs.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/nodeattrs.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function nodeattrsFunc(params, options, callback) {
@@ -4810,9 +4695,9 @@ var require_nodeattrs = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/nodes.js
+// node_modules/@opensearch-project/opensearch/api/cat/nodes.js
 var require_nodes = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/nodes.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/nodes.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function nodesFunc(params, options, callback) {
@@ -4827,9 +4712,9 @@ var require_nodes = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/pendingTasks.js
+// node_modules/@opensearch-project/opensearch/api/cat/pendingTasks.js
 var require_pendingTasks = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/pendingTasks.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/pendingTasks.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function pendingTasksFunc(params, options, callback) {
@@ -4844,9 +4729,9 @@ var require_pendingTasks = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/pitSegments.js
+// node_modules/@opensearch-project/opensearch/api/cat/pitSegments.js
 var require_pitSegments = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/pitSegments.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/pitSegments.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function pitSegmentsFunc(params, options, callback) {
@@ -4861,9 +4746,9 @@ var require_pitSegments = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/plugins.js
+// node_modules/@opensearch-project/opensearch/api/cat/plugins.js
 var require_plugins = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/plugins.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/plugins.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function pluginsFunc(params, options, callback) {
@@ -4878,9 +4763,9 @@ var require_plugins = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/recovery.js
+// node_modules/@opensearch-project/opensearch/api/cat/recovery.js
 var require_recovery = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/recovery.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/recovery.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function recoveryFunc(params, options, callback) {
@@ -4896,9 +4781,9 @@ var require_recovery = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/repositories.js
+// node_modules/@opensearch-project/opensearch/api/cat/repositories.js
 var require_repositories = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/repositories.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/repositories.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function repositoriesFunc(params, options, callback) {
@@ -4913,9 +4798,9 @@ var require_repositories = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/segmentReplication.js
+// node_modules/@opensearch-project/opensearch/api/cat/segmentReplication.js
 var require_segmentReplication = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/segmentReplication.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/segmentReplication.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function segmentReplicationFunc(params, options, callback) {
@@ -4931,9 +4816,9 @@ var require_segmentReplication = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/segments.js
+// node_modules/@opensearch-project/opensearch/api/cat/segments.js
 var require_segments = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/segments.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/segments.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function segmentsFunc(params, options, callback) {
@@ -4949,9 +4834,9 @@ var require_segments = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/shards.js
+// node_modules/@opensearch-project/opensearch/api/cat/shards.js
 var require_shards = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/shards.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/shards.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function shardsFunc(params, options, callback) {
@@ -4967,9 +4852,9 @@ var require_shards = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/snapshots.js
+// node_modules/@opensearch-project/opensearch/api/cat/snapshots.js
 var require_snapshots = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/snapshots.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/snapshots.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function snapshotsFunc(params, options, callback) {
@@ -4985,9 +4870,9 @@ var require_snapshots = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/tasks.js
+// node_modules/@opensearch-project/opensearch/api/cat/tasks.js
 var require_tasks = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/tasks.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/tasks.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function tasksFunc(params, options, callback) {
@@ -5002,9 +4887,9 @@ var require_tasks = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/templates.js
+// node_modules/@opensearch-project/opensearch/api/cat/templates.js
 var require_templates = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/templates.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/templates.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function templatesFunc(params, options, callback) {
@@ -5020,9 +4905,9 @@ var require_templates = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/threadPool.js
+// node_modules/@opensearch-project/opensearch/api/cat/threadPool.js
 var require_threadPool = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/threadPool.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/threadPool.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function threadPoolFunc(params, options, callback) {
@@ -5038,9 +4923,9 @@ var require_threadPool = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/_api.js
+// node_modules/@opensearch-project/opensearch/api/cat/_api.js
 var require_api2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cat/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cat/_api.js"(exports2, module2) {
     "use strict";
     function CatApi(bindObj) {
       this.aliases = require_aliases().bind(bindObj);
@@ -5078,9 +4963,9 @@ var require_api2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/allocationExplain.js
+// node_modules/@opensearch-project/opensearch/api/cluster/allocationExplain.js
 var require_allocationExplain = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/allocationExplain.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/allocationExplain.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function allocationExplainFunc(params, options, callback) {
@@ -5095,9 +4980,9 @@ var require_allocationExplain = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteComponentTemplate.js
+// node_modules/@opensearch-project/opensearch/api/cluster/deleteComponentTemplate.js
 var require_deleteComponentTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteComponentTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/deleteComponentTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteComponentTemplateFunc(params, options, callback) {
@@ -5114,9 +4999,9 @@ var require_deleteComponentTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteDecommissionAwareness.js
+// node_modules/@opensearch-project/opensearch/api/cluster/deleteDecommissionAwareness.js
 var require_deleteDecommissionAwareness = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteDecommissionAwareness.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/deleteDecommissionAwareness.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deleteDecommissionAwarenessFunc(params, options, callback) {
@@ -5131,9 +5016,9 @@ var require_deleteDecommissionAwareness = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteVotingConfigExclusions.js
+// node_modules/@opensearch-project/opensearch/api/cluster/deleteVotingConfigExclusions.js
 var require_deleteVotingConfigExclusions = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteVotingConfigExclusions.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/deleteVotingConfigExclusions.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deleteVotingConfigExclusionsFunc(params, options, callback) {
@@ -5148,9 +5033,9 @@ var require_deleteVotingConfigExclusions = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteWeightedRouting.js
+// node_modules/@opensearch-project/opensearch/api/cluster/deleteWeightedRouting.js
 var require_deleteWeightedRouting = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/deleteWeightedRouting.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/deleteWeightedRouting.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deleteWeightedRoutingFunc(params, options, callback) {
@@ -5165,9 +5050,9 @@ var require_deleteWeightedRouting = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/existsComponentTemplate.js
+// node_modules/@opensearch-project/opensearch/api/cluster/existsComponentTemplate.js
 var require_existsComponentTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/existsComponentTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/existsComponentTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsComponentTemplateFunc(params, options, callback) {
@@ -5184,9 +5069,9 @@ var require_existsComponentTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getComponentTemplate.js
+// node_modules/@opensearch-project/opensearch/api/cluster/getComponentTemplate.js
 var require_getComponentTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getComponentTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/getComponentTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getComponentTemplateFunc(params, options, callback) {
@@ -5202,9 +5087,9 @@ var require_getComponentTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getDecommissionAwareness.js
+// node_modules/@opensearch-project/opensearch/api/cluster/getDecommissionAwareness.js
 var require_getDecommissionAwareness = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getDecommissionAwareness.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/getDecommissionAwareness.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getDecommissionAwarenessFunc(params, options, callback) {
@@ -5221,9 +5106,9 @@ var require_getDecommissionAwareness = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getSettings.js
+// node_modules/@opensearch-project/opensearch/api/cluster/getSettings.js
 var require_getSettings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/getSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getSettingsFunc(params, options, callback) {
@@ -5238,9 +5123,9 @@ var require_getSettings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getWeightedRouting.js
+// node_modules/@opensearch-project/opensearch/api/cluster/getWeightedRouting.js
 var require_getWeightedRouting = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/getWeightedRouting.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/getWeightedRouting.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getWeightedRoutingFunc(params, options, callback) {
@@ -5257,9 +5142,9 @@ var require_getWeightedRouting = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/health.js
+// node_modules/@opensearch-project/opensearch/api/cluster/health.js
 var require_health2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/health.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/health.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function healthFunc(params, options, callback) {
@@ -5275,9 +5160,9 @@ var require_health2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/pendingTasks.js
+// node_modules/@opensearch-project/opensearch/api/cluster/pendingTasks.js
 var require_pendingTasks2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/pendingTasks.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/pendingTasks.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function pendingTasksFunc(params, options, callback) {
@@ -5292,9 +5177,9 @@ var require_pendingTasks2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/postVotingConfigExclusions.js
+// node_modules/@opensearch-project/opensearch/api/cluster/postVotingConfigExclusions.js
 var require_postVotingConfigExclusions = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/postVotingConfigExclusions.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/postVotingConfigExclusions.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function postVotingConfigExclusionsFunc(params, options, callback) {
@@ -5309,9 +5194,9 @@ var require_postVotingConfigExclusions = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putComponentTemplate.js
+// node_modules/@opensearch-project/opensearch/api/cluster/putComponentTemplate.js
 var require_putComponentTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putComponentTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/putComponentTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putComponentTemplateFunc(params, options, callback) {
@@ -5328,9 +5213,9 @@ var require_putComponentTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putDecommissionAwareness.js
+// node_modules/@opensearch-project/opensearch/api/cluster/putDecommissionAwareness.js
 var require_putDecommissionAwareness = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putDecommissionAwareness.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/putDecommissionAwareness.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putDecommissionAwarenessFunc(params, options, callback) {
@@ -5349,9 +5234,9 @@ var require_putDecommissionAwareness = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putSettings.js
+// node_modules/@opensearch-project/opensearch/api/cluster/putSettings.js
 var require_putSettings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/putSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function putSettingsFunc(params, options, callback) {
@@ -5366,9 +5251,9 @@ var require_putSettings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putWeightedRouting.js
+// node_modules/@opensearch-project/opensearch/api/cluster/putWeightedRouting.js
 var require_putWeightedRouting = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/putWeightedRouting.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/putWeightedRouting.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putWeightedRoutingFunc(params, options, callback) {
@@ -5385,9 +5270,9 @@ var require_putWeightedRouting = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/remoteInfo.js
+// node_modules/@opensearch-project/opensearch/api/cluster/remoteInfo.js
 var require_remoteInfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/remoteInfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/remoteInfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function remoteInfoFunc(params, options, callback) {
@@ -5402,9 +5287,9 @@ var require_remoteInfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/reroute.js
+// node_modules/@opensearch-project/opensearch/api/cluster/reroute.js
 var require_reroute = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/reroute.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/reroute.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function rerouteFunc(params, options, callback) {
@@ -5419,9 +5304,9 @@ var require_reroute = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/state.js
+// node_modules/@opensearch-project/opensearch/api/cluster/state.js
 var require_state = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/state.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/state.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function stateFunc(params, options, callback) {
@@ -5438,9 +5323,9 @@ var require_state = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/stats.js
+// node_modules/@opensearch-project/opensearch/api/cluster/stats.js
 var require_stats2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statsFunc(params, options, callback) {
@@ -5467,9 +5352,9 @@ var require_stats2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/_api.js
+// node_modules/@opensearch-project/opensearch/api/cluster/_api.js
 var require_api3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/cluster/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/cluster/_api.js"(exports2, module2) {
     "use strict";
     function ClusterApi(bindObj) {
       this.allocationExplain = require_allocationExplain().bind(bindObj);
@@ -5515,9 +5400,9 @@ var require_api3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/deleteDanglingIndex.js
+// node_modules/@opensearch-project/opensearch/api/danglingIndices/deleteDanglingIndex.js
 var require_deleteDanglingIndex = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/deleteDanglingIndex.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/danglingIndices/deleteDanglingIndex.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteDanglingIndexFunc(params, options, callback) {
@@ -5535,9 +5420,9 @@ var require_deleteDanglingIndex = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/importDanglingIndex.js
+// node_modules/@opensearch-project/opensearch/api/danglingIndices/importDanglingIndex.js
 var require_importDanglingIndex = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/importDanglingIndex.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/danglingIndices/importDanglingIndex.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function importDanglingIndexFunc(params, options, callback) {
@@ -5555,9 +5440,9 @@ var require_importDanglingIndex = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/listDanglingIndices.js
+// node_modules/@opensearch-project/opensearch/api/danglingIndices/listDanglingIndices.js
 var require_listDanglingIndices = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/listDanglingIndices.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/danglingIndices/listDanglingIndices.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function listDanglingIndicesFunc(params, options, callback) {
@@ -5572,9 +5457,9 @@ var require_listDanglingIndices = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/_api.js
+// node_modules/@opensearch-project/opensearch/api/danglingIndices/_api.js
 var require_api4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/danglingIndices/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/danglingIndices/_api.js"(exports2, module2) {
     "use strict";
     function DanglingIndicesApi(bindObj) {
       this.deleteDanglingIndex = require_deleteDanglingIndex().bind(bindObj);
@@ -5588,9 +5473,9 @@ var require_api4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/create.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/create.js
 var require_create = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/create.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/create.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function createFunc(params, options, callback) {
@@ -5605,9 +5490,9 @@ var require_create = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/delete.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/delete.js
 var require_delete2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -5624,9 +5509,9 @@ var require_delete2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/deprovision.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/deprovision.js
 var require_deprovision = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/deprovision.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/deprovision.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deprovisionFunc(params, options, callback) {
@@ -5643,9 +5528,9 @@ var require_deprovision = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/get.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/get.js
 var require_get2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -5662,9 +5547,9 @@ var require_get2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/getStatus.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/getStatus.js
 var require_getStatus = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/getStatus.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/getStatus.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getStatusFunc(params, options, callback) {
@@ -5681,9 +5566,9 @@ var require_getStatus = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/getSteps.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/getSteps.js
 var require_getSteps = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/getSteps.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/getSteps.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getStepsFunc(params, options, callback) {
@@ -5698,9 +5583,9 @@ var require_getSteps = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/provision.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/provision.js
 var require_provision = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/provision.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/provision.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function provisionFunc(params, options, callback) {
@@ -5717,9 +5602,9 @@ var require_provision = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/search.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/search.js
 var require_search2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/search.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/search.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function searchFunc(params, options, callback) {
@@ -5734,9 +5619,9 @@ var require_search2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/searchState.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/searchState.js
 var require_searchState = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/searchState.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/searchState.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function searchStateFunc(params, options, callback) {
@@ -5751,9 +5636,9 @@ var require_searchState = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/update.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/update.js
 var require_update = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/update.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/update.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateFunc(params, options, callback) {
@@ -5770,9 +5655,9 @@ var require_update = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/_api.js
+// node_modules/@opensearch-project/opensearch/api/flowFramework/_api.js
 var require_api5 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/flowFramework/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/flowFramework/_api.js"(exports2, module2) {
     "use strict";
     function FlowFrameworkApi(bindObj) {
       this.create = require_create().bind(bindObj);
@@ -5793,9 +5678,9 @@ var require_api5 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/deleteIp2GeoDatasource.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/deleteIp2GeoDatasource.js
 var require_deleteIp2GeoDatasource = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/deleteIp2GeoDatasource.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/deleteIp2GeoDatasource.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteIp2GeoDatasourceFunc(params, options, callback) {
@@ -5812,9 +5697,9 @@ var require_deleteIp2GeoDatasource = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPost.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPost.js
 var require_geojsonUploadPost = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPost.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPost.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function geojsonUploadPostFunc(params, options, callback) {
@@ -5829,9 +5714,9 @@ var require_geojsonUploadPost = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPut.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPut.js
 var require_geojsonUploadPut = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPut.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/geojsonUploadPut.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function geojsonUploadPutFunc(params, options, callback) {
@@ -5846,9 +5731,9 @@ var require_geojsonUploadPut = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/getIp2GeoDatasource.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/getIp2GeoDatasource.js
 var require_getIp2GeoDatasource = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/getIp2GeoDatasource.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/getIp2GeoDatasource.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getIp2GeoDatasourceFunc(params, options, callback) {
@@ -5864,9 +5749,9 @@ var require_getIp2GeoDatasource = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/getUploadStats.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/getUploadStats.js
 var require_getUploadStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/getUploadStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/getUploadStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getUploadStatsFunc(params, options, callback) {
@@ -5881,9 +5766,9 @@ var require_getUploadStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasource.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasource.js
 var require_putIp2GeoDatasource = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasource.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasource.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putIp2GeoDatasourceFunc(params, options, callback) {
@@ -5900,9 +5785,9 @@ var require_putIp2GeoDatasource = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasourceSettings.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasourceSettings.js
 var require_putIp2GeoDatasourceSettings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasourceSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/putIp2GeoDatasourceSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putIp2GeoDatasourceSettingsFunc(params, options, callback) {
@@ -5919,9 +5804,9 @@ var require_putIp2GeoDatasourceSettings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/_api.js
+// node_modules/@opensearch-project/opensearch/api/geospatial/_api.js
 var require_api6 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/geospatial/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/geospatial/_api.js"(exports2, module2) {
     "use strict";
     function GeospatialApi(bindObj) {
       this.deleteIp2GeoDatasource = require_deleteIp2GeoDatasource().bind(bindObj);
@@ -5943,9 +5828,9 @@ var require_api6 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/connect.js
+// node_modules/@opensearch-project/opensearch/api/http/connect.js
 var require_connect = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/connect.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/connect.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function connectFunc(params, options, callback) {
@@ -5963,9 +5848,9 @@ var require_connect = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/delete.js
+// node_modules/@opensearch-project/opensearch/api/http/delete.js
 var require_delete3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -5983,9 +5868,9 @@ var require_delete3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/get.js
+// node_modules/@opensearch-project/opensearch/api/http/get.js
 var require_get3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -6003,9 +5888,9 @@ var require_get3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/head.js
+// node_modules/@opensearch-project/opensearch/api/http/head.js
 var require_head = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/head.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/head.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function headFunc(params, options, callback) {
@@ -6023,9 +5908,9 @@ var require_head = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/options.js
+// node_modules/@opensearch-project/opensearch/api/http/options.js
 var require_options = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/options.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/options.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function optionsFunc(params, options, callback) {
@@ -6043,9 +5928,9 @@ var require_options = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/patch.js
+// node_modules/@opensearch-project/opensearch/api/http/patch.js
 var require_patch = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/patch.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/patch.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchFunc(params, options, callback) {
@@ -6063,9 +5948,9 @@ var require_patch = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/post.js
+// node_modules/@opensearch-project/opensearch/api/http/post.js
 var require_post = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/post.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/post.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function postFunc(params, options, callback) {
@@ -6083,9 +5968,9 @@ var require_post = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/put.js
+// node_modules/@opensearch-project/opensearch/api/http/put.js
 var require_put = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/put.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/put.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function putFunc(params, options, callback) {
@@ -6103,9 +5988,9 @@ var require_put = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/trace.js
+// node_modules/@opensearch-project/opensearch/api/http/trace.js
 var require_trace = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/trace.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/trace.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function traceFunc(params, options, callback) {
@@ -6123,9 +6008,9 @@ var require_trace = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/_api.js
+// node_modules/@opensearch-project/opensearch/api/http/_api.js
 var require_api7 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/http/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/http/_api.js"(exports2, module2) {
     "use strict";
     function HttpApi(bindObj) {
       this.connect = require_connect().bind(bindObj);
@@ -6142,9 +6027,9 @@ var require_api7 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/addBlock.js
+// node_modules/@opensearch-project/opensearch/api/indices/addBlock.js
 var require_addBlock = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/addBlock.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/addBlock.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function addBlockFunc(params, options, callback) {
@@ -6163,9 +6048,9 @@ var require_addBlock = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/analyze.js
+// node_modules/@opensearch-project/opensearch/api/indices/analyze.js
 var require_analyze = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/analyze.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/analyze.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function analyzeFunc(params, options, callback) {
@@ -6181,9 +6066,9 @@ var require_analyze = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/clearCache.js
+// node_modules/@opensearch-project/opensearch/api/indices/clearCache.js
 var require_clearCache = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/clearCache.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/clearCache.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function clearCacheFunc(params, options, callback) {
@@ -6199,9 +6084,9 @@ var require_clearCache = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/clone.js
+// node_modules/@opensearch-project/opensearch/api/indices/clone.js
 var require_clone = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/clone.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/clone.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function cloneFunc(params, options, callback) {
@@ -6220,9 +6105,9 @@ var require_clone = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/close.js
+// node_modules/@opensearch-project/opensearch/api/indices/close.js
 var require_close = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/close.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/close.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function closeFunc(params, options, callback) {
@@ -6239,9 +6124,9 @@ var require_close = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/create.js
+// node_modules/@opensearch-project/opensearch/api/indices/create.js
 var require_create2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/create.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/create.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createFunc(params, options, callback) {
@@ -6258,9 +6143,9 @@ var require_create2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/createDataStream.js
+// node_modules/@opensearch-project/opensearch/api/indices/createDataStream.js
 var require_createDataStream = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/createDataStream.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/createDataStream.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createDataStreamFunc(params, options, callback) {
@@ -6277,9 +6162,9 @@ var require_createDataStream = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/dataStreamsStats.js
+// node_modules/@opensearch-project/opensearch/api/indices/dataStreamsStats.js
 var require_dataStreamsStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/dataStreamsStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/dataStreamsStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function dataStreamsStatsFunc(params, options, callback) {
@@ -6295,9 +6180,9 @@ var require_dataStreamsStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/delete.js
+// node_modules/@opensearch-project/opensearch/api/indices/delete.js
 var require_delete4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -6314,9 +6199,9 @@ var require_delete4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteAlias.js
+// node_modules/@opensearch-project/opensearch/api/indices/deleteAlias.js
 var require_deleteAlias = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteAlias.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/deleteAlias.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteAliasFunc(params, options, callback) {
@@ -6335,9 +6220,9 @@ var require_deleteAlias = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteDataStream.js
+// node_modules/@opensearch-project/opensearch/api/indices/deleteDataStream.js
 var require_deleteDataStream = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteDataStream.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/deleteDataStream.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteDataStreamFunc(params, options, callback) {
@@ -6354,9 +6239,9 @@ var require_deleteDataStream = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteIndexTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/deleteIndexTemplate.js
 var require_deleteIndexTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteIndexTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/deleteIndexTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteIndexTemplateFunc(params, options, callback) {
@@ -6373,9 +6258,9 @@ var require_deleteIndexTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/deleteTemplate.js
 var require_deleteTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/deleteTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/deleteTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteTemplateFunc(params, options, callback) {
@@ -6392,9 +6277,9 @@ var require_deleteTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/exists.js
+// node_modules/@opensearch-project/opensearch/api/indices/exists.js
 var require_exists = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/exists.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/exists.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsFunc(params, options, callback) {
@@ -6411,9 +6296,9 @@ var require_exists = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/existsAlias.js
+// node_modules/@opensearch-project/opensearch/api/indices/existsAlias.js
 var require_existsAlias = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/existsAlias.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/existsAlias.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsAliasFunc(params, options, callback) {
@@ -6431,9 +6316,9 @@ var require_existsAlias = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/existsIndexTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/existsIndexTemplate.js
 var require_existsIndexTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/existsIndexTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/existsIndexTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsIndexTemplateFunc(params, options, callback) {
@@ -6450,9 +6335,9 @@ var require_existsIndexTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/existsTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/existsTemplate.js
 var require_existsTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/existsTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/existsTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsTemplateFunc(params, options, callback) {
@@ -6469,9 +6354,9 @@ var require_existsTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/flush.js
+// node_modules/@opensearch-project/opensearch/api/indices/flush.js
 var require_flush = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/flush.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/flush.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function flushFunc(params, options, callback) {
@@ -6487,9 +6372,9 @@ var require_flush = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/forcemerge.js
+// node_modules/@opensearch-project/opensearch/api/indices/forcemerge.js
 var require_forcemerge = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/forcemerge.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/forcemerge.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function forcemergeFunc(params, options, callback) {
@@ -6505,9 +6390,9 @@ var require_forcemerge = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/get.js
+// node_modules/@opensearch-project/opensearch/api/indices/get.js
 var require_get4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -6524,9 +6409,9 @@ var require_get4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getAlias.js
+// node_modules/@opensearch-project/opensearch/api/indices/getAlias.js
 var require_getAlias = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getAlias.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getAlias.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getAliasFunc(params, options, callback) {
@@ -6543,9 +6428,9 @@ var require_getAlias = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getDataStream.js
+// node_modules/@opensearch-project/opensearch/api/indices/getDataStream.js
 var require_getDataStream = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getDataStream.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getDataStream.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getDataStreamFunc(params, options, callback) {
@@ -6561,9 +6446,9 @@ var require_getDataStream = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getFieldMapping.js
+// node_modules/@opensearch-project/opensearch/api/indices/getFieldMapping.js
 var require_getFieldMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getFieldMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getFieldMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFieldMappingFunc(params, options, callback) {
@@ -6581,9 +6466,9 @@ var require_getFieldMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getIndexTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/getIndexTemplate.js
 var require_getIndexTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getIndexTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getIndexTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getIndexTemplateFunc(params, options, callback) {
@@ -6599,9 +6484,9 @@ var require_getIndexTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getMapping.js
+// node_modules/@opensearch-project/opensearch/api/indices/getMapping.js
 var require_getMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getMappingFunc(params, options, callback) {
@@ -6617,9 +6502,9 @@ var require_getMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getSettings.js
+// node_modules/@opensearch-project/opensearch/api/indices/getSettings.js
 var require_getSettings2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getSettingsFunc(params, options, callback) {
@@ -6636,9 +6521,9 @@ var require_getSettings2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/getTemplate.js
 var require_getTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getTemplateFunc(params, options, callback) {
@@ -6654,9 +6539,9 @@ var require_getTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getUpgrade.js
+// node_modules/@opensearch-project/opensearch/api/indices/getUpgrade.js
 var require_getUpgrade = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/getUpgrade.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/getUpgrade.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getUpgradeFunc(params, options, callback) {
@@ -6672,9 +6557,9 @@ var require_getUpgrade = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/open.js
+// node_modules/@opensearch-project/opensearch/api/indices/open.js
 var require_open = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/open.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/open.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function openFunc(params, options, callback) {
@@ -6691,9 +6576,9 @@ var require_open = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putAlias.js
+// node_modules/@opensearch-project/opensearch/api/indices/putAlias.js
 var require_putAlias = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putAlias.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/putAlias.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function putAliasFunc(params, options, callback) {
@@ -6710,9 +6595,9 @@ var require_putAlias = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putIndexTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/putIndexTemplate.js
 var require_putIndexTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putIndexTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/putIndexTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putIndexTemplateFunc(params, options, callback) {
@@ -6729,9 +6614,9 @@ var require_putIndexTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putMapping.js
+// node_modules/@opensearch-project/opensearch/api/indices/putMapping.js
 var require_putMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/putMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putMappingFunc(params, options, callback) {
@@ -6748,9 +6633,9 @@ var require_putMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putSettings.js
+// node_modules/@opensearch-project/opensearch/api/indices/putSettings.js
 var require_putSettings2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/putSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putSettingsFunc(params, options, callback) {
@@ -6766,9 +6651,9 @@ var require_putSettings2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/putTemplate.js
 var require_putTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/putTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/putTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putTemplateFunc(params, options, callback) {
@@ -6785,9 +6670,9 @@ var require_putTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/recovery.js
+// node_modules/@opensearch-project/opensearch/api/indices/recovery.js
 var require_recovery2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/recovery.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/recovery.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function recoveryFunc(params, options, callback) {
@@ -6803,9 +6688,9 @@ var require_recovery2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/refresh.js
+// node_modules/@opensearch-project/opensearch/api/indices/refresh.js
 var require_refresh = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/refresh.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/refresh.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function refreshFunc(params, options, callback) {
@@ -6821,9 +6706,9 @@ var require_refresh = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/resolveIndex.js
+// node_modules/@opensearch-project/opensearch/api/indices/resolveIndex.js
 var require_resolveIndex = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/resolveIndex.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/resolveIndex.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function resolveIndexFunc(params, options, callback) {
@@ -6840,9 +6725,9 @@ var require_resolveIndex = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/rollover.js
+// node_modules/@opensearch-project/opensearch/api/indices/rollover.js
 var require_rollover = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/rollover.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/rollover.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function rolloverFunc(params, options, callback) {
@@ -6860,9 +6745,9 @@ var require_rollover = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/segments.js
+// node_modules/@opensearch-project/opensearch/api/indices/segments.js
 var require_segments2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/segments.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/segments.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function segmentsFunc(params, options, callback) {
@@ -6878,9 +6763,9 @@ var require_segments2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/shardStores.js
+// node_modules/@opensearch-project/opensearch/api/indices/shardStores.js
 var require_shardStores = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/shardStores.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/shardStores.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function shardStoresFunc(params, options, callback) {
@@ -6896,9 +6781,9 @@ var require_shardStores = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/shrink.js
+// node_modules/@opensearch-project/opensearch/api/indices/shrink.js
 var require_shrink = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/shrink.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/shrink.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function shrinkFunc(params, options, callback) {
@@ -6917,9 +6802,9 @@ var require_shrink = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/simulateIndexTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/simulateIndexTemplate.js
 var require_simulateIndexTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/simulateIndexTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/simulateIndexTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function simulateIndexTemplateFunc(params, options, callback) {
@@ -6936,9 +6821,9 @@ var require_simulateIndexTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/simulateTemplate.js
+// node_modules/@opensearch-project/opensearch/api/indices/simulateTemplate.js
 var require_simulateTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/simulateTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/simulateTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function simulateTemplateFunc(params, options, callback) {
@@ -6954,9 +6839,9 @@ var require_simulateTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/split.js
+// node_modules/@opensearch-project/opensearch/api/indices/split.js
 var require_split = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/split.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/split.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function splitFunc(params, options, callback) {
@@ -6975,9 +6860,9 @@ var require_split = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/stats.js
+// node_modules/@opensearch-project/opensearch/api/indices/stats.js
 var require_stats3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statsFunc(params, options, callback) {
@@ -6994,9 +6879,9 @@ var require_stats3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/updateAliases.js
+// node_modules/@opensearch-project/opensearch/api/indices/updateAliases.js
 var require_updateAliases = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/updateAliases.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/updateAliases.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function updateAliasesFunc(params, options, callback) {
@@ -7011,9 +6896,9 @@ var require_updateAliases = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/upgrade.js
+// node_modules/@opensearch-project/opensearch/api/indices/upgrade.js
 var require_upgrade = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/upgrade.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/upgrade.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function upgradeFunc(params, options, callback) {
@@ -7029,9 +6914,9 @@ var require_upgrade = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/validateQuery.js
+// node_modules/@opensearch-project/opensearch/api/indices/validateQuery.js
 var require_validateQuery = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/validateQuery.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/validateQuery.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function validateQueryFunc(params, options, callback) {
@@ -7047,9 +6932,9 @@ var require_validateQuery = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/_api.js
+// node_modules/@opensearch-project/opensearch/api/indices/_api.js
 var require_api8 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/indices/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/indices/_api.js"(exports2, module2) {
     "use strict";
     function IndicesApi(bindObj) {
       this.addBlock = require_addBlock().bind(bindObj);
@@ -7135,9 +7020,9 @@ var require_api8 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/deletePipeline.js
+// node_modules/@opensearch-project/opensearch/api/ingest/deletePipeline.js
 var require_deletePipeline = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/deletePipeline.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ingest/deletePipeline.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deletePipelineFunc(params, options, callback) {
@@ -7154,9 +7039,9 @@ var require_deletePipeline = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/getPipeline.js
+// node_modules/@opensearch-project/opensearch/api/ingest/getPipeline.js
 var require_getPipeline = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/getPipeline.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ingest/getPipeline.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getPipelineFunc(params, options, callback) {
@@ -7172,9 +7057,9 @@ var require_getPipeline = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/processorGrok.js
+// node_modules/@opensearch-project/opensearch/api/ingest/processorGrok.js
 var require_processorGrok = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/processorGrok.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ingest/processorGrok.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function processorGrokFunc(params, options, callback) {
@@ -7189,9 +7074,9 @@ var require_processorGrok = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/putPipeline.js
+// node_modules/@opensearch-project/opensearch/api/ingest/putPipeline.js
 var require_putPipeline = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/putPipeline.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ingest/putPipeline.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putPipelineFunc(params, options, callback) {
@@ -7208,9 +7093,9 @@ var require_putPipeline = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/simulate.js
+// node_modules/@opensearch-project/opensearch/api/ingest/simulate.js
 var require_simulate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/simulate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ingest/simulate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function simulateFunc(params, options, callback) {
@@ -7226,9 +7111,9 @@ var require_simulate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/_api.js
+// node_modules/@opensearch-project/opensearch/api/ingest/_api.js
 var require_api9 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ingest/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ingest/_api.js"(exports2, module2) {
     "use strict";
     function IngestApi(bindObj) {
       this.deletePipeline = require_deletePipeline().bind(bindObj);
@@ -7245,9 +7130,9 @@ var require_api9 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/insights/topQueries.js
+// node_modules/@opensearch-project/opensearch/api/insights/topQueries.js
 var require_topQueries = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/insights/topQueries.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/insights/topQueries.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function topQueriesFunc(params, options, callback) {
@@ -7263,9 +7148,9 @@ var require_topQueries = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/insights/_api.js
+// node_modules/@opensearch-project/opensearch/api/insights/_api.js
 var require_api10 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/insights/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/insights/_api.js"(exports2, module2) {
     "use strict";
     function InsightsApi(bindObj) {
       this.topQueries = require_topQueries().bind(bindObj);
@@ -7275,9 +7160,9 @@ var require_api10 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/addPolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/addPolicy.js
 var require_addPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/addPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/addPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function addPolicyFunc(params, options, callback) {
@@ -7293,9 +7178,9 @@ var require_addPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/changePolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/changePolicy.js
 var require_changePolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/changePolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/changePolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function changePolicyFunc(params, options, callback) {
@@ -7311,9 +7196,9 @@ var require_changePolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/deletePolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/deletePolicy.js
 var require_deletePolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/deletePolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/deletePolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deletePolicyFunc(params, options, callback) {
@@ -7330,9 +7215,9 @@ var require_deletePolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/existsPolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/existsPolicy.js
 var require_existsPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/existsPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/existsPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsPolicyFunc(params, options, callback) {
@@ -7349,9 +7234,9 @@ var require_existsPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/explainPolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/explainPolicy.js
 var require_explainPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/explainPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/explainPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function explainPolicyFunc(params, options, callback) {
@@ -7367,9 +7252,9 @@ var require_explainPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/getPolicies.js
+// node_modules/@opensearch-project/opensearch/api/ism/getPolicies.js
 var require_getPolicies = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/getPolicies.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/getPolicies.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getPoliciesFunc(params, options, callback) {
@@ -7384,9 +7269,9 @@ var require_getPolicies = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/getPolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/getPolicy.js
 var require_getPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/getPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/getPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getPolicyFunc(params, options, callback) {
@@ -7403,9 +7288,9 @@ var require_getPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/putPolicies.js
+// node_modules/@opensearch-project/opensearch/api/ism/putPolicies.js
 var require_putPolicies = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/putPolicies.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/putPolicies.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function putPoliciesFunc(params, options, callback) {
@@ -7421,9 +7306,9 @@ var require_putPolicies = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/putPolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/putPolicy.js
 var require_putPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/putPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/putPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putPolicyFunc(params, options, callback) {
@@ -7440,9 +7325,9 @@ var require_putPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/refreshSearchAnalyzers.js
+// node_modules/@opensearch-project/opensearch/api/ism/refreshSearchAnalyzers.js
 var require_refreshSearchAnalyzers = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/refreshSearchAnalyzers.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/refreshSearchAnalyzers.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function refreshSearchAnalyzersFunc(params, options, callback) {
@@ -7459,9 +7344,9 @@ var require_refreshSearchAnalyzers = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/removePolicy.js
+// node_modules/@opensearch-project/opensearch/api/ism/removePolicy.js
 var require_removePolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/removePolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/removePolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function removePolicyFunc(params, options, callback) {
@@ -7477,9 +7362,9 @@ var require_removePolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/retryIndex.js
+// node_modules/@opensearch-project/opensearch/api/ism/retryIndex.js
 var require_retryIndex = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/retryIndex.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/retryIndex.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function retryIndexFunc(params, options, callback) {
@@ -7495,9 +7380,9 @@ var require_retryIndex = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/_api.js
+// node_modules/@opensearch-project/opensearch/api/ism/_api.js
 var require_api11 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ism/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ism/_api.js"(exports2, module2) {
     "use strict";
     function IsmApi(bindObj) {
       this.addPolicy = require_addPolicy().bind(bindObj);
@@ -7529,9 +7414,9 @@ var require_api11 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/deleteModel.js
+// node_modules/@opensearch-project/opensearch/api/knn/deleteModel.js
 var require_deleteModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/deleteModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/deleteModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteModelFunc(params, options, callback) {
@@ -7548,9 +7433,9 @@ var require_deleteModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/getModel.js
+// node_modules/@opensearch-project/opensearch/api/knn/getModel.js
 var require_getModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/getModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/getModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getModelFunc(params, options, callback) {
@@ -7567,9 +7452,9 @@ var require_getModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/searchModels.js
+// node_modules/@opensearch-project/opensearch/api/knn/searchModels.js
 var require_searchModels = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/searchModels.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/searchModels.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchModelsFunc(params, options, callback) {
@@ -7584,9 +7469,9 @@ var require_searchModels = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/stats.js
+// node_modules/@opensearch-project/opensearch/api/knn/stats.js
 var require_stats4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statsFunc(params, options, callback) {
@@ -7603,9 +7488,9 @@ var require_stats4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/trainModel.js
+// node_modules/@opensearch-project/opensearch/api/knn/trainModel.js
 var require_trainModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/trainModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/trainModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function trainModelFunc(params, options, callback) {
@@ -7621,9 +7506,9 @@ var require_trainModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/warmup.js
+// node_modules/@opensearch-project/opensearch/api/knn/warmup.js
 var require_warmup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/warmup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/warmup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function warmupFunc(params, options, callback) {
@@ -7640,9 +7525,9 @@ var require_warmup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/_api.js
+// node_modules/@opensearch-project/opensearch/api/knn/_api.js
 var require_api12 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/knn/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/knn/_api.js"(exports2, module2) {
     "use strict";
     function KnnApi(bindObj) {
       this.deleteModel = require_deleteModel().bind(bindObj);
@@ -7660,9 +7545,9 @@ var require_api12 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/help.js
+// node_modules/@opensearch-project/opensearch/api/list/help.js
 var require_help2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/help.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/list/help.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function helpFunc(params, options, callback) {
@@ -7677,9 +7562,9 @@ var require_help2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/indices.js
+// node_modules/@opensearch-project/opensearch/api/list/indices.js
 var require_indices2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/indices.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/list/indices.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function indicesFunc(params, options, callback) {
@@ -7695,9 +7580,9 @@ var require_indices2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/shards.js
+// node_modules/@opensearch-project/opensearch/api/list/shards.js
 var require_shards2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/shards.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/list/shards.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function shardsFunc(params, options, callback) {
@@ -7713,9 +7598,9 @@ var require_shards2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/_api.js
+// node_modules/@opensearch-project/opensearch/api/list/_api.js
 var require_api13 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/list/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/list/_api.js"(exports2, module2) {
     "use strict";
     function ListApi(bindObj) {
       this.help = require_help2().bind(bindObj);
@@ -7726,9 +7611,9 @@ var require_api13 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/cacheStats.js
+// node_modules/@opensearch-project/opensearch/api/ltr/cacheStats.js
 var require_cacheStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/cacheStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/cacheStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function cacheStatsFunc(params, options, callback) {
@@ -7743,9 +7628,9 @@ var require_cacheStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/clearCache.js
+// node_modules/@opensearch-project/opensearch/api/ltr/clearCache.js
 var require_clearCache2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/clearCache.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/clearCache.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function clearCacheFunc(params, options, callback) {
@@ -7761,9 +7646,9 @@ var require_clearCache2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/createDefaultStore.js
+// node_modules/@opensearch-project/opensearch/api/ltr/createDefaultStore.js
 var require_createDefaultStore = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/createDefaultStore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/createDefaultStore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function createDefaultStoreFunc(params, options, callback) {
@@ -7778,9 +7663,9 @@ var require_createDefaultStore = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/createStore.js
+// node_modules/@opensearch-project/opensearch/api/ltr/createStore.js
 var require_createStore = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/createStore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/createStore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createStoreFunc(params, options, callback) {
@@ -7797,9 +7682,9 @@ var require_createStore = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/deleteDefaultStore.js
+// node_modules/@opensearch-project/opensearch/api/ltr/deleteDefaultStore.js
 var require_deleteDefaultStore = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/deleteDefaultStore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/deleteDefaultStore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deleteDefaultStoreFunc(params, options, callback) {
@@ -7814,9 +7699,9 @@ var require_deleteDefaultStore = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/deleteStore.js
+// node_modules/@opensearch-project/opensearch/api/ltr/deleteStore.js
 var require_deleteStore = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/deleteStore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/deleteStore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteStoreFunc(params, options, callback) {
@@ -7833,9 +7718,9 @@ var require_deleteStore = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/getStore.js
+// node_modules/@opensearch-project/opensearch/api/ltr/getStore.js
 var require_getStore = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/getStore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/getStore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getStoreFunc(params, options, callback) {
@@ -7852,9 +7737,9 @@ var require_getStore = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/listStores.js
+// node_modules/@opensearch-project/opensearch/api/ltr/listStores.js
 var require_listStores = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/listStores.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/listStores.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function listStoresFunc(params, options, callback) {
@@ -7869,9 +7754,9 @@ var require_listStores = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/stats.js
+// node_modules/@opensearch-project/opensearch/api/ltr/stats.js
 var require_stats5 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statsFunc(params, options, callback) {
@@ -7888,9 +7773,9 @@ var require_stats5 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/_api.js
+// node_modules/@opensearch-project/opensearch/api/ltr/_api.js
 var require_api14 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ltr/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ltr/_api.js"(exports2, module2) {
     "use strict";
     function LtrApi(bindObj) {
       this.cacheStats = require_cacheStats().bind(bindObj);
@@ -7915,9 +7800,9 @@ var require_api14 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/chunkModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/chunkModel.js
 var require_chunkModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/chunkModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/chunkModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function chunkModelFunc(params, options, callback) {
@@ -7936,9 +7821,9 @@ var require_chunkModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createConnector.js
+// node_modules/@opensearch-project/opensearch/api/ml/createConnector.js
 var require_createConnector = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createConnector.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/createConnector.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function createConnectorFunc(params, options, callback) {
@@ -7953,9 +7838,9 @@ var require_createConnector = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createController.js
+// node_modules/@opensearch-project/opensearch/api/ml/createController.js
 var require_createController = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createController.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/createController.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createControllerFunc(params, options, callback) {
@@ -7972,9 +7857,9 @@ var require_createController = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createMemory.js
+// node_modules/@opensearch-project/opensearch/api/ml/createMemory.js
 var require_createMemory = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createMemory.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/createMemory.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function createMemoryFunc(params, options, callback) {
@@ -7989,9 +7874,9 @@ var require_createMemory = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createMessage.js
+// node_modules/@opensearch-project/opensearch/api/ml/createMessage.js
 var require_createMessage = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createMessage.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/createMessage.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createMessageFunc(params, options, callback) {
@@ -8008,9 +7893,9 @@ var require_createMessage = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createModelMeta.js
+// node_modules/@opensearch-project/opensearch/api/ml/createModelMeta.js
 var require_createModelMeta = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/createModelMeta.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/createModelMeta.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function createModelMetaFunc(params, options, callback) {
@@ -8025,9 +7910,9 @@ var require_createModelMeta = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteAgent.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteAgent.js
 var require_deleteAgent = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteAgent.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteAgent.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteAgentFunc(params, options, callback) {
@@ -8044,9 +7929,9 @@ var require_deleteAgent = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteConnector.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteConnector.js
 var require_deleteConnector = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteConnector.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteConnector.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteConnectorFunc(params, options, callback) {
@@ -8063,9 +7948,9 @@ var require_deleteConnector = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteController.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteController.js
 var require_deleteController = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteController.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteController.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteControllerFunc(params, options, callback) {
@@ -8082,9 +7967,9 @@ var require_deleteController = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteMemory.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteMemory.js
 var require_deleteMemory = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteMemory.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteMemory.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteMemoryFunc(params, options, callback) {
@@ -8101,9 +7986,9 @@ var require_deleteMemory = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteModel.js
 var require_deleteModel2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteModelFunc(params, options, callback) {
@@ -8120,9 +8005,9 @@ var require_deleteModel2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteModelGroup.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteModelGroup.js
 var require_deleteModelGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteModelGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteModelGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteModelGroupFunc(params, options, callback) {
@@ -8139,9 +8024,9 @@ var require_deleteModelGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteTask.js
+// node_modules/@opensearch-project/opensearch/api/ml/deleteTask.js
 var require_deleteTask = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deleteTask.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deleteTask.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteTaskFunc(params, options, callback) {
@@ -8158,9 +8043,9 @@ var require_deleteTask = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deployModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/deployModel.js
 var require_deployModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/deployModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/deployModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deployModelFunc(params, options, callback) {
@@ -8177,9 +8062,9 @@ var require_deployModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/executeAgent.js
+// node_modules/@opensearch-project/opensearch/api/ml/executeAgent.js
 var require_executeAgent = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/executeAgent.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/executeAgent.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function executeAgentFunc(params, options, callback) {
@@ -8196,9 +8081,9 @@ var require_executeAgent = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/executeAlgorithm.js
+// node_modules/@opensearch-project/opensearch/api/ml/executeAlgorithm.js
 var require_executeAlgorithm = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/executeAlgorithm.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/executeAlgorithm.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function executeAlgorithmFunc(params, options, callback) {
@@ -8215,9 +8100,9 @@ var require_executeAlgorithm = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAgent.js
+// node_modules/@opensearch-project/opensearch/api/ml/getAgent.js
 var require_getAgent = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAgent.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getAgent.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getAgentFunc(params, options, callback) {
@@ -8234,9 +8119,9 @@ var require_getAgent = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAllMemories.js
+// node_modules/@opensearch-project/opensearch/api/ml/getAllMemories.js
 var require_getAllMemories = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAllMemories.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getAllMemories.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAllMemoriesFunc(params, options, callback) {
@@ -8251,9 +8136,9 @@ var require_getAllMemories = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAllMessages.js
+// node_modules/@opensearch-project/opensearch/api/ml/getAllMessages.js
 var require_getAllMessages = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAllMessages.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getAllMessages.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getAllMessagesFunc(params, options, callback) {
@@ -8270,9 +8155,9 @@ var require_getAllMessages = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAllTools.js
+// node_modules/@opensearch-project/opensearch/api/ml/getAllTools.js
 var require_getAllTools = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getAllTools.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getAllTools.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAllToolsFunc(params, options, callback) {
@@ -8287,9 +8172,9 @@ var require_getAllTools = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getConnector.js
+// node_modules/@opensearch-project/opensearch/api/ml/getConnector.js
 var require_getConnector = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getConnector.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getConnector.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getConnectorFunc(params, options, callback) {
@@ -8306,9 +8191,9 @@ var require_getConnector = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getController.js
+// node_modules/@opensearch-project/opensearch/api/ml/getController.js
 var require_getController = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getController.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getController.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getControllerFunc(params, options, callback) {
@@ -8325,9 +8210,9 @@ var require_getController = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getMemory.js
+// node_modules/@opensearch-project/opensearch/api/ml/getMemory.js
 var require_getMemory = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getMemory.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getMemory.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getMemoryFunc(params, options, callback) {
@@ -8344,9 +8229,9 @@ var require_getMemory = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getMessage.js
+// node_modules/@opensearch-project/opensearch/api/ml/getMessage.js
 var require_getMessage = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getMessage.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getMessage.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getMessageFunc(params, options, callback) {
@@ -8363,9 +8248,9 @@ var require_getMessage = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getMessageTraces.js
+// node_modules/@opensearch-project/opensearch/api/ml/getMessageTraces.js
 var require_getMessageTraces = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getMessageTraces.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getMessageTraces.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getMessageTracesFunc(params, options, callback) {
@@ -8382,9 +8267,9 @@ var require_getMessageTraces = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/getModel.js
 var require_getModel2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getModelFunc(params, options, callback) {
@@ -8401,9 +8286,9 @@ var require_getModel2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getModelGroup.js
+// node_modules/@opensearch-project/opensearch/api/ml/getModelGroup.js
 var require_getModelGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getModelGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getModelGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getModelGroupFunc(params, options, callback) {
@@ -8420,9 +8305,9 @@ var require_getModelGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getProfile.js
+// node_modules/@opensearch-project/opensearch/api/ml/getProfile.js
 var require_getProfile = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getProfile.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getProfile.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getProfileFunc(params, options, callback) {
@@ -8437,9 +8322,9 @@ var require_getProfile = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getProfileModels.js
+// node_modules/@opensearch-project/opensearch/api/ml/getProfileModels.js
 var require_getProfileModels = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getProfileModels.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getProfileModels.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getProfileModelsFunc(params, options, callback) {
@@ -8455,9 +8340,9 @@ var require_getProfileModels = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getProfileTasks.js
+// node_modules/@opensearch-project/opensearch/api/ml/getProfileTasks.js
 var require_getProfileTasks = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getProfileTasks.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getProfileTasks.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getProfileTasksFunc(params, options, callback) {
@@ -8473,9 +8358,9 @@ var require_getProfileTasks = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getStats.js
+// node_modules/@opensearch-project/opensearch/api/ml/getStats.js
 var require_getStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getStatsFunc(params, options, callback) {
@@ -8492,9 +8377,9 @@ var require_getStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getTask.js
+// node_modules/@opensearch-project/opensearch/api/ml/getTask.js
 var require_getTask = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getTask.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getTask.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getTaskFunc(params, options, callback) {
@@ -8511,9 +8396,9 @@ var require_getTask = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getTool.js
+// node_modules/@opensearch-project/opensearch/api/ml/getTool.js
 var require_getTool = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/getTool.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/getTool.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getToolFunc(params, options, callback) {
@@ -8530,9 +8415,9 @@ var require_getTool = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/loadModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/loadModel.js
 var require_loadModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/loadModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/loadModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function loadModelFunc(params, options, callback) {
@@ -8549,9 +8434,9 @@ var require_loadModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/predict.js
+// node_modules/@opensearch-project/opensearch/api/ml/predict.js
 var require_predict = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/predict.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/predict.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function predictFunc(params, options, callback) {
@@ -8570,9 +8455,9 @@ var require_predict = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/predictModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/predictModel.js
 var require_predictModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/predictModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/predictModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function predictModelFunc(params, options, callback) {
@@ -8589,9 +8474,9 @@ var require_predictModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerAgents.js
+// node_modules/@opensearch-project/opensearch/api/ml/registerAgents.js
 var require_registerAgents = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerAgents.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/registerAgents.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function registerAgentsFunc(params, options, callback) {
@@ -8606,9 +8491,9 @@ var require_registerAgents = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/registerModel.js
 var require_registerModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/registerModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function registerModelFunc(params, options, callback) {
@@ -8623,9 +8508,9 @@ var require_registerModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerModelGroup.js
+// node_modules/@opensearch-project/opensearch/api/ml/registerModelGroup.js
 var require_registerModelGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerModelGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/registerModelGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function registerModelGroupFunc(params, options, callback) {
@@ -8640,9 +8525,9 @@ var require_registerModelGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerModelMeta.js
+// node_modules/@opensearch-project/opensearch/api/ml/registerModelMeta.js
 var require_registerModelMeta = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/registerModelMeta.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/registerModelMeta.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function registerModelMetaFunc(params, options, callback) {
@@ -8657,9 +8542,9 @@ var require_registerModelMeta = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchAgents.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchAgents.js
 var require_searchAgents = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchAgents.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchAgents.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchAgentsFunc(params, options, callback) {
@@ -8674,9 +8559,9 @@ var require_searchAgents = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchConnectors.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchConnectors.js
 var require_searchConnectors = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchConnectors.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchConnectors.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchConnectorsFunc(params, options, callback) {
@@ -8691,9 +8576,9 @@ var require_searchConnectors = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchMemory.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchMemory.js
 var require_searchMemory = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchMemory.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchMemory.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchMemoryFunc(params, options, callback) {
@@ -8708,9 +8593,9 @@ var require_searchMemory = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchMessage.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchMessage.js
 var require_searchMessage = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchMessage.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchMessage.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function searchMessageFunc(params, options, callback) {
@@ -8727,9 +8612,9 @@ var require_searchMessage = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchModelGroup.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchModelGroup.js
 var require_searchModelGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchModelGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchModelGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchModelGroupFunc(params, options, callback) {
@@ -8744,9 +8629,9 @@ var require_searchModelGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchModels.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchModels.js
 var require_searchModels2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchModels.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchModels.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchModelsFunc(params, options, callback) {
@@ -8761,9 +8646,9 @@ var require_searchModels2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchTasks.js
+// node_modules/@opensearch-project/opensearch/api/ml/searchTasks.js
 var require_searchTasks = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/searchTasks.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/searchTasks.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchTasksFunc(params, options, callback) {
@@ -8778,9 +8663,9 @@ var require_searchTasks = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/train.js
+// node_modules/@opensearch-project/opensearch/api/ml/train.js
 var require_train = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/train.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/train.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function trainFunc(params, options, callback) {
@@ -8797,9 +8682,9 @@ var require_train = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/trainPredict.js
+// node_modules/@opensearch-project/opensearch/api/ml/trainPredict.js
 var require_trainPredict = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/trainPredict.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/trainPredict.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function trainPredictFunc(params, options, callback) {
@@ -8816,9 +8701,9 @@ var require_trainPredict = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/undeployModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/undeployModel.js
 var require_undeployModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/undeployModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/undeployModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function undeployModelFunc(params, options, callback) {
@@ -8834,9 +8719,9 @@ var require_undeployModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/unloadModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/unloadModel.js
 var require_unloadModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/unloadModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/unloadModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function unloadModelFunc(params, options, callback) {
@@ -8852,9 +8737,9 @@ var require_unloadModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateConnector.js
+// node_modules/@opensearch-project/opensearch/api/ml/updateConnector.js
 var require_updateConnector = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateConnector.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/updateConnector.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateConnectorFunc(params, options, callback) {
@@ -8871,9 +8756,9 @@ var require_updateConnector = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateController.js
+// node_modules/@opensearch-project/opensearch/api/ml/updateController.js
 var require_updateController = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateController.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/updateController.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateControllerFunc(params, options, callback) {
@@ -8890,9 +8775,9 @@ var require_updateController = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateMemory.js
+// node_modules/@opensearch-project/opensearch/api/ml/updateMemory.js
 var require_updateMemory = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateMemory.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/updateMemory.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateMemoryFunc(params, options, callback) {
@@ -8909,9 +8794,9 @@ var require_updateMemory = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateMessage.js
+// node_modules/@opensearch-project/opensearch/api/ml/updateMessage.js
 var require_updateMessage = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateMessage.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/updateMessage.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateMessageFunc(params, options, callback) {
@@ -8928,9 +8813,9 @@ var require_updateMessage = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/updateModel.js
 var require_updateModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/updateModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateModelFunc(params, options, callback) {
@@ -8947,9 +8832,9 @@ var require_updateModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateModelGroup.js
+// node_modules/@opensearch-project/opensearch/api/ml/updateModelGroup.js
 var require_updateModelGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/updateModelGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/updateModelGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateModelGroupFunc(params, options, callback) {
@@ -8966,9 +8851,9 @@ var require_updateModelGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/uploadChunk.js
+// node_modules/@opensearch-project/opensearch/api/ml/uploadChunk.js
 var require_uploadChunk = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/uploadChunk.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/uploadChunk.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function uploadChunkFunc(params, options, callback) {
@@ -8987,9 +8872,9 @@ var require_uploadChunk = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/uploadModel.js
+// node_modules/@opensearch-project/opensearch/api/ml/uploadModel.js
 var require_uploadModel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/uploadModel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/uploadModel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function uploadModelFunc(params, options, callback) {
@@ -9004,9 +8889,9 @@ var require_uploadModel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/_api.js
+// node_modules/@opensearch-project/opensearch/api/ml/_api.js
 var require_api15 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ml/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ml/_api.js"(exports2, module2) {
     "use strict";
     function MlApi(bindObj) {
       this.chunkModel = require_chunkModel().bind(bindObj);
@@ -9130,9 +9015,9 @@ var require_api15 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/neural/stats.js
+// node_modules/@opensearch-project/opensearch/api/neural/stats.js
 var require_stats6 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/neural/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/neural/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statsFunc(params, options, callback) {
@@ -9149,9 +9034,9 @@ var require_stats6 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/neural/_api.js
+// node_modules/@opensearch-project/opensearch/api/neural/_api.js
 var require_api16 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/neural/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/neural/_api.js"(exports2, module2) {
     "use strict";
     function NeuralApi(bindObj) {
       this.stats = require_stats6().bind(bindObj);
@@ -9160,9 +9045,9 @@ var require_api16 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/hotThreads.js
+// node_modules/@opensearch-project/opensearch/api/nodes/hotThreads.js
 var require_hotThreads = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/hotThreads.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/nodes/hotThreads.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function hotThreadsFunc(params, options, callback) {
@@ -9178,9 +9063,9 @@ var require_hotThreads = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/info.js
+// node_modules/@opensearch-project/opensearch/api/nodes/info.js
 var require_info = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/info.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/nodes/info.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function infoFunc(params, options, callback) {
@@ -9197,9 +9082,9 @@ var require_info = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/reloadSecureSettings.js
+// node_modules/@opensearch-project/opensearch/api/nodes/reloadSecureSettings.js
 var require_reloadSecureSettings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/reloadSecureSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/nodes/reloadSecureSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function reloadSecureSettingsFunc(params, options, callback) {
@@ -9215,9 +9100,9 @@ var require_reloadSecureSettings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/stats.js
+// node_modules/@opensearch-project/opensearch/api/nodes/stats.js
 var require_stats7 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/stats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/nodes/stats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statsFunc(params, options, callback) {
@@ -9235,9 +9120,9 @@ var require_stats7 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/usage.js
+// node_modules/@opensearch-project/opensearch/api/nodes/usage.js
 var require_usage = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/usage.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/nodes/usage.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function usageFunc(params, options, callback) {
@@ -9254,9 +9139,9 @@ var require_usage = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/_api.js
+// node_modules/@opensearch-project/opensearch/api/nodes/_api.js
 var require_api17 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/nodes/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/nodes/_api.js"(exports2, module2) {
     "use strict";
     function NodesApi(bindObj) {
       this.hotThreads = require_hotThreads().bind(bindObj);
@@ -9271,9 +9156,9 @@ var require_api17 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/createConfig.js
+// node_modules/@opensearch-project/opensearch/api/notifications/createConfig.js
 var require_createConfig = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/createConfig.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/createConfig.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function createConfigFunc(params, options, callback) {
@@ -9288,9 +9173,9 @@ var require_createConfig = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/deleteConfig.js
+// node_modules/@opensearch-project/opensearch/api/notifications/deleteConfig.js
 var require_deleteConfig = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/deleteConfig.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/deleteConfig.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteConfigFunc(params, options, callback) {
@@ -9307,9 +9192,9 @@ var require_deleteConfig = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/deleteConfigs.js
+// node_modules/@opensearch-project/opensearch/api/notifications/deleteConfigs.js
 var require_deleteConfigs = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/deleteConfigs.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/deleteConfigs.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function deleteConfigsFunc(params, options, callback) {
@@ -9325,9 +9210,9 @@ var require_deleteConfigs = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/getConfig.js
+// node_modules/@opensearch-project/opensearch/api/notifications/getConfig.js
 var require_getConfig = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/getConfig.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/getConfig.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getConfigFunc(params, options, callback) {
@@ -9344,9 +9229,9 @@ var require_getConfig = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/getConfigs.js
+// node_modules/@opensearch-project/opensearch/api/notifications/getConfigs.js
 var require_getConfigs = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/getConfigs.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/getConfigs.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getConfigsFunc(params, options, callback) {
@@ -9361,9 +9246,9 @@ var require_getConfigs = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/listChannels.js
+// node_modules/@opensearch-project/opensearch/api/notifications/listChannels.js
 var require_listChannels = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/listChannels.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/listChannels.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function listChannelsFunc(params, options, callback) {
@@ -9378,9 +9263,9 @@ var require_listChannels = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/listFeatures.js
+// node_modules/@opensearch-project/opensearch/api/notifications/listFeatures.js
 var require_listFeatures = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/listFeatures.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/listFeatures.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function listFeaturesFunc(params, options, callback) {
@@ -9395,9 +9280,9 @@ var require_listFeatures = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/sendTest.js
+// node_modules/@opensearch-project/opensearch/api/notifications/sendTest.js
 var require_sendTest = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/sendTest.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/sendTest.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function sendTestFunc(params, options, callback) {
@@ -9414,9 +9299,9 @@ var require_sendTest = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/updateConfig.js
+// node_modules/@opensearch-project/opensearch/api/notifications/updateConfig.js
 var require_updateConfig = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/updateConfig.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/updateConfig.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateConfigFunc(params, options, callback) {
@@ -9433,9 +9318,9 @@ var require_updateConfig = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/_api.js
+// node_modules/@opensearch-project/opensearch/api/notifications/_api.js
 var require_api18 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/notifications/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/notifications/_api.js"(exports2, module2) {
     "use strict";
     function NotificationsApi(bindObj) {
       this.createConfig = require_createConfig().bind(bindObj);
@@ -9461,9 +9346,9 @@ var require_api18 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/createObject.js
+// node_modules/@opensearch-project/opensearch/api/observability/createObject.js
 var require_createObject = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/createObject.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/createObject.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function createObjectFunc(params, options, callback) {
@@ -9478,9 +9363,9 @@ var require_createObject = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/deleteObject.js
+// node_modules/@opensearch-project/opensearch/api/observability/deleteObject.js
 var require_deleteObject = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/deleteObject.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/deleteObject.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteObjectFunc(params, options, callback) {
@@ -9497,9 +9382,9 @@ var require_deleteObject = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/deleteObjects.js
+// node_modules/@opensearch-project/opensearch/api/observability/deleteObjects.js
 var require_deleteObjects = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/deleteObjects.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/deleteObjects.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deleteObjectsFunc(params, options, callback) {
@@ -9514,9 +9399,9 @@ var require_deleteObjects = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/getLocalstats.js
+// node_modules/@opensearch-project/opensearch/api/observability/getLocalstats.js
 var require_getLocalstats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/getLocalstats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/getLocalstats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getLocalstatsFunc(params, options, callback) {
@@ -9531,9 +9416,9 @@ var require_getLocalstats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/getObject.js
+// node_modules/@opensearch-project/opensearch/api/observability/getObject.js
 var require_getObject = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/getObject.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/getObject.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getObjectFunc(params, options, callback) {
@@ -9550,9 +9435,9 @@ var require_getObject = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/listObjects.js
+// node_modules/@opensearch-project/opensearch/api/observability/listObjects.js
 var require_listObjects = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/listObjects.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/listObjects.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function listObjectsFunc(params, options, callback) {
@@ -9567,9 +9452,9 @@ var require_listObjects = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/updateObject.js
+// node_modules/@opensearch-project/opensearch/api/observability/updateObject.js
 var require_updateObject = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/updateObject.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/updateObject.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateObjectFunc(params, options, callback) {
@@ -9586,9 +9471,9 @@ var require_updateObject = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/_api.js
+// node_modules/@opensearch-project/opensearch/api/observability/_api.js
 var require_api19 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/observability/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/observability/_api.js"(exports2, module2) {
     "use strict";
     function ObservabilityApi(bindObj) {
       this.createObject = require_createObject().bind(bindObj);
@@ -9610,9 +9495,9 @@ var require_api19 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/explain.js
+// node_modules/@opensearch-project/opensearch/api/ppl/explain.js
 var require_explain = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/explain.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ppl/explain.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function explainFunc(params, options, callback) {
@@ -9627,9 +9512,9 @@ var require_explain = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/getStats.js
+// node_modules/@opensearch-project/opensearch/api/ppl/getStats.js
 var require_getStats2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/getStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ppl/getStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getStatsFunc(params, options, callback) {
@@ -9644,9 +9529,9 @@ var require_getStats2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/postStats.js
+// node_modules/@opensearch-project/opensearch/api/ppl/postStats.js
 var require_postStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/postStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ppl/postStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function postStatsFunc(params, options, callback) {
@@ -9661,9 +9546,9 @@ var require_postStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/query.js
+// node_modules/@opensearch-project/opensearch/api/ppl/query.js
 var require_query = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/query.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ppl/query.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function queryFunc(params, options, callback) {
@@ -9678,9 +9563,9 @@ var require_query = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/_api.js
+// node_modules/@opensearch-project/opensearch/api/ppl/_api.js
 var require_api20 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/ppl/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/ppl/_api.js"(exports2, module2) {
     "use strict";
     function PplApi(bindObj) {
       this.explain = require_explain().bind(bindObj);
@@ -9694,9 +9579,9 @@ var require_api20 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourceDelete.js
+// node_modules/@opensearch-project/opensearch/api/query/datasourceDelete.js
 var require_datasourceDelete = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourceDelete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/query/datasourceDelete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function datasourceDeleteFunc(params, options, callback) {
@@ -9713,9 +9598,9 @@ var require_datasourceDelete = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourceRetrieve.js
+// node_modules/@opensearch-project/opensearch/api/query/datasourceRetrieve.js
 var require_datasourceRetrieve = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourceRetrieve.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/query/datasourceRetrieve.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function datasourceRetrieveFunc(params, options, callback) {
@@ -9732,9 +9617,9 @@ var require_datasourceRetrieve = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourcesCreate.js
+// node_modules/@opensearch-project/opensearch/api/query/datasourcesCreate.js
 var require_datasourcesCreate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourcesCreate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/query/datasourcesCreate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function datasourcesCreateFunc(params, options, callback) {
@@ -9749,9 +9634,9 @@ var require_datasourcesCreate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourcesList.js
+// node_modules/@opensearch-project/opensearch/api/query/datasourcesList.js
 var require_datasourcesList = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourcesList.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/query/datasourcesList.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function datasourcesListFunc(params, options, callback) {
@@ -9766,9 +9651,9 @@ var require_datasourcesList = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourcesUpdate.js
+// node_modules/@opensearch-project/opensearch/api/query/datasourcesUpdate.js
 var require_datasourcesUpdate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/datasourcesUpdate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/query/datasourcesUpdate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function datasourcesUpdateFunc(params, options, callback) {
@@ -9783,9 +9668,9 @@ var require_datasourcesUpdate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/_api.js
+// node_modules/@opensearch-project/opensearch/api/query/_api.js
 var require_api21 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/query/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/query/_api.js"(exports2, module2) {
     "use strict";
     function QueryApi(bindObj) {
       this.datasourceDelete = require_datasourceDelete().bind(bindObj);
@@ -9803,9 +9688,9 @@ var require_api21 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/remoteStore/restore.js
+// node_modules/@opensearch-project/opensearch/api/remoteStore/restore.js
 var require_restore = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/remoteStore/restore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/remoteStore/restore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function restoreFunc(params, options, callback) {
@@ -9820,9 +9705,9 @@ var require_restore = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/remoteStore/_api.js
+// node_modules/@opensearch-project/opensearch/api/remoteStore/_api.js
 var require_api22 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/remoteStore/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/remoteStore/_api.js"(exports2, module2) {
     "use strict";
     function RemoteStoreApi(bindObj) {
       this.restore = require_restore().bind(bindObj);
@@ -9831,9 +9716,9 @@ var require_api22 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/autofollowStats.js
+// node_modules/@opensearch-project/opensearch/api/replication/autofollowStats.js
 var require_autofollowStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/autofollowStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/autofollowStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function autofollowStatsFunc(params, options, callback) {
@@ -9848,9 +9733,9 @@ var require_autofollowStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/createReplicationRule.js
+// node_modules/@opensearch-project/opensearch/api/replication/createReplicationRule.js
 var require_createReplicationRule = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/createReplicationRule.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/createReplicationRule.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function createReplicationRuleFunc(params, options, callback) {
@@ -9865,9 +9750,9 @@ var require_createReplicationRule = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/deleteReplicationRule.js
+// node_modules/@opensearch-project/opensearch/api/replication/deleteReplicationRule.js
 var require_deleteReplicationRule = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/deleteReplicationRule.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/deleteReplicationRule.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function deleteReplicationRuleFunc(params, options, callback) {
@@ -9882,9 +9767,9 @@ var require_deleteReplicationRule = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/followerStats.js
+// node_modules/@opensearch-project/opensearch/api/replication/followerStats.js
 var require_followerStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/followerStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/followerStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function followerStatsFunc(params, options, callback) {
@@ -9899,9 +9784,9 @@ var require_followerStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/leaderStats.js
+// node_modules/@opensearch-project/opensearch/api/replication/leaderStats.js
 var require_leaderStats = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/leaderStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/leaderStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function leaderStatsFunc(params, options, callback) {
@@ -9916,9 +9801,9 @@ var require_leaderStats = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/pause.js
+// node_modules/@opensearch-project/opensearch/api/replication/pause.js
 var require_pause = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/pause.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/pause.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function pauseFunc(params, options, callback) {
@@ -9935,9 +9820,9 @@ var require_pause = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/resume.js
+// node_modules/@opensearch-project/opensearch/api/replication/resume.js
 var require_resume = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/resume.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/resume.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function resumeFunc(params, options, callback) {
@@ -9954,9 +9839,9 @@ var require_resume = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/start.js
+// node_modules/@opensearch-project/opensearch/api/replication/start.js
 var require_start = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/start.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/start.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function startFunc(params, options, callback) {
@@ -9973,9 +9858,9 @@ var require_start = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/status.js
+// node_modules/@opensearch-project/opensearch/api/replication/status.js
 var require_status = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/status.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/status.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function statusFunc(params, options, callback) {
@@ -9992,9 +9877,9 @@ var require_status = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/stop.js
+// node_modules/@opensearch-project/opensearch/api/replication/stop.js
 var require_stop = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/stop.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/stop.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function stopFunc(params, options, callback) {
@@ -10011,9 +9896,9 @@ var require_stop = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/updateSettings.js
+// node_modules/@opensearch-project/opensearch/api/replication/updateSettings.js
 var require_updateSettings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/updateSettings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/updateSettings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateSettingsFunc(params, options, callback) {
@@ -10030,9 +9915,9 @@ var require_updateSettings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/_api.js
+// node_modules/@opensearch-project/opensearch/api/replication/_api.js
 var require_api23 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/replication/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/replication/_api.js"(exports2, module2) {
     "use strict";
     function ReplicationApi(bindObj) {
       this.autofollowStats = require_autofollowStats().bind(bindObj);
@@ -10057,9 +9942,9 @@ var require_api23 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/delete.js
+// node_modules/@opensearch-project/opensearch/api/rollups/delete.js
 var require_delete5 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -10076,9 +9961,9 @@ var require_delete5 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/explain.js
+// node_modules/@opensearch-project/opensearch/api/rollups/explain.js
 var require_explain2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/explain.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/explain.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function explainFunc(params, options, callback) {
@@ -10095,9 +9980,9 @@ var require_explain2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/get.js
+// node_modules/@opensearch-project/opensearch/api/rollups/get.js
 var require_get5 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -10114,9 +9999,9 @@ var require_get5 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/put.js
+// node_modules/@opensearch-project/opensearch/api/rollups/put.js
 var require_put2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/put.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/put.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putFunc(params, options, callback) {
@@ -10133,9 +10018,9 @@ var require_put2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/start.js
+// node_modules/@opensearch-project/opensearch/api/rollups/start.js
 var require_start2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/start.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/start.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function startFunc(params, options, callback) {
@@ -10152,9 +10037,9 @@ var require_start2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/stop.js
+// node_modules/@opensearch-project/opensearch/api/rollups/stop.js
 var require_stop2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/stop.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/stop.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function stopFunc(params, options, callback) {
@@ -10171,9 +10056,9 @@ var require_stop2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/_api.js
+// node_modules/@opensearch-project/opensearch/api/rollups/_api.js
 var require_api24 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/rollups/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/rollups/_api.js"(exports2, module2) {
     "use strict";
     function RollupsApi(bindObj) {
       this.delete = require_delete5().bind(bindObj);
@@ -10187,9 +10072,9 @@ var require_api24 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/delete.js
+// node_modules/@opensearch-project/opensearch/api/searchPipeline/delete.js
 var require_delete6 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/searchPipeline/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -10206,9 +10091,9 @@ var require_delete6 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/get.js
+// node_modules/@opensearch-project/opensearch/api/searchPipeline/get.js
 var require_get6 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/searchPipeline/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -10224,9 +10109,9 @@ var require_get6 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/put.js
+// node_modules/@opensearch-project/opensearch/api/searchPipeline/put.js
 var require_put3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/put.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/searchPipeline/put.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putFunc(params, options, callback) {
@@ -10243,9 +10128,9 @@ var require_put3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/_api.js
+// node_modules/@opensearch-project/opensearch/api/searchPipeline/_api.js
 var require_api25 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/searchPipeline/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/searchPipeline/_api.js"(exports2, module2) {
     "use strict";
     function SearchPipelineApi(bindObj) {
       this.delete = require_delete6().bind(bindObj);
@@ -10256,9 +10141,9 @@ var require_api25 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/authinfo.js
+// node_modules/@opensearch-project/opensearch/api/security/authinfo.js
 var require_authinfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/authinfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/authinfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function authinfoFunc(params, options, callback) {
@@ -10273,9 +10158,9 @@ var require_authinfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/authtoken.js
+// node_modules/@opensearch-project/opensearch/api/security/authtoken.js
 var require_authtoken = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/authtoken.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/authtoken.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function authtokenFunc(params, options, callback) {
@@ -10290,9 +10175,9 @@ var require_authtoken = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/changePassword.js
+// node_modules/@opensearch-project/opensearch/api/security/changePassword.js
 var require_changePassword = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/changePassword.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/changePassword.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function changePasswordFunc(params, options, callback) {
@@ -10307,9 +10192,9 @@ var require_changePassword = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/configUpgradeCheck.js
+// node_modules/@opensearch-project/opensearch/api/security/configUpgradeCheck.js
 var require_configUpgradeCheck = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/configUpgradeCheck.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/configUpgradeCheck.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function configUpgradeCheckFunc(params, options, callback) {
@@ -10324,9 +10209,9 @@ var require_configUpgradeCheck = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/configUpgradePerform.js
+// node_modules/@opensearch-project/opensearch/api/security/configUpgradePerform.js
 var require_configUpgradePerform = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/configUpgradePerform.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/configUpgradePerform.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function configUpgradePerformFunc(params, options, callback) {
@@ -10341,9 +10226,9 @@ var require_configUpgradePerform = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createActionGroup.js
+// node_modules/@opensearch-project/opensearch/api/security/createActionGroup.js
 var require_createActionGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createActionGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createActionGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createActionGroupFunc(params, options, callback) {
@@ -10360,9 +10245,9 @@ var require_createActionGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createAllowlist.js
+// node_modules/@opensearch-project/opensearch/api/security/createAllowlist.js
 var require_createAllowlist = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createAllowlist.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createAllowlist.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function createAllowlistFunc(params, options, callback) {
@@ -10377,9 +10262,9 @@ var require_createAllowlist = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createRole.js
+// node_modules/@opensearch-project/opensearch/api/security/createRole.js
 var require_createRole = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createRole.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createRole.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createRoleFunc(params, options, callback) {
@@ -10396,9 +10281,9 @@ var require_createRole = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createRoleMapping.js
+// node_modules/@opensearch-project/opensearch/api/security/createRoleMapping.js
 var require_createRoleMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createRoleMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createRoleMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createRoleMappingFunc(params, options, callback) {
@@ -10415,9 +10300,9 @@ var require_createRoleMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createTenant.js
+// node_modules/@opensearch-project/opensearch/api/security/createTenant.js
 var require_createTenant = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createTenant.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createTenant.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createTenantFunc(params, options, callback) {
@@ -10434,9 +10319,9 @@ var require_createTenant = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createUpdateTenancyConfig.js
+// node_modules/@opensearch-project/opensearch/api/security/createUpdateTenancyConfig.js
 var require_createUpdateTenancyConfig = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createUpdateTenancyConfig.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createUpdateTenancyConfig.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function createUpdateTenancyConfigFunc(params, options, callback) {
@@ -10451,9 +10336,9 @@ var require_createUpdateTenancyConfig = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createUser.js
+// node_modules/@opensearch-project/opensearch/api/security/createUser.js
 var require_createUser = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createUser.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createUser.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createUserFunc(params, options, callback) {
@@ -10470,9 +10355,9 @@ var require_createUser = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createUserLegacy.js
+// node_modules/@opensearch-project/opensearch/api/security/createUserLegacy.js
 var require_createUserLegacy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/createUserLegacy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/createUserLegacy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createUserLegacyFunc(params, options, callback) {
@@ -10489,9 +10374,9 @@ var require_createUserLegacy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteActionGroup.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteActionGroup.js
 var require_deleteActionGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteActionGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteActionGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteActionGroupFunc(params, options, callback) {
@@ -10508,9 +10393,9 @@ var require_deleteActionGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteDistinguishedName.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteDistinguishedName.js
 var require_deleteDistinguishedName = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteDistinguishedName.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteDistinguishedName.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteDistinguishedNameFunc(params, options, callback) {
@@ -10527,9 +10412,9 @@ var require_deleteDistinguishedName = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteRole.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteRole.js
 var require_deleteRole = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteRole.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteRole.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteRoleFunc(params, options, callback) {
@@ -10546,9 +10431,9 @@ var require_deleteRole = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteRoleMapping.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteRoleMapping.js
 var require_deleteRoleMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteRoleMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteRoleMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteRoleMappingFunc(params, options, callback) {
@@ -10565,9 +10450,9 @@ var require_deleteRoleMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteTenant.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteTenant.js
 var require_deleteTenant = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteTenant.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteTenant.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteTenantFunc(params, options, callback) {
@@ -10584,9 +10469,9 @@ var require_deleteTenant = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteUser.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteUser.js
 var require_deleteUser = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteUser.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteUser.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteUserFunc(params, options, callback) {
@@ -10603,9 +10488,9 @@ var require_deleteUser = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteUserLegacy.js
+// node_modules/@opensearch-project/opensearch/api/security/deleteUserLegacy.js
 var require_deleteUserLegacy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/deleteUserLegacy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/deleteUserLegacy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteUserLegacyFunc(params, options, callback) {
@@ -10622,9 +10507,9 @@ var require_deleteUserLegacy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/flushCache.js
+// node_modules/@opensearch-project/opensearch/api/security/flushCache.js
 var require_flushCache = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/flushCache.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/flushCache.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function flushCacheFunc(params, options, callback) {
@@ -10639,9 +10524,9 @@ var require_flushCache = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/generateOboToken.js
+// node_modules/@opensearch-project/opensearch/api/security/generateOboToken.js
 var require_generateOboToken = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/generateOboToken.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/generateOboToken.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function generateOboTokenFunc(params, options, callback) {
@@ -10656,9 +10541,9 @@ var require_generateOboToken = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/generateUserToken.js
+// node_modules/@opensearch-project/opensearch/api/security/generateUserToken.js
 var require_generateUserToken = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/generateUserToken.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/generateUserToken.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function generateUserTokenFunc(params, options, callback) {
@@ -10675,9 +10560,9 @@ var require_generateUserToken = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/generateUserTokenLegacy.js
+// node_modules/@opensearch-project/opensearch/api/security/generateUserTokenLegacy.js
 var require_generateUserTokenLegacy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/generateUserTokenLegacy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/generateUserTokenLegacy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function generateUserTokenLegacyFunc(params, options, callback) {
@@ -10694,9 +10579,9 @@ var require_generateUserTokenLegacy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAccountDetails.js
+// node_modules/@opensearch-project/opensearch/api/security/getAccountDetails.js
 var require_getAccountDetails = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAccountDetails.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getAccountDetails.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAccountDetailsFunc(params, options, callback) {
@@ -10711,9 +10596,9 @@ var require_getAccountDetails = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getActionGroup.js
+// node_modules/@opensearch-project/opensearch/api/security/getActionGroup.js
 var require_getActionGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getActionGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getActionGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getActionGroupFunc(params, options, callback) {
@@ -10730,9 +10615,9 @@ var require_getActionGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getActionGroups.js
+// node_modules/@opensearch-project/opensearch/api/security/getActionGroups.js
 var require_getActionGroups = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getActionGroups.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getActionGroups.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getActionGroupsFunc(params, options, callback) {
@@ -10747,9 +10632,9 @@ var require_getActionGroups = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAllCertificates.js
+// node_modules/@opensearch-project/opensearch/api/security/getAllCertificates.js
 var require_getAllCertificates = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAllCertificates.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getAllCertificates.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAllCertificatesFunc(params, options, callback) {
@@ -10764,9 +10649,9 @@ var require_getAllCertificates = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAllowlist.js
+// node_modules/@opensearch-project/opensearch/api/security/getAllowlist.js
 var require_getAllowlist = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAllowlist.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getAllowlist.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAllowlistFunc(params, options, callback) {
@@ -10781,9 +10666,9 @@ var require_getAllowlist = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAuditConfiguration.js
+// node_modules/@opensearch-project/opensearch/api/security/getAuditConfiguration.js
 var require_getAuditConfiguration = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getAuditConfiguration.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getAuditConfiguration.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAuditConfigurationFunc(params, options, callback) {
@@ -10798,9 +10683,9 @@ var require_getAuditConfiguration = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getCertificates.js
+// node_modules/@opensearch-project/opensearch/api/security/getCertificates.js
 var require_getCertificates = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getCertificates.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getCertificates.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getCertificatesFunc(params, options, callback) {
@@ -10815,9 +10700,9 @@ var require_getCertificates = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getConfiguration.js
+// node_modules/@opensearch-project/opensearch/api/security/getConfiguration.js
 var require_getConfiguration = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getConfiguration.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getConfiguration.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getConfigurationFunc(params, options, callback) {
@@ -10832,9 +10717,9 @@ var require_getConfiguration = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getDashboardsInfo.js
+// node_modules/@opensearch-project/opensearch/api/security/getDashboardsInfo.js
 var require_getDashboardsInfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getDashboardsInfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getDashboardsInfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getDashboardsInfoFunc(params, options, callback) {
@@ -10849,9 +10734,9 @@ var require_getDashboardsInfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getDistinguishedName.js
+// node_modules/@opensearch-project/opensearch/api/security/getDistinguishedName.js
 var require_getDistinguishedName = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getDistinguishedName.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getDistinguishedName.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getDistinguishedNameFunc(params, options, callback) {
@@ -10868,9 +10753,9 @@ var require_getDistinguishedName = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getDistinguishedNames.js
+// node_modules/@opensearch-project/opensearch/api/security/getDistinguishedNames.js
 var require_getDistinguishedNames = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getDistinguishedNames.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getDistinguishedNames.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getDistinguishedNamesFunc(params, options, callback) {
@@ -10885,9 +10770,9 @@ var require_getDistinguishedNames = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getNodeCertificates.js
+// node_modules/@opensearch-project/opensearch/api/security/getNodeCertificates.js
 var require_getNodeCertificates = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getNodeCertificates.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getNodeCertificates.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getNodeCertificatesFunc(params, options, callback) {
@@ -10904,9 +10789,9 @@ var require_getNodeCertificates = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getPermissionsInfo.js
+// node_modules/@opensearch-project/opensearch/api/security/getPermissionsInfo.js
 var require_getPermissionsInfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getPermissionsInfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getPermissionsInfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getPermissionsInfoFunc(params, options, callback) {
@@ -10921,9 +10806,9 @@ var require_getPermissionsInfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRole.js
+// node_modules/@opensearch-project/opensearch/api/security/getRole.js
 var require_getRole = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRole.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getRole.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getRoleFunc(params, options, callback) {
@@ -10940,9 +10825,9 @@ var require_getRole = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRoleMapping.js
+// node_modules/@opensearch-project/opensearch/api/security/getRoleMapping.js
 var require_getRoleMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRoleMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getRoleMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getRoleMappingFunc(params, options, callback) {
@@ -10959,9 +10844,9 @@ var require_getRoleMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRoleMappings.js
+// node_modules/@opensearch-project/opensearch/api/security/getRoleMappings.js
 var require_getRoleMappings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRoleMappings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getRoleMappings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getRoleMappingsFunc(params, options, callback) {
@@ -10976,9 +10861,9 @@ var require_getRoleMappings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRoles.js
+// node_modules/@opensearch-project/opensearch/api/security/getRoles.js
 var require_getRoles = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getRoles.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getRoles.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getRolesFunc(params, options, callback) {
@@ -10993,9 +10878,9 @@ var require_getRoles = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getSslinfo.js
+// node_modules/@opensearch-project/opensearch/api/security/getSslinfo.js
 var require_getSslinfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getSslinfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getSslinfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getSslinfoFunc(params, options, callback) {
@@ -11010,9 +10895,9 @@ var require_getSslinfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getTenancyConfig.js
+// node_modules/@opensearch-project/opensearch/api/security/getTenancyConfig.js
 var require_getTenancyConfig = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getTenancyConfig.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getTenancyConfig.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getTenancyConfigFunc(params, options, callback) {
@@ -11027,9 +10912,9 @@ var require_getTenancyConfig = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getTenant.js
+// node_modules/@opensearch-project/opensearch/api/security/getTenant.js
 var require_getTenant = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getTenant.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getTenant.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getTenantFunc(params, options, callback) {
@@ -11046,9 +10931,9 @@ var require_getTenant = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getTenants.js
+// node_modules/@opensearch-project/opensearch/api/security/getTenants.js
 var require_getTenants = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getTenants.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getTenants.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getTenantsFunc(params, options, callback) {
@@ -11063,9 +10948,9 @@ var require_getTenants = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUser.js
+// node_modules/@opensearch-project/opensearch/api/security/getUser.js
 var require_getUser = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUser.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getUser.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getUserFunc(params, options, callback) {
@@ -11082,9 +10967,9 @@ var require_getUser = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUserLegacy.js
+// node_modules/@opensearch-project/opensearch/api/security/getUserLegacy.js
 var require_getUserLegacy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUserLegacy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getUserLegacy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getUserLegacyFunc(params, options, callback) {
@@ -11101,9 +10986,9 @@ var require_getUserLegacy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUsers.js
+// node_modules/@opensearch-project/opensearch/api/security/getUsers.js
 var require_getUsers = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUsers.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getUsers.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getUsersFunc(params, options, callback) {
@@ -11118,9 +11003,9 @@ var require_getUsers = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUsersLegacy.js
+// node_modules/@opensearch-project/opensearch/api/security/getUsersLegacy.js
 var require_getUsersLegacy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/getUsersLegacy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/getUsersLegacy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getUsersLegacyFunc(params, options, callback) {
@@ -11135,9 +11020,9 @@ var require_getUsersLegacy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/health.js
+// node_modules/@opensearch-project/opensearch/api/security/health.js
 var require_health3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/health.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/health.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function healthFunc(params, options, callback) {
@@ -11152,9 +11037,9 @@ var require_health3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/migrate.js
+// node_modules/@opensearch-project/opensearch/api/security/migrate.js
 var require_migrate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/migrate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/migrate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function migrateFunc(params, options, callback) {
@@ -11169,9 +11054,9 @@ var require_migrate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchActionGroup.js
+// node_modules/@opensearch-project/opensearch/api/security/patchActionGroup.js
 var require_patchActionGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchActionGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchActionGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function patchActionGroupFunc(params, options, callback) {
@@ -11188,9 +11073,9 @@ var require_patchActionGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchActionGroups.js
+// node_modules/@opensearch-project/opensearch/api/security/patchActionGroups.js
 var require_patchActionGroups = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchActionGroups.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchActionGroups.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchActionGroupsFunc(params, options, callback) {
@@ -11205,9 +11090,9 @@ var require_patchActionGroups = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchAllowlist.js
+// node_modules/@opensearch-project/opensearch/api/security/patchAllowlist.js
 var require_patchAllowlist = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchAllowlist.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchAllowlist.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchAllowlistFunc(params, options, callback) {
@@ -11222,9 +11107,9 @@ var require_patchAllowlist = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchAuditConfiguration.js
+// node_modules/@opensearch-project/opensearch/api/security/patchAuditConfiguration.js
 var require_patchAuditConfiguration = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchAuditConfiguration.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchAuditConfiguration.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchAuditConfigurationFunc(params, options, callback) {
@@ -11239,9 +11124,9 @@ var require_patchAuditConfiguration = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchConfiguration.js
+// node_modules/@opensearch-project/opensearch/api/security/patchConfiguration.js
 var require_patchConfiguration = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchConfiguration.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchConfiguration.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchConfigurationFunc(params, options, callback) {
@@ -11256,9 +11141,9 @@ var require_patchConfiguration = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedName.js
+// node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedName.js
 var require_patchDistinguishedName = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedName.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedName.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function patchDistinguishedNameFunc(params, options, callback) {
@@ -11275,9 +11160,9 @@ var require_patchDistinguishedName = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedNames.js
+// node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedNames.js
 var require_patchDistinguishedNames = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedNames.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchDistinguishedNames.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchDistinguishedNamesFunc(params, options, callback) {
@@ -11292,9 +11177,9 @@ var require_patchDistinguishedNames = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRole.js
+// node_modules/@opensearch-project/opensearch/api/security/patchRole.js
 var require_patchRole = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRole.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchRole.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function patchRoleFunc(params, options, callback) {
@@ -11311,9 +11196,9 @@ var require_patchRole = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRoleMapping.js
+// node_modules/@opensearch-project/opensearch/api/security/patchRoleMapping.js
 var require_patchRoleMapping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRoleMapping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchRoleMapping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function patchRoleMappingFunc(params, options, callback) {
@@ -11330,9 +11215,9 @@ var require_patchRoleMapping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRoleMappings.js
+// node_modules/@opensearch-project/opensearch/api/security/patchRoleMappings.js
 var require_patchRoleMappings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRoleMappings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchRoleMappings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchRoleMappingsFunc(params, options, callback) {
@@ -11347,9 +11232,9 @@ var require_patchRoleMappings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRoles.js
+// node_modules/@opensearch-project/opensearch/api/security/patchRoles.js
 var require_patchRoles = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchRoles.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchRoles.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchRolesFunc(params, options, callback) {
@@ -11364,9 +11249,9 @@ var require_patchRoles = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchTenant.js
+// node_modules/@opensearch-project/opensearch/api/security/patchTenant.js
 var require_patchTenant = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchTenant.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchTenant.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function patchTenantFunc(params, options, callback) {
@@ -11383,9 +11268,9 @@ var require_patchTenant = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchTenants.js
+// node_modules/@opensearch-project/opensearch/api/security/patchTenants.js
 var require_patchTenants = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchTenants.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchTenants.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchTenantsFunc(params, options, callback) {
@@ -11400,9 +11285,9 @@ var require_patchTenants = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchUser.js
+// node_modules/@opensearch-project/opensearch/api/security/patchUser.js
 var require_patchUser = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchUser.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchUser.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function patchUserFunc(params, options, callback) {
@@ -11419,9 +11304,9 @@ var require_patchUser = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchUsers.js
+// node_modules/@opensearch-project/opensearch/api/security/patchUsers.js
 var require_patchUsers = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/patchUsers.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/patchUsers.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function patchUsersFunc(params, options, callback) {
@@ -11436,9 +11321,9 @@ var require_patchUsers = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/postDashboardsInfo.js
+// node_modules/@opensearch-project/opensearch/api/security/postDashboardsInfo.js
 var require_postDashboardsInfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/postDashboardsInfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/postDashboardsInfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function postDashboardsInfoFunc(params, options, callback) {
@@ -11453,9 +11338,9 @@ var require_postDashboardsInfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/reloadHttpCertificates.js
+// node_modules/@opensearch-project/opensearch/api/security/reloadHttpCertificates.js
 var require_reloadHttpCertificates = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/reloadHttpCertificates.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/reloadHttpCertificates.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function reloadHttpCertificatesFunc(params, options, callback) {
@@ -11470,9 +11355,9 @@ var require_reloadHttpCertificates = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/reloadTransportCertificates.js
+// node_modules/@opensearch-project/opensearch/api/security/reloadTransportCertificates.js
 var require_reloadTransportCertificates = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/reloadTransportCertificates.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/reloadTransportCertificates.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function reloadTransportCertificatesFunc(params, options, callback) {
@@ -11487,9 +11372,9 @@ var require_reloadTransportCertificates = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/tenantInfo.js
+// node_modules/@opensearch-project/opensearch/api/security/tenantInfo.js
 var require_tenantInfo = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/tenantInfo.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/tenantInfo.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function tenantInfoFunc(params, options, callback) {
@@ -11504,9 +11389,9 @@ var require_tenantInfo = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/updateAuditConfiguration.js
+// node_modules/@opensearch-project/opensearch/api/security/updateAuditConfiguration.js
 var require_updateAuditConfiguration = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/updateAuditConfiguration.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/updateAuditConfiguration.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function updateAuditConfigurationFunc(params, options, callback) {
@@ -11521,9 +11406,9 @@ var require_updateAuditConfiguration = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/updateConfiguration.js
+// node_modules/@opensearch-project/opensearch/api/security/updateConfiguration.js
 var require_updateConfiguration = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/updateConfiguration.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/updateConfiguration.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function updateConfigurationFunc(params, options, callback) {
@@ -11538,9 +11423,9 @@ var require_updateConfiguration = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/updateDistinguishedName.js
+// node_modules/@opensearch-project/opensearch/api/security/updateDistinguishedName.js
 var require_updateDistinguishedName = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/updateDistinguishedName.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/updateDistinguishedName.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateDistinguishedNameFunc(params, options, callback) {
@@ -11557,9 +11442,9 @@ var require_updateDistinguishedName = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/validate.js
+// node_modules/@opensearch-project/opensearch/api/security/validate.js
 var require_validate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/validate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/validate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function validateFunc(params, options, callback) {
@@ -11574,9 +11459,9 @@ var require_validate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/whoAmI.js
+// node_modules/@opensearch-project/opensearch/api/security/whoAmI.js
 var require_whoAmI = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/whoAmI.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/whoAmI.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function whoAmIFunc(params, options, callback) {
@@ -11591,9 +11476,9 @@ var require_whoAmI = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/whoAmIProtected.js
+// node_modules/@opensearch-project/opensearch/api/security/whoAmIProtected.js
 var require_whoAmIProtected = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/whoAmIProtected.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/whoAmIProtected.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function whoAmIProtectedFunc(params, options, callback) {
@@ -11608,9 +11493,9 @@ var require_whoAmIProtected = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/_api.js
+// node_modules/@opensearch-project/opensearch/api/security/_api.js
 var require_api26 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/security/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/security/_api.js"(exports2, module2) {
     "use strict";
     function SecurityApi(bindObj) {
       this.authinfo = require_authinfo().bind(bindObj);
@@ -11765,9 +11650,9 @@ var require_api26 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/createPolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/createPolicy.js
 var require_createPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/createPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/createPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createPolicyFunc(params, options, callback) {
@@ -11784,9 +11669,9 @@ var require_createPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/deletePolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/deletePolicy.js
 var require_deletePolicy2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/deletePolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/deletePolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deletePolicyFunc(params, options, callback) {
@@ -11803,9 +11688,9 @@ var require_deletePolicy2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/explainPolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/explainPolicy.js
 var require_explainPolicy2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/explainPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/explainPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function explainPolicyFunc(params, options, callback) {
@@ -11822,9 +11707,9 @@ var require_explainPolicy2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/getPolicies.js
+// node_modules/@opensearch-project/opensearch/api/sm/getPolicies.js
 var require_getPolicies2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/getPolicies.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/getPolicies.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getPoliciesFunc(params, options, callback) {
@@ -11839,9 +11724,9 @@ var require_getPolicies2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/getPolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/getPolicy.js
 var require_getPolicy2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/getPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/getPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getPolicyFunc(params, options, callback) {
@@ -11858,9 +11743,9 @@ var require_getPolicy2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/startPolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/startPolicy.js
 var require_startPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/startPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/startPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function startPolicyFunc(params, options, callback) {
@@ -11877,9 +11762,9 @@ var require_startPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/stopPolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/stopPolicy.js
 var require_stopPolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/stopPolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/stopPolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function stopPolicyFunc(params, options, callback) {
@@ -11896,9 +11781,9 @@ var require_stopPolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/updatePolicy.js
+// node_modules/@opensearch-project/opensearch/api/sm/updatePolicy.js
 var require_updatePolicy = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/updatePolicy.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/updatePolicy.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updatePolicyFunc(params, options, callback) {
@@ -11917,9 +11802,9 @@ var require_updatePolicy = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/_api.js
+// node_modules/@opensearch-project/opensearch/api/sm/_api.js
 var require_api27 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sm/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sm/_api.js"(exports2, module2) {
     "use strict";
     function SmApi(bindObj) {
       this.createPolicy = require_createPolicy().bind(bindObj);
@@ -11943,9 +11828,9 @@ var require_api27 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/cleanupRepository.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/cleanupRepository.js
 var require_cleanupRepository = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/cleanupRepository.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/cleanupRepository.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function cleanupRepositoryFunc(params, options, callback) {
@@ -11962,9 +11847,9 @@ var require_cleanupRepository = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/clone.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/clone.js
 var require_clone2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/clone.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/clone.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function cloneFunc(params, options, callback) {
@@ -11985,9 +11870,9 @@ var require_clone2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/create.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/create.js
 var require_create3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/create.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/create.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createFunc(params, options, callback) {
@@ -12006,9 +11891,9 @@ var require_create3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/createRepository.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/createRepository.js
 var require_createRepository = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/createRepository.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/createRepository.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createRepositoryFunc(params, options, callback) {
@@ -12025,9 +11910,9 @@ var require_createRepository = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/delete.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/delete.js
 var require_delete7 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -12046,9 +11931,9 @@ var require_delete7 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/deleteRepository.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/deleteRepository.js
 var require_deleteRepository = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/deleteRepository.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/deleteRepository.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteRepositoryFunc(params, options, callback) {
@@ -12065,9 +11950,9 @@ var require_deleteRepository = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/get.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/get.js
 var require_get7 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -12086,9 +11971,9 @@ var require_get7 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/getRepository.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/getRepository.js
 var require_getRepository = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/getRepository.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/getRepository.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getRepositoryFunc(params, options, callback) {
@@ -12104,9 +11989,9 @@ var require_getRepository = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/restore.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/restore.js
 var require_restore2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/restore.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/restore.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function restoreFunc(params, options, callback) {
@@ -12125,9 +12010,9 @@ var require_restore2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/status.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/status.js
 var require_status2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/status.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/status.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function statusFunc(params, options, callback) {
@@ -12144,9 +12029,9 @@ var require_status2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/verifyRepository.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/verifyRepository.js
 var require_verifyRepository = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/verifyRepository.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/verifyRepository.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function verifyRepositoryFunc(params, options, callback) {
@@ -12163,9 +12048,9 @@ var require_verifyRepository = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/_api.js
+// node_modules/@opensearch-project/opensearch/api/snapshot/_api.js
 var require_api28 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/snapshot/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/snapshot/_api.js"(exports2, module2) {
     "use strict";
     function SnapshotApi(bindObj) {
       this.cleanupRepository = require_cleanupRepository().bind(bindObj);
@@ -12189,9 +12074,9 @@ var require_api28 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/close.js
+// node_modules/@opensearch-project/opensearch/api/sql/close.js
 var require_close2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/close.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/close.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function closeFunc(params, options, callback) {
@@ -12206,9 +12091,9 @@ var require_close2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/explain.js
+// node_modules/@opensearch-project/opensearch/api/sql/explain.js
 var require_explain3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/explain.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/explain.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function explainFunc(params, options, callback) {
@@ -12223,9 +12108,9 @@ var require_explain3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/getStats.js
+// node_modules/@opensearch-project/opensearch/api/sql/getStats.js
 var require_getStats3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/getStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/getStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getStatsFunc(params, options, callback) {
@@ -12240,9 +12125,9 @@ var require_getStats3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/postStats.js
+// node_modules/@opensearch-project/opensearch/api/sql/postStats.js
 var require_postStats2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/postStats.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/postStats.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function postStatsFunc(params, options, callback) {
@@ -12257,9 +12142,9 @@ var require_postStats2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/query.js
+// node_modules/@opensearch-project/opensearch/api/sql/query.js
 var require_query2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/query.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/query.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function queryFunc(params, options, callback) {
@@ -12274,9 +12159,9 @@ var require_query2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/settings.js
+// node_modules/@opensearch-project/opensearch/api/sql/settings.js
 var require_settings = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/settings.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/settings.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function settingsFunc(params, options, callback) {
@@ -12291,9 +12176,9 @@ var require_settings = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/_api.js
+// node_modules/@opensearch-project/opensearch/api/sql/_api.js
 var require_api29 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/sql/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/sql/_api.js"(exports2, module2) {
     "use strict";
     function SqlApi(bindObj) {
       this.close = require_close2().bind(bindObj);
@@ -12309,9 +12194,9 @@ var require_api29 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/cancel.js
+// node_modules/@opensearch-project/opensearch/api/tasks/cancel.js
 var require_cancel = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/cancel.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/tasks/cancel.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function cancelFunc(params, options, callback) {
@@ -12327,9 +12212,9 @@ var require_cancel = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/get.js
+// node_modules/@opensearch-project/opensearch/api/tasks/get.js
 var require_get8 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/tasks/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -12346,9 +12231,9 @@ var require_get8 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/list.js
+// node_modules/@opensearch-project/opensearch/api/tasks/list.js
 var require_list = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/list.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/tasks/list.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function listFunc(params, options, callback) {
@@ -12363,9 +12248,9 @@ var require_list = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/_api.js
+// node_modules/@opensearch-project/opensearch/api/tasks/_api.js
 var require_api30 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/tasks/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/tasks/_api.js"(exports2, module2) {
     "use strict";
     function TasksApi(bindObj) {
       this.cancel = require_cancel().bind(bindObj);
@@ -12376,9 +12261,9 @@ var require_api30 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/delete.js
+// node_modules/@opensearch-project/opensearch/api/transforms/delete.js
 var require_delete8 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -12395,9 +12280,9 @@ var require_delete8 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/explain.js
+// node_modules/@opensearch-project/opensearch/api/transforms/explain.js
 var require_explain4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/explain.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/explain.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function explainFunc(params, options, callback) {
@@ -12414,9 +12299,9 @@ var require_explain4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/get.js
+// node_modules/@opensearch-project/opensearch/api/transforms/get.js
 var require_get9 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -12433,9 +12318,9 @@ var require_get9 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/preview.js
+// node_modules/@opensearch-project/opensearch/api/transforms/preview.js
 var require_preview = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/preview.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/preview.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function previewFunc(params, options, callback) {
@@ -12450,9 +12335,9 @@ var require_preview = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/put.js
+// node_modules/@opensearch-project/opensearch/api/transforms/put.js
 var require_put4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/put.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/put.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putFunc(params, options, callback) {
@@ -12469,9 +12354,9 @@ var require_put4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/search.js
+// node_modules/@opensearch-project/opensearch/api/transforms/search.js
 var require_search3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/search.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/search.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function searchFunc(params, options, callback) {
@@ -12486,9 +12371,9 @@ var require_search3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/start.js
+// node_modules/@opensearch-project/opensearch/api/transforms/start.js
 var require_start3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/start.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/start.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function startFunc(params, options, callback) {
@@ -12505,9 +12390,9 @@ var require_start3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/stop.js
+// node_modules/@opensearch-project/opensearch/api/transforms/stop.js
 var require_stop3 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/stop.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/stop.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function stopFunc(params, options, callback) {
@@ -12524,9 +12409,9 @@ var require_stop3 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/_api.js
+// node_modules/@opensearch-project/opensearch/api/transforms/_api.js
 var require_api31 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/transforms/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/transforms/_api.js"(exports2, module2) {
     "use strict";
     function TransformsApi(bindObj) {
       this.delete = require_delete8().bind(bindObj);
@@ -12542,9 +12427,9 @@ var require_api31 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/createQueryGroup.js
+// node_modules/@opensearch-project/opensearch/api/wlm/createQueryGroup.js
 var require_createQueryGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/createQueryGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/wlm/createQueryGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function createQueryGroupFunc(params, options, callback) {
@@ -12559,9 +12444,9 @@ var require_createQueryGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/deleteQueryGroup.js
+// node_modules/@opensearch-project/opensearch/api/wlm/deleteQueryGroup.js
 var require_deleteQueryGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/deleteQueryGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/wlm/deleteQueryGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteQueryGroupFunc(params, options, callback) {
@@ -12578,9 +12463,9 @@ var require_deleteQueryGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/getQueryGroup.js
+// node_modules/@opensearch-project/opensearch/api/wlm/getQueryGroup.js
 var require_getQueryGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/getQueryGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/wlm/getQueryGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function getQueryGroupFunc(params, options, callback) {
@@ -12596,9 +12481,9 @@ var require_getQueryGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/updateQueryGroup.js
+// node_modules/@opensearch-project/opensearch/api/wlm/updateQueryGroup.js
 var require_updateQueryGroup = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/updateQueryGroup.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/wlm/updateQueryGroup.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateQueryGroupFunc(params, options, callback) {
@@ -12615,9 +12500,9 @@ var require_updateQueryGroup = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/_api.js
+// node_modules/@opensearch-project/opensearch/api/wlm/_api.js
 var require_api32 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/wlm/_api.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/wlm/_api.js"(exports2, module2) {
     "use strict";
     function WlmApi(bindObj) {
       this.createQueryGroup = require_createQueryGroup().bind(bindObj);
@@ -12633,9 +12518,9 @@ var require_api32 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/bulk.js
+// node_modules/@opensearch-project/opensearch/api/_core/bulk.js
 var require_bulk = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/bulk.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/bulk.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function bulkFunc(params, options, callback) {
@@ -12651,9 +12536,9 @@ var require_bulk = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/bulkStream.js
+// node_modules/@opensearch-project/opensearch/api/_core/bulkStream.js
 var require_bulkStream = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/bulkStream.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/bulkStream.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function bulkStreamFunc(params, options, callback) {
@@ -12669,9 +12554,9 @@ var require_bulkStream = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/clearScroll.js
+// node_modules/@opensearch-project/opensearch/api/_core/clearScroll.js
 var require_clearScroll = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/clearScroll.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/clearScroll.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function clearScrollFunc(params, options, callback) {
@@ -12687,9 +12572,9 @@ var require_clearScroll = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/count.js
+// node_modules/@opensearch-project/opensearch/api/_core/count.js
 var require_count2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/count.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/count.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function countFunc(params, options, callback) {
@@ -12705,9 +12590,9 @@ var require_count2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/create.js
+// node_modules/@opensearch-project/opensearch/api/_core/create.js
 var require_create4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/create.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/create.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createFunc(params, options, callback) {
@@ -12726,9 +12611,9 @@ var require_create4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/createPit.js
+// node_modules/@opensearch-project/opensearch/api/_core/createPit.js
 var require_createPit = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/createPit.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/createPit.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function createPitFunc(params, options, callback) {
@@ -12745,9 +12630,9 @@ var require_createPit = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/delete.js
+// node_modules/@opensearch-project/opensearch/api/_core/delete.js
 var require_delete9 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/delete.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/delete.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteFunc(params, options, callback) {
@@ -12766,9 +12651,9 @@ var require_delete9 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteAllPits.js
+// node_modules/@opensearch-project/opensearch/api/_core/deleteAllPits.js
 var require_deleteAllPits = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteAllPits.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/deleteAllPits.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deleteAllPitsFunc(params, options, callback) {
@@ -12783,9 +12668,9 @@ var require_deleteAllPits = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteByQuery.js
+// node_modules/@opensearch-project/opensearch/api/_core/deleteByQuery.js
 var require_deleteByQuery = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteByQuery.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/deleteByQuery.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteByQueryFunc(params, options, callback) {
@@ -12802,9 +12687,9 @@ var require_deleteByQuery = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteByQueryRethrottle.js
+// node_modules/@opensearch-project/opensearch/api/_core/deleteByQueryRethrottle.js
 var require_deleteByQueryRethrottle = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteByQueryRethrottle.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/deleteByQueryRethrottle.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteByQueryRethrottleFunc(params, options, callback) {
@@ -12821,9 +12706,9 @@ var require_deleteByQueryRethrottle = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deletePit.js
+// node_modules/@opensearch-project/opensearch/api/_core/deletePit.js
 var require_deletePit = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deletePit.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/deletePit.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function deletePitFunc(params, options, callback) {
@@ -12838,9 +12723,9 @@ var require_deletePit = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteScript.js
+// node_modules/@opensearch-project/opensearch/api/_core/deleteScript.js
 var require_deleteScript = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/deleteScript.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/deleteScript.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function deleteScriptFunc(params, options, callback) {
@@ -12857,9 +12742,9 @@ var require_deleteScript = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/exists.js
+// node_modules/@opensearch-project/opensearch/api/_core/exists.js
 var require_exists2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/exists.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/exists.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsFunc(params, options, callback) {
@@ -12878,9 +12763,9 @@ var require_exists2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/existsSource.js
+// node_modules/@opensearch-project/opensearch/api/_core/existsSource.js
 var require_existsSource = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/existsSource.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/existsSource.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function existsSourceFunc(params, options, callback) {
@@ -12899,9 +12784,9 @@ var require_existsSource = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/explain.js
+// node_modules/@opensearch-project/opensearch/api/_core/explain.js
 var require_explain5 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/explain.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/explain.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function explainFunc(params, options, callback) {
@@ -12920,9 +12805,9 @@ var require_explain5 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/fieldCaps.js
+// node_modules/@opensearch-project/opensearch/api/_core/fieldCaps.js
 var require_fieldCaps = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/fieldCaps.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/fieldCaps.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function fieldCapsFunc(params, options, callback) {
@@ -12938,9 +12823,9 @@ var require_fieldCaps = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/get.js
+// node_modules/@opensearch-project/opensearch/api/_core/get.js
 var require_get10 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/get.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/get.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getFunc(params, options, callback) {
@@ -12959,9 +12844,9 @@ var require_get10 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getAllPits.js
+// node_modules/@opensearch-project/opensearch/api/_core/getAllPits.js
 var require_getAllPits = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getAllPits.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/getAllPits.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getAllPitsFunc(params, options, callback) {
@@ -12976,9 +12861,9 @@ var require_getAllPits = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getScript.js
+// node_modules/@opensearch-project/opensearch/api/_core/getScript.js
 var require_getScript = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getScript.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/getScript.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getScriptFunc(params, options, callback) {
@@ -12995,9 +12880,9 @@ var require_getScript = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getScriptContext.js
+// node_modules/@opensearch-project/opensearch/api/_core/getScriptContext.js
 var require_getScriptContext = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getScriptContext.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/getScriptContext.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getScriptContextFunc(params, options, callback) {
@@ -13012,9 +12897,9 @@ var require_getScriptContext = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getScriptLanguages.js
+// node_modules/@opensearch-project/opensearch/api/_core/getScriptLanguages.js
 var require_getScriptLanguages = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getScriptLanguages.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/getScriptLanguages.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function getScriptLanguagesFunc(params, options, callback) {
@@ -13029,9 +12914,9 @@ var require_getScriptLanguages = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getSource.js
+// node_modules/@opensearch-project/opensearch/api/_core/getSource.js
 var require_getSource = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/getSource.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/getSource.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function getSourceFunc(params, options, callback) {
@@ -13050,9 +12935,9 @@ var require_getSource = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/index.js
+// node_modules/@opensearch-project/opensearch/api/_core/index.js
 var require_core = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/index.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/index.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function indexFunc(params, options, callback) {
@@ -13070,9 +12955,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/info.js
+// node_modules/@opensearch-project/opensearch/api/_core/info.js
 var require_info2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/info.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/info.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function infoFunc(params, options, callback) {
@@ -13087,9 +12972,9 @@ var require_info2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/mget.js
+// node_modules/@opensearch-project/opensearch/api/_core/mget.js
 var require_mget = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/mget.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/mget.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function mgetFunc(params, options, callback) {
@@ -13105,9 +12990,9 @@ var require_mget = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/msearch.js
+// node_modules/@opensearch-project/opensearch/api/_core/msearch.js
 var require_msearch = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/msearch.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/msearch.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function msearchFunc(params, options, callback) {
@@ -13123,9 +13008,9 @@ var require_msearch = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/msearchTemplate.js
+// node_modules/@opensearch-project/opensearch/api/_core/msearchTemplate.js
 var require_msearchTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/msearchTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/msearchTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function msearchTemplateFunc(params, options, callback) {
@@ -13141,9 +13026,9 @@ var require_msearchTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/mtermvectors.js
+// node_modules/@opensearch-project/opensearch/api/_core/mtermvectors.js
 var require_mtermvectors = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/mtermvectors.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/mtermvectors.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function mtermvectorsFunc(params, options, callback) {
@@ -13159,9 +13044,9 @@ var require_mtermvectors = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/ping.js
+// node_modules/@opensearch-project/opensearch/api/_core/ping.js
 var require_ping = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/ping.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/ping.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function pingFunc(params, options, callback) {
@@ -13176,9 +13061,9 @@ var require_ping = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/putScript.js
+// node_modules/@opensearch-project/opensearch/api/_core/putScript.js
 var require_putScript = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/putScript.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/putScript.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function putScriptFunc(params, options, callback) {
@@ -13196,9 +13081,9 @@ var require_putScript = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/rankEval.js
+// node_modules/@opensearch-project/opensearch/api/_core/rankEval.js
 var require_rankEval = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/rankEval.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/rankEval.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function rankEvalFunc(params, options, callback) {
@@ -13214,9 +13099,9 @@ var require_rankEval = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/reindex.js
+// node_modules/@opensearch-project/opensearch/api/_core/reindex.js
 var require_reindex = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/reindex.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/reindex.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, handleMissingParam } = require_utils();
     function reindexFunc(params, options, callback) {
@@ -13231,9 +13116,9 @@ var require_reindex = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/reindexRethrottle.js
+// node_modules/@opensearch-project/opensearch/api/_core/reindexRethrottle.js
 var require_reindexRethrottle = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/reindexRethrottle.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/reindexRethrottle.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function reindexRethrottleFunc(params, options, callback) {
@@ -13250,9 +13135,9 @@ var require_reindexRethrottle = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/renderSearchTemplate.js
+// node_modules/@opensearch-project/opensearch/api/_core/renderSearchTemplate.js
 var require_renderSearchTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/renderSearchTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/renderSearchTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function renderSearchTemplateFunc(params, options, callback) {
@@ -13268,9 +13153,9 @@ var require_renderSearchTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/scriptsPainlessExecute.js
+// node_modules/@opensearch-project/opensearch/api/_core/scriptsPainlessExecute.js
 var require_scriptsPainlessExecute = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/scriptsPainlessExecute.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/scriptsPainlessExecute.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments } = require_utils();
     function scriptsPainlessExecuteFunc(params, options, callback) {
@@ -13285,9 +13170,9 @@ var require_scriptsPainlessExecute = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/scroll.js
+// node_modules/@opensearch-project/opensearch/api/_core/scroll.js
 var require_scroll = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/scroll.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/scroll.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function scrollFunc(params, options, callback) {
@@ -13303,9 +13188,9 @@ var require_scroll = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/search.js
+// node_modules/@opensearch-project/opensearch/api/_core/search.js
 var require_search4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/search.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/search.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function searchFunc(params, options, callback) {
@@ -13321,9 +13206,9 @@ var require_search4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/searchShards.js
+// node_modules/@opensearch-project/opensearch/api/_core/searchShards.js
 var require_searchShards = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/searchShards.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/searchShards.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam } = require_utils();
     function searchShardsFunc(params, options, callback) {
@@ -13339,9 +13224,9 @@ var require_searchShards = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/searchTemplate.js
+// node_modules/@opensearch-project/opensearch/api/_core/searchTemplate.js
 var require_searchTemplate = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/searchTemplate.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/searchTemplate.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function searchTemplateFunc(params, options, callback) {
@@ -13357,9 +13242,9 @@ var require_searchTemplate = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/termvectors.js
+// node_modules/@opensearch-project/opensearch/api/_core/termvectors.js
 var require_termvectors = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/termvectors.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/termvectors.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function termvectorsFunc(params, options, callback) {
@@ -13377,9 +13262,9 @@ var require_termvectors = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/update.js
+// node_modules/@opensearch-project/opensearch/api/_core/update.js
 var require_update2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/update.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/update.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateFunc(params, options, callback) {
@@ -13398,9 +13283,9 @@ var require_update2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/updateByQuery.js
+// node_modules/@opensearch-project/opensearch/api/_core/updateByQuery.js
 var require_updateByQuery = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/updateByQuery.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/updateByQuery.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateByQueryFunc(params, options, callback) {
@@ -13417,9 +13302,9 @@ var require_updateByQuery = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/updateByQueryRethrottle.js
+// node_modules/@opensearch-project/opensearch/api/_core/updateByQueryRethrottle.js
 var require_updateByQueryRethrottle = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/_core/updateByQueryRethrottle.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/_core/updateByQueryRethrottle.js"(exports2, module2) {
     "use strict";
     var { normalizeArguments, parsePathParam, handleMissingParam } = require_utils();
     function updateByQueryRethrottleFunc(params, options, callback) {
@@ -13436,9 +13321,9 @@ var require_updateByQueryRethrottle = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/OpenSearchApi.js
+// node_modules/@opensearch-project/opensearch/api/OpenSearchApi.js
 var require_OpenSearchApi = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/api/OpenSearchApi.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/api/OpenSearchApi.js"(exports2, module2) {
     "use strict";
     var { kConfigErr } = require_utils();
     var kApiModules = /* @__PURE__ */ Symbol("api modules");
@@ -13671,9 +13556,9 @@ var require_OpenSearchApi = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Client.js
+// node_modules/@opensearch-project/opensearch/lib/Client.js
 var require_Client = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/Client.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/Client.js"(exports2, module2) {
     "use strict";
     var { EventEmitter } = require("events");
     var { URL } = require("url");
@@ -13924,9 +13809,9 @@ var require_Client = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/index.js
+// node_modules/@opensearch-project/opensearch/index.js
 var require_opensearch = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/index.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/index.js"(exports2, module2) {
     "use strict";
     var { Client: Client2 } = require_Client();
     var Transport2 = require_Transport();
@@ -13954,9 +13839,9 @@ var require_opensearch = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/errors.js
+// node_modules/@opensearch-project/opensearch/lib/aws/errors.js
 var require_errors2 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/errors.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/aws/errors.js"(exports2, module2) {
     "use strict";
     var { OpenSearchClientError } = require_errors();
     var AwsSigv4SignerError = class _AwsSigv4SignerError extends OpenSearchClientError {
@@ -13972,9 +13857,9 @@ var require_errors2 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/aws4/lru.js
+// node_modules/aws4/lru.js
 var require_lru = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/aws4/lru.js"(exports2, module2) {
+  "node_modules/aws4/lru.js"(exports2, module2) {
     module2.exports = function(size) {
       return new LruCache(size);
     };
@@ -14060,9 +13945,9 @@ var require_lru = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/aws4/aws4.js
+// node_modules/aws4/aws4.js
 var require_aws4 = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/aws4/aws4.js"(exports2) {
+  "node_modules/aws4/aws4.js"(exports2) {
     var aws4 = exports2;
     var url = require("url");
     var querystring = require("querystring");
@@ -14339,9 +14224,9 @@ var require_aws4 = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/shared.js
+// node_modules/@opensearch-project/opensearch/lib/aws/shared.js
 var require_shared = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/shared.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/aws/shared.js"(exports2, module2) {
     "use strict";
     var Connection2 = require_Connection();
     var Transport2 = require_Transport();
@@ -14502,9 +14387,9 @@ var require_shared = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/AwsSigv4Signer.js
+// node_modules/@opensearch-project/opensearch/lib/aws/AwsSigv4Signer.js
 var require_AwsSigv4Signer = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/AwsSigv4Signer.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/aws/AwsSigv4Signer.js"(exports2, module2) {
     "use strict";
     var AwsSigv4SignerError = require_errors2();
     var { giveAwsV4Signer, giveAwsCredentialProviderLoader } = require_shared();
@@ -14542,9 +14427,9 @@ var require_AwsSigv4Signer = __commonJS({
   }
 });
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/index.js
+// node_modules/@opensearch-project/opensearch/lib/aws/index.js
 var require_aws = __commonJS({
-  "../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/lib/aws/index.js"(exports2, module2) {
+  "node_modules/@opensearch-project/opensearch/lib/aws/index.js"(exports2, module2) {
     "use strict";
     var AwsSigv4Signer3 = require_AwsSigv4Signer();
     var AwsSigv4SignerError = require_errors2();
@@ -14888,7 +14773,7 @@ function parseJsonSchema(content, schemaId) {
   };
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/util.js
+// node_modules/fast-xml-parser/src/util.js
 var nameStartChar = ":A-Za-z_\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD";
 var nameChar = nameStartChar + "\\-.\\d\\u00B7\\u0300-\\u036F\\u203F-\\u2040";
 var nameRegexp = "[" + nameStartChar + "][" + nameChar + "]*";
@@ -14929,7 +14814,7 @@ var DANGEROUS_PROPERTY_NAMES = [
 ];
 var criticalProperties = ["__proto__", "constructor", "prototype"];
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/validator.js
+// node_modules/fast-xml-parser/src/validator.js
 var defaultOptions = {
   allowBooleanAttributes: false,
   //A tag can have attributes without any value
@@ -15235,7 +15120,7 @@ function getPositionFromMatch(match) {
   return match.startIndex + match[1].length;
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@nodable/entities/src/entities.js
+// node_modules/@nodable/entities/src/entities.js
 var BASIC_LATIN = {
   amp: "&",
   AMP: "&",
@@ -16335,7 +16220,7 @@ var COMMON_HTML = {
   frac34: "\xBE"
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@nodable/entities/src/EntityDecoder.js
+// node_modules/@nodable/entities/src/EntityDecoder.js
 var SPECIAL_CHARS = new Set("!?\\\\/[]$%{}^&*()<>|+");
 function validateEntityName(name) {
   if (name[0] === "#") {
@@ -16704,7 +16589,7 @@ var EntityDecoder = class {
   }
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js
+// node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js
 var defaultOnDangerousProperty = (name) => {
   if (DANGEROUS_PROPERTY_NAMES.includes(name)) {
     return "__" + name;
@@ -16838,7 +16723,7 @@ var buildOptions = function(options) {
   return built;
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/xmlparser/xmlNode.js
+// node_modules/fast-xml-parser/src/xmlparser/xmlNode.js
 var METADATA_SYMBOL;
 if (typeof Symbol !== "function") {
   METADATA_SYMBOL = "@@xmlMetadata";
@@ -16872,7 +16757,7 @@ var XmlNode = class {
   }
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/xml-naming/src/index.js
+// node_modules/xml-naming/src/index.js
 var nameStartChar10 = ":A-Za-z_\xC0-\xD6\xD8-\xF6\xF8-\u02FF\u0370-\u037D\u037F-\u0486\u0488-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD";
 var nameChar10 = nameStartChar10 + "\\-\\.\\d\xB7\u0300-\u036F\u203F-\u2040";
 var nameStartChar11 = ":A-Za-z_\xC0-\u02FF\u0370-\u037D\u037F-\u0486\u0488-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}";
@@ -16894,7 +16779,7 @@ var regexes11 = buildRegexes(nameStartChar11, nameChar11, "u");
 var getRegexes = (xmlVersion = "1.0") => xmlVersion === "1.1" ? regexes11 : regexes10;
 var qName = (str, { xmlVersion = "1.0" } = {}) => getRegexes(xmlVersion).qName.test(str);
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js
+// node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js
 var DocTypeReader = class {
   constructor(options, xmlVersion) {
     this.suppressValidationErr = !options;
@@ -17174,7 +17059,7 @@ function validateEntityName2(name, xmlVersion) {
     throw new Error(`Invalid entity name ${name}`);
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/strnum/strnum.js
+// node_modules/strnum/strnum.js
 var hexRegex = /^[-+]?0x[a-fA-F0-9]+$/;
 var binRegex = /^0b[01]+$/;
 var octRegex = /^0o[0-7]+$/;
@@ -17305,7 +17190,7 @@ function handleInfinity(str, num, options) {
   }
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/ignoreAttributes.js
+// node_modules/fast-xml-parser/src/ignoreAttributes.js
 function getIgnoreAttributesFn(ignoreAttributes) {
   if (typeof ignoreAttributes === "function") {
     return ignoreAttributes;
@@ -17325,7 +17210,7 @@ function getIgnoreAttributesFn(ignoreAttributes) {
   return () => false;
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/path-expression-matcher/src/Expression.js
+// node_modules/path-expression-matcher/src/Expression.js
 var Expression = class {
   /**
    * Create a new Expression
@@ -17488,7 +17373,7 @@ var Expression = class {
   }
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/path-expression-matcher/src/ExpressionSet.js
+// node_modules/path-expression-matcher/src/ExpressionSet.js
 var ExpressionSet = class {
   constructor() {
     this._byDepthAndTag = /* @__PURE__ */ new Map();
@@ -17643,7 +17528,7 @@ var ExpressionSet = class {
   }
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/path-expression-matcher/src/Matcher.js
+// node_modules/path-expression-matcher/src/Matcher.js
 var MatcherView = class {
   /**
    * @param {Matcher} matcher - The parent Matcher instance to read from.
@@ -18093,7 +17978,7 @@ var Matcher = class {
   }
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js
+// node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js
 function extractRawAttributes(prefixedAttrs, options) {
   if (!prefixedAttrs) return {};
   const attrs = options.attributesGroupName ? prefixedAttrs[options.attributesGroupName] : prefixedAttrs;
@@ -18674,7 +18559,7 @@ function sanitizeName(name, options) {
   return name;
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/xmlparser/node2json.js
+// node_modules/fast-xml-parser/src/xmlparser/node2json.js
 var METADATA_SYMBOL2 = XmlNode.getMetaDataSymbol();
 function stripAttributePrefix(attrs, prefix) {
   if (!attrs || typeof attrs !== "object") return {};
@@ -18786,7 +18671,7 @@ function isLeafTag(obj, options) {
   return false;
 }
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/xmlparser/XMLParser.js
+// node_modules/fast-xml-parser/src/xmlparser/XMLParser.js
 var XMLParser = class {
   constructor(options) {
     this.externalEntities = {};
@@ -18846,7 +18731,7 @@ var XMLParser = class {
   }
 };
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/fast-xml-parser/src/fxp.js
+// node_modules/fast-xml-parser/src/fxp.js
 var XMLValidator = {
   validate
 };
@@ -19438,7 +19323,7 @@ var dynamoClient3 = import_lib_dynamodb3.DynamoDBDocumentClient.from(new import_
 // src/lib/schema/opensearch/indexer.ts
 var import_credential_provider_node = require("@aws-sdk/credential-provider-node");
 
-// ../../../../../../../Users/christophervuu/repos/kbx-keyra/.aws-sam/deps/6b3d09a8-0092-449e-afe2-3ff8419e6af8/node_modules/@opensearch-project/opensearch/index.mjs
+// node_modules/@opensearch-project/opensearch/index.mjs
 var import_index = __toESM(require_opensearch(), 1);
 var Client = import_index.default.Client;
 var Transport = import_index.default.Transport;

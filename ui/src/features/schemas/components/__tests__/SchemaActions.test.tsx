@@ -1,14 +1,14 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import type { UsageMapping } from '../../hooks/use-schema-usage';
+import { SchemaActions } from '../SchemaActions';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaDetail } from '@/lib/types';
-
-import type { UsageMapping } from '../../hooks/use-schema-usage';
-import { SchemaActions } from '../SchemaActions';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -71,7 +71,12 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getDeploymentDiff: vi.fn(),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
-    syncCdmSchema: vi.fn(),
+    syncCdmSchema: vi.fn().mockResolvedValue({
+      schemaId: 'schema-1',
+      synced: true,
+      commitSha: 'sha-new',
+      message: 'Schema re-synced from CDM source.',
+    }),
     listPublishedSchemas: vi.fn(),
     publishSchemaToGitHub: vi.fn(),
     linkPublishedSchema: vi.fn(),
@@ -129,7 +134,7 @@ function renderActions(
 
 describe('SchemaActions', () => {
   describe('CDM schema', () => {
-    it('shows Re-sync placeholder and View Raw, hides non-CDM buttons', () => {
+    it('shows Re-sync action and View Raw, hides non-CDM buttons', () => {
       const schema = makeSchema({ origin: 'cdm', scope: 'global' });
       renderActions(schema, createMockAdapter());
 
@@ -138,6 +143,39 @@ describe('SchemaActions', () => {
       expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
       expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
       expect(screen.queryByTestId('action-promote')).not.toBeInTheDocument();
+    });
+
+    it('calls syncCdmSchema on Re-sync click and shows status message', async () => {
+      const syncCdmSchema = vi.fn().mockResolvedValue({
+        schemaId: 'schema-1',
+        synced: true,
+        commitSha: 'sha-new',
+        message: 'Schema re-synced from CDM source.',
+      });
+      const schema = makeSchema({ origin: 'cdm', scope: 'global' });
+      renderActions(schema, createMockAdapter({ syncCdmSchema }));
+
+      await userEvent.click(screen.getByTestId('action-resync'));
+
+      await waitFor(() => {
+        expect(syncCdmSchema).toHaveBeenCalledWith('schema-1');
+      });
+      expect(screen.getByTestId('resync-success')).toHaveTextContent('Schema re-synced from CDM source.');
+    });
+
+    it('shows actionable non-technical retry message when re-sync fails', async () => {
+      const syncCdmSchema = vi.fn().mockRejectedValue(new Error('rate-limit'));
+      const schema = makeSchema({ origin: 'cdm', scope: 'global' });
+      renderActions(schema, createMockAdapter({ syncCdmSchema }));
+
+      await userEvent.click(screen.getByTestId('action-resync'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('resync-error')).toHaveTextContent(
+          'Unable to re-sync right now. Please verify repository access and try again.',
+        );
+      });
+      expect(screen.getByRole('button', { name: 'Retry re-sync' })).toBeInTheDocument();
     });
   });
 
@@ -204,13 +242,11 @@ describe('SchemaActions', () => {
       expect(btn).toHaveAttribute('title', 'GitHub sync available when backend is connected');
     });
 
-    it('re-sync shows tooltip text for CDM', () => {
+    it('CDM re-sync action is enabled', () => {
       const schema = makeSchema({ origin: 'cdm', scope: 'global' });
       renderActions(schema, createMockAdapter());
 
-      const btn = screen.getByTestId('action-resync');
-      expect(btn).toBeDisabled();
-      expect(btn).toHaveAttribute('title', 'Re-sync available when backend is connected');
+      expect(screen.getByTestId('action-resync')).toBeEnabled();
     });
   });
 
