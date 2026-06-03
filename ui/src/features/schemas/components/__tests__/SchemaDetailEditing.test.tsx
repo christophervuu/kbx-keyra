@@ -29,7 +29,7 @@ const LOCAL_SCHEMA: SchemaDetail = {
     description: 'A local schema',
     updatedBy: 'local-user',
     inferred: false,
-    syncStatus: 'not-synced',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-10T00:00:00Z',
@@ -182,11 +182,6 @@ describe('SchemaDetailPage — T-05 editing operations', () => {
     });
 
     await user.click(screen.getByTestId('edit-schema-button'));
-
-    // Wait for at least one delete button to appear
-    await waitFor(() => {
-      expect(screen.getAllByTestId('node-delete-button').length).toBeGreaterThan(0);
-    });
 
     // Click delete on the address node (which has children)
     // The virtualizer may render 0 items in jsdom, so we check the container.

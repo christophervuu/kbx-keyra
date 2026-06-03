@@ -24,7 +24,7 @@ function makeSchema(overrides: Partial<SchemaDetail['metadata']> = {}): SchemaDe
       origin: 'local',
       status: 'ready',
       scope: 'project',
-      syncStatus: 'not-synced',
+      syncStatus: 'sync-failed',
       source: { type: 'upload' },
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-02T00:00:00Z',
@@ -139,8 +139,11 @@ describe('SchemaActions', () => {
       renderActions(schema, createMockAdapter());
 
       expect(screen.getByTestId('action-resync')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Re-sync' })).toBeInTheDocument();
       expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
       expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
       expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
       expect(screen.queryByTestId('action-promote')).not.toBeInTheDocument();
     });
@@ -247,6 +250,14 @@ describe('SchemaActions', () => {
       renderActions(schema, createMockAdapter());
 
       expect(screen.getByTestId('action-resync')).toBeEnabled();
+    });
+
+    it('CDM schemas do not render disabled discoverability placeholders', () => {
+      const schema = makeSchema({ origin: 'cdm', scope: 'global' });
+      renderActions(schema, createMockAdapter());
+
+      expect(screen.queryByTestId('action-auto-describe')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
     });
   });
 

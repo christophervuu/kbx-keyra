@@ -80,7 +80,7 @@ export type ParseInferredSchemaFn = (content: string, format: 'json' | 'xml') =>
 // Schema Library Types (FS-016)
 // ---------------------------------------------------------------------------
 
-export type SyncStatus = 'synced' | 'not-synced' | 'local-changes' | 'local' | 'inferred';
+export type SyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'local' | 'inferred';
 export type DisplayFormat = 'JSON Schema' | 'XSD' | 'Inferred';
 
 export interface SchemaLibraryItem {

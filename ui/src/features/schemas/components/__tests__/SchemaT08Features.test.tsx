@@ -4,10 +4,30 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import { InferredSchemaBanner } from '../InferredSchemaBanner';
 
+function createStorageMock() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    clear: () => {
+      store.clear();
+    },
+  };
+}
+
 const SCHEMA_ID = 'schema-test-1';
 const STORAGE_KEY = `keyra:schema-banner-dismissed:${SCHEMA_ID}`;
 
 describe('InferredSchemaBanner', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', createStorageMock());
+  });
+
   beforeEach(() => {
     localStorage.clear();
   });
@@ -132,6 +152,17 @@ const VALID_JSON_SCHEMA = JSON.stringify({
 
 const INVALID_JSON = 'not valid json {{{{';
 
+function makeUploadFile(contents: string, name: string, type: string) {
+  const file = new File([contents], name, { type });
+  if (typeof file.text !== 'function') {
+    Object.defineProperty(file, 'text', {
+      value: () => Promise.resolve(contents),
+      configurable: true,
+    });
+  }
+  return file;
+}
+
 const MOCK_DETAIL: SchemaDetail = {
   metadata: {
     schemaId: 'schema-replace-1',
@@ -141,7 +172,7 @@ const MOCK_DETAIL: SchemaDetail = {
     origin: 'local',
     status: 'ready',
     scope: 'project',
-    syncStatus: 'not-synced',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-02T00:00:00Z',
@@ -242,7 +273,7 @@ describe('ReplaceFileDialog', () => {
     renderDialog(createMockAdapter());
     await userEvent.click(screen.getByTestId('replace-confirm-button'));
 
-    const file = new File([INVALID_JSON], 'schema.json', { type: 'application/json' });
+    const file = makeUploadFile(INVALID_JSON, 'schema.json', 'application/json');
     const input = screen.getByTestId('replace-file-input');
     await userEvent.upload(input, file);
 
@@ -258,7 +289,7 @@ describe('ReplaceFileDialog', () => {
     renderDialog(createMockAdapter({ updateSchema, getSchema }), onReplaced);
     await userEvent.click(screen.getByTestId('replace-confirm-button'));
 
-    const file = new File([VALID_JSON_SCHEMA], 'schema.json', { type: 'application/json' });
+    const file = makeUploadFile(VALID_JSON_SCHEMA, 'schema.json', 'application/json');
     const input = screen.getByTestId('replace-file-input');
     await userEvent.upload(input, file);
 

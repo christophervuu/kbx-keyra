@@ -611,6 +611,21 @@ Duplicate link attempts within the same project for the same `repo+branch+path` 
 - Status-refresh can set/return `update-available` without content mutation.
 - GitHub read failures persist `sync-failed` and surface canonical actionable service-unavailable semantics.
 
+### UI-consumption CDM status contract (FS-078)
+
+At the API boundary consumed by UI schema surfaces, CDM `syncStatus` semantics are canonicalized to:
+
+- `synced`
+- `update-available`
+- `sync-failed`
+
+Contract requirements:
+
+- Backend normalization owns legacy/transitional mapping before response emission.
+- UI-facing schema payloads (`GET /schemas`, `GET /schemas/:id`, project-embedded schema records, and CDM sync responses) must not require UI-only reinterpretation of legacy status strings.
+- Unknown/unexpected legacy values must normalize deterministically to `sync-failed` for safe, consistent cross-surface rendering.
+- This normalization guarantees one badge vocabulary across Project Overview, Schema Library, and Schema Detail and prevents legacy labels (`not-synced`, `local-changes`) from reappearing for CDM records.
+
 ### No-write GitHub invariant (AE-09)
 
 CDM browse/link/sync flows must use GitHub read endpoints only.

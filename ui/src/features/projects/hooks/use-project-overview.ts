@@ -49,6 +49,7 @@ function buildSchemaCardData(detail: SchemaDetail): SchemaCardData {
     name: metadata.name,
     format: metadata.format,
     origin: metadata.origin,
+    sourceType: metadata.source.type,
     scope: 'project-level',
     fieldCount: metadata.fieldCount,
     syncStatus: metadata.syncStatus,
@@ -98,6 +99,7 @@ export interface UseProjectOverviewResult {
 
   removeSchema: (schemaId: string) => Promise<void>;
   addSchemaRef: (ref: SchemaRef) => Promise<void>;
+  resyncSchema: (schemaId: string) => Promise<{ message: string }>;
 
   deleteMappingAction: (mappingId: string) => Promise<void>;
   duplicateMappingAction: (mappingId: string) => Promise<void>;
@@ -307,6 +309,22 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
     [adapter, projectId],
   );
 
+  const resyncSchema = useCallback(
+    async (schemaId: string): Promise<{ message: string }> => {
+      const result = await adapter.syncCdmSchema(schemaId);
+      const refreshed = await adapter.getSchema(schemaId);
+      setSchemaDetails((prev) =>
+        prev.map((detail) =>
+          detail.metadata.schemaId === schemaId ? refreshed : detail,
+        ),
+      );
+      return {
+        message: result.message || 'Schema re-synced from CDM source.',
+      };
+    },
+    [adapter],
+  );
+
   // ---------------------------------------------------------------------------
   // Mapping actions
   // ---------------------------------------------------------------------------
@@ -394,6 +412,7 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
     updateTags,
     removeSchema,
     addSchemaRef,
+    resyncSchema,
     deleteMappingAction,
     duplicateMappingAction,
     deleteProjectAction,

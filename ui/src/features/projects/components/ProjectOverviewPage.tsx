@@ -35,6 +35,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     updateTags,
     removeSchema,
     addSchemaRef,
+    resyncSchema,
     deleteMappingAction,
     duplicateMappingAction,
     deleteProjectAction,
@@ -165,6 +166,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           onUpload={handleOpenSchemaUpload}
           onLink={addSchemaRef}
           onRemove={removeSchema}
+          onResync={resyncSchema}
           onView={handleViewSchema}
           mappingsReferencingSchema={schemasReferencingMapping}
         />

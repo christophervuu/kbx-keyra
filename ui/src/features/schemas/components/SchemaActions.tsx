@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import type { UsageMapping } from '../hooks/use-schema-usage';
+import { isSchemaActionAllowed } from '../lib';
 
 import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -102,6 +103,11 @@ export function SchemaActions({
   const isCdm = metadata.origin === 'cdm';
   const isJsonSchema = metadata.format === 'json-schema';
   const isProjectScoped = metadata.scope === 'project';
+  const canResync = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'resync');
+  const canEdit = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'edit') && isJsonSchema && !isEditing;
+  const canReplace = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'replace');
+  const canPromote = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'promote-global') && isProjectScoped;
+  const canRemove = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'remove');
 
   // --- Modal states ---
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
@@ -115,12 +121,14 @@ export function SchemaActions({
   const [promoteError, setPromoteError] = useState<string | null>(null);
 
   async function handleResync() {
+    if (!canResync) return;
+
     setIsResyncing(true);
     setResyncError(null);
     setResyncMessage(null);
     try {
       const result = await adapter.syncCdmSchema(metadata.schemaId);
-      setResyncMessage(result.message || 'CDM schema sync completed.');
+      setResyncMessage(result.message || 'Schema re-synced from CDM source.');
       onResynced?.();
     } catch {
       setResyncError('Unable to re-sync right now. Please verify repository access and try again.');
@@ -131,6 +139,8 @@ export function SchemaActions({
 
   // --- Promote to Global ---
   async function handlePromoteConfirm() {
+    if (!canPromote) return;
+
     setIsPromoting(true);
     setPromoteError(null);
     try {
@@ -146,6 +156,8 @@ export function SchemaActions({
 
   // --- Remove ---
   function handleRemoveClick() {
+    if (!canRemove) return;
+
     if (usageMappings.length > 0) {
       setShowRemoveBlocked(true);
     } else {
@@ -154,6 +166,8 @@ export function SchemaActions({
   }
 
   async function handleRemoveConfirm() {
+    if (!canRemove) return;
+
     setIsRemoving(true);
     try {
       await adapter.deleteSchema(metadata.schemaId);
@@ -177,7 +191,7 @@ export function SchemaActions({
 
       <div className="flex flex-wrap gap-2">
         {/* --- CDM: Re-sync action --- */}
-        {isCdm && (
+        {canResync && (
           <Button
             variant="secondary"
             size="sm"
@@ -185,7 +199,7 @@ export function SchemaActions({
             onClick={() => void handleResync()}
             loading={isResyncing}
           >
-            Re-sync from GitHub
+            Re-sync
           </Button>
         )}
 
@@ -193,7 +207,7 @@ export function SchemaActions({
         {!isCdm && (
           <>
             {/* Edit (json-schema only, not while editing) */}
-            {isJsonSchema && !isEditing && (
+            {canEdit && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -219,17 +233,19 @@ export function SchemaActions({
             />
 
             {/* Replace file (T-08) */}
-            <Button
-              variant="secondary"
-              size="sm"
-              data-testid="action-replace"
-              onClick={onReplace}
-            >
-              Replace file
-            </Button>
+            {canReplace && (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="action-replace"
+                onClick={onReplace}
+              >
+                Replace file
+              </Button>
+            )}
 
             {/* Promote to Global (project-scoped only) */}
-            {isProjectScoped && (
+            {canPromote && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -241,14 +257,16 @@ export function SchemaActions({
             )}
 
             {/* Remove */}
-            <Button
-              variant="danger"
-              size="sm"
-              data-testid="action-remove"
-              onClick={handleRemoveClick}
-            >
-              Remove
-            </Button>
+            {canRemove && (
+              <Button
+                variant="danger"
+                size="sm"
+                data-testid="action-remove"
+                onClick={handleRemoveClick}
+              >
+                Remove
+              </Button>
+            )}
           </>
         )}
 
@@ -263,7 +281,7 @@ export function SchemaActions({
         </Button>
       </div>
 
-      {isCdm && resyncError && (
+      {canResync && resyncError && (
         <div
           role="alert"
           data-testid="resync-error"
@@ -283,7 +301,7 @@ export function SchemaActions({
         </div>
       )}
 
-      {isCdm && !resyncError && resyncMessage && (
+      {canResync && !resyncError && resyncMessage && (
         <p
           role="status"
           data-testid="resync-success"

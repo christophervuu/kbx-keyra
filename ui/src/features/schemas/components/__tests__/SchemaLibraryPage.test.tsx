@@ -1,16 +1,16 @@
 // SchemaLibraryPage.test.tsx — Integration tests for the assembled Schema Library page (FS-016 T-04)
 
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SchemaLibraryPage } from '../SchemaLibraryPage';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { ProjectDetail, SchemaMetadata } from '@/lib/types/domain';
-
-import { SchemaLibraryPage } from '../SchemaLibraryPage';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -25,7 +25,7 @@ function makeSchemaMeta(overrides: Partial<SchemaMetadata> = {}): SchemaMetadata
     origin: 'local',
     status: 'ready',
     scope: 'project',
-    syncStatus: 'local-changes',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',

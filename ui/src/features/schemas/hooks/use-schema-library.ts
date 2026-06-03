@@ -4,9 +4,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useAdapter } from '@/lib/api';
-import type { SchemaMetadata, SchemaOrigin } from '@/lib/types/domain';
-
 import { filterSchemas, sortSchemas } from '../lib/schema-filters';
 import type {
   DisplayFormat,
@@ -18,6 +15,9 @@ import type {
   SyncStatus,
 } from '../types';
 
+import { useAdapter } from '@/lib/api';
+import type { SchemaMetadata, SchemaOrigin } from '@/lib/types/domain';
+
 // ---------------------------------------------------------------------------
 // Derivation helpers
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ import type {
 function deriveSyncStatus(schema: SchemaMetadata): SyncStatus {
   if (schema.inferred === true) return 'inferred';
   if (schema.source.type === 'github') {
-    return schema.source.commitSha != null ? 'synced' : 'not-synced';
+    return schema.syncStatus ?? 'synced';
   }
   // source.type === 'upload'
   return 'local';

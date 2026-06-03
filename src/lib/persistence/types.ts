@@ -60,6 +60,27 @@ export type SchemaSyncStatus =
   | 'not-synced'
   | 'local-changes';
 
+/**
+ * Canonical sync states exposed to UI consumers (FS-078 T-01).
+ */
+export type CanonicalSchemaSyncStatus = 'synced' | 'update-available' | 'sync-failed';
+
+/**
+ * Normalizes persisted/legacy sync statuses to canonical UI-facing values.
+ *
+ * - Canonical values pass through unchanged.
+ * - Legacy and unknown values deterministically map to `sync-failed`.
+ */
+export function normalizeSchemaSyncStatus(
+  value: SchemaSyncStatus | string | null | undefined,
+): CanonicalSchemaSyncStatus {
+  if (value === 'synced' || value === 'update-available' || value === 'sync-failed') {
+    return value;
+  }
+
+  return 'sync-failed';
+}
+
 // ---------------------------------------------------------------------------
 // CDM Re-sync Result Contracts (FS-077)
 // ---------------------------------------------------------------------------
@@ -431,7 +452,7 @@ export interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
-  readonly syncStatus: SchemaSyncStatus;
+  readonly syncStatus: CanonicalSchemaSyncStatus;
   readonly source: SchemaSourceInfo;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
@@ -488,7 +509,7 @@ export function toSchemaMetadata(item: SchemaMetadataItem): SchemaMetadata {
     scope: item.scope,
     description: item.description,
     inferred: item.inferred,
-    syncStatus: item.syncStatus,
+    syncStatus: normalizeSchemaSyncStatus(item.syncStatus),
     source: item.source,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,

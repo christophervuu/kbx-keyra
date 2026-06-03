@@ -30,8 +30,8 @@ describe('list-schemas handler', () => {
     getEnvStore().SCHEMAS_TABLE = 'Schemas';
 
     sharedMocks.scan.mockReset().mockResolvedValue([
-      { schemaId: 's1', name: 'Schema 1' },
-      { schemaId: 's2', name: 'Schema 2' },
+      { schemaId: 's1', name: 'Schema 1', syncStatus: 'local-changes' },
+      { schemaId: 's2', name: 'Schema 2', syncStatus: 'synced' },
     ]);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
@@ -43,8 +43,10 @@ describe('list-schemas handler', () => {
     const result = await handler({ body: null });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as Array<{ schemaId: string }>;
+    const parsed = JSON.parse(result.body) as Array<{ schemaId: string; syncStatus?: string }>;
     expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.syncStatus).toBe('sync-failed');
+    expect(parsed[1]?.syncStatus).toBe('synced');
   });
 
   it('returns empty array when no schemas', async () => {

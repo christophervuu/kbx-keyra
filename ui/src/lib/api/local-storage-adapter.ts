@@ -68,6 +68,14 @@ const MAX_MAPPING_VERSIONS = 50;
 
 const VALID_SCHEMA_ORIGINS: readonly SchemaOrigin[] = ['cdm', 'published', 'local'];
 
+function normalizeSchemaSyncStatusForStorage(value: unknown): SchemaMetadata['syncStatus'] {
+  if (value === 'synced' || value === 'update-available' || value === 'sync-failed') {
+    return value;
+  }
+
+  return 'sync-failed';
+}
+
 function normalizeSchemaOrigin(origin: unknown): SchemaOrigin {
   return typeof origin === 'string' && VALID_SCHEMA_ORIGINS.includes(origin as SchemaOrigin)
     ? (origin as SchemaOrigin)
@@ -349,7 +357,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       scope: item.metadata.scope ?? 'global',
       description: item.metadata.description ?? '',
       inferred: item.metadata.inferred ?? false,
-      syncStatus: item.metadata.syncStatus ?? 'not-synced',
+      syncStatus: normalizeSchemaSyncStatusForStorage(item.metadata.syncStatus ?? 'sync-failed'),
     }));
   }
 
@@ -366,7 +374,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       scope: found.metadata.scope ?? 'global',
       description: found.metadata.description ?? '',
       inferred: found.metadata.inferred ?? false,
-      syncStatus: found.metadata.syncStatus ?? 'not-synced',
+      syncStatus: normalizeSchemaSyncStatusForStorage(found.metadata.syncStatus ?? 'sync-failed'),
     };
 
     return {
@@ -391,7 +399,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       description: input.description ?? '',
       updatedBy: 'local-user',
       inferred: input.inferred ?? false,
-      syncStatus: input.syncStatus ?? 'not-synced',
+      syncStatus: normalizeSchemaSyncStatusForStorage(input.syncStatus ?? 'sync-failed'),
       source: input.source ?? { type: 'upload' },
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -423,13 +431,13 @@ export class LocalStorageAdapter implements ApiAdapter {
       scope: current.metadata.scope ?? 'global',
       description: current.metadata.description ?? '',
       inferred: current.metadata.inferred ?? false,
-      syncStatus: current.metadata.syncStatus ?? 'not-synced',
+      syncStatus: normalizeSchemaSyncStatusForStorage(current.metadata.syncStatus ?? 'sync-failed'),
     };
 
     const didUpdateContent = input.content !== undefined;
     const nextSyncStatus =
       didUpdateContent && currentMetadata.syncStatus === 'synced'
-        ? 'local-changes'
+        ? 'sync-failed'
         : currentMetadata.syncStatus;
 
     const nextMetadata: SchemaMetadata = {

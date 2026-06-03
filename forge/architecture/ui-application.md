@@ -2335,7 +2335,7 @@ Schema editing is intentionally split into three layers:
 
 This separation keeps row-level interactions deterministic/testable while concentrating persistence concerns in a single hook.
 
-### Project Overview CDM link flow (FS-076)
+### Project Overview CDM link flow (FS-076 / FS-078)
 
 Project Overview includes a CDM linking path in schema management:
 
@@ -2345,14 +2345,14 @@ Project Overview includes a CDM linking path in schema management:
 
 CDM-linked cards in Project Overview:
 
-- Show CDM/read-only provenance and sync-state badges driven by `metadata.syncStatus`.
+- Show canonical CDM provenance label `CDM (KBXT/KBX-Canonicals)` and sync-state badges driven by `metadata.syncStatus`.
 - Hide remove action for CDM entries to enforce read-only behavior at the project schema surface.
 
 ### Action visibility rules (origin x scope x format)
 
-Current implementation in `SchemaActions` uses metadata-driven conditional rendering:
+Current implementation in `SchemaActions` and shared CDM action policy utilities (`cdm-action-policy`) uses metadata/surface-driven conditional rendering:
 
-- CDM schemas: Re-sync (active) and View Raw only; edit/replace/remove/promote/sync-to-GitHub actions are hidden
+- CDM schemas in **Schema Detail**: Re-sync (active) and View Raw only; edit/replace/remove/promote/sync-to-GitHub actions are hidden
 - Non-CDM schemas:
   - Edit when `format === 'json-schema'` and not already editing
   - Auto-describe (placeholder)
@@ -2362,13 +2362,37 @@ Current implementation in `SchemaActions` uses metadata-driven conditional rende
   - View Raw
 - `scope === 'project'`: additional Promote to Global action + confirm flow
 
+FS-078 surface policy clarifications:
+
+- **Project Overview:** View, Re-sync, Unlink (project-link scoped)
+- **Schema Detail:** View Raw and Re-sync only (no Unlink)
+- **Schema Library:** navigation-first cards (no inline Re-sync action on cards)
+
 Promote/Remove flows use shared `ConfirmDialog` and adapter mutations (`updateSchema`, `deleteSchema`) with post-action page refresh/navigation.
 
 CDM sync-state presentation contract:
 
-- `SchemaGitStatus` renders CDM sync states from metadata (`syncStatus`) including `synced`, `update-available`, and `sync-failed`.
+- `SchemaGitStatus` and shared schema presentation primitives render canonical CDM sync states from metadata (`syncStatus`) including `synced`, `update-available`, and `sync-failed`.
 - Schema detail load performs best-effort status-refresh read (`syncCdmSchema(..., { statusOnly: true })`) followed by metadata re-fetch for trustworthy passive status display.
 - Explicit Re-sync action remains manual-only and does not imply background auto-sync.
+
+### FS-078 canonical CDM UX consistency contract (Rev 2)
+
+Cross-surface invariants for `origin === 'cdm'`:
+
+- **Canonical origin label:** all schema surfaces (Project Overview, Schema Library, Schema Detail) show `CDM (KBXT/KBX-Canonicals)`.
+- **Canonical sync badges:** all schema surfaces use the same UI status meanings:
+  - `synced` -> `✓ Synced`
+  - `update-available` -> `⚠ Update available`
+  - `sync-failed` -> `⚠ Sync failed`
+- **Consistent Re-sync semantics:** where Re-sync is surfaced (Project Overview, Schema Detail), action label is `Re-sync` and success/failure feedback copy is standardized.
+- **Strict Schema Detail read-only posture for CDM:** no inline metadata edit, no tree edit mode, no replace-file flow, and no mutate-capable actions beyond explicit Re-sync.
+- **Unlink scope constraint:** Unlink is available only in Project Overview (project association context), never in Schema Detail.
+
+UI consumption contract notes:
+
+- Backend is the canonical source of CDM sync-status normalization.
+- UI consumes canonical enum values for primary rendering; defensive display fallback maps unknown/legacy status values to `sync-failed` to preserve cross-surface safety and consistency.
 
 ### UI preference storage vs domain storage
 

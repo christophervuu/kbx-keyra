@@ -19,6 +19,7 @@ export interface SchemaCardData {
   readonly name: string;
   readonly format: string;
   readonly origin: string;
+  readonly sourceType: 'github' | 'upload';
   readonly scope: SchemaScope;
   readonly fieldCount: number;
   readonly syncStatus: string;

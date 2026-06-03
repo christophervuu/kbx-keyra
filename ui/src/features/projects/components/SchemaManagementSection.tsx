@@ -92,6 +92,7 @@ export interface SchemaManagementSectionProps {
   onUpload: () => void;
   onLink: (ref: SchemaRef) => Promise<void>;
   onRemove: (schemaId: string) => Promise<void>;
+  onResync: (schemaId: string) => Promise<{ message: string }>;
   onView: (schemaId: string) => void;
   mappingsReferencingSchema: (schemaId: string) => string[];
 }
@@ -109,11 +110,16 @@ export function SchemaManagementSection({
   onUpload,
   onLink,
   onRemove,
+  onResync,
   onView,
   mappingsReferencingSchema,
 }: SchemaManagementSectionProps) {
   const [removeTarget, setRemoveTarget] = useState<SchemaCardData | null>(null);
   const [showLinkPicker, setShowLinkPicker] = useState(false);
+  const [resyncingSchemaId, setResyncingSchemaId] = useState<string | null>(null);
+  const [resyncFeedbackBySchemaId, setResyncFeedbackBySchemaId] = useState<
+    Record<string, { type: 'success' | 'error'; message: string }>
+  >({});
 
   function handleRemoveClick(schemaId: string) {
     const schema = schemas.find((s) => s.schemaId === schemaId) ?? null;
@@ -129,6 +135,36 @@ export function SchemaManagementSection({
   async function handleLinkConfirm(ref: SchemaRef) {
     setShowLinkPicker(false);
     await onLink(ref);
+  }
+
+  async function handleResync(schemaId: string) {
+    setResyncingSchemaId(schemaId);
+    setResyncFeedbackBySchemaId((prev) => {
+      const next = { ...prev };
+      delete next[schemaId];
+      return next;
+    });
+
+    try {
+      const result = await onResync(schemaId);
+      setResyncFeedbackBySchemaId((prev) => ({
+        ...prev,
+        [schemaId]: {
+          type: 'success',
+          message: result.message || 'Schema re-synced from CDM source.',
+        },
+      }));
+    } catch {
+      setResyncFeedbackBySchemaId((prev) => ({
+        ...prev,
+        [schemaId]: {
+          type: 'error',
+          message: 'Unable to re-sync right now. Please verify repository access and try again.',
+        },
+      }));
+    } finally {
+      setResyncingSchemaId(null);
+    }
   }
 
   const attachedIds = schemas.map((s) => s.schemaId);
@@ -195,6 +231,9 @@ export function SchemaManagementSection({
               usageCount={mappingsReferencingSchema(schema.schemaId).length}
               onView={onView}
               onRemove={handleRemoveClick}
+              onResync={handleResync}
+              isResyncing={resyncingSchemaId === schema.schemaId}
+              resyncFeedback={resyncFeedbackBySchemaId[schema.schemaId] ?? null}
             />
           ))}
         </div>

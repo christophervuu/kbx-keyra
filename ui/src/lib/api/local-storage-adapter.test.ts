@@ -216,7 +216,7 @@ describe('LocalStorageAdapter', () => {
     }
   });
 
-  it("updateSchema content changes move synced schema to 'local-changes'", async () => {
+  it("updateSchema content changes move synced schema to 'sync-failed'", async () => {
     const adapter = new LocalStorageAdapter();
 
     const created = await adapter.createSchema({
@@ -231,7 +231,7 @@ describe('LocalStorageAdapter', () => {
       content: { type: 'object', properties: { id: { type: 'number' } } },
     });
 
-    expect(updated.syncStatus).toBe('local-changes');
+    expect(updated.syncStatus).toBe('sync-failed');
   });
 
   it('performs mapping create/list/get/update/delete and duplicate', async () => {
@@ -352,7 +352,7 @@ describe('LocalStorageAdapter', () => {
       fieldCount: 1,
       status: 'ready',
       scope: 'global',
-      syncStatus: 'not-synced',
+      syncStatus: 'sync-failed',
       source: { type: 'upload' },
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -387,7 +387,7 @@ describe('LocalStorageAdapter', () => {
       origin: 'legacy-origin',
       status: 'ready',
       scope: 'global',
-      syncStatus: 'not-synced',
+      syncStatus: 'sync-failed',
       source: { type: 'upload' },
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',

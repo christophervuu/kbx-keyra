@@ -5,6 +5,7 @@ import { InferredSchemaBanner } from './InferredSchemaBanner';
 import { ReplaceFileDialog } from './ReplaceFileDialog';
 import { SchemaActions } from './SchemaActions';
 import { SchemaGitStatus } from './SchemaGitStatus';
+import { getSchemaOriginLabel } from './SchemaPresentationPrimitives';
 import { SchemaTreeView } from './SchemaTreeView';
 import { SchemaUsageSection } from './SchemaUsageSection';
 import { ViewRawModal } from './ViewRawModal';
@@ -36,7 +37,7 @@ function OriginBadge({ origin }: { origin: SchemaMetadata['origin'] }) {
     local: 'bg-slate-700 text-slate-300 border border-slate-600',
   };
   const labels: Record<SchemaMetadata['origin'], string> = {
-    cdm: 'CDM',
+    cdm: getSchemaOriginLabel('cdm'),
     published: 'Published',
     local: 'Local',
   };
@@ -333,12 +334,20 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
         onUpdateDescription={(description) => updateMetadata({ description })}
       />
 
+      {metadata.origin === 'cdm' && (
+        <div
+          role="status"
+          data-testid="cdm-read-only-note"
+          className="border-b border-slate-800 bg-slate-950 px-6 py-3 text-sm text-slate-400"
+        >
+          CDM schema is read-only in Schema Detail. Use Re-sync to refresh from source.
+        </div>
+      )}
+
       {/* Section: Git Status */}
       <SchemaGitStatus
         source={metadata.source}
-        origin={metadata.origin}
         syncStatus={metadata.syncStatus}
-        hasLocalChanges={metadata.syncStatus === 'local-changes'}
         lastSyncedAt={metadata.updatedAt}
       />
 

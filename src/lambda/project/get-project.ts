@@ -10,6 +10,7 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import { normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
 
 interface SchemaRef {
   readonly schemaId: string;
@@ -127,7 +128,10 @@ async function loadSchemas(schemaIds: readonly string[]): Promise<SchemaMetadata
     });
 
     if (schema) {
-      schemas.push(schema);
+      schemas.push({
+        ...schema,
+        syncStatus: normalizeSchemaSyncStatus(schema.syncStatus),
+      });
     }
   }
 

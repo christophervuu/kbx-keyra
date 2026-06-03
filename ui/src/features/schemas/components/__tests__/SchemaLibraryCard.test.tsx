@@ -116,9 +116,9 @@ describe('SchemaLibraryCard', () => {
   // Origin badges
   // -------------------------------------------------------------------------
 
-  it('renders CDM origin badge with correct text', () => {
+  it('renders CDM origin badge with canonical text', () => {
     renderCard(makeItem({ origin: 'cdm' }));
-    expect(screen.getByText('CDM')).toBeInTheDocument();
+    expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
   });
 
   it('renders Published origin badge with correct text', () => {
@@ -131,7 +131,7 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByText('Local')).toBeInTheDocument();
   });
 
-  it('renders Unknown origin badge for malformed origin values', () => {
+  it('falls back to Unknown label for malformed origin values', () => {
     renderCard(
       makeItem({
         origin: 'legacy-origin' as unknown as SchemaLibraryItem['origin'],
@@ -142,7 +142,7 @@ describe('SchemaLibraryCard', () => {
 
   it('CDM badge has purple styling', () => {
     renderCard(makeItem({ origin: 'cdm' }));
-    const badge = screen.getByText('CDM').closest('span');
+    const badge = screen.getByText('CDM (KBXT/KBX-Canonicals)').closest('span');
     expect(badge?.className).toContain('bg-purple-100');
     expect(badge?.className).toContain('text-purple-800');
   });
@@ -185,14 +185,16 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByTestId('sync-status-synced')).toHaveTextContent('Synced');
   });
 
-  it('renders not-synced indicator', () => {
-    renderCard(makeItem({ syncStatus: 'not-synced' }));
-    expect(screen.getByTestId('sync-status-not-synced')).toBeInTheDocument();
+  it('renders update-available indicator', () => {
+    renderCard(makeItem({ syncStatus: 'update-available' }));
+    expect(screen.getByTestId('sync-status-update-available')).toBeInTheDocument();
+    expect(screen.getByText('Update available')).toBeInTheDocument();
   });
 
-  it('renders local-changes indicator', () => {
-    renderCard(makeItem({ syncStatus: 'local-changes' }));
-    expect(screen.getByTestId('sync-status-local-changes')).toBeInTheDocument();
+  it('renders sync-failed indicator', () => {
+    renderCard(makeItem({ syncStatus: 'sync-failed' }));
+    expect(screen.getByTestId('sync-status-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
   it('renders inferred indicator', () => {

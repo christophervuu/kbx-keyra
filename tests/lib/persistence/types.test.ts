@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+  normalizeSchemaSyncStatus,
   toMappingMetadata,
   toProjectDetail,
   toProjectMetadata,
@@ -71,7 +72,7 @@ type DomainSchemaMetadata = {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
-  readonly syncStatus: 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
+  readonly syncStatus: 'synced' | 'update-available' | 'sync-failed';
   readonly source:
     | { readonly type: 'upload' }
     | {
@@ -106,6 +107,16 @@ type DomainSchemaSyncResult = {
 };
 
 describe('persistence types', () => {
+  it('normalizes legacy/unknown sync statuses to canonical values', () => {
+    expect(normalizeSchemaSyncStatus('synced')).toBe('synced');
+    expect(normalizeSchemaSyncStatus('update-available')).toBe('update-available');
+    expect(normalizeSchemaSyncStatus('sync-failed')).toBe('sync-failed');
+    expect(normalizeSchemaSyncStatus('not-synced')).toBe('sync-failed');
+    expect(normalizeSchemaSyncStatus('local-changes')).toBe('sync-failed');
+    expect(normalizeSchemaSyncStatus('mystery-status')).toBe('sync-failed');
+    expect(normalizeSchemaSyncStatus(undefined)).toBe('sync-failed');
+  });
+
   it('project item includes all domain project fields', () => {
     expectTypeOf<ProjectItem>().toMatchTypeOf<DomainProject>();
   });

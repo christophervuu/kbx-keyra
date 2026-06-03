@@ -1,10 +1,15 @@
 // SchemaLibraryCard — Single schema card for the Schema Library page (FS-016 T-02)
 
+import type { KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { PATHS } from '@/routes/paths';
-
 import type { SchemaLibraryItem, SyncStatus } from '../types';
+
+import {
+  SchemaSyncStatusBadge,
+  getSchemaOriginLabel,
+} from '@/features/schemas/components/SchemaPresentationPrimitives';
+import { PATHS } from '@/routes/paths';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -18,7 +23,7 @@ const ORIGIN_CONFIG: Record<
   SchemaLibraryItem['origin'],
   { emoji: string; label: string; className: string }
 > = {
-  cdm: { emoji: '📚', label: 'CDM', className: 'bg-purple-100 text-purple-800' },
+  cdm: { emoji: '📚', label: getSchemaOriginLabel('cdm'), className: 'bg-purple-100 text-purple-800' },
   published: { emoji: '📄', label: 'Published', className: 'bg-blue-100 text-blue-800' },
   local: { emoji: '💾', label: 'Local', className: 'bg-green-100 text-green-800' },
 };
@@ -56,36 +61,16 @@ function ScopeBadge({ scope }: ScopeBadgeProps) {
   );
 }
 
-interface SyncStatusIndicatorProps {
-  status: SyncStatus;
-}
-
 const SYNC_STATUS_CONFIG: Record<
   SyncStatus,
-  { symbol: string; className: string; label: string } | null
+  true | null
 > = {
-  synced: { symbol: '✓', className: 'text-green-600', label: 'Synced' },
-  'not-synced': { symbol: '⚠', className: 'text-amber-600', label: 'Not synced' },
-  'local-changes': { symbol: '⚠', className: 'text-amber-600', label: 'Local changes' },
-  inferred: { symbol: '⚠', className: 'text-amber-600', label: 'Inferred' },
+  synced: true,
+  'update-available': true,
+  'sync-failed': true,
+  inferred: true,
   local: null, // no indicator for upload-only schemas
 };
-
-function SyncStatusIndicator({ status }: SyncStatusIndicatorProps) {
-  const config = SYNC_STATUS_CONFIG[status];
-  if (!config) return null;
-
-  return (
-    <span
-      className={`inline-flex items-center gap-0.5 text-xs font-medium ${config.className}`}
-      aria-label={config.label}
-      data-testid={`sync-status-${status}`}
-    >
-      <span aria-hidden="true">{config.symbol}</span>
-      {config.label}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // SchemaLibraryCard
@@ -112,7 +97,7 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
     navigate(PATHS.SCHEMA_DETAIL.replace(':schemaId', item.schemaId));
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+  function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       handleNavigate();
@@ -151,7 +136,22 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
         {SYNC_STATUS_CONFIG[item.syncStatus] !== null && (
           <>
             <span aria-hidden="true">·</span>
-            <SyncStatusIndicator status={item.syncStatus} />
+            {item.syncStatus === 'inferred' ? (
+              <span
+                className="inline-flex items-center gap-0.5 text-xs font-medium text-amber-600"
+                aria-label="Inferred"
+                data-testid="sync-status-inferred"
+              >
+                <span aria-hidden="true">⚠</span>
+                <span>Inferred</span>
+              </span>
+            ) : (
+              <SchemaSyncStatusBadge
+                status={item.syncStatus}
+                className="text-xs"
+                dataTestIdPrefix="sync-status"
+              />
+            )}
           </>
         )}
       </div>

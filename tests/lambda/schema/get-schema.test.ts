@@ -36,7 +36,7 @@ describe('get-schema handler', () => {
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('schema-1');
-    sharedMocks.getItem.mockReset().mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getItem.mockReset().mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema', syncStatus: 'local-changes' });
     sharedMocks.getObject.mockReset().mockResolvedValue(JSON.stringify({ type: 'object', properties: {} }));
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
@@ -51,6 +51,7 @@ describe('get-schema handler', () => {
     expect(result.statusCode).toBe(200);
     const parsed = JSON.parse(result.body) as { metadata: { schemaId: string }; content: Record<string, unknown> };
     expect(parsed.metadata.schemaId).toBe('schema-1');
+    expect((parsed.metadata as { syncStatus?: string }).syncStatus).toBe('sync-failed');
     expect(typeof parsed.content).toBe('object');
   });
 

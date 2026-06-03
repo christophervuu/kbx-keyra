@@ -1,8 +1,5 @@
 // SchemaLibraryPage — Assembled Schema Library page (FS-016 T-04)
 
-import { PageHeader } from '@/components/PageHeader';
-
-import { useSchemaLibrary } from '../hooks/use-schema-library';
 import { ActiveFilterChips } from './ActiveFilterChips';
 import { SchemaLibraryCard } from './SchemaLibraryCard';
 import { SchemaLibraryEmptyState } from './SchemaLibraryEmptyState';
@@ -11,6 +8,9 @@ import { SchemaLibraryNoResults } from './SchemaLibraryNoResults';
 import { SchemaLibrarySearch } from './SchemaLibrarySearch';
 import { SchemaLibrarySkeleton } from './SchemaLibrarySkeleton';
 import { SchemaLibrarySortControl } from './SchemaLibrarySortControl';
+import { useSchemaLibrary } from '../hooks/use-schema-library';
+
+import { PageHeader } from '@/components/PageHeader';
 
 export function SchemaLibraryPage() {
   const {

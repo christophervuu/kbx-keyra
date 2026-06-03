@@ -34,3 +34,8 @@ export type { SchemaLibraryNoResultsProps } from './SchemaLibraryNoResults';
 export { SchemaLibrarySkeleton } from './SchemaLibrarySkeleton';
 export { SchemaLibraryEmptyState } from './SchemaLibraryEmptyState';
 export { SchemaLibraryPage } from './SchemaLibraryPage';
+export {
+  SchemaSyncStatusBadge,
+  getSchemaOriginLabel,
+  normalizeSchemaSyncStatusForDisplay,
+} from './SchemaPresentationPrimitives';

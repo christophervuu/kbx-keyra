@@ -3,11 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+import { SchemaDetailPage } from '../SchemaDetailPage';
+
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaDetail } from '@/lib/types/domain';
-
-import { SchemaDetailPage } from '../SchemaDetailPage';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -50,7 +50,7 @@ const LOCAL_SCHEMA: SchemaDetail = {
     description: 'A local schema',
     updatedBy: 'local-user',
     inferred: false,
-    syncStatus: 'not-synced',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-10T00:00:00Z',
@@ -163,7 +163,7 @@ describe('SchemaDetailPage', () => {
     });
 
     // CDM badge
-    expect(screen.getByText('CDM')).toBeInTheDocument();
+    expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
     // Global scope badge
     expect(screen.getByText('Global')).toBeInTheDocument();
     // Field count
@@ -172,6 +172,9 @@ describe('SchemaDetailPage', () => {
     expect(screen.getByText('JSON Schema')).toBeInTheDocument();
     // Description (read-only plain text)
     expect(screen.getByText('CDM customer object')).toBeInTheDocument();
+    expect(screen.getByTestId('cdm-read-only-note')).toHaveTextContent(
+      'CDM schema is read-only in Schema Detail. Use Re-sync to refresh from source.',
+    );
 
     // Name heading should NOT be a button (read-only for CDM)
     const heading = screen.getByRole('heading', { level: 1, name: 'CDM Customer' });
@@ -368,6 +371,23 @@ describe('SchemaDetailPage', () => {
 
     expect(screen.queryByTestId('edit-schema-button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('editing-banner')).not.toBeInTheDocument();
+  });
+
+  it('CDM schema actions are limited to Re-sync and View Raw', async () => {
+    adapter = createMockAdapter({ getSchema: vi.fn().mockResolvedValue(CDM_SCHEMA) });
+    renderPage(adapter, 'schema-cdm-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-detail-actions')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('action-resync')).toBeInTheDocument();
+    expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
+    expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-promote')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
   });
 
   it('XSD format schema does not show edit mode controls', async () => {

@@ -10,6 +10,7 @@ const SCHEMA: SchemaCardData = {
   name: 'Customer Schema',
   format: 'json-schema',
   origin: 'local',
+  sourceType: 'upload',
   scope: 'project-level',
   fieldCount: 12,
   syncStatus: 'synced',
@@ -71,19 +72,29 @@ describe('SchemaCard', () => {
     expect(onView).toHaveBeenCalledWith('schema-1');
   });
 
-  it('calls onRemove with schemaId when Remove button clicked', async () => {
+  it('calls onRemove with schemaId when Unlink button clicked', async () => {
     const onRemove = vi.fn();
     const user = userEvent.setup();
     render(
       <SchemaCard schema={SCHEMA} usageCount={0} onView={vi.fn()} onRemove={onRemove} />,
     );
-    await user.click(screen.getByRole('button', { name: /remove schema customer schema/i }));
+    await user.click(screen.getByRole('button', { name: /unlink schema customer schema/i }));
     expect(onRemove).toHaveBeenCalledWith('schema-1');
   });
 
-  it('hides Remove action for CDM schemas (read-only enforcement)', () => {
+  it('shows Unlink action for CDM schemas (project-scoped unlink is allowed)', () => {
     renderCard({ origin: 'cdm' });
-    expect(screen.queryByRole('button', { name: /remove schema customer schema/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /unlink schema customer schema/i })).toBeInTheDocument();
+  });
+
+  it('shows Re-sync action for CDM github schemas', () => {
+    renderCard({ origin: 'cdm', sourceType: 'github' });
+    expect(screen.getByRole('button', { name: /re-sync schema customer schema/i })).toBeInTheDocument();
+  });
+
+  it('hides Re-sync action for upload-backed schemas', () => {
+    renderCard({ origin: 'local', sourceType: 'upload' });
+    expect(screen.queryByRole('button', { name: /re-sync schema customer schema/i })).not.toBeInTheDocument();
   });
 
   // AE-13: color-coded origin badges
@@ -91,7 +102,7 @@ describe('SchemaCard', () => {
     renderCard({ origin: 'cdm' });
     const badge = screen.getByTestId('origin-badge-cdm');
     expect(badge).toBeInTheDocument();
-    expect(badge).toHaveTextContent('CDM');
+    expect(badge).toHaveTextContent('CDM (KBXT/KBX-Canonicals)');
     expect(badge).toHaveClass('bg-blue-100');
     expect(badge).toHaveClass('text-blue-800');
   });
@@ -130,18 +141,6 @@ describe('SchemaCard', () => {
     expect(screen.getByText('Synced')).toBeInTheDocument();
   });
 
-  it('AE-13: shows "Not synced" indicator for not-synced non-local schema', () => {
-    renderCard({ origin: 'cdm', syncStatus: 'not-synced' });
-    expect(screen.getByTestId('sync-status-not-synced')).toBeInTheDocument();
-    expect(screen.getByText('Not synced')).toBeInTheDocument();
-  });
-
-  it('AE-13: shows "Local changes" indicator for local-changes non-local schema', () => {
-    renderCard({ origin: 'published', syncStatus: 'local-changes' });
-    expect(screen.getByTestId('sync-status-local-changes')).toBeInTheDocument();
-    expect(screen.getByText('Local changes')).toBeInTheDocument();
-  });
-
   it('AE-13: shows "Update available" indicator for update-available non-local schema', () => {
     renderCard({ origin: 'cdm', syncStatus: 'update-available' });
     expect(screen.getByTestId('sync-status-update-available')).toBeInTheDocument();
@@ -155,9 +154,9 @@ describe('SchemaCard', () => {
   });
 
   it('AE-13: no sync indicator for local-origin schemas', () => {
-    renderCard({ origin: 'local', syncStatus: 'not-synced' });
+    renderCard({ origin: 'local', syncStatus: 'sync-failed' });
     expect(screen.queryByTestId(/sync-status/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Not synced')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sync failed')).not.toBeInTheDocument();
   });
 
   // Usage count

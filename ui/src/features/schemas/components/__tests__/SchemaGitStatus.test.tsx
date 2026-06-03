@@ -27,7 +27,7 @@ const UPLOAD_SOURCE: UploadSourceInfo = {
 
 describe('SchemaGitStatus', () => {
   it('renders "local schema" message for upload source', () => {
-    render(<SchemaGitStatus source={UPLOAD_SOURCE} origin="local" />);
+    render(<SchemaGitStatus source={UPLOAD_SOURCE} syncStatus="sync-failed" />);
     expect(screen.getByTestId('git-status-local-only')).toBeInTheDocument();
     expect(screen.getByText(/local schema.*not connected/i)).toBeInTheDocument();
   });
@@ -36,7 +36,7 @@ describe('SchemaGitStatus', () => {
     render(
       <SchemaGitStatus
         source={GITHUB_SOURCE}
-        origin="cdm"
+        syncStatus="synced"
         lastSyncedAt="2026-04-01T12:00:00Z"
       />,
     );
@@ -49,54 +49,53 @@ describe('SchemaGitStatus', () => {
   });
 
   it('shows synced indicator for CDM schema with commitSha', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" syncStatus="synced" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="synced" />);
     expect(screen.getByTestId('git-status-indicator-synced')).toBeInTheDocument();
     expect(screen.getByText('Synced')).toBeInTheDocument();
   });
 
   it('shows update-available indicator', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" syncStatus="update-available" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="update-available" />);
     expect(screen.getByTestId('git-status-indicator-update-available')).toBeInTheDocument();
     expect(screen.getByText('Update available')).toBeInTheDocument();
   });
 
   it('shows sync-failed indicator', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" syncStatus="sync-failed" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="sync-failed" />);
     expect(screen.getByTestId('git-status-indicator-sync-failed')).toBeInTheDocument();
     expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
   it('shows synced indicator for published schema with commitSha', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="published" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="synced" />);
     expect(screen.getByTestId('git-status-indicator-synced')).toBeInTheDocument();
   });
 
-  it('shows not-synced indicator for published schema without commitSha', () => {
-    const sourceNoSha: GitHubSourceInfo = { ...GITHUB_SOURCE, commitSha: undefined };
-    render(<SchemaGitStatus source={sourceNoSha} origin="published" />);
-    expect(screen.getByTestId('git-status-indicator-not-synced')).toBeInTheDocument();
-    expect(screen.getByText('Not synced')).toBeInTheDocument();
+  it('shows sync-failed indicator for published schema with failure status', () => {
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="sync-failed" />);
+    expect(screen.getByTestId('git-status-indicator-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
-  it('shows local-changes indicator when hasLocalChanges is true', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" hasLocalChanges />);
-    expect(screen.getByTestId('git-status-indicator-local-changes')).toBeInTheDocument();
-    expect(screen.getByText('Local changes')).toBeInTheDocument();
+  it('shows update-available indicator for canonical status', () => {
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="update-available" />);
+    expect(screen.getByTestId('git-status-indicator-update-available')).toBeInTheDocument();
+    expect(screen.getByText('Update available')).toBeInTheDocument();
   });
 
   it('shows "—" for commit when commitSha is absent', () => {
     const sourceNoSha: GitHubSourceInfo = { ...GITHUB_SOURCE, commitSha: undefined };
-    render(<SchemaGitStatus source={sourceNoSha} origin="published" />);
+    render(<SchemaGitStatus source={sourceNoSha} syncStatus="sync-failed" />);
     expect(screen.getByTestId('git-status-commit')).toHaveTextContent('—');
   });
 
   it('does not render last-synced row when lastSyncedAt is not provided', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="synced" />);
     expect(screen.queryByTestId('git-status-last-synced')).not.toBeInTheDocument();
   });
 
   it('has accessible section label', () => {
-    render(<SchemaGitStatus source={GITHUB_SOURCE} origin="cdm" />);
+    render(<SchemaGitStatus source={GITHUB_SOURCE} syncStatus="synced" />);
     expect(screen.getByRole('region', { name: /repository status/i })).toBeInTheDocument();
   });
 });

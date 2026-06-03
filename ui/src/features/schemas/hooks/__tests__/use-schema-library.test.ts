@@ -21,7 +21,7 @@ function makeSchemaMeta(overrides: Partial<SchemaMetadata> = {}): SchemaMetadata
     origin: 'local',
     status: 'ready',
     scope: 'project',
-    syncStatus: 'local-changes',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
@@ -252,20 +252,22 @@ describe('useSchemaLibrary', () => {
       expect(await getStatus(s)).toBe('local');
     });
 
-    it('github source with commitSha → synced', async () => {
+    it('github source uses backend sync status (synced)', async () => {
       const s = makeSchemaMeta({
         source: { type: 'github', repo: 'r', branch: 'main', path: '/x.json', commitSha: 'abc123' },
         inferred: false,
+        syncStatus: 'synced',
       });
       expect(await getStatus(s)).toBe('synced');
     });
 
-    it('github source without commitSha → not-synced', async () => {
+    it('github source without commitSha uses schema sync status from backend contract', async () => {
       const s = makeSchemaMeta({
         source: { type: 'github', repo: 'r', branch: 'main', path: '/x.json' },
         inferred: false,
+        syncStatus: 'sync-failed',
       });
-      expect(await getStatus(s)).toBe('not-synced');
+      expect(await getStatus(s)).toBe('sync-failed');
     });
 
     it('inferred schema → inferred (takes priority over source)', async () => {

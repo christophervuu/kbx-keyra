@@ -6,6 +6,7 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import { normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
 
 interface SchemaMetadata {
   readonly schemaId: string;
@@ -49,7 +50,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       TableName: getSchemasTableOrThrow(),
     });
 
-    return jsonResponse(200, schemas);
+    const normalizedSchemas = schemas.map((schema) => ({
+      ...schema,
+      syncStatus: normalizeSchemaSyncStatus(schema.syncStatus),
+    }));
+
+    return jsonResponse(200, normalizedSchemas);
   } catch {
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);

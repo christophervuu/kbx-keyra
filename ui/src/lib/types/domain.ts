@@ -17,20 +17,15 @@ export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 export type SchemaScope = 'global' | 'project';
 
 /**
- * Canonical CDM sync states (FS-076):
+ * Canonical sync states exposed to UI consumers (FS-078 T-01):
  * - synced
  * - update-available
  * - sync-failed
- *
- * Legacy values are retained for backward compatibility with existing
- * local/published schema records until migration is complete.
  */
 export type SchemaSyncStatus =
   | 'synced'
   | 'update-available'
-  | 'sync-failed'
-  | 'not-synced'
-  | 'local-changes';
+  | 'sync-failed';
 
 export type MappingStatus = 'draft' | 'ready' | 'has-errors';
 

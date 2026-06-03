@@ -3,13 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+import { ProjectOverviewPage } from '../ProjectOverviewPage';
+
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
-
-import { ProjectOverviewPage } from '../ProjectOverviewPage';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -83,6 +83,11 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    getCurrentDeployments: vi.fn().mockResolvedValue({
+      DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
+      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+    }),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),

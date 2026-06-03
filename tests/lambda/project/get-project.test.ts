@@ -57,7 +57,7 @@ describe('get-project handler', () => {
         updatedAt: '2026-05-15T00:00:00.000Z',
       })
       .mockResolvedValueOnce({ schemaId: 'schema-1', name: 'S1' })
-      .mockResolvedValueOnce({ schemaId: 'schema-2', name: 'S2' });
+      .mockResolvedValueOnce({ schemaId: 'schema-2', name: 'S2', syncStatus: 'local-changes' });
     sharedMocks.query.mockResolvedValueOnce([{ mappingId: 'map-1', projectId: 'proj-1', name: 'Map1' }]);
 
     const { handler } = await importHandler();
@@ -67,6 +67,7 @@ describe('get-project handler', () => {
     const parsed = JSON.parse(result.body) as { mappings: unknown[]; schemas: unknown[] };
     expect(Array.isArray(parsed.mappings)).toBe(true);
     expect(Array.isArray(parsed.schemas)).toBe(true);
+    expect((parsed.schemas[1] as { syncStatus?: string }).syncStatus).toBe('sync-failed');
   });
 
   it('not found returns 404 standard envelope', async () => {
