@@ -14,25 +14,25 @@ import type { ComparisonMode } from '@/lib/types';
 const ALL_AVAILABLE: Record<ComparisonMode, ModeAvailabilityEntry> = {
   'current-vs-saved': { available: true },
   'current-vs-dev': { available: true },
-  'current-vs-qa': { available: true },
-  'dev-vs-qa': { available: true },
-  'qa-vs-prod': { available: true },
+  'current-vs-preprod': { available: true },
+  'dev-vs-preprod': { available: true },
+  'preprod-vs-prod': { available: true },
 };
 
 const PHASE_0_AVAILABILITY: Record<ComparisonMode, ModeAvailabilityEntry> = {
   'current-vs-saved': { available: true },
   'current-vs-dev': { available: false, reason: 'requires backend connection' },
-  'current-vs-qa': { available: false, reason: 'requires backend connection' },
-  'dev-vs-qa': { available: false, reason: 'requires backend connection' },
-  'qa-vs-prod': { available: false, reason: 'requires backend connection' },
+  'current-vs-preprod': { available: false, reason: 'requires backend connection' },
+  'dev-vs-preprod': { available: false, reason: 'requires backend connection' },
+  'preprod-vs-prod': { available: false, reason: 'requires backend connection' },
 };
 
 const MIXED_AVAILABILITY: Record<ComparisonMode, ModeAvailabilityEntry> = {
   'current-vs-saved': { available: true },
   'current-vs-dev': { available: true },
-  'current-vs-qa': { available: false, reason: 'QA has no active deployment' },
-  'dev-vs-qa': { available: false, reason: 'QA has no active deployment' },
-  'qa-vs-prod': { available: false, reason: 'QA has no active deployment' },
+  'current-vs-preprod': { available: false, reason: 'PREPROD has no active deployment' },
+  'dev-vs-preprod': { available: false, reason: 'PREPROD has no active deployment' },
+  'preprod-vs-prod': { available: false, reason: 'PREPROD has no active deployment' },
 };
 
 function renderSelector(
@@ -56,9 +56,9 @@ describe('ComparisonModeSelector', () => {
 
     expect(screen.getByTestId('comparison-mode-option-current-vs-saved')).toBeInTheDocument();
     expect(screen.getByTestId('comparison-mode-option-current-vs-dev')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-mode-option-current-vs-qa')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-mode-option-dev-vs-qa')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-mode-option-qa-vs-prod')).toBeInTheDocument();
+    expect(screen.getByTestId('comparison-mode-option-current-vs-preprod')).toBeInTheDocument();
+    expect(screen.getByTestId('comparison-mode-option-dev-vs-preprod')).toBeInTheDocument();
+    expect(screen.getByTestId('comparison-mode-option-preprod-vs-prod')).toBeInTheDocument();
   });
 
   it('renders the selector container with correct test-id', () => {
@@ -96,9 +96,9 @@ describe('ComparisonModeSelector', () => {
     renderSelector({ modeAvailability: PHASE_0_AVAILABILITY });
 
     expect(screen.getByTestId('comparison-mode-option-current-vs-dev')).toBeDisabled();
-    expect(screen.getByTestId('comparison-mode-option-current-vs-qa')).toBeDisabled();
-    expect(screen.getByTestId('comparison-mode-option-dev-vs-qa')).toBeDisabled();
-    expect(screen.getByTestId('comparison-mode-option-qa-vs-prod')).toBeDisabled();
+    expect(screen.getByTestId('comparison-mode-option-current-vs-preprod')).toBeDisabled();
+    expect(screen.getByTestId('comparison-mode-option-dev-vs-preprod')).toBeDisabled();
+    expect(screen.getByTestId('comparison-mode-option-preprod-vs-prod')).toBeDisabled();
   });
 
   it('available modes are not disabled', () => {
@@ -133,16 +133,16 @@ describe('ComparisonModeSelector', () => {
 
     expect(screen.getByTestId('comparison-mode-option-current-vs-saved')).not.toBeDisabled();
     expect(screen.getByTestId('comparison-mode-option-current-vs-dev')).not.toBeDisabled();
-    expect(screen.getByTestId('comparison-mode-option-current-vs-qa')).toBeDisabled();
-    expect(screen.getByTestId('comparison-mode-option-dev-vs-qa')).toBeDisabled();
-    expect(screen.getByTestId('comparison-mode-option-qa-vs-prod')).toBeDisabled();
+    expect(screen.getByTestId('comparison-mode-option-current-vs-preprod')).toBeDisabled();
+    expect(screen.getByTestId('comparison-mode-option-dev-vs-preprod')).toBeDisabled();
+    expect(screen.getByTestId('comparison-mode-option-preprod-vs-prod')).toBeDisabled();
   });
 
   it('mixed availability: disabled modes show correct reason', () => {
     renderSelector({ modeAvailability: MIXED_AVAILABILITY });
 
-    const qaOption = screen.getByTestId('comparison-mode-option-current-vs-qa');
-    expect(qaOption).toHaveAttribute('title', 'QA has no active deployment');
+    const preprodOption = screen.getByTestId('comparison-mode-option-current-vs-preprod');
+    expect(preprodOption).toHaveAttribute('title', 'PREPROD has no active deployment');
   });
 
   it('has radiogroup role for accessibility', () => {
@@ -155,6 +155,6 @@ describe('ComparisonModeSelector', () => {
 
     expect(screen.getByTestId('comparison-mode-option-current-vs-saved').textContent).toContain('Current vs Saved');
     expect(screen.getByTestId('comparison-mode-option-current-vs-dev').textContent).toContain('Current vs DEV');
-    expect(screen.getByTestId('comparison-mode-option-qa-vs-prod').textContent).toContain('QA vs PROD');
+    expect(screen.getByTestId('comparison-mode-option-preprod-vs-prod').textContent).toContain('PREPROD vs PROD');
   });
 });

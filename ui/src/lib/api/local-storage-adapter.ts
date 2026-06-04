@@ -110,7 +110,7 @@ interface StoredVersionEntry {
 
 interface CurrentDeploymentsInput {
   readonly DEV?: CurrentDeployment | null;
-  readonly QA?: CurrentDeployment | null;
+  readonly PREPROD?: CurrentDeployment | null;
   readonly PROD?: CurrentDeployment | null;
 }
 
@@ -251,15 +251,20 @@ export class LocalStorageAdapter implements ApiAdapter {
         deployment: currentDeployments.DEV ?? null,
         status: this.computeStaleness(currentDeployments.DEV ?? null, mapping),
       },
-      QA: {
-        environment: 'QA',
-        deployment: currentDeployments.QA ?? null,
-        status: this.computeStaleness(currentDeployments.QA ?? null, mapping),
+      PREPROD: {
+        environment: 'PREPROD',
+        deployment: currentDeployments.PREPROD ?? null,
+        status: this.computeStaleness(currentDeployments.PREPROD ?? null, mapping),
       },
       PROD: {
         environment: 'PROD',
         deployment: currentDeployments.PROD ?? null,
         status: this.computeStaleness(currentDeployments.PROD ?? null, mapping),
+      },
+      QA: {
+        environment: 'PREPROD',
+        deployment: currentDeployments.PREPROD ?? null,
+        status: this.computeStaleness(currentDeployments.PREPROD ?? null, mapping),
       },
     };
   }
@@ -286,7 +291,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   private getCurrentByEnvironment(
     mappingId: string,
-  ): { DEV: CurrentDeployment | null; QA: CurrentDeployment | null; PROD: CurrentDeployment | null } {
+  ): { DEV: CurrentDeployment | null; PREPROD: CurrentDeployment | null; PROD: CurrentDeployment | null } {
     const deployments = this.readDeployments(mappingId);
 
     const latestFor = (environment: Environment): CurrentDeployment | null => {
@@ -299,7 +304,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     return {
       DEV: latestFor('DEV'),
-      QA: latestFor('QA'),
+      PREPROD: latestFor('PREPROD'),
       PROD: latestFor('PROD'),
     };
   }

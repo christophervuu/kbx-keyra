@@ -22,6 +22,7 @@ export {
 } from './mappings.js';
 export {
   create as createDeployment,
+  createRollback as createRollbackDeployment,
   deployments,
   getCurrent as getCurrentDeployment,
   getCurrentAll as getCurrentDeployments,
@@ -81,7 +82,12 @@ export type {
   DeploymentEnvironment,
   DeploymentItem,
   DeploymentSourceType,
+  DeploymentEnvironmentModel,
+  RuntimeDeploymentEnvironment,
+  PersistedDeploymentEnvironment,
+  LegacyRuntimeDeploymentEnvironment,
   CreateDeploymentInput,
+  CreateRollbackDeploymentInput,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaMetadataInput,
@@ -112,5 +118,11 @@ export type {
   UpdateProjectInput,
   UploadSourceInfo,
 } from './types.js';
-export { toMappingMetadata, toProjectDetail, toProjectMetadata, toSchemaMetadata } from './types.js';
+export {
+  normalizeRuntimeDeploymentEnvironment,
+  toMappingMetadata,
+  toProjectDetail,
+  toProjectMetadata,
+  toSchemaMetadata,
+} from './types.js';
 export { computeConfigHash } from './hash.js';

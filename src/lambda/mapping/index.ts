@@ -8,5 +8,6 @@ export { handler as getMappingVersionHandler } from './get-version.js';
 export { handler as listMappingsHandler } from './list-mappings.js';
 export { handler as listMappingRevisionsHandler } from './list-revisions.js';
 export { handler as listMappingVersionsHandler } from './list-versions.js';
+export { handler as previewMappingHandler } from './preview-mapping.js';
 export { handler as saveMappingVersionHandler } from './save-version.js';
 export { handler as updateMappingHandler } from './update-mapping.js';

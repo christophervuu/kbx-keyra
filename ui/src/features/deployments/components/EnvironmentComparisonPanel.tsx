@@ -34,8 +34,8 @@ const statusConfig: Record<
 // ---------------------------------------------------------------------------
 
 const PROMOTE_TARGET: Partial<Record<Environment, Environment>> = {
-  DEV: 'QA',
-  QA: 'PROD',
+  DEV: 'PREPROD',
+  PREPROD: 'PROD',
 };
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ export interface EnvironmentComparisonPanelProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Side-by-side DEV / QA / PROD comparison panel.
+ * Side-by-side DEV / PREPROD / PROD comparison panel.
  *
  * Shows current deployment source, staleness status, and promote button
  * (only for version-backed deployments, AE-07).
@@ -159,7 +159,7 @@ export function EnvironmentComparisonPanel({
   isPromoting,
   onPromote,
 }: EnvironmentComparisonPanelProps) {
-  const environments: Environment[] = ['DEV', 'QA', 'PROD'];
+  const environments: Environment[] = ['DEV', 'PREPROD', 'PROD'];
 
   return (
     <section aria-label="Environment comparison" data-testid="environment-comparison-panel">

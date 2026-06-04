@@ -3,3 +3,15 @@ export { handler as getCurrentDeploymentsHandler } from './get-current-deploymen
 export { handler as listDeploymentsHandler } from './list-deployments.js';
 export { handler as promoteDeploymentHandler } from './promote-deployment.js';
 export { handler as rollbackDeploymentHandler } from './rollback-deployment.js';
+export {
+  assertArtifactPayloadWithinLimit,
+  buildArtifactId,
+  buildRuntimeDeployArtifact,
+  getRuntimeRelayClient,
+  maxDeployArtifactPayloadBytes,
+  type RuntimeDeployArtifact,
+  type RuntimeRelayClient,
+  type RuntimeRelayFailure,
+  type RuntimeRelayResponse,
+  type RuntimeRelayResult,
+} from './runtime-relay.js';

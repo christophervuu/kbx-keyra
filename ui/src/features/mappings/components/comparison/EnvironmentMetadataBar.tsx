@@ -32,10 +32,14 @@ function envBadgeClass(environment: Environment): string {
   switch (environment) {
     case 'DEV':
       return 'bg-green-900/60 text-green-300 border border-green-700/50';
-    case 'QA':
+    case 'PREPROD':
       return 'bg-amber-900/60 text-amber-300 border border-amber-700/50';
     case 'PROD':
       return 'bg-red-900/60 text-red-300 border border-red-700/50';
+    case 'QA':
+      return 'bg-amber-900/60 text-amber-300 border border-amber-700/50';
+    case 'SANDBOX':
+      return 'bg-purple-900/60 text-purple-300 border border-purple-700/50';
   }
 }
 
@@ -47,7 +51,7 @@ function envBadgeClass(environment: Environment): string {
  * Compact metadata bar displayed at the top of each comparison side panel.
  *
  * Shows:
- * - Execution context badge (Client-side in blue, or DEV/QA/PROD in env color)
+ * - Execution context badge (Client-side in blue, or DEV/PREPROD/PROD in env color)
  * - Config/snapshot version
  * - Deployment timestamp (server-side only) with relative time + ISO on hover
  * - Engine version
@@ -61,7 +65,6 @@ export function EnvironmentMetadataBar({ metadata, label }: EnvironmentMetadataB
     executionContext,
     environment,
     configVersion,
-    snapshotVersion,
     deployedAt,
     engineVersion,
     savedAt,
@@ -69,8 +72,10 @@ export function EnvironmentMetadataBar({ metadata, label }: EnvironmentMetadataB
   } = metadata;
 
   const isServer = executionContext === 'server';
-  const version = isServer && snapshotVersion !== undefined
-    ? `Snapshot v${snapshotVersion}`
+  const version = isServer && metadata.sourceType !== undefined
+    ? metadata.sourceType === 'revision'
+      ? `Rev ${metadata.sourceNumber ?? '?'}`
+      : `v${metadata.sourceNumber ?? '?'}`
     : `v${configVersion}`;
 
   return (

@@ -59,9 +59,9 @@ describe.skipIf(!RUN_INTEGRATION)('persistence integration - deployments', () =>
       config: baseConfig,
     });
 
-    const qa = await deployments.create({
+    const preprod = await deployments.create({
       mappingId,
-      environment: 'QA',
+      environment: 'PREPROD',
       sourceType: 'version',
       sourceNumber: 2,
       deployedBy: 'tester',
@@ -72,21 +72,21 @@ describe.skipIf(!RUN_INTEGRATION)('persistence integration - deployments', () =>
     });
 
     expect(dev.environment).toBe('DEV');
-    expect(qa.environment).toBe('QA');
+    expect(preprod.environment).toBe('PREPROD');
 
     const currentDev = await deployments.getCurrent(mappingId, 'DEV');
-    const currentQa = await deployments.getCurrent(mappingId, 'QA');
+    const currentPreprod = await deployments.getCurrent(mappingId, 'PREPROD');
     const currentProd = await deployments.getCurrent(mappingId, 'PROD');
 
     expect(currentDev?.sourceType).toBe('revision');
     expect(currentDev?.sourceNumber).toBe(5);
-    expect(currentQa?.sourceType).toBe('version');
-    expect(currentQa?.sourceNumber).toBe(2);
+    expect(currentPreprod?.sourceType).toBe('version');
+    expect(currentPreprod?.sourceNumber).toBe(2);
     expect(currentProd).toBeNull();
 
     const all = await deployments.getCurrentAll(mappingId);
     expect(all.DEV?.sourceNumber).toBe(5);
-    expect(all.QA?.sourceNumber).toBe(2);
+    expect(all.PREPROD?.sourceNumber).toBe(2);
     expect(all.PROD).toBeNull();
 
     const historyAll = await deployments.listHistory(mappingId);
@@ -96,8 +96,8 @@ describe.skipIf(!RUN_INTEGRATION)('persistence integration - deployments', () =>
     expect(historyDev.length).toBe(1);
     expect(historyDev[0]?.environment).toBe('DEV');
 
-    const historyQa = await deployments.listHistory(mappingId, 'QA', 1);
-    expect(historyQa.length).toBe(1);
-    expect(historyQa[0]?.environment).toBe('QA');
+    const historyPreprod = await deployments.listHistory(mappingId, 'PREPROD', 1);
+    expect(historyPreprod.length).toBe(1);
+    expect(historyPreprod[0]?.environment).toBe('PREPROD');
   }, 45_000);
 });

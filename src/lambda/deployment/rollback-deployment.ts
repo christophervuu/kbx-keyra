@@ -9,11 +9,9 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { create as createDeployment, listHistory } from '../../lib/persistence/deployments.js';
-import { getConfig as getRevisionConfig } from '../../lib/persistence/mapping-revisions.js';
-import { getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
+import { createRollback as createRollbackDeployment, listHistory } from '../../lib/persistence/deployments.js';
 
-type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
+type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 
 interface RollbackRequest {
   readonly environment: DeploymentEnvironment;
@@ -39,7 +37,7 @@ function getMappingsTableOrThrow(): string {
 }
 
 function isEnvironment(value: unknown): value is DeploymentEnvironment {
-  return value === 'DEV' || value === 'QA' || value === 'PROD';
+  return value === 'DEV' || value === 'PREPROD' || value === 'PROD';
 }
 
 function parseRollbackRequest(body: Record<string, unknown> | null): RollbackRequest | null {
@@ -74,7 +72,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   if (!request) {
     return errorResponse(
       ERROR_CODES.VALIDATION_ERROR,
-      'Invalid rollback request body. Expected { environment: DEV|QA|PROD, deploymentSK: string }',
+      'Invalid rollback request body. Expected { environment: DEV|PREPROD|PROD, deploymentSK: string }',
       400,
       false,
     );
@@ -102,28 +100,42 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     }
 
-    const config =
-      target.sourceType === 'revision'
-        ? await getRevisionConfig(mappingId, target.sourceNumber)
-        : await getVersionConfig(mappingId, target.sourceNumber);
-
-    if (!config) {
+    if (!target.configS3Key || !target.configHash) {
       return errorResponse(
         ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
-        `Deployment snapshot config unavailable: ${mappingId}:${request.deploymentSK}`,
+        `Rollback artifact metadata unavailable: ${mappingId}:${request.deploymentSK}`,
         500,
         false,
       );
     }
 
-    const created = await createDeployment({
+    if (!target.artifactId || !target.artifactHash) {
+      return errorResponse(
+        ERROR_CODES.CONFLICT,
+        'artifact_not_available_for_rollback: artifact metadata missing in target environment. Redeploy/promote the desired snapshot first.',
+        409,
+        false,
+        undefined,
+        {
+          reason: 'artifact_not_available_for_rollback',
+          environment: request.environment,
+          deploymentSK: request.deploymentSK,
+          remediation: 'redeploy-or-promote-artifact',
+        },
+      );
+    }
+
+    const created = await createRollbackDeployment({
       mappingId,
       environment: request.environment,
       sourceType: target.sourceType,
       sourceNumber: target.sourceNumber,
       deployedBy: 'system',
+      artifactId: target.artifactId,
+      artifactHash: target.artifactHash,
+      configHash: target.configHash,
+      configS3Key: target.configS3Key,
       rollbackOf: request.deploymentSK,
-      config,
     });
 
     return jsonResponse(201, created);

@@ -30,7 +30,7 @@ const VERSIONS: MappingVersion[] = [
   { version: 1, revisionNumber: 2, createdAt: '2026-01-02T00:00:00Z', createdBy: 'alice' },
 ];
 
-// DEV = version-backed, QA = revision-backed, PROD = not-deployed
+// DEV = version-backed, PREPROD = revision-backed, PROD = not-deployed
 const CURRENT_WITH_MIXED: CurrentDeployments = {
   DEV: {
     environment: 'DEV',
@@ -45,11 +45,11 @@ const CURRENT_WITH_MIXED: CurrentDeployments = {
     },
     status: 'current',
   },
-  QA: {
-    environment: 'QA',
+  PREPROD: {
+    environment: 'PREPROD',
     deployment: {
       mappingId: 'map-1',
-      environment: 'QA',
+      environment: 'PREPROD',
       deployedAt: '2026-01-01T10:00:00Z',
       sourceType: 'revision',
       sourceNumber: 1,
@@ -88,8 +88,8 @@ const HISTORY_RECORDS: DeploymentRecord[] = [
 
 const PROMOTE_RECORD: DeploymentRecord = {
   mappingId: 'map-1',
-  environmentDeployedAt: 'QA#2026-01-02T11:00:00Z',
-  environment: 'QA',
+  environmentDeployedAt: 'PREPROD#2026-01-02T11:00:00Z',
+  environment: 'PREPROD',
   sourceType: 'version',
   sourceNumber: 1,
   configS3Key: 's3://bucket/map-1/v1.json',
@@ -224,7 +224,7 @@ describe('T-06: Environment comparison panel', () => {
     renderPage(createMockAdapter());
     await waitFor(() => screen.getByTestId('environment-comparison-panel'));
     expect(screen.getByTestId('env-card-DEV')).toBeTruthy();
-    expect(screen.getByTestId('env-card-QA')).toBeTruthy();
+    expect(screen.getByTestId('env-card-PREPROD')).toBeTruthy();
     expect(screen.getByTestId('env-card-PROD')).toBeTruthy();
   });
 
@@ -234,10 +234,10 @@ describe('T-06: Environment comparison panel', () => {
     expect(screen.getByTestId('env-status-DEV').textContent).toBe('Current');
   });
 
-  it('QA card shows stale status', async () => {
+  it('PREPROD card shows stale status', async () => {
     renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('env-status-QA'));
-    expect(screen.getByTestId('env-status-QA').textContent).toBe('Stale');
+    await waitFor(() => screen.getByTestId('env-status-PREPROD'));
+    expect(screen.getByTestId('env-status-PREPROD').textContent).toBe('Stale');
   });
 
   it('PROD card shows not-deployed status', async () => {
@@ -252,10 +252,10 @@ describe('T-06: Environment comparison panel', () => {
     expect(screen.getByTestId('env-source-DEV').textContent).toBe('v1');
   });
 
-  it('QA source label shows revision number', async () => {
+  it('PREPROD source label shows revision number', async () => {
     renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('env-source-QA'));
-    expect(screen.getByTestId('env-source-QA').textContent).toBe('Rev 1');
+    await waitFor(() => screen.getByTestId('env-source-PREPROD'));
+    expect(screen.getByTestId('env-source-PREPROD').textContent).toBe('Rev 1');
   });
 });
 
@@ -297,7 +297,7 @@ describe('T-06: Promote button visibility (AE-07)', () => {
   it('DEV promote button hidden when not-deployed', async () => {
     const noneDeployments: CurrentDeployments = {
       DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
-      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
       PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
     };
     renderPage(
@@ -325,7 +325,7 @@ describe('T-06: Promote button visibility (AE-07)', () => {
 
     expect(adapter.promoteDeployment).toHaveBeenCalledWith('map-1', {
       fromEnvironment: 'DEV',
-      toEnvironment: 'QA',
+      toEnvironment: 'PREPROD',
     });
   });
 

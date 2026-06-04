@@ -4,7 +4,9 @@ import type { DiffEntry } from './diff';
 
 export type ISODateString = string;
 
-export type Environment = 'DEV' | 'QA' | 'PROD';
+export type RuntimeEnvironment = 'DEV' | 'PREPROD' | 'PROD';
+
+export type Environment = RuntimeEnvironment | 'QA' | 'SANDBOX';
 
 export type DeployStatus = 'deployed' | 'stale' | 'not-deployed' | 'deploying';
 
@@ -655,9 +657,12 @@ export interface ServerPreviewResult {
   readonly output: Readonly<Record<string, unknown>>;
   readonly diagnostics: readonly Diagnostic[];
   readonly metadata: {
-    readonly environment: Environment;
-    readonly snapshotVersion: number;
+    readonly environment: RuntimeEnvironment;
+    readonly artifactId: string;
+    readonly artifactHash: string;
     readonly deployedAt: ISODateString;
+    readonly sourceType: 'revision' | 'version';
+    readonly sourceNumber: number;
     readonly engineVersion: string;
   };
 }
@@ -683,16 +688,19 @@ export interface TestRunResult {
 export type ComparisonMode =
   | 'current-vs-saved'
   | 'current-vs-dev'
-  | 'current-vs-qa'
-  | 'dev-vs-qa'
-  | 'qa-vs-prod';
+  | 'current-vs-preprod'
+  | 'dev-vs-preprod'
+  | 'preprod-vs-prod';
 
 export interface ComparisonSideMetadata {
   readonly executionContext: 'client' | 'server';
   readonly environment?: Environment;
   readonly configVersion: number;
-  readonly snapshotVersion?: number;
   readonly deployedAt?: ISODateString;
+  readonly sourceType?: 'revision' | 'version';
+  readonly sourceNumber?: number;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
   readonly engineVersion: string;
   readonly savedAt?: ISODateString;
   readonly hasUnsavedChanges?: boolean;

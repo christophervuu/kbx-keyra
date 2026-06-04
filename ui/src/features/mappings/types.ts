@@ -212,7 +212,7 @@ export interface ComparisonModeConfig {
  * Canonical comparison mode definitions:
  * - Current = working config (includes unsaved changes)
  * - Saved = latest persisted mapping version
- * - DEV/QA/PROD = currently deployed snapshot in that environment
+ * - DEV/PREPROD/PROD = currently deployed snapshot in that environment
  */
 export const COMPARISON_MODES: Readonly<Record<ComparisonMode, ComparisonModeConfig>> = {
   'current-vs-saved': {
@@ -223,16 +223,16 @@ export const COMPARISON_MODES: Readonly<Record<ComparisonMode, ComparisonModeCon
     left: { label: 'Current', context: 'client' },
     right: { label: 'DEV', context: 'server', environment: 'DEV' },
   },
-  'current-vs-qa': {
+  'current-vs-preprod': {
     left: { label: 'Current', context: 'client' },
-    right: { label: 'QA', context: 'server', environment: 'QA' },
+    right: { label: 'PREPROD', context: 'server', environment: 'PREPROD' },
   },
-  'dev-vs-qa': {
+  'dev-vs-preprod': {
     left: { label: 'DEV', context: 'server', environment: 'DEV' },
-    right: { label: 'QA', context: 'server', environment: 'QA' },
+    right: { label: 'PREPROD', context: 'server', environment: 'PREPROD' },
   },
-  'qa-vs-prod': {
-    left: { label: 'QA', context: 'server', environment: 'QA' },
+  'preprod-vs-prod': {
+    left: { label: 'PREPROD', context: 'server', environment: 'PREPROD' },
     right: { label: 'PROD', context: 'server', environment: 'PROD' },
   },
 };

@@ -80,8 +80,10 @@ export interface EnvironmentDeploymentSummary {
 
 export interface CurrentDeployments {
   readonly DEV: EnvironmentDeploymentSummary;
-  readonly QA: EnvironmentDeploymentSummary;
+  readonly PREPROD: EnvironmentDeploymentSummary;
   readonly PROD: EnvironmentDeploymentSummary;
+  /** Legacy alias retained for compatibility; normalize behavior to PREPROD. */
+  readonly QA: EnvironmentDeploymentSummary;
 }
 
 export interface ApiAdapter {

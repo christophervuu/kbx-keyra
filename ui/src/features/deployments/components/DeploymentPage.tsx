@@ -218,13 +218,13 @@ export interface DeploymentPageProps {
 /**
  * Deployment page for a mapping.
  *
- * - Environment selector (DEV/QA/PROD tabs)
+ * - Environment selector (DEV/PREPROD/PROD tabs)
  * - DEV: shows both Revisions and Versions sections with active deploy buttons
- * - QA/PROD: shows Versions only (revisions section disabled / hidden)
+ * - PREPROD/PROD: shows Versions only (revisions section disabled / hidden)
  * - Deploy action calls adapter.deployMapping(); shows feedback banner on outcome
  * - Links back to editor
  *
- * Implements AE-01, AE-03, AE-09 (DEV shows both), AE-10 (QA/PROD versions only).
+ * Implements AE-01, AE-03, AE-09 (DEV shows both), AE-10 (PREPROD/PROD versions only).
  */
 export function DeploymentPage({ mappingId, projectId, mappingName }: DeploymentPageProps) {
   const {
@@ -351,7 +351,7 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
                 onDeploy={(rev) => void handleRevisionDeploy(rev)}
               />
             ) : (
-              /* QA/PROD: show revisions section in disabled state so user knows they exist */
+              /* PREPROD/PROD: show revisions section in disabled state so user knows they exist */
               <RevisionDeploySection
                 revisions={revisions}
                 disabled={true}

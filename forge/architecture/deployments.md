@@ -1,378 +1,307 @@
 # Deployment Architecture
 
-This document defines the Phase 1 deployment subsystem architecture for KeyRa — DynamoDB table schemas, S3 snapshot layout, API routes, deployability rules, staleness computation, promotion/rollback semantics, and module structure.
+This document defines the deployment subsystem architecture for KeyRa under the FS-081 environment model: **SANDBOX control plane** with **DEV / PREPROD / PROD runtime planes** in separate AWS accounts.
 
-This document was authored after T-01 and T-02 of FS-064 and reflects implemented decisions.
+This document supersedes earlier DEV/QA/PROD-only assumptions and codifies artifact relay, promotion, rollback, and runtime-local execution contracts.
 
 ---
 
 ## 1) Purpose and Scope
 
 **Purpose:**
-- Define the DynamoDB table schemas and key structures for deployment history and current-deployment tracking
-- Establish S3 snapshot layout for immutable deployment config copies
-- Document the five deployment API routes and their validation rules
-- Codify the deployability matrix (which source types can target which environments)
-- Define staleness computation semantics for revision-backed and version-backed deployments
-- Describe promotion and rollback semantics
-- Document the `src/lib/persistence/deployments.ts` and `src/lib/deployment/staleness.ts` module architecture
+- Define control-plane vs runtime-plane responsibilities for deployment
+- Define DynamoDB/S3 storage model for immutable artifacts and environment-local active pointers
+- Document deploy/promote/rollback semantics for SANDBOX → DEV → PREPROD → PROD
+- Codify same-artifact promotion invariants and pointer-only rollback behavior
+- Define staleness semantics and API route responsibilities
+- Define MVP transfer and network assumptions (direct payload push, internal allowlisted HTTPS)
 
 **Scope:**
-- Deployments and DeploymentCurrent DynamoDB tables
-- S3 deployment snapshot storage
-- Lambda handlers: deploy, promote, rollback, list, current
-- Staleness module for computing `current` / `stale` / `not-deployed` status
-- UI adapter methods consuming these APIs
+- Deployments and DeploymentCurrent persistence contracts
+- Deployment artifact payload contract
+- Control-plane orchestration behavior
+- Runtime ingestion/activation behavior
+- Staleness behavior and history/current APIs
+- Server-preview implications for runtime-local execution
 
 **Out of scope:**
-- Approval workflows for QA/PROD promotion
-- CI/CD pipeline integration or webhook triggers
+- AuthN/AuthZ hardening for internal deploy/preview endpoints
+- Approval workflows for PROD promotion
+- CI/CD pipeline and provisioning automation design
 - Multi-tenant deployment isolation
-- Automated deployment on version creation
 
 ---
 
-## 2) DynamoDB Table Definitions
+## 2) Environment Model and Plane Boundaries
+
+## 2.1 Account topology
+
+| Plane | Environment | Account Name | Account ID |
+|---|---|---|---|
+| Control plane | SANDBOX | `kbxt-platform-integrations-qa` | `503561435751` |
+| Runtime plane | DEV | `kbxt-b2b-integrations-dev` | `897699593484` |
+| Runtime plane | PREPROD | `kbxt-b2b-integrations-pre-prod` | `527737084689` |
+| Runtime plane | PROD | `kbxt-b2b-integrations-prod` | `410618142059` |
+
+## 2.2 Responsibility split
+
+**SANDBOX control plane owns:**
+- Authoring/save/version workflows
+- Artifact creation/registry metadata (`artifactId`, hash, provenance)
+- Deploy and promotion orchestration to runtime environments
+- Cross-environment rollout status and audit coordination
+
+**Runtime planes (DEV/PREPROD/PROD) own:**
+- Internal deploy ingestion endpoint
+- Local immutable artifact persistence
+- Local active pointer store (`mappingId -> artifactId`)
+- Runtime execution (generic mapping Lambda) and server preview execution
+- Environment-local deploy/promote/rollback history
+
+**Hard boundary:** runtime execution must never read sandbox deployment state at request time.
+
+---
+
+## 3) Deployment Artifact Model
+
+Each immutable artifact includes:
+- `artifactId` (globally unique; stable across promotions)
+- `artifactHash` (content hash)
+- `mappingId`
+- `sourceDescriptor`:
+  - `sourceType` (`revision` | `version`)
+  - `sourceNumber`
+  - `sourceConfigHash`
+- `engineVersion`
+- `mappingConfig` (full executable snapshot)
+- `schemaRefs` with immutable provenance metadata (including commit identity where available)
+- `createdAt` and control-plane provenance metadata
+
+Artifact invariants:
+- Artifacts are immutable and never overwritten.
+- Promotion reuses the same artifact identity (`artifactId` + `artifactHash`).
+- Rollback repoints active pointer to existing artifact identity.
+
+---
+
+## 4) DynamoDB Table Definitions
 
 ### Deployments (history)
 
 | Attribute | Key | Type | Description |
 |-----------|-----|------|-------------|
 | `mappingId` | PK | String (UUID) | Parent mapping |
-| `environmentDeployedAt` | SK | String | `{ENV}#{ISO8601}` — composite sort key enabling time-ordered range scans per environment |
-| `environment` | — | String | `DEV` / `QA` / `PROD` |
+| `environmentDeployedAt` | SK | String | `{ENV}#{ISO8601}` for time-ordered range scans |
+| `environment` | — | String | `DEV` / `PREPROD` / `PROD` |
 | `sourceType` | — | String | `revision` / `version` |
-| `sourceNumber` | — | Number | Revision number or version number of the deployed artifact |
-| `configS3Key` | — | String | S3 key of the deployed config snapshot |
-| `configHash` | — | String | SHA-256 of config content |
+| `sourceNumber` | — | Number | Revision or version number |
+| `artifactId` | — | String | Deployed artifact identity |
+| `artifactHash` | — | String | Content hash |
+| `configS3Key` | — | String | Local runtime artifact object key |
 | `deployedAt` | — | String | ISO 8601 |
-| `deployedBy` | — | String | User identifier (`"system"` for programmatic deploys in Phase 1) |
-| `cdmSchemaTraceability` | — | Array (optional) | FS-079 traceability entries for referenced CDM schemas (`schemaId`, optional `schemaName`, `referenceRole`, `repo`, `path`, `commitSha`) |
-| `promotedFrom` | — | String | Environment promoted from — absent if direct deploy |
-| `rollbackOf` | — | String | SK (`environmentDeployedAt`) of the deployment this entry rolls back — absent if not a rollback |
+| `deployedBy` | — | String | User/system identifier |
+| `promotedFrom` | — | String | Prior runtime environment on promotion |
+| `rollbackOf` | — | String | Historical `environmentDeployedAt` reference |
+| `cdmSchemaTraceability` | — | Array (optional) | Referenced CDM schema provenance entries |
 
-Table name env variable: `DEPLOYMENTS_TABLE` (default: `keyra-deployments`).
+Table env variable: `DEPLOYMENTS_TABLE` (default: `keyra-deployments`).
 
-No GSIs. History queries use PK=`mappingId` with optional SK `begins_with('{ENV}#')` to filter by environment.
-
----
-
-### DeploymentCurrent (denormalized current pointer)
+### DeploymentCurrent (active pointer)
 
 | Attribute | Key | Type | Description |
 |-----------|-----|------|-------------|
-| `mappingIdEnvironment` | PK | String | `{mappingId}#{ENV}` — composite key for O(1) current-deployment lookup |
-| `mappingId` | — | String (UUID) | Parent mapping |
-| `environment` | — | String | `DEV` / `QA` / `PROD` |
-| `deployedAt` | — | String | ISO 8601 of the current deployment |
+| `mappingIdEnvironment` | PK | String | `{mappingId}#{ENV}` |
+| `mappingId` | — | String | Parent mapping |
+| `environment` | — | String | `DEV` / `PREPROD` / `PROD` |
+| `artifactId` | — | String | Active artifact identity |
+| `artifactHash` | — | String | Active artifact hash |
 | `sourceType` | — | String | `revision` / `version` |
-| `sourceNumber` | — | Number | Current deployed number |
-| `configHash` | — | String | For staleness comparison |
-| `configS3Key` | — | String | S3 key of the current deployed snapshot |
+| `sourceNumber` | — | Number | Active source number |
+| `deployedAt` | — | String | ISO 8601 |
+| `configS3Key` | — | String | Local active artifact object key |
 
-Table name env variable: `DEPLOYMENT_CURRENT_TABLE` (default: `keyra-deployment-current`).
-
-This table is a mutable pointer updated on every deploy/promote/rollback. It enables O(1) current-deployment lookups without scanning history.
+Table env variable: `DEPLOYMENT_CURRENT_TABLE` (default: `keyra-deployment-current`).
 
 ---
 
-## 3) S3 Snapshot Layout
+## 5) S3 Artifact Layout
 
-Bucket: configured via `STORAGE_BUCKET` environment variable.
+Bucket: configured via `STORAGE_BUCKET` in each runtime account.
 
 | Key Pattern | Content | Mutability |
 |-------------|---------|------------|
-| `deployments/{mappingId}/{ENV}/{deployedAt}.json` | Deployment snapshot payload `{ config, metadata }`; FS-079 metadata may include `cdmSchemaTraceability[]` | Immutable — never overwritten or deleted |
+| `deployments/{mappingId}/{ENV}/{artifactId}.json` | Runtime artifact payload `{ config, metadata }` | Immutable |
 
-Key builder: `deploymentSnapshotKey(mappingId, environment, deployedAt)` in `src/lib/persistence/config.ts`.
-
-Snapshot copies are written from the revision's or version's existing S3 object at deploy time via `src/lib/persistence/s3/deployment-snapshot.ts`. Once written, they are never mutated — rollback replays a snapshot by referencing its key rather than modifying it.
-
-FS-079 dual-location traceability rule:
-- when a deploy/promote succeeds with referenced CDM schemas, traceability is written to:
-  1. `DeploymentItem.cdmSchemaTraceability`
-  2. snapshot body metadata (`metadata.cdmSchemaTraceability`)
+Notes:
+- Artifact object key identity should be stable for the same `artifactId` in an environment.
+- Rollback reuses existing object key; no content rewrite.
+- FS-079 traceability remains dual-location (`DeploymentItem` + artifact metadata).
 
 ---
 
-## 4) Deployability Rules Matrix
+## 6) Deployability and Promotion Rules
 
-| Source Type | DEV | QA | PROD |
-|-------------|-----|----|------|
+| Source Type | DEV | PREPROD | PROD |
+|-------------|-----|---------|------|
 | `revision`  | ✅ Allowed | ❌ `REVISION_NOT_DEPLOYABLE_TO_ENV` | ❌ `REVISION_NOT_DEPLOYABLE_TO_ENV` |
 | `version`   | ✅ Allowed | ✅ Allowed | ✅ Allowed |
 
-Enforced at the API layer in `deploy-mapping.ts`. The persistence layer accepts any valid input and does not re-validate environment rules.
+Promotion rules:
+- Promotion requires source current deployment to be `sourceType=version`.
+- Sequential path: DEV → PREPROD → PROD.
+- Promotion must preserve artifact identity (no payload regeneration).
 
-**Promotion rules:**
-- Promotion is only available when the current deployment in `fromEnvironment` has `sourceType=version`.
-- Attempting to promote a revision-backed deployment returns 400 `PROMOTION_REQUIRES_VERSION`.
-- Promotion path is sequential: DEV→QA, QA→PROD. Skipping environments (e.g., DEV→PROD) is not validated in Phase 1 but is architecturally unsupported.
-
-**Rollback rules:**
-- Rollback is always allowed regardless of source type.
-- Rollback replays an existing snapshot by creating a new `DeploymentItem` with `rollbackOf` pointing to the historical entry's `environmentDeployedAt` SK value.
-- No snapshot is written; the new entry re-uses the original `configS3Key`.
+Rollback rules:
+- Rollback is pointer-only and append-only in history.
+- If target artifact is not locally available, runtime returns `artifact_not_available_for_rollback`.
+- Runtime does not auto-import rollback artifacts in MVP.
 
 ---
 
-## 5) Error Codes
+## 7) Transfer, Payload, and Retry Contracts (MVP)
+
+### 7.1 Canonical transfer mechanism
+
+For FS-081 MVP, SANDBOX control plane performs **direct payload push**:
+- SANDBOX POSTs full artifact payload in runtime deploy API request body.
+- Signed pull URL flow is deferred to a later enhancement.
+
+### 7.2 Payload-size limit
+
+Runtime deploy ingestion API enforces configured maximum payload size:
+- Oversize payloads are rejected with deterministic actionable diagnostics.
+- Recommended stable code: `DEPLOY_ARTIFACT_TOO_LARGE` (HTTP 413).
+
+### 7.3 Idempotent retries
+
+Retries are client-driven and keyed by `artifactId`/`snapshotId`:
+- Repeated delivery of identical artifact to same environment must be safe.
+- Runtime responses for duplicate-safe retries must be deterministic.
+
+### 7.4 Network assumption (MVP)
+
+- Runtime deploy/preview endpoints are HTTPS and reachable from SANDBOX.
+- Access model for this phase: internal public endpoint allowlisting.
+- Private connectivity patterns (VPC-to-VPC/private link) are out of scope for MVP.
+
+---
+
+## 8) Error Codes
 
 | Code | HTTP | Description |
 |------|------|-------------|
-| `REVISION_NOT_DEPLOYABLE_TO_ENV` | 400 | Deploy of a revision was attempted to QA or PROD |
-| `PROMOTION_REQUIRES_VERSION` | 400 | Promote was attempted on a revision-backed deployment |
-| `SOURCE_NOT_FOUND` | 404 | Referenced revision or version does not exist |
-| `SNAPSHOT_INTEGRITY_ERROR` | 500 | Version config snapshot is missing from S3 (should not occur under normal operation) |
-| `DEPLOY_BLOCKED_CDM_SCHEMA_STATE` | 409 | Deploy/promote blocked because one or more referenced CDM schemas are not deployable (FS-079) |
-
-### FS-079 CDM deploy-context guardrail
-
-Deploy and promote handlers run a CDM pre-check before any deployment create writes.
-
-Enforcement points:
-- `src/lambda/deployment/deploy-mapping.ts`
-- `src/lambda/deployment/promote-deployment.ts`
-
-Shared guard:
-- `src/lambda/deployment/cdm-deploy-guard.ts`
-
-Guard output contract:
-- `issues[]` with per-schema:
-  - `schemaId`
-  - optional `schemaName`
-  - `referenceRole` (`source` | `target`)
-  - `reason`
-  - `remediationKey`
-
-Stable reason taxonomy:
-- `unsynced`
-- `update-failed`
-- `metadata-incomplete`
-- `ingest-not-ready`
-- `schema-missing`
-
-Blocking semantics:
-- all issues are returned in one response (no first-failure short-circuit)
-- any issue blocks deploy/promote and no deployment persistence write occurs
-- non-CDM referenced schemas are ignored by this guard
+| `REVISION_NOT_DEPLOYABLE_TO_ENV` | 400 | Revision deploy attempted to PREPROD or PROD |
+| `PROMOTION_REQUIRES_VERSION` | 400 | Promote attempted from revision-backed source |
+| `SOURCE_NOT_FOUND` | 404 | Referenced revision/version not found |
+| `SNAPSHOT_INTEGRITY_ERROR` | 500 | Artifact/snapshot integrity mismatch |
+| `DEPLOY_BLOCKED_CDM_SCHEMA_STATE` | 409 | CDM deploy guardrail block |
+| `DEPLOY_ARTIFACT_TOO_LARGE` | 413 | Direct artifact payload exceeds configured size |
+| `artifact_not_available_for_rollback` | 409 | Requested rollback artifact not present locally |
 
 ---
 
-## 6) API Routes
+## 9) API Route Responsibilities
 
-All deployment routes are under the `/mappings/:mappingId/` prefix.
+All control-plane deployment routes remain under `/mappings/:mappingId/`.
 
-| Method | Route | Handler | Description |
-|--------|-------|---------|-------------|
-| `POST` | `/mappings/:mappingId/deploy` | `src/lambda/deployment/deploy-mapping.ts` | Create a deployment snapshot for a revision or version |
-| `POST` | `/mappings/:mappingId/promote` | `src/lambda/deployment/promote-deployment.ts` | Promote a version-backed deployment from one env to the next |
-| `POST` | `/mappings/:mappingId/rollback` | `src/lambda/deployment/rollback-deployment.ts` | Roll back to a historical snapshot |
-| `GET` | `/mappings/:mappingId/deployments` | `src/lambda/deployment/list-deployments.ts` | List deployment history (optional `?environment=` filter) |
-| `GET` | `/mappings/:mappingId/deployments/current` | `src/lambda/deployment/get-current-deployments.ts` | Get current deployment for all three environments |
+| Method | Route | Plane | Description |
+|---|---|---|---|
+| `POST` | `/mappings/:mappingId/deploy` | Control plane | Orchestrate deploy to selected runtime environment |
+| `POST` | `/mappings/:mappingId/promote` | Control plane | Orchestrate same-artifact promotion to next runtime environment |
+| `POST` | `/mappings/:mappingId/rollback` | Control plane | Orchestrate rollback request in selected runtime environment |
+| `GET` | `/mappings/:mappingId/deployments` | Control plane | Return deployment history view |
+| `GET` | `/mappings/:mappingId/deployments/current` | Control plane | Return current pointers for DEV/PREPROD/PROD |
 
-### Request / Response Shapes
+Runtime-plane internal endpoints (not public product API):
+- Deploy ingestion endpoint (artifact push + validation + activation)
+- Runtime preview endpoint (execute active local artifact)
 
-**POST /deploy** body:
-```json
-{ "environment": "DEV|QA|PROD", "sourceType": "revision|version", "sourceNumber": 5 }
-```
-Response: `201` with the created `DeploymentItem`.
+### Request/response environment model
 
-**POST /promote** body:
-```json
-{ "fromEnvironment": "DEV", "toEnvironment": "QA" }
-```
-Response: `201` with the promoted `DeploymentItem`.
+- Runtime target enums: `DEV | PREPROD | PROD`
+- Control-plane-only enum/context: `SANDBOX`
 
-**POST /rollback** body:
-```json
-{ "environment": "PROD", "deploymentSK": "PROD#2026-01-01T10:00:00.000Z" }
-```
-Response: `201` with the rollback `DeploymentItem`.
-
-**GET /deployments** query params: `?environment=DEV` (optional).
-Response: `200` with `DeploymentItem[]` sorted descending by `deployedAt`.
-
-**GET /deployments/current**
-Response: `200` with `{ DEV: DeploymentCurrentItem | null, QA: ..., PROD: ... }`.
+Migration compatibility:
+- Legacy stored raw environment value `QA` may remain in historical records for audit.
+- Domain/presentation layers normalize `QA -> PREPROD`.
 
 ---
 
-## 7) Staleness Computation
+## 10) Staleness Computation
 
-Staleness status is computed by `src/lib/deployment/staleness.ts`. This module is backend-only and has no dependencies on DynamoDB or S3.
+Staleness remains a pure function in `src/lib/deployment/staleness.ts`.
 
-### Definitions
+Definitions:
+- `current`: deployed source matches latest artifact of deployed source type
+- `stale`: newer revision/version exists beyond deployed source number
+- `not-deployed`: no current deployment for environment
 
-- **`current`**: deployed source matches the latest artifact of its type.
-- **`stale`**: a newer revision or version exists beyond what was deployed.
-- **`not-deployed`**: no deployment record exists for that environment.
-
-### Revision-stale (DEV only in practice)
-
-```
-stale when: mapping.revision > deployment.sourceNumber
-```
-A newer save has been committed since the deployed revision was created.
-
-### Version-stale (any environment)
-
-```
-stale when: mapping.latestVersion > deployment.sourceNumber
-```
-A newer version milestone has been created since the deployed version was promoted or deployed.
-
-### API function signatures
-
-```ts
-function computeStaleness(
-  deployment: DeploymentStalenessInput | null,  // { sourceType, sourceNumber }
-  mapping: MappingStalenessInput,               // { revision, latestVersion }
-): DeploymentStatus   // 'current' | 'stale' | 'not-deployed'
-
-function computeAllEnvironments(
-  currentDeployments: CurrentDeploymentsInput,  // { DEV?, QA?, PROD? }
-  mapping: MappingStalenessInput,
-): EnvironmentDeploymentStatus   // { DEV, QA, PROD }
-```
-
-The `GET /deployments/current` handler returns raw `DeploymentCurrentItem` data. Staleness annotation is applied by the HTTP adapter (`HttpAdapter`) on the client side using the mapping's `revision` and `latestVersion` fields. The `LocalStorageAdapter` performs the same computation inline.
+Environment status shape is now `{ DEV, PREPROD, PROD }`.
 
 ---
 
-## 8) Promotion Semantics
+## 11) Promotion and Rollback Semantics
 
-Promotion creates a new deployment record in the target environment referencing the same version as the source environment's current deployment.
+### Promotion
 
-Steps:
-1. Read current deployment from `DeploymentCurrent` for `fromEnvironment`.
-2. Validate `sourceType === 'version'` — reject with `PROMOTION_REQUIRES_VERSION` otherwise.
-3. Fetch the version config snapshot from S3 using `configS3Key` of the source deployment.
-4. Call `deployments.create()` for `toEnvironment` with `promotedFrom` set.
-5. Return the new deployment record.
+1. Control plane resolves source runtime current deployment.
+2. Validates promotable source (`sourceType=version`).
+3. Relays same artifact payload (`artifactId`/`artifactHash`) to target runtime deploy ingestion endpoint.
+4. Target runtime verifies integrity, persists artifact locally (if absent), updates local active pointer, appends history.
 
-The promoted deployment gets a fresh `configS3Key` at the new environment path (`deployments/{mappingId}/{TO_ENV}/{timestamp}.json`). Both the source and target deployment entries share the same `configHash`.
+### Rollback
 
----
-
-## 9) Rollback Semantics
-
-Rollback creates a new deployment record in the target environment using the snapshot of a historical deployment — without writing a new S3 object.
-
-Steps:
-1. Parse `deploymentSK` from the request body (format: `{ENV}#{ISO8601}`).
-2. Look up the referenced `DeploymentItem` by `mappingId` + `environmentDeployedAt`.
-3. Create a new `DeploymentItem` with:
-   - Same `sourceType`, `sourceNumber`, `configS3Key`, `configHash`
-   - `rollbackOf` set to the referenced entry's `environmentDeployedAt`
-   - Fresh `deployedAt` timestamp
-4. Update `DeploymentCurrent` to point to the new entry.
-5. Return the new deployment record.
-
-The original historical entry is never modified. Rollback is append-only.
+1. Control plane requests rollback in target runtime by deployment history identity.
+2. Runtime verifies referenced artifact exists locally.
+3. Runtime appends rollback event (`rollbackOf`) and repoints active pointer.
+4. If missing locally: return `artifact_not_available_for_rollback` with remediation (redeploy/promote artifact explicitly).
 
 ---
 
-## 10) Module Architecture
+## 12) Server Preview Implications
 
-### Persistence module
+- Preview is routed by control plane to selected runtime environment.
+- Runtime preview executes using local active pointer + local artifact only.
+- Preview response includes environment + artifact identity metadata.
+- Runtime preview with no active deployment returns deterministic `not-deployed` error.
+
+---
+
+## 13) Retention Policy Baseline
+
+- Retention policy is configurable per environment.
+- MVP default: retain all artifacts locally.
+- Long-term infinite retention is not required by architecture.
+- Rollback guarantees apply to artifacts retained within configured rollback window.
+
+---
+
+## 14) Module Architecture
 
 ```
 src/lib/persistence/
-  deployments.ts            Deployment CRUD — create, getCurrent, getCurrentAll, listHistory
-  config.ts                 deploymentSnapshotKey(), deploymentHistorySortKey(), deploymentCurrentKey()
-  types.ts                  DeploymentItem, DeploymentCurrentItem, CreateDeploymentInput, DeploymentEnvironment
+  deployments.ts            Deployment CRUD and active-pointer operations
+  config.ts                 deployment key builders
+  types.ts                  Deployment item/current item/environment contracts
   s3/
-    deployment-snapshot.ts  Write deployment snapshot payload (`{ config, metadata }`) to S3 at deployments/{mappingId}/{ENV}/{ts}.json
-```
+    deployment-snapshot.ts  Runtime artifact persistence helper
 
-**Key functions in `deployments.ts`:**
-
-| Function | Description |
-|----------|-------------|
-| `create(input)` | Writes DeploymentItem + DeploymentCurrentItem + S3 snapshot atomically; persists optional `cdmSchemaTraceability` to both item and snapshot metadata |
-| `getCurrent(mappingId, env)` | Returns `DeploymentCurrentItem \| null` for a single environment |
-| `getCurrentAll(mappingId)` | Returns `{ DEV, QA, PROD }` current items (parallel reads) |
-| `listHistory(mappingId, env?, limit?)` | Paginated query on Deployments table, descending by SK |
-
-### Staleness module
-
-```
 src/lib/deployment/
-  index.ts        Barrel export
-  staleness.ts    computeStaleness(), computeAllEnvironments()
-```
+  staleness.ts              Pure status computation helpers
 
-The staleness module is pure (no I/O), enabling use in both Lambda handlers and client-side adapters.
-
-### Lambda handlers
-
-```
 src/lambda/deployment/
-  index.ts                    Barrel export
-  deploy-mapping.ts           POST /mappings/:mappingId/deploy
-  promote-deployment.ts       POST /mappings/:mappingId/promote
-  rollback-deployment.ts      POST /mappings/:mappingId/rollback
-  list-deployments.ts         GET  /mappings/:mappingId/deployments
-  get-current-deployments.ts  GET  /mappings/:mappingId/deployments/current
+  deploy-mapping.ts         Control-plane deploy orchestration
+  promote-deployment.ts     Control-plane promotion orchestration
+  rollback-deployment.ts    Control-plane rollback orchestration
+  list-deployments.ts       History query endpoint
+  get-current-deployments.ts Current pointers endpoint
 ```
 
-All handlers follow the shared Lambda conventions established in `src/lambda/shared/` (response envelope, error helpers, path param extraction, body parsing).
-
-### UI adapter methods
-
-Defined in `ui/src/lib/api/types.ts` (`ApiAdapter` interface):
-
-| Method | Description |
-|--------|-------------|
-| `deployMapping(mappingId, { environment, sourceType, sourceNumber })` | Calls `POST /deploy` |
-| `promoteDeployment(mappingId, { fromEnvironment, toEnvironment })` | Calls `POST /promote` |
-| `rollbackDeployment(mappingId, { environment, deploymentSK })` | Calls `POST /rollback` |
-| `listDeployments(mappingId, { environment? })` | Calls `GET /deployments` |
-| `getCurrentDeployments(mappingId)` | Calls `GET /deployments/current`; HTTP adapter computes staleness client-side |
-
 ---
 
-## 11) Environment Configuration
+## 15) Cross-References
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `DEPLOYMENTS_TABLE` | Deployments table name | `keyra-deployments` |
-| `DEPLOYMENT_CURRENT_TABLE` | DeploymentCurrent table name | `keyra-deployment-current` |
-| `STORAGE_BUCKET` | S3 bucket name (shared with schemas/mappings) | `keyra-storage` |
-
----
-
-## 12) Access Patterns
-
-| Pattern | Operation | Table | Notes |
-|---------|-----------|-------|-------|
-| Create deployment | PutItem × 2 + S3 Put | Deployments + DeploymentCurrent | Transactional-style: history then current |
-| Get current deployment (single env) | GetItem | DeploymentCurrent | PK = `{mappingId}#{ENV}` |
-| Get current deployments (all envs) | GetItem × 3 (parallel) | DeploymentCurrent | One read per environment |
-| List deployment history (all envs) | Query (PK) | Deployments | SK range scan descending |
-| List deployment history (one env) | Query (PK + `begins_with`) | Deployments | SK prefix `{ENV}#` |
-| Promote deployment | GetItem + PutItem × 2 + S3 Put | DeploymentCurrent → Deployments + Current | Read source current, create target record |
-| Rollback | GetItem (history) + PutItem × 2 | Deployments → Deployments + Current | No new S3 write — reuses existing snapshot key |
-
----
-
-## 13) Constraints and Limits
-
-- Deployment history is append-only. No history entries are deleted in Phase 1.
-- Rollback never mutates existing records or S3 objects.
-- `deployedBy` is hardcoded to `"system"` in Phase 1 (no authenticated user context available at handler level yet).
-- Parallel `getCurrentAll` reads are fire-and-forget; if one fails the handler surfaces a 500. This is acceptable for Phase 1.
-- No pagination token exposed from `listDeployments` in the HTTP API. Phase 1 scale assumption: < 100 deployments per mapping per environment.
-
----
-
-## 14) Cross-References
-
-- Revision/version model: `forge/architecture/persistence-model.md` §6
-- Backend API handler conventions: `forge/architecture/backend-api.md`
-- Infrastructure (SAM template): `forge/architecture/infrastructure.md`
-- FS-064 spec: `forge/active/FS-064/spec.md`
-- Phase 1 persistence module: `src/lib/persistence/`
-- Staleness module: `src/lib/deployment/staleness.ts`
+- `forge/architecture/backend-api.md`
+- `forge/architecture/infrastructure.md`
+- `forge/architecture/persistence-model.md`
+- `forge/active/FS-081/spec.md`

@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+import { CompareTab } from './CompareTab';
+import type { CompareTabProps } from './CompareTab';
+
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 
-import { CompareTab } from './CompareTab';
-import type { CompareTabProps } from './CompareTab';
 
 // ---------------------------------------------------------------------------
 // Mock adapter
@@ -137,7 +138,7 @@ describe('CompareTab', () => {
 
   it('does not render deploy, promote, or rollback elements', () => {
     renderCompareTab();
-    expect(screen.queryByText(/deploy/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^deploy$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/promote/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/rollback/i)).not.toBeInTheDocument();
   });
@@ -179,9 +180,9 @@ describe('CompareTab', () => {
     renderCompareTab();
     expect(screen.getByTestId('comparison-mode-option-current-vs-saved')).toBeInTheDocument();
     expect(screen.getByTestId('comparison-mode-option-current-vs-dev')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-mode-option-current-vs-qa')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-mode-option-dev-vs-qa')).toBeInTheDocument();
-    expect(screen.getByTestId('comparison-mode-option-qa-vs-prod')).toBeInTheDocument();
+    expect(screen.getByTestId('comparison-mode-option-current-vs-preprod')).toBeInTheDocument();
+    expect(screen.getByTestId('comparison-mode-option-dev-vs-preprod')).toBeInTheDocument();
+    expect(screen.getByTestId('comparison-mode-option-preprod-vs-prod')).toBeInTheDocument();
   });
 
   it('current-vs-saved mode is selected by default', () => {

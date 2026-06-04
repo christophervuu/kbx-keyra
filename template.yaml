@@ -626,6 +626,36 @@ Resources:
             Path: /mappings/{id}/versions
             Method: post
 
+  PreviewMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-previewmapping
+      CodeUri: .
+      Handler: src/lambda/mapping/preview-mapping.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref DeploymentCurrentTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{id}/preview
+            Method: post
+
   DeployMappingFunction:
     Type: AWS::Serverless::Function
     Metadata:

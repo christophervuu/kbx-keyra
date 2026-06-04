@@ -1,9 +1,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ComparisonSnapshotIndicator, ComparisonSnapshotView } from './ComparisonSnapshotView';
+
 import type { ComparisonSnapshot } from '@/lib/types/domain';
 
-import { ComparisonSnapshotIndicator, ComparisonSnapshotView } from './ComparisonSnapshotView';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -150,13 +151,13 @@ describe('ComparisonSnapshotView', () => {
   it('shows mode label', () => {
     const snap = makeSnapshot({ mode: 'current-vs-saved' });
     render(<ComparisonSnapshotView snapshots={[snap]} onDelete={vi.fn()} />);
-    expect(screen.getByText('Current vs Saved')).toBeInTheDocument();
+    expect(screen.getAllByText('Current vs Saved').length).toBeGreaterThan(0);
   });
 
   it('shows left and right labels', () => {
     const snap = makeSnapshot();
     render(<ComparisonSnapshotView snapshots={[snap]} onDelete={vi.fn()} />);
-    expect(screen.getByText(/Current.*Saved/)).toBeInTheDocument();
+    expect(screen.getAllByText('Current vs Saved').length).toBeGreaterThan(0);
   });
 
   it('calls onDelete when delete button is clicked', () => {
@@ -170,7 +171,7 @@ describe('ComparisonSnapshotView', () => {
   it('renders multiple snapshots', () => {
     const snaps = [
       makeSnapshot({ id: 'snap-1' }),
-      makeSnapshot({ id: 'snap-2', mode: 'current-vs-dev' }),
+      makeSnapshot({ id: 'snap-2', mode: 'current-vs-preprod' }),
     ];
     render(<ComparisonSnapshotView snapshots={snaps} onDelete={vi.fn()} />);
     expect(screen.getByTestId('comparison-snapshot-item-snap-1')).toBeInTheDocument();

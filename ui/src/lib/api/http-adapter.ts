@@ -56,7 +56,8 @@ import type {
 
 interface CurrentDeploymentsApiResponse {
   readonly DEV: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
-  readonly QA: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+  readonly PREPROD: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+  readonly QA?: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
   readonly PROD: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
 }
 
@@ -458,21 +459,28 @@ export class HttpAdapter extends LocalStorageAdapter {
       latestVersion,
     };
 
+    const preprodDeployment = current.PREPROD ?? current.QA ?? null;
+
     return {
       DEV: {
         environment: 'DEV',
         deployment: current.DEV,
         status: computeStatus(current.DEV, stalenessInput),
       },
-      QA: {
-        environment: 'QA',
-        deployment: current.QA,
-        status: computeStatus(current.QA, stalenessInput),
+      PREPROD: {
+        environment: 'PREPROD',
+        deployment: preprodDeployment,
+        status: computeStatus(preprodDeployment, stalenessInput),
       },
       PROD: {
         environment: 'PROD',
         deployment: current.PROD,
         status: computeStatus(current.PROD, stalenessInput),
+      },
+      QA: {
+        environment: 'PREPROD',
+        deployment: preprodDeployment,
+        status: computeStatus(preprodDeployment, stalenessInput),
       },
     };
   }

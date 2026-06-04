@@ -14,8 +14,13 @@ import { create as createDeployment } from '../../lib/persistence/deployments.js
 import { getConfig as getRevisionConfig } from '../../lib/persistence/mapping-revisions.js';
 import { get as getVersion, getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
 import { validateCdmDeployGuard } from './cdm-deploy-guard.js';
+import {
+  assertArtifactPayloadWithinLimit,
+  buildRuntimeDeployArtifact,
+  getRuntimeRelayClient,
+} from './runtime-relay.js';
 
-type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
+type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 type DeploymentSourceType = 'revision' | 'version';
 
 interface DeployRequest {
@@ -28,6 +33,14 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+}
+
+function mapRelayStatusCodeToHttp(statusCode: number): number {
+  if (statusCode >= 400 && statusCode < 600) {
+    return statusCode;
+  }
+
+  return 503;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -45,7 +58,7 @@ function getMappingsTableOrThrow(): string {
 }
 
 function isEnvironment(value: unknown): value is DeploymentEnvironment {
-  return value === 'DEV' || value === 'QA' || value === 'PROD';
+  return value === 'DEV' || value === 'PREPROD' || value === 'PROD';
 }
 
 function isSourceType(value: unknown): value is DeploymentSourceType {
@@ -86,7 +99,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   if (!request) {
     return errorResponse(
       ERROR_CODES.VALIDATION_ERROR,
-      'Invalid deployment request body. Expected { environment: DEV|QA|PROD, sourceType: revision|version, sourceNumber: integer>0 }',
+      'Invalid deployment request body. Expected { environment: DEV|PREPROD|PROD, sourceType: revision|version, sourceNumber: integer>0 }',
       400,
       false,
     );
@@ -143,12 +156,54 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         );
       }
 
+      const artifact = await buildRuntimeDeployArtifact({
+        mappingId,
+        sourceType: 'revision',
+        sourceNumber: request.sourceNumber,
+        config,
+      });
+
+      const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
+      if (!payloadCheck.ok) {
+        return errorResponse(
+          ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE,
+          `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce mapping payload size or raise MAX_DEPLOY_ARTIFACT_PAYLOAD_BYTES.`,
+          413,
+          false,
+          undefined,
+          {
+            artifactId: artifact.artifactId,
+            snapshotId: artifact.snapshotId,
+            payloadBytes: payloadCheck.payloadBytes,
+            limitBytes: payloadCheck.limitBytes,
+          },
+        );
+      }
+
+      const relay = await getRuntimeRelayClient().pushArtifact(request.environment, artifact);
+      if (!relay.ok) {
+        return errorResponse(
+          relay.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+          relay.message,
+          mapRelayStatusCodeToHttp(relay.statusCode),
+          relay.retryable,
+          relay.requestId,
+          {
+            environment: request.environment,
+            artifactId: artifact.artifactId,
+            snapshotId: artifact.snapshotId,
+          },
+        );
+      }
+
       const created = await createDeployment({
         mappingId,
         environment: request.environment,
         sourceType: 'revision',
         sourceNumber: request.sourceNumber,
         deployedBy: 'system',
+        artifactId: artifact.artifactId,
+        artifactHash: artifact.artifactHash,
         ...(cdmGuard.cdmTraceability.length > 0 ? { cdmSchemaTraceability: cdmGuard.cdmTraceability } : {}),
         config,
       });
@@ -176,18 +231,73 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     }
 
+    const artifact = await buildRuntimeDeployArtifact({
+      mappingId,
+      sourceType: 'version',
+      sourceNumber: version.version,
+      config,
+    });
+
+    const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
+    if (!payloadCheck.ok) {
+      return errorResponse(
+        ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE,
+        `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce mapping payload size or raise MAX_DEPLOY_ARTIFACT_PAYLOAD_BYTES.`,
+        413,
+        false,
+        undefined,
+        {
+          artifactId: artifact.artifactId,
+          snapshotId: artifact.snapshotId,
+          payloadBytes: payloadCheck.payloadBytes,
+          limitBytes: payloadCheck.limitBytes,
+        },
+      );
+    }
+
+    const relay = await getRuntimeRelayClient().pushArtifact(request.environment, artifact);
+    if (!relay.ok) {
+      return errorResponse(
+        relay.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+        relay.message,
+        mapRelayStatusCodeToHttp(relay.statusCode),
+        relay.retryable,
+        relay.requestId,
+        {
+          environment: request.environment,
+          artifactId: artifact.artifactId,
+          snapshotId: artifact.snapshotId,
+        },
+      );
+    }
+
     const created = await createDeployment({
       mappingId,
       environment: request.environment,
       sourceType: 'version',
       sourceNumber: version.version,
       deployedBy: 'system',
+      artifactId: artifact.artifactId,
+      artifactHash: artifact.artifactHash,
       ...(cdmGuard.cdmTraceability.length > 0 ? { cdmSchemaTraceability: cdmGuard.cdmTraceability } : {}),
       config,
     });
 
     return jsonResponse(201, created);
-  } catch {
+  } catch (error) {
+    const isArtifactIntegrityError =
+      (error as { name?: string } | null | undefined)?.name === 'DeploymentArtifactIntegrityError';
+
+    if (isArtifactIntegrityError) {
+      const message = (error as { message?: string } | null | undefined)?.message ?? 'Artifact integrity mismatch';
+      return errorResponse(
+        ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
+        message,
+        500,
+        false,
+      );
+    }
+
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);
   }

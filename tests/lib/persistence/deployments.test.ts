@@ -6,6 +6,7 @@ import type {
   DeploymentItem,
   MappingConfig,
 } from '../../../src/lib/persistence/types.js';
+import { normalizeRuntimeDeploymentEnvironment } from '../../../src/lib/persistence/types.js';
 
 const { dynamoSendMock, putSnapshotMock } = vi.hoisted(() => ({
   dynamoSendMock: vi.fn(),
@@ -125,6 +126,63 @@ describe('persistence deployments', () => {
     expect(currentPut.input.Item.mappingIdEnvironment).toBe('mapping-1#DEV');
   });
 
+  it('create rejects when provided artifactHash does not match computed config hash', async () => {
+    putSnapshotMock.mockResolvedValue('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
+    dynamoSendMock.mockResolvedValue({});
+
+    const mod = await importModule();
+
+    await expect(
+      mod.create(
+        makeCreateInput({
+          artifactHash: 'not-the-computed-hash',
+        }),
+      ),
+    ).rejects.toMatchObject({
+      name: 'DeploymentArtifactIntegrityError',
+    });
+
+    expect(putSnapshotMock).not.toHaveBeenCalled();
+    expect(dynamoSendMock).not.toHaveBeenCalled();
+  });
+
+  it('createRollback appends rollback event and repoints current without writing snapshot', async () => {
+    dynamoSendMock.mockResolvedValue({});
+
+    const mod = await importModule();
+    const result = await mod.createRollback({
+      mappingId: 'mapping-1',
+      environment: 'PROD',
+      sourceType: 'version',
+      sourceNumber: 2,
+      deployedBy: 'system',
+      artifactId: 'artifact-2',
+      artifactHash: 'hash-2',
+      configHash: 'cfg-2',
+      configS3Key: 'deployments/mapping-1/PROD/artifact-2.json',
+      rollbackOf: 'PROD#2026-06-01T00:00:00.000Z',
+    });
+
+    expect(putSnapshotMock).not.toHaveBeenCalled();
+    expect(result.rollbackOf).toBe('PROD#2026-06-01T00:00:00.000Z');
+    expect(result.artifactId).toBe('artifact-2');
+    expect(result.configS3Key).toBe('deployments/mapping-1/PROD/artifact-2.json');
+
+    const deploymentPut = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { TableName: string; Item: DeploymentItem };
+    };
+    expect(deploymentPut.input.TableName).toBe('keyra-deployments');
+    expect(deploymentPut.input.Item.rollbackOf).toBe('PROD#2026-06-01T00:00:00.000Z');
+    expect(deploymentPut.input.Item.artifactId).toBe('artifact-2');
+
+    const currentPut = dynamoSendMock.mock.calls[1]?.[0] as {
+      input: { TableName: string; Item: DeploymentCurrentItem };
+    };
+    expect(currentPut.input.TableName).toBe('keyra-deployment-current');
+    expect(currentPut.input.Item.mappingIdEnvironment).toBe('mapping-1#PROD');
+    expect(currentPut.input.Item.artifactId).toBe('artifact-2');
+  });
+
   it('create persists cdmSchemaTraceability in both deployment item and snapshot metadata', async () => {
     putSnapshotMock.mockResolvedValue('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
     dynamoSendMock.mockResolvedValue({});
@@ -175,26 +233,27 @@ describe('persistence deployments', () => {
 
     dynamoSendMock.mockResolvedValueOnce({ Item: makeCurrentItem() });
     dynamoSendMock.mockResolvedValueOnce({ Item: undefined });
+    dynamoSendMock.mockResolvedValueOnce({ Item: undefined });
 
     const found = await mod.getCurrent('mapping-1', 'DEV');
-    const missing = await mod.getCurrent('mapping-1', 'QA');
+    const missing = await mod.getCurrent('mapping-1', 'PREPROD');
 
     expect(found?.mappingIdEnvironment).toBe('mapping-1#DEV');
     expect(missing).toBeNull();
   });
 
-  it('getCurrentAll fetches DEV/QA/PROD', async () => {
+  it('getCurrentAll fetches DEV/PREPROD/PROD', async () => {
     const mod = await importModule();
 
     dynamoSendMock
       .mockResolvedValueOnce({ Item: makeCurrentItem({ environment: 'DEV', mappingIdEnvironment: 'mapping-1#DEV' }) })
-      .mockResolvedValueOnce({ Item: makeCurrentItem({ environment: 'QA', mappingIdEnvironment: 'mapping-1#QA' }) })
+      .mockResolvedValueOnce({ Item: makeCurrentItem({ environment: 'PREPROD', mappingIdEnvironment: 'mapping-1#PREPROD' }) })
       .mockResolvedValueOnce({ Item: undefined });
 
     const result = await mod.getCurrentAll('mapping-1');
 
     expect(result.DEV?.environment).toBe('DEV');
-    expect(result.QA?.environment).toBe('QA');
+    expect(result.PREPROD?.environment).toBe('PREPROD');
     expect(result.PROD).toBeNull();
   });
 
@@ -230,8 +289,49 @@ describe('persistence deployments', () => {
     const mod = await importModule();
 
     expect(mod.deployments.create).toBe(mod.create);
+    expect(mod.deployments.createRollback).toBe(mod.createRollback);
     expect(mod.deployments.getCurrent).toBe(mod.getCurrent);
     expect(mod.deployments.getCurrentAll).toBe(mod.getCurrentAll);
     expect(mod.deployments.listHistory).toBe(mod.listHistory);
+  });
+
+  it('getCurrent PREPROD falls back to legacy QA current key', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock
+      .mockResolvedValueOnce({ Item: undefined })
+      .mockResolvedValueOnce({ Item: makeCurrentItem({ environment: 'QA', mappingIdEnvironment: 'mapping-1#QA' }) });
+
+    const current = await mod.getCurrent('mapping-1', 'PREPROD');
+
+    expect(current?.mappingIdEnvironment).toBe('mapping-1#QA');
+    expect(current?.environment).toBe('QA');
+    expect(normalizeRuntimeDeploymentEnvironment(current?.environment ?? 'QA')).toBe('PREPROD');
+  });
+
+  it('listHistory PREPROD includes legacy QA records via normalization filter', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({
+      Items: [
+        makeHistoryItem({ environment: 'DEV', environmentDeployedAt: 'DEV#2026-06-03T00:00:00.000Z' }),
+        makeHistoryItem({ environment: 'QA', environmentDeployedAt: 'QA#2026-06-02T00:00:00.000Z' }),
+        makeHistoryItem({ environment: 'PREPROD', environmentDeployedAt: 'PREPROD#2026-06-01T00:00:00.000Z' }),
+      ],
+    });
+
+    const result = await mod.listHistory('mapping-1', 'PREPROD');
+
+    expect(result.map((item) => item.environment)).toEqual(['QA', 'PREPROD']);
+
+    const queryCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: {
+        KeyConditionExpression: string;
+        ExpressionAttributeValues: Record<string, unknown>;
+      };
+    };
+
+    expect(queryCommand.input.KeyConditionExpression).toBe('mappingId = :mappingId');
+    expect(queryCommand.input.ExpressionAttributeValues[':environmentPrefix']).toBeUndefined();
   });
 });

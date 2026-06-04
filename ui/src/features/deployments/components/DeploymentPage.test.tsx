@@ -39,7 +39,7 @@ const CURRENT_DEPLOYMENTS: CurrentDeployments = {
     },
     status: 'current',
   },
-  QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+  PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
   PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
 };
 
@@ -207,13 +207,13 @@ describe('DeploymentPage', () => {
     expect(verDeployBtn.disabled).toBe(false);
   });
 
-  it('QA: revision deploy buttons are disabled', async () => {
+  it('PREPROD: revision deploy buttons are disabled', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
 
-    await waitFor(() => screen.getByTestId('env-tab-QA'));
+    await waitFor(() => screen.getByTestId('env-tab-PREPROD'));
 
-    await user.click(screen.getByTestId('env-tab-QA'));
+    await user.click(screen.getByTestId('env-tab-PREPROD'));
 
     await waitFor(() => {
       const revDeployBtn = screen.getByTestId('deploy-revision-3') as HTMLButtonElement;
@@ -235,13 +235,13 @@ describe('DeploymentPage', () => {
     });
   });
 
-  it('QA: version deploy buttons are enabled', async () => {
+  it('PREPROD: version deploy buttons are enabled', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
 
-    await waitFor(() => screen.getByTestId('env-tab-QA'));
+    await waitFor(() => screen.getByTestId('env-tab-PREPROD'));
 
-    await user.click(screen.getByTestId('env-tab-QA'));
+    await user.click(screen.getByTestId('env-tab-PREPROD'));
 
     await waitFor(() => {
       const verDeployBtn = screen.getByTestId('deploy-version-2') as HTMLButtonElement;

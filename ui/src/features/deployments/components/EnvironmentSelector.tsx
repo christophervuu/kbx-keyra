@@ -7,16 +7,18 @@ export interface EnvironmentSelectorProps {
   onChange: (env: Environment) => void;
 }
 
-const ENVIRONMENTS: Environment[] = ['DEV', 'QA', 'PROD'];
+const ENVIRONMENTS: Environment[] = ['DEV', 'PREPROD', 'PROD'];
 
 const envLabels: Record<Environment, string> = {
   DEV: 'DEV',
-  QA: 'QA',
+  PREPROD: 'PREPROD',
   PROD: 'PROD',
+  QA: 'QA (legacy)',
+  SANDBOX: 'SANDBOX',
 };
 
 /**
- * Tab-style environment selector for DEV / QA / PROD.
+ * Tab-style environment selector for DEV / PREPROD / PROD.
  * Keyboard accessible: left/right arrows navigate tabs; Enter/Space selects.
  */
 export function EnvironmentSelector({ value, onChange }: EnvironmentSelectorProps) {

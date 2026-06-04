@@ -289,7 +289,43 @@ export interface MappingRevisionItem {
   readonly configHash: string;
 }
 
-export type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
+export type RuntimeDeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
+
+/**
+ * Canonical environment model (FS-081):
+ * - SANDBOX is control-plane context only (never a runtime deploy target)
+ * - DEV/PREPROD/PROD are runtime deployment targets
+ */
+export type DeploymentEnvironmentModel = 'SANDBOX' | RuntimeDeploymentEnvironment;
+
+/**
+ * Legacy persisted runtime value retained for audit compatibility.
+ */
+export type LegacyRuntimeDeploymentEnvironment = 'QA';
+
+/**
+ * Canonical runtime deployment environment contract.
+ */
+export type DeploymentEnvironment = RuntimeDeploymentEnvironment;
+
+/**
+ * Persisted environment value may include legacy QA records.
+ */
+export type PersistedDeploymentEnvironment = RuntimeDeploymentEnvironment | LegacyRuntimeDeploymentEnvironment;
+
+export function normalizeRuntimeDeploymentEnvironment(
+  value: PersistedDeploymentEnvironment | string,
+): RuntimeDeploymentEnvironment {
+  if (value === 'DEV' || value === 'PREPROD' || value === 'PROD') {
+    return value;
+  }
+
+  if (value === 'QA') {
+    return 'PREPROD';
+  }
+
+  throw new Error(`Unknown deployment environment: ${value}`);
+}
 
 export type DeploymentSourceType = 'revision' | 'version';
 
@@ -315,9 +351,14 @@ export interface DeploymentItem {
   readonly mappingId: string;
   /** Composite SK: {ENV}#{ISO8601} */
   readonly environmentDeployedAt: string;
-  readonly environment: DeploymentEnvironment;
+  /**
+   * Canonical in new writes; may be legacy QA in historical records.
+   */
+  readonly environment: PersistedDeploymentEnvironment;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
   readonly configS3Key: string;
   readonly configHash: string;
   readonly deployedAt: ISODateString;
@@ -334,10 +375,15 @@ export interface DeploymentCurrentItem {
   /** Composite PK: {mappingId}#{ENV} */
   readonly mappingIdEnvironment: string;
   readonly mappingId: string;
-  readonly environment: DeploymentEnvironment;
+  /**
+   * Canonical in new writes; may be legacy QA in historical records.
+   */
+  readonly environment: PersistedDeploymentEnvironment;
   readonly deployedAt: ISODateString;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
   readonly configHash: string;
   readonly configS3Key: string;
 }
@@ -367,9 +413,24 @@ export interface CreateDeploymentInput {
   readonly sourceNumber: number;
   readonly deployedBy: string;
   readonly config: MappingConfig;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
   readonly cdmSchemaTraceability?: readonly DeploymentCdmSchemaTraceabilityEntry[];
   readonly promotedFrom?: DeploymentEnvironment;
   readonly rollbackOf?: string;
+}
+
+export interface CreateRollbackDeploymentInput {
+  readonly mappingId: string;
+  readonly environment: DeploymentEnvironment;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly deployedBy: string;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
+  readonly configHash: string;
+  readonly configS3Key: string;
+  readonly rollbackOf: string;
 }
 
 export interface CreateProjectInput {

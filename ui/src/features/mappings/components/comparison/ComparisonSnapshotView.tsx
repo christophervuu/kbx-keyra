@@ -22,9 +22,9 @@ function formatMode(mode: ComparisonSnapshot['mode']): string {
   switch (mode) {
     case 'current-vs-saved': return 'Current vs Saved';
     case 'current-vs-dev': return 'Current vs DEV';
-    case 'current-vs-qa': return 'Current vs QA';
-    case 'dev-vs-qa': return 'DEV vs QA';
-    case 'qa-vs-prod': return 'QA vs PROD';
+    case 'current-vs-preprod': return 'Current vs PREPROD';
+    case 'dev-vs-preprod': return 'DEV vs PREPROD';
+    case 'preprod-vs-prod': return 'PREPROD vs PROD';
     default: return mode;
   }
 }

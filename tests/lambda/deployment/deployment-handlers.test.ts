@@ -17,11 +17,15 @@ const sharedMocks = vi.hoisted(() => ({
     REVISION_NOT_DEPLOYABLE_TO_ENV: 'REVISION_NOT_DEPLOYABLE_TO_ENV',
     PROMOTION_REQUIRES_VERSION: 'PROMOTION_REQUIRES_VERSION',
     SNAPSHOT_INTEGRITY_ERROR: 'SNAPSHOT_INTEGRITY_ERROR',
+    DEPLOY_ARTIFACT_TOO_LARGE: 'DEPLOY_ARTIFACT_TOO_LARGE',
+    SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+    CONFLICT: 'CONFLICT',
   },
 }));
 
 const deploymentPersistenceMocks = vi.hoisted(() => ({
   create: vi.fn(),
+  createRollback: vi.fn(),
   getCurrent: vi.fn(),
   getCurrentAll: vi.fn(),
   listHistory: vi.fn(),
@@ -36,10 +40,24 @@ const versionMocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
 }));
 
+const runtimeRelayMocks = vi.hoisted(() => ({
+  buildRuntimeDeployArtifact: vi.fn(),
+  assertArtifactPayloadWithinLimit: vi.fn(),
+  getRuntimeRelayClient: vi.fn(),
+  relayClient: {
+    pushArtifact: vi.fn(),
+  },
+}));
+
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
 vi.mock('../../../src/lib/persistence/deployments.js', () => deploymentPersistenceMocks);
 vi.mock('../../../src/lib/persistence/mapping-revisions.js', () => revisionMocks);
 vi.mock('../../../src/lib/persistence/mapping-versions.js', () => versionMocks);
+vi.mock('../../../src/lambda/deployment/runtime-relay.js', () => ({
+  buildRuntimeDeployArtifact: runtimeRelayMocks.buildRuntimeDeployArtifact,
+  assertArtifactPayloadWithinLimit: runtimeRelayMocks.assertArtifactPayloadWithinLimit,
+  getRuntimeRelayClient: runtimeRelayMocks.getRuntimeRelayClient,
+}));
 
 async function importDeployHandler() {
   return import('../../../src/lambda/deployment/deploy-mapping.js');
@@ -86,16 +104,57 @@ describe('deployment handlers', () => {
     sharedMocks.getItem.mockReset().mockResolvedValue({ mappingId: 'map-1' });
 
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
-    sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({
-      statusCode,
-      body: JSON.stringify({ error: { code, message, statusCode, retryable } }),
-    }));
+    sharedMocks.errorResponse
+      .mockReset()
+      .mockImplementation((code, message, statusCode, retryable, requestId, details) => ({
+        statusCode,
+        body: JSON.stringify({
+          error: {
+            code,
+            message,
+            statusCode,
+            retryable,
+            ...(requestId ? { requestId } : {}),
+            ...(details !== undefined ? { details } : {}),
+          },
+        }),
+      }));
     sharedMocks.internalError.mockReset().mockReturnValue({ code: 'INTERNAL_ERROR', message: 'err', statusCode: 500, retryable: true });
 
     deploymentPersistenceMocks.create.mockReset().mockResolvedValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    deploymentPersistenceMocks.createRollback.mockReset().mockResolvedValue({
+      environment: 'PROD',
+      sourceType: 'version',
+      sourceNumber: 2,
+      rollbackOf: 'PROD#2026-06-01T00:00:00.000Z',
+    });
     deploymentPersistenceMocks.getCurrent.mockReset().mockResolvedValue({ sourceType: 'version', sourceNumber: 3 });
-    deploymentPersistenceMocks.getCurrentAll.mockReset().mockResolvedValue({ DEV: null, QA: null, PROD: null });
+    deploymentPersistenceMocks.getCurrentAll.mockReset().mockResolvedValue({ DEV: null, PREPROD: null, PROD: null });
     deploymentPersistenceMocks.listHistory.mockReset().mockResolvedValue([]);
+
+    runtimeRelayMocks.buildRuntimeDeployArtifact.mockReset().mockResolvedValue({
+      artifactId: 'artifact-1',
+      snapshotId: 'artifact-1',
+      artifactHash: 'abc',
+      mappingId: 'map-1',
+      sourceType: 'version',
+      sourceNumber: 3,
+      sourceConfigHash: 'abc',
+      engineVersion: '1.0.0',
+      mappingConfig: { id: 'config' },
+      createdAt: '2026-06-03T00:00:00.000Z',
+    });
+    runtimeRelayMocks.assertArtifactPayloadWithinLimit.mockReset().mockReturnValue({
+      ok: true,
+      payloadBytes: 128,
+      limitBytes: 1024,
+    });
+    runtimeRelayMocks.relayClient.pushArtifact.mockReset().mockResolvedValue({
+      ok: true,
+      statusCode: 201,
+      requestId: 'runtime-req-1',
+    });
+    runtimeRelayMocks.getRuntimeRelayClient.mockReset().mockReturnValue(runtimeRelayMocks.relayClient);
 
     revisionMocks.getConfig.mockReset().mockResolvedValue({ id: 'config' });
     versionMocks.get.mockReset().mockResolvedValue({ version: 3 });
@@ -114,8 +173,8 @@ describe('deployment handlers', () => {
     );
   });
 
-  it('deploy handler rejects revision deploy to QA', async () => {
-    sharedMocks.parseBody.mockReturnValue({ environment: 'QA', sourceType: 'revision', sourceNumber: 2 });
+  it('deploy handler rejects revision deploy to PREPROD', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'PREPROD', sourceType: 'revision', sourceNumber: 2 });
     const { handler } = await importDeployHandler();
 
     const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
@@ -134,6 +193,72 @@ describe('deployment handlers', () => {
     expect(deploymentPersistenceMocks.create).toHaveBeenCalledWith(
       expect.objectContaining({ environment: 'PROD', sourceType: 'version', sourceNumber: 3 }),
     );
+    expect(runtimeRelayMocks.relayClient.pushArtifact).toHaveBeenCalled();
+  });
+
+  it('deploy handler rejects oversize runtime artifact payload', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    runtimeRelayMocks.assertArtifactPayloadWithinLimit.mockReturnValueOnce({
+      ok: false,
+      payloadBytes: 4096,
+      limitBytes: 1024,
+    });
+
+    const { handler } = await importDeployHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(413);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('DEPLOY_ARTIFACT_TOO_LARGE');
+    expect(body.error.message).toContain('MAX_DEPLOY_ARTIFACT_PAYLOAD_BYTES');
+    expect(body.error.details).toEqual({
+      artifactId: 'artifact-1',
+      snapshotId: 'artifact-1',
+      payloadBytes: 4096,
+      limitBytes: 1024,
+    });
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('deploy handler surfaces runtime relay failure without creating deployment', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    runtimeRelayMocks.relayClient.pushArtifact.mockResolvedValueOnce({
+      ok: false,
+      statusCode: 503,
+      errorCode: 'SERVICE_UNAVAILABLE',
+      message: 'Runtime endpoint unavailable',
+      retryable: true,
+      requestId: 'runtime-req-fail',
+    });
+
+    const { handler } = await importDeployHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(503);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
+    expect(body.error.retryable).toBe(true);
+    expect(body.error.details).toEqual({
+      environment: 'DEV',
+      artifactId: 'artifact-1',
+      snapshotId: 'artifact-1',
+    });
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('deploy handler returns snapshot integrity error when persistence detects artifact hash mismatch', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    deploymentPersistenceMocks.create.mockRejectedValueOnce(
+      Object.assign(new Error('hash mismatch'), { name: 'DeploymentArtifactIntegrityError' }),
+    );
+
+    const { handler } = await importDeployHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('SNAPSHOT_INTEGRITY_ERROR');
+    expect(body.error.retryable).toBe(false);
   });
 
   it('deploy handler blocks when referenced CDM source schema is unsynced', async () => {
@@ -175,7 +300,7 @@ describe('deployment handlers', () => {
   });
 
   it('promote handler requires version-backed source', async () => {
-    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'QA' });
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
     deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'revision', sourceNumber: 2 });
     const { handler } = await importPromoteHandler();
 
@@ -186,7 +311,7 @@ describe('deployment handlers', () => {
   });
 
   it('promote handler creates deployment when source is version-backed', async () => {
-    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'QA' });
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
     deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
     const { handler } = await importPromoteHandler();
 
@@ -195,16 +320,88 @@ describe('deployment handlers', () => {
     expect(result.statusCode).toBe(201);
     expect(deploymentPersistenceMocks.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        environment: 'QA',
+        environment: 'PREPROD',
         sourceType: 'version',
         sourceNumber: 3,
         promotedFrom: 'DEV',
       }),
     );
+    expect(runtimeRelayMocks.relayClient.pushArtifact).toHaveBeenCalledWith(
+      'PREPROD',
+      expect.objectContaining({ artifactId: 'artifact-1', snapshotId: 'artifact-1' }),
+    );
+  });
+
+  it('promote handler rejects oversize runtime artifact payload', async () => {
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
+    deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
+    runtimeRelayMocks.assertArtifactPayloadWithinLimit.mockReturnValueOnce({
+      ok: false,
+      payloadBytes: 8192,
+      limitBytes: 1024,
+    });
+
+    const { handler } = await importPromoteHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(413);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('DEPLOY_ARTIFACT_TOO_LARGE');
+    expect(body.error.details).toEqual({
+      artifactId: 'artifact-1',
+      snapshotId: 'artifact-1',
+      payloadBytes: 8192,
+      limitBytes: 1024,
+    });
+    expect(runtimeRelayMocks.relayClient.pushArtifact).not.toHaveBeenCalled();
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('promote handler surfaces runtime relay failure without creating deployment', async () => {
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
+    deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
+    runtimeRelayMocks.relayClient.pushArtifact.mockResolvedValueOnce({
+      ok: false,
+      statusCode: 503,
+      errorCode: 'SERVICE_UNAVAILABLE',
+      message: 'Runtime endpoint unavailable',
+      retryable: true,
+      requestId: 'runtime-req-fail-promote',
+    });
+
+    const { handler } = await importPromoteHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(503);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('SERVICE_UNAVAILABLE');
+    expect(body.error.details).toEqual({
+      environment: 'PREPROD',
+      artifactId: 'artifact-1',
+      snapshotId: 'artifact-1',
+      promotedFrom: 'DEV',
+    });
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('promote handler returns snapshot integrity error when persistence detects artifact hash mismatch', async () => {
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
+    deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
+    deploymentPersistenceMocks.create.mockRejectedValueOnce(
+      Object.assign(new Error('hash mismatch'), { name: 'DeploymentArtifactIntegrityError' }),
+    );
+
+    const { handler } = await importPromoteHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('SNAPSHOT_INTEGRITY_ERROR');
+    expect(body.error.retryable).toBe(false);
   });
 
   it('promote handler includes cdmSchemaTraceability when referenced CDM schemas are deployable', async () => {
-    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'QA' });
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
     deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
     sharedMocks.getItem
       .mockResolvedValueOnce({ mappingId: 'map-1', sourceSchemaId: 'schema-source' })
@@ -243,7 +440,7 @@ describe('deployment handlers', () => {
   });
 
   it('promote handler blocks when referenced CDM target schema is missing', async () => {
-    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'QA' });
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
     sharedMocks.getItem
       .mockResolvedValueOnce({ mappingId: 'map-1', targetSchemaId: 'schema-target' })
       .mockResolvedValueOnce(null);
@@ -333,6 +530,10 @@ describe('deployment handlers', () => {
         environmentDeployedAt: 'PROD#2026-06-01T00:00:00.000Z',
         sourceType: 'version',
         sourceNumber: 2,
+        artifactId: 'artifact-2',
+        artifactHash: 'hash-2',
+        configHash: 'cfg-2',
+        configS3Key: 'deployments/map-1/PROD/artifact-2.json',
       },
     ]);
     const { handler } = await importRollbackHandler();
@@ -340,14 +541,46 @@ describe('deployment handlers', () => {
     const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
 
     expect(result.statusCode).toBe(201);
-    expect(deploymentPersistenceMocks.create).toHaveBeenCalledWith(
+    expect(deploymentPersistenceMocks.createRollback).toHaveBeenCalledWith(
       expect.objectContaining({
         environment: 'PROD',
         sourceType: 'version',
         sourceNumber: 2,
+        artifactId: 'artifact-2',
+        artifactHash: 'hash-2',
+        configHash: 'cfg-2',
+        configS3Key: 'deployments/map-1/PROD/artifact-2.json',
         rollbackOf: 'PROD#2026-06-01T00:00:00.000Z',
       }),
     );
+  });
+
+  it('rollback handler returns artifact_not_available_for_rollback when artifact metadata is missing', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'PROD', deploymentSK: 'PROD#2026-06-01T00:00:00.000Z' });
+    deploymentPersistenceMocks.listHistory.mockResolvedValueOnce([
+      {
+        environmentDeployedAt: 'PROD#2026-06-01T00:00:00.000Z',
+        sourceType: 'version',
+        sourceNumber: 2,
+        configHash: 'cfg-2',
+        configS3Key: 'deployments/map-1/PROD/artifact-2.json',
+      },
+    ]);
+
+    const { handler } = await importRollbackHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(409);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('CONFLICT');
+    expect(body.error.message).toContain('artifact_not_available_for_rollback');
+    expect(body.error.details).toEqual({
+      reason: 'artifact_not_available_for_rollback',
+      environment: 'PROD',
+      deploymentSK: 'PROD#2026-06-01T00:00:00.000Z',
+      remediation: 'redeploy-or-promote-artifact',
+    });
+    expect(deploymentPersistenceMocks.createRollback).not.toHaveBeenCalled();
   });
 
   it('list handler returns filtered history', async () => {
@@ -362,12 +595,33 @@ describe('deployment handlers', () => {
   });
 
   it('current handler returns per-environment map', async () => {
-    deploymentPersistenceMocks.getCurrentAll.mockResolvedValueOnce({ DEV: { sourceType: 'version' }, QA: null, PROD: null });
+    deploymentPersistenceMocks.getCurrentAll.mockResolvedValueOnce({ DEV: { sourceType: 'version' }, PREPROD: null, PROD: null });
     const { handler } = await importCurrentHandler();
 
     const result = await handler({ body: null, pathParameters: { mappingId: 'map-1' } });
 
     expect(result.statusCode).toBe(200);
-    expect(JSON.parse(result.body)).toEqual({ DEV: { sourceType: 'version' }, QA: null, PROD: null });
+    expect(JSON.parse(result.body)).toEqual({ DEV: { sourceType: 'version' }, PREPROD: null, PROD: null });
+  });
+
+  it('list handler normalizes legacy QA query to PREPROD', async () => {
+    sharedMocks.parseQueryParam.mockReturnValueOnce('QA');
+    deploymentPersistenceMocks.listHistory.mockResolvedValueOnce([{ environment: 'PREPROD' }]);
+    const { handler } = await importListHandler();
+
+    const result = await handler({ body: null, pathParameters: { mappingId: 'map-1' }, queryStringParameters: { environment: 'QA' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(deploymentPersistenceMocks.listHistory).toHaveBeenCalledWith('map-1', 'PREPROD');
+  });
+
+  it('list handler rejects SANDBOX query as non-runtime environment', async () => {
+    sharedMocks.parseQueryParam.mockReturnValueOnce('SANDBOX');
+    const { handler } = await importListHandler();
+
+    const result = await handler({ body: null, pathParameters: { mappingId: 'map-1' }, queryStringParameters: { environment: 'SANDBOX' } });
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body).error.code).toBe('VALIDATION_ERROR');
   });
 });

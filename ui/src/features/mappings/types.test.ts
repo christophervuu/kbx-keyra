@@ -20,9 +20,9 @@ describe('FS-037 T-01: comparison domain and feature types', () => {
     const modes: ComparisonMode[] = [
       'current-vs-saved',
       'current-vs-dev',
-      'current-vs-qa',
-      'dev-vs-qa',
-      'qa-vs-prod',
+      'current-vs-preprod',
+      'dev-vs-preprod',
+      'preprod-vs-prod',
     ];
 
     expect(modes).toHaveLength(5);
@@ -34,9 +34,9 @@ describe('FS-037 T-01: comparison domain and feature types', () => {
     expect(modes).toHaveLength(5);
     expect(COMPARISON_MODES['current-vs-saved']).toBeDefined();
     expect(COMPARISON_MODES['current-vs-dev']).toBeDefined();
-    expect(COMPARISON_MODES['current-vs-qa']).toBeDefined();
-    expect(COMPARISON_MODES['dev-vs-qa']).toBeDefined();
-    expect(COMPARISON_MODES['qa-vs-prod']).toBeDefined();
+    expect(COMPARISON_MODES['current-vs-preprod']).toBeDefined();
+    expect(COMPARISON_MODES['dev-vs-preprod']).toBeDefined();
+    expect(COMPARISON_MODES['preprod-vs-prod']).toBeDefined();
   });
 
   it('ComparisonModeConfig and side config are structurally valid', () => {

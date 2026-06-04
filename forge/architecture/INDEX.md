@@ -12,19 +12,21 @@ This file must be kept current. When an architecture document is created or mean
 
 | Document | Covers | Last Updated |
 | --- | --- | --- |
-| [deployments.md](./deployments.md) | Deployment subsystem architecture: deploy/promote/rollback routes, deployability policy, storage model, staleness computation, and CDM deployment guardrail + provenance traceability contracts (FS-079). | 2026-06-03 |
+| [deployments.md](./deployments.md) | Deployment subsystem architecture: SANDBOX control-plane + DEV/PREPROD/PROD runtime model, deploy/promote/rollback semantics, artifact relay + payload/retry contracts, retention baseline, and CDM deploy guardrail/provenance contracts. | 2026-06-03 |
 | [project-structure.md](./project-structure.md) | Repository layout and file/folder conventions for `src/`, `ui/`, and `tests/`. | 2026-05-15 |
 | [mapping-engine.md](./mapping-engine.md) | Mapping engine architecture: public API, parser/evaluator, validate/execute pipelines, function registry, diagnostics, and constraints. | 2026-05-14 |
 | [ui-application.md](./ui-application.md) | UI architecture: adapter/state/routing/component structure, mapping workspace contracts, and CDM UX contracts including FS-078 sync-status consistency, FS-079 deploy-block messaging, and FS-080 resilience degraded/retry/failure-class handling. | 2026-06-03 |
-| [phase-1-readiness.md](./phase-1-readiness.md) | Phase 0→1 readiness baseline, backend constraints implied by UI, and transition guidance. | 2026-06-03 |
+| [phase-1-readiness.md](./phase-1-readiness.md) | Phase 0→1 readiness baseline, backend constraints implied by UI, and transition guidance including FS-081 deployment environment migration constraints (`DEV/PREPROD/PROD` + `SANDBOX` control-plane context). | 2026-06-03 |
 | [e2e-testing.md](./e2e-testing.md) | E2E infrastructure, conventions, and CI acceptance-gate posture. | 2026-06-02 |
 | [ai-runtime.md](./ai-runtime.md) | Shared AI runtime architecture: prompt/routing/invocation/telemetry/error-normalization contracts and feature-specific runtime addenda. | 2026-06-03 |
 | [persistence-model.md](./persistence-model.md) | Persistence layer architecture: DynamoDB/S3 schemas, access patterns, and metadata/blob boundaries. | 2026-06-01 |
 | [schema-ingestion.md](./schema-ingestion.md) | Schema ingestion/indexing pipeline architecture: flow, module boundaries, failure handling, and performance targets. | 2026-05-15 |
-| [backend-api.md](./backend-api.md) | Backend API architecture: handler conventions, route contracts, error envelopes, and cross-cutting addenda including FS-076 CDM read-only API, FS-078 sync-status normalization, FS-079 deploy guardrails, and FS-080 CDM GitHub resilience taxonomy/retry/cache/telemetry semantics. | 2026-06-03 |
-| [infrastructure.md](./infrastructure.md) | Infrastructure architecture: SAM resources, environment config, packaging, local dev, and deployment conventions. | 2026-05-31 |
+| [backend-api.md](./backend-api.md) | Backend API architecture: handler conventions, route contracts, error envelopes, and cross-cutting addenda including FS-076 CDM read-only API, FS-078 sync-status normalization, FS-079 deploy guardrails, FS-080 CDM GitHub resilience semantics, and FS-081 runtime deployment model contracts. | 2026-06-03 |
+| [infrastructure.md](./infrastructure.md) | Infrastructure architecture: SAM resources, environment config, packaging, local dev, deployment conventions, and FS-081 multi-account topology/runtime footprint assumptions. | 2026-06-03 |
 
 **Recent update notes**
+
+- **2026-06-03 (FS-081):** updated `deployments.md`, `backend-api.md`, `infrastructure.md`, and `phase-1-readiness.md` to codify SANDBOX control-plane + DEV/PREPROD/PROD runtime model, direct-push artifact transfer (signed-pull deferred), payload-size/idempotent retry contracts, pointer-only rollback with missing-artifact remediation, runtime-local execution/preview invariants, and QA->PREPROD normalization policy.
 
 - **2026-06-03 (FS-080):** updated `backend-api.md` and `ui-application.md` to codify CDM GitHub read resilience contracts: backend failure taxonomy (`rate-limited`, `unauthorized-forbidden`, `not-found-path-mismatch`, `timeout-transient`) + stable error codes, bounded retry/backoff+jitter behavior, browse cache TTL defaults (local 30s/dev 60s/prod 300s) with outage-only stale-grace guidance, explicit `retry-after` propagation, sync no-silent-failure invariant, and structured telemetry/request-lineage fields.
 - **2026-06-03 (FS-079):** updated `deployments.md`, `backend-api.md`, and `ui-application.md` to codify CDM deployment guardrail + provenance contracts: deploy/promote pre-check gating, stable CDM block reason taxonomy (`unsynced`, `update-failed`, `metadata-incomplete`, `ingest-not-ready`, `schema-missing`), and dual-location traceability persistence.

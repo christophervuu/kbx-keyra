@@ -88,6 +88,7 @@ src/
       rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)
       list-deployments.ts GET /mappings/:mappingId/deployments handler (optional environment filter)
       get-current-deployments.ts GET /mappings/:mappingId/deployments/current handler
+      runtime-relay.ts Shared runtime artifact relay module for control-plane deploy/promote (artifact identity/hash construction, payload-size guard, runtime relay client abstraction) (FS-081 T-03)
       index.ts          Deployment lambda barrel exports
     shared/           Shared Lambda handler utilities (FS-057 T-01)
       index.ts         Shared lambda utilities barrel export
@@ -810,6 +811,7 @@ tests/
       get-version.test.ts Get mapping version tests (200 + revision pointer + 404)
       create-version.test.ts Create mapping version tests (201 from latest revision)
       save-version.test.ts Save mapping version shim tests (delegates to create-version flow)
+      preview-mapping.test.ts Server preview handler tests (runtime environment routing, local active-artifact execution, provenance metadata, not-deployed behavior) (FS-081 T-05)
     deployment/       Deployment lambda handler tests (FS-064 T-02)
       deployment-handlers.test.ts Unit tests for deploy/promote/rollback/list/current handlers and policy/error behavior
     shared/           Shared lambda utility tests (FS-057 T-01)

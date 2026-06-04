@@ -124,7 +124,15 @@ const saveStatusConfig: Record<SaveStatus, { label: (count: number) => string; c
 // Deploy badge helpers
 // ---------------------------------------------------------------------------
 
-const ENV_ORDER: Environment[] = ['DEV', 'QA', 'PROD'];
+const ENV_ORDER: Environment[] = ['DEV', 'PREPROD', 'PROD'];
+
+function normalizeEnvironmentLabel(environment: Environment): string {
+  if (environment === 'QA') {
+    return 'PREPROD';
+  }
+
+  return environment;
+}
 
 function getDeployBadgeContent(
   deployStatus: HighestDeployStatus | null,
@@ -135,7 +143,7 @@ function getDeployBadgeContent(
   }
 
   const isStale = savedVersion > deployStatus.deployedVersion;
-  const envLabel = deployStatus.environment;
+  const envLabel = normalizeEnvironmentLabel(deployStatus.environment);
 
   if (isStale) {
     return { label: `${envLabel} (stale)`, dotClass: 'bg-amber-500' };

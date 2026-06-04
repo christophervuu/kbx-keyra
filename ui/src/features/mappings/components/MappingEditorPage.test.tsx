@@ -106,11 +106,11 @@ describe('EditorTopBar', () => {
   });
 
   it('renders stale badge when saved version is ahead of deployed version', () => {
-    const deployStatus: HighestDeployStatus = { environment: 'QA', deployedVersion: 1 };
+    const deployStatus: HighestDeployStatus = { environment: 'PREPROD', deployedVersion: 1 };
     renderWithRouter(
       <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} version={3} deployStatus={deployStatus} />,
     );
-    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('QA (stale)');
+    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('PREPROD (stale)');
   });
 
   it('renders source and target schema names', () => {

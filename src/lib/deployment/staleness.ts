@@ -14,13 +14,13 @@ export interface MappingStalenessInput {
 
 export interface CurrentDeploymentsInput {
   readonly DEV?: DeploymentStalenessInput | null;
-  readonly QA?: DeploymentStalenessInput | null;
+  readonly PREPROD?: DeploymentStalenessInput | null;
   readonly PROD?: DeploymentStalenessInput | null;
 }
 
 export interface EnvironmentDeploymentStatus {
   readonly DEV: DeploymentStatus;
-  readonly QA: DeploymentStatus;
+  readonly PREPROD: DeploymentStatus;
   readonly PROD: DeploymentStatus;
 }
 
@@ -46,7 +46,7 @@ export function computeAllEnvironments(
 ): EnvironmentDeploymentStatus {
   return {
     DEV: computeStaleness(currentDeployments.DEV ?? null, mapping),
-    QA: computeStaleness(currentDeployments.QA ?? null, mapping),
+    PREPROD: computeStaleness(currentDeployments.PREPROD ?? null, mapping),
     PROD: computeStaleness(currentDeployments.PROD ?? null, mapping),
   };
 }

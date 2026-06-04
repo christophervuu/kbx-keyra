@@ -231,3 +231,51 @@ After deployment, stack outputs provide:
 - `forge/architecture/schema-ingestion.md` — OpenSearch mapping, Step Functions flow, batch sizing
 - `forge/architecture/project-structure.md` — Repository file layout, Lambda handler locations
 - `forge/architecture/ai-runtime.md` — AI Lambda conventions (separate from Phase 1 CRUD infra)
+
+---
+
+## 12) Multi-Account Deployment Topology Addendum (FS-081)
+
+FS-081 establishes a deployment topology with one control-plane account and three runtime accounts.
+
+### 12.1 Account layout
+
+| Plane | Environment | Account | ID |
+|---|---|---|---|
+| Control plane | SANDBOX | `kbxt-platform-integrations-qa` | `503561435751` |
+| Runtime plane | DEV | `kbxt-b2b-integrations-dev` | `897699593484` |
+| Runtime plane | PREPROD | `kbxt-b2b-integrations-pre-prod` | `527737084689` |
+| Runtime plane | PROD | `kbxt-b2b-integrations-prod` | `410618142059` |
+
+### 12.2 Runtime minimum footprint (per runtime account)
+
+Each runtime account must provision, at minimum:
+
+1. Internal deploy ingestion API endpoint (artifact push/verify/activate)
+2. Runtime artifact storage (immutable objects)
+3. Active pointer store (`mappingId -> artifactId`)
+4. Runtime history store (append-only deploy/promote/rollback records)
+5. Generic mapping runtime executor + runtime preview execution path
+
+### 12.3 Control-plane infrastructure responsibilities
+
+SANDBOX infrastructure must support:
+
+- deployment orchestration handlers
+- artifact registry/provenance metadata store
+- outbound HTTPS connectivity to runtime internal endpoints
+- environment routing configuration for DEV/PREPROD/PROD runtime targets
+
+### 12.4 Transfer and connectivity assumptions (MVP)
+
+- No cross-account role assumption in deploy/promote flows.
+- Canonical transfer uses direct payload push from SANDBOX to runtime deploy API request body.
+- Runtime ingestion endpoint enforces maximum artifact payload size and deterministic oversize rejection.
+- Runtime endpoints are HTTPS and reachable via internal public endpoint allowlisting from SANDBOX.
+- Private connectivity constructs (e.g., PrivateLink/VPC peering) are deferred from MVP.
+
+### 12.5 Retention baseline
+
+- Retention policy is configurable by runtime environment.
+- MVP default: retain all runtime artifacts locally.
+- Rollback guarantee is bounded by configured retention/rollback window.

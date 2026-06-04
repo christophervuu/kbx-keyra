@@ -492,11 +492,11 @@ describe('HttpAdapter (CRUD)', () => {
     vi.mocked(httpRequest).mockResolvedValueOnce([]);
     const adapter = new HttpAdapter(API_URL);
 
-    await adapter.listDeployments('m-1', { environment: 'QA' });
+    await adapter.listDeployments('m-1', { environment: 'PREPROD' });
 
     expect(httpRequest).toHaveBeenCalledWith({
       baseUrl: API_URL,
-      path: '/mappings/m-1/deployments?environment=QA',
+      path: '/mappings/m-1/deployments?environment=PREPROD',
       method: 'GET',
     });
   });
@@ -514,15 +514,15 @@ describe('HttpAdapter (CRUD)', () => {
           configHash: 'dev-hash',
           configS3Key: 'deployments/m-1/DEV/2026-06-01T00:00:00.000Z.json',
         },
-        QA: {
-          mappingIdEnvironment: 'm-1#QA',
+        PREPROD: {
+          mappingIdEnvironment: 'm-1#PREPROD',
           mappingId: 'm-1',
-          environment: 'QA',
+          environment: 'PREPROD',
           deployedAt: '2026-06-01T00:00:00.000Z',
           sourceType: 'version',
           sourceNumber: 1,
-          configHash: 'qa-hash',
-          configS3Key: 'deployments/m-1/QA/2026-06-01T00:00:00.000Z.json',
+          configHash: 'preprod-hash',
+          configS3Key: 'deployments/m-1/PREPROD/2026-06-01T00:00:00.000Z.json',
         },
         PROD: null,
       })
@@ -554,6 +554,7 @@ describe('HttpAdapter (CRUD)', () => {
     });
 
     expect(result.DEV.status).toBe('stale');
+    expect(result.PREPROD.status).toBe('stale');
     expect(result.QA.status).toBe('stale');
     expect(result.PROD.status).toBe('not-deployed');
   });
@@ -649,7 +650,7 @@ describe('HttpAdapter (CRUD)', () => {
     ['getTemplate', (a: HttpAdapter) => a.getTemplate('t-1')],
     ['getDeploymentContext', (a: HttpAdapter) => a.getDeploymentContext('m-1')],
     ['deploy', (a: HttpAdapter) => a.deploy('m-1', 'DEV')],
-    ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'QA')],
+    ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'PREPROD')],
     ['rollback', (a: HttpAdapter) => a.rollback('m-1', 'DEV', 1)],
     ['getDeploymentDiff', (a: HttpAdapter) => a.getDeploymentDiff('m-1', 1, 2)],
     ['listPublishedSchemas', (a: HttpAdapter) => a.listPublishedSchemas()],

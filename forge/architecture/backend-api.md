@@ -23,8 +23,10 @@ Scope:
 
 Out of scope:
 - Detailed AI runtime internals under `src/lib/ai/` (covered by `ai-runtime.md`)
-- Deployment, published-schema GitHub write flows, Activity/Preview/Auth architecture
+- Published-schema GitHub write flows and full Auth architecture hardening details
 - IaC resource authoring details (covered by `infrastructure.md`)
+
+Deployment/preview architecture contracts are covered via addenda in this document.
 
 ---
 
@@ -792,3 +794,80 @@ Required fields for debugging/tracing:
 - `retryAfter` (if present)
 - request lineage (`requestId`, optional `correlationId`)
 - terminal decision/summary fields (success/failure classification)
+
+---
+
+## 16) Runtime Deployment Model Addendum (FS-081)
+
+FS-081 introduces a control-plane/runtime-plane split for deployments:
+
+- **Control plane:** SANDBOX (`kbxt-platform-integrations-qa`, account `503561435751`)
+- **Runtime planes:** DEV (`897699593484`), PREPROD (`527737084689`), PROD (`410618142059`)
+
+### 16.1 Canonical environment model
+
+- Runtime deployment targets: `DEV | PREPROD | PROD`
+- Control-plane context (non-runtime target): `SANDBOX`
+
+Legacy-compatibility policy:
+- persisted historical `QA` values may remain in raw records for audit fidelity
+- domain/presentation normalization maps `QA -> PREPROD` for behavior and UI rendering
+
+### 16.2 Deployment route responsibilities under FS-081
+
+Control-plane routes (public KeyRa API surface):
+
+- `POST /mappings/:mappingId/deploy`
+- `POST /mappings/:mappingId/promote`
+- `POST /mappings/:mappingId/rollback`
+- `GET /mappings/:mappingId/deployments`
+- `GET /mappings/:mappingId/deployments/current`
+
+Control-plane handlers orchestrate delivery to runtime environments; runtime activation/execution remains environment-local.
+
+Runtime internal endpoints (not part of public product route table):
+
+- internal deploy ingestion endpoint (artifact push/verify/activate)
+- internal runtime preview endpoint (execute currently active local artifact)
+
+### 16.3 Transfer and retry contract (MVP)
+
+Canonical transfer for this phase:
+- SANDBOX control-plane POSTs full deployment artifact payload directly in runtime deploy request body.
+- Signed URL pull transfer is deferred.
+
+Payload guardrail:
+- runtime deploy ingestion must enforce configured max payload size
+- oversize must fail with deterministic actionable diagnostic (recommended code: `DEPLOY_ARTIFACT_TOO_LARGE`, HTTP 413)
+
+Retry contract:
+- retries are client-driven and idempotent by `artifactId`/`snapshotId`
+- repeated delivery of identical artifact to same runtime environment must be safe and deterministic
+
+### 16.4 Promotion and rollback contract
+
+Promotion:
+- preserves same artifact identity (`artifactId` + hash) from source runtime to target runtime
+- does not regenerate payload during DEV->PREPROD or PREPROD->PROD promotion
+
+Rollback:
+- pointer-only reassignment in target runtime
+- append-only rollback history event (`rollbackOf` linkage)
+- no artifact content mutation/deletion
+- if artifact missing locally in target runtime: return `artifact_not_available_for_rollback` (recommended HTTP 409), no implicit auto-import in MVP
+
+### 16.5 Runtime-local execution and preview invariant
+
+For both business execution and server preview:
+- runtime environment resolves active pointer and artifact from local resources only
+- no runtime dependency on SANDBOX deployment state at request execution time
+
+Preview response contract should include runtime provenance:
+- `environment`
+- artifact identity metadata (artifact id/hash and deployed source metadata as available)
+
+### 16.6 Network assumption (MVP)
+
+- Runtime deploy/preview endpoints are HTTPS and reachable from SANDBOX.
+- Access model for this phase: internal public endpoint allowlisting.
+- Private connectivity topology (e.g., private link/VPC peering) is deferred.

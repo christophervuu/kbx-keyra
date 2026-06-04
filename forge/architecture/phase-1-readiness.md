@@ -90,7 +90,7 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `getDeploymentContext(mappingId): Promise<DeploymentContext>` | local simulated env records | deployment-context endpoint | deployment | env model currently fixed `DEV/QA/PROD` |
+| `getDeploymentContext(mappingId): Promise<DeploymentContext>` | local simulated env records | deployment-context endpoint | deployment | FS-081 runtime model is `DEV/PREPROD/PROD`; `SANDBOX` is control-plane context |
 | `deploy(mappingId, environment): Promise<DeploymentRecord>` | local simulated record create | real deploy orchestration | deployment | async/long-running behavior not modeled in adapter yet |
 | `promote(mappingId, from, to): Promise<DeploymentRecord>` | local simulated promotion | promotion API | deployment | policy/approval concerns deferred |
 | `rollback(mappingId, environment, targetVersion): Promise<DeploymentRecord>` | local simulated rollback | rollback API | deployment | auditability requirements likely in Phase 1 |
@@ -210,9 +210,9 @@ Frontend implementation currently constrains backend design in these ways:
    - Source: version APIs and editor/version-history flows  
    - Constraint: numeric version identity and retrievable full snapshots are part of current UI behavior.
 
-7. **Fixed environment enum in deploy workflows**  
+7. **Environment model migration in deploy workflows**  
    - Source: `Environment` usage and deployment methods  
-   - Constraint: backend environment model must remain compatible or require coordinated UI migration.
+   - Constraint: backend and UI must migrate runtime environment contracts from `DEV/QA/PROD` to `DEV/PREPROD/PROD`, with explicit `SANDBOX` control-plane context and legacy `QA -> PREPROD` normalization.
 
 8. **Latency-sensitive preview/validation UX**  
    - Source: debounced validation/preview hooks and test-lab workflows  

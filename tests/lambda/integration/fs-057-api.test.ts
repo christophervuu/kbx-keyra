@@ -96,6 +96,7 @@ interface Handlers {
   readonly rollbackDeployment: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly listDeployments: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
   readonly getCurrentDeployments: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+  readonly previewMapping: (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
 }
 
 const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -364,6 +365,7 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
       rollbackDeployment: deployment.rollbackDeploymentHandler,
       listDeployments: deployment.listDeploymentsHandler,
       getCurrentDeployments: deployment.getCurrentDeploymentsHandler,
+      previewMapping: mapping.previewMappingHandler,
     };
   });
 
@@ -632,11 +634,11 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     expect(deployRevisionDev.statusCode).toBe(201);
     expect(parseBody<{ sourceType: string; sourceNumber: number }>(deployRevisionDev)).toMatchObject({ sourceType: 'revision', sourceNumber: 2 });
 
-    const deployRevisionQa = await handlers.deployMapping(
-      event({ environment: 'QA', sourceType: 'revision', sourceNumber: 2 }, { mappingId: mapping.mappingId }),
+    const deployRevisionPreprod = await handlers.deployMapping(
+      event({ environment: 'PREPROD', sourceType: 'revision', sourceNumber: 2 }, { mappingId: mapping.mappingId }),
     );
-    expect(deployRevisionQa.statusCode).toBe(400);
-    expect(parseBody<{ error: { code: string } }>(deployRevisionQa).error.code).toBe('REVISION_NOT_DEPLOYABLE_TO_ENV');
+    expect(deployRevisionPreprod.statusCode).toBe(400);
+    expect(parseBody<{ error: { code: string } }>(deployRevisionPreprod).error.code).toBe('REVISION_NOT_DEPLOYABLE_TO_ENV');
 
     const versionCreated = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
     expect(versionCreated.statusCode).toBe(201);
@@ -649,7 +651,7 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     expect(parseBody<{ sourceType: string; sourceNumber: number }>(deployVersionProd)).toMatchObject({ sourceType: 'version', sourceNumber: 1 });
 
     const promoteFromRevision = await handlers.promoteDeployment(
-      event({ fromEnvironment: 'DEV', toEnvironment: 'QA' }, { mappingId: mapping.mappingId }),
+      event({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' }, { mappingId: mapping.mappingId }),
     );
     expect(promoteFromRevision.statusCode).toBe(400);
     expect(parseBody<{ error: { code: string } }>(promoteFromRevision).error.code).toBe('PROMOTION_REQUIRES_VERSION');
@@ -660,7 +662,7 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     expect(deployVersionDev.statusCode).toBe(201);
 
     const promoteVersion = await handlers.promoteDeployment(
-      event({ fromEnvironment: 'DEV', toEnvironment: 'QA' }, { mappingId: mapping.mappingId }),
+      event({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' }, { mappingId: mapping.mappingId }),
     );
     expect(promoteVersion.statusCode).toBe(201);
     expect(parseBody<{ sourceType: string; sourceNumber: number; promotedFrom: string }>(promoteVersion)).toMatchObject({
@@ -706,10 +708,86 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
 
     const current = await handlers.getCurrentDeployments(event(undefined, { mappingId: mapping.mappingId }));
     expect(current.statusCode).toBe(200);
-    const currentBody = parseBody<{ DEV: { sourceType: string }; QA: { sourceType: string }; PROD: { sourceType: string; sourceNumber: number } }>(current);
+    const currentBody = parseBody<{ DEV: { sourceType: string }; PREPROD: { sourceType: string }; PROD: { sourceType: string; sourceNumber: number } }>(current);
     expect(currentBody.DEV.sourceType).toBe('version');
-    expect(currentBody.QA.sourceType).toBe('version');
+    expect(currentBody.PREPROD.sourceType).toBe('version');
     expect(currentBody.PROD.sourceNumber).toBe(1);
+  });
+
+  it('FS-081 AE-05 preview uses selected runtime environment active artifact and returns provenance metadata', async () => {
+    const project = parseBody<{ projectId: string }>(
+      await handlers.createProject(event({ name: 'Preview Project', slug: 'preview-project' })),
+    );
+
+    const createMapping = await handlers.createMapping(event({
+      projectId: project.projectId,
+      name: 'Preview Map',
+      rules: [{ target: 'A', type: 'string', expression: 'source("a")' }],
+    }));
+    const mapping = parseBody<{ mappingId: string }>(createMapping);
+
+    const v1 = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(v1.statusCode).toBe(201);
+
+    const update = await handlers.updateMapping(event({
+      projectId: project.projectId,
+      name: 'Preview Map',
+      expectedRevision: 1,
+      rules: [{ target: 'A', type: 'string', expression: 'source("a2")' }],
+    }, { id: mapping.mappingId }));
+    expect(update.statusCode).toBe(200);
+
+    const v2 = await handlers.saveVersion(event({}, { mappingId: mapping.mappingId }));
+    expect(v2.statusCode).toBe(201);
+
+    expect((await handlers.deployMapping(event({ environment: 'DEV', sourceType: 'version', sourceNumber: 1 }, { mappingId: mapping.mappingId }))).statusCode).toBe(201);
+    expect((await handlers.deployMapping(event({ environment: 'PREPROD', sourceType: 'version', sourceNumber: 2 }, { mappingId: mapping.mappingId }))).statusCode).toBe(201);
+
+    const previewPreprod = await handlers.previewMapping(
+      event({ environment: 'PREPROD', sourceData: { a: 'x', a2: 'y' } }, { mappingId: mapping.mappingId }),
+    );
+    expect(previewPreprod.statusCode).toBe(200);
+    const preprodBody = parseBody<{
+      output: Record<string, unknown>;
+      metadata: { environment: string; sourceNumber: number; artifactId: string | null };
+    }>(previewPreprod);
+    expect(preprodBody.output).toEqual({ A: 'y' });
+    expect(preprodBody.metadata.environment).toBe('PREPROD');
+    expect(preprodBody.metadata.sourceNumber).toBe(2);
+    expect(preprodBody.metadata.artifactId).toContain(':version:2');
+
+    const previewDev = await handlers.previewMapping(
+      event({ environment: 'DEV', sourceData: { a: 'x', a2: 'y' } }, { mappingId: mapping.mappingId }),
+    );
+    expect(previewDev.statusCode).toBe(200);
+    const devBody = parseBody<{
+      output: Record<string, unknown>;
+      metadata: { environment: string; sourceNumber: number; artifactId: string | null };
+    }>(previewDev);
+    expect(devBody.output).toEqual({ A: 'x' });
+    expect(devBody.metadata.environment).toBe('DEV');
+    expect(devBody.metadata.sourceNumber).toBe(1);
+    expect(devBody.metadata.artifactId).toContain(':version:1');
+  });
+
+  it('FS-081 preview returns deterministic not-deployed error when target environment has no active artifact', async () => {
+    const project = parseBody<{ projectId: string }>(
+      await handlers.createProject(event({ name: 'Preview Not Deployed', slug: 'preview-not-deployed' })),
+    );
+
+    const createMapping = await handlers.createMapping(event({
+      projectId: project.projectId,
+      name: 'Preview Empty',
+      rules: [{ target: 'A', type: 'string', expression: 'source("a")' }],
+    }));
+    const mapping = parseBody<{ mappingId: string }>(createMapping);
+
+    const preview = await handlers.previewMapping(
+      event({ environment: 'PROD', sourceData: { a: 'x' } }, { mappingId: mapping.mappingId }),
+    );
+
+    expect(preview.statusCode).toBe(404);
+    expect(parseBody<{ error: { code: string } }>(preview).error.code).toBe('SOURCE_NOT_FOUND');
   });
 
   afterAll(async () => {

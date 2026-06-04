@@ -66,7 +66,7 @@ describe('persistence config', () => {
     expect(config.deploymentSnapshotKey('mapping-1', 'DEV', '2026-06-01T00:00:00.000Z')).toBe(
       'deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json',
     );
-    expect(config.deploymentHistorySortKey('QA', '2026-06-01T00:00:00.000Z')).toBe('QA#2026-06-01T00:00:00.000Z');
+    expect(config.deploymentHistorySortKey('PREPROD', '2026-06-01T00:00:00.000Z')).toBe('PREPROD#2026-06-01T00:00:00.000Z');
     expect(config.deploymentCurrentKey('mapping-1', 'PROD')).toBe('mapping-1#PROD');
   });
 

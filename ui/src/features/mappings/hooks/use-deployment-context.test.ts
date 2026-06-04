@@ -24,7 +24,7 @@ function makeContext(overrides?: Partial<DeploymentContext>): DeploymentContext 
     projectName: 'Test Project',
     environments: [
       { environment: 'DEV', status: 'deployed', deployedVersion: 3, deployedAt: '2026-01-01T00:00:00Z' },
-      { environment: 'QA', status: 'not-deployed' },
+      { environment: 'PREPROD', status: 'not-deployed' },
       { environment: 'PROD', status: 'stale', deployedVersion: 1, deployedAt: '2025-06-01T00:00:00Z' },
     ],
     ...overrides,
@@ -72,7 +72,7 @@ describe('useDeploymentContext', () => {
     expect(result.current.deploymentContext).toEqual(ctx);
     expect(result.current.error).toBeNull();
     expect(result.current.environmentStatus.get('DEV')?.status).toBe('deployed');
-    expect(result.current.environmentStatus.get('QA')?.status).toBe('not-deployed');
+    expect(result.current.environmentStatus.get('PREPROD')?.status).toBe('not-deployed');
     expect(result.current.environmentStatus.get('PROD')?.status).toBe('stale');
   });
 
@@ -81,7 +81,7 @@ describe('useDeploymentContext', () => {
     const ctx = makeContext({
       environments: [
         { environment: 'DEV', status: 'not-deployed' },
-        { environment: 'QA', status: 'not-deployed' },
+        { environment: 'PREPROD', status: 'not-deployed' },
         { environment: 'PROD', status: 'not-deployed' },
       ],
     });
@@ -98,7 +98,7 @@ describe('useDeploymentContext', () => {
   });
 
   it('isModeAvailable returns correct results based on environment status', async () => {
-    // DEV deployed, QA not-deployed, PROD stale
+    // DEV deployed, PREPROD not-deployed, PROD stale
     const ctx = makeContext();
     const adapter = makeAdapter(vi.fn().mockResolvedValue(ctx));
 
@@ -112,15 +112,15 @@ describe('useDeploymentContext', () => {
     // current-vs-dev: DEV is deployed → available
     expect(result.current.isModeAvailable('current-vs-dev')).toEqual({ available: true });
 
-    // current-vs-qa: QA is not-deployed → unavailable
-    expect(result.current.isModeAvailable('current-vs-qa').available).toBe(false);
-    expect(result.current.isModeAvailable('current-vs-qa').reason).toContain('QA');
+    // current-vs-preprod: PREPROD is not-deployed → unavailable
+    expect(result.current.isModeAvailable('current-vs-preprod').available).toBe(false);
+    expect(result.current.isModeAvailable('current-vs-preprod').reason).toContain('PREPROD');
 
-    // dev-vs-qa: DEV deployed but QA not-deployed → unavailable
-    expect(result.current.isModeAvailable('dev-vs-qa').available).toBe(false);
+    // dev-vs-preprod: DEV deployed but PREPROD not-deployed → unavailable
+    expect(result.current.isModeAvailable('dev-vs-preprod').available).toBe(false);
 
-    // qa-vs-prod: QA not-deployed → unavailable
-    expect(result.current.isModeAvailable('qa-vs-prod').available).toBe(false);
+    // preprod-vs-prod: PREPROD not-deployed → unavailable
+    expect(result.current.isModeAvailable('preprod-vs-prod').available).toBe(false);
   });
 
   it('all environment modes unavailable when adapter throws (Phase 0)', async () => {
@@ -146,15 +146,15 @@ describe('useDeploymentContext', () => {
       available: false,
       reason: 'requires backend connection',
     });
-    expect(result.current.isModeAvailable('current-vs-qa')).toEqual({
+    expect(result.current.isModeAvailable('current-vs-preprod')).toEqual({
       available: false,
       reason: 'requires backend connection',
     });
-    expect(result.current.isModeAvailable('dev-vs-qa')).toEqual({
+    expect(result.current.isModeAvailable('dev-vs-preprod')).toEqual({
       available: false,
       reason: 'requires backend connection',
     });
-    expect(result.current.isModeAvailable('qa-vs-prod')).toEqual({
+    expect(result.current.isModeAvailable('preprod-vs-prod')).toEqual({
       available: false,
       reason: 'requires backend connection',
     });
@@ -202,7 +202,7 @@ describe('useDeploymentContext', () => {
     const ctx = makeContext({
       environments: [
         { environment: 'DEV', status: 'deployed', deployedVersion: 1, deployedAt: '2026-01-01T00:00:00Z' },
-        { environment: 'QA', status: 'deployed', deployedVersion: 2, deployedAt: '2026-01-02T00:00:00Z' },
+        { environment: 'PREPROD', status: 'deployed', deployedVersion: 2, deployedAt: '2026-01-02T00:00:00Z' },
         { environment: 'PROD', status: 'deployed', deployedVersion: 3, deployedAt: '2026-01-03T00:00:00Z' },
       ],
     });
@@ -217,8 +217,8 @@ describe('useDeploymentContext', () => {
 
     expect(result.current.isModeAvailable('current-vs-saved')).toEqual({ available: true });
     expect(result.current.isModeAvailable('current-vs-dev')).toEqual({ available: true });
-    expect(result.current.isModeAvailable('current-vs-qa')).toEqual({ available: true });
-    expect(result.current.isModeAvailable('dev-vs-qa')).toEqual({ available: true });
-    expect(result.current.isModeAvailable('qa-vs-prod')).toEqual({ available: true });
+    expect(result.current.isModeAvailable('current-vs-preprod')).toEqual({ available: true });
+    expect(result.current.isModeAvailable('dev-vs-preprod')).toEqual({ available: true });
+    expect(result.current.isModeAvailable('preprod-vs-prod')).toEqual({ available: true });
   });
 });
