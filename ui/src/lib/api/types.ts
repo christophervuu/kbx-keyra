@@ -48,18 +48,29 @@ export type DeploymentSourceType = 'revision' | 'version';
 
 export type DeploymentStatus = 'current' | 'stale' | 'not-deployed';
 
+export type DeploymentOrchestrationStatus =
+  | 'queued'
+  | 'in_progress'
+  | 'retrying'
+  | 'succeeded'
+  | 'failed'
+  | 'timed_out';
+
 export interface DeploymentRecord {
   readonly mappingId: string;
   readonly environmentDeployedAt: string;
   readonly environment: Environment;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
-  readonly configS3Key: string;
-  readonly configHash: string;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
+  readonly configS3Key?: string;
+  readonly configHash?: string;
   readonly deployedAt: string;
   readonly deployedBy: string;
   readonly promotedFrom?: Environment;
   readonly rollbackOf?: string;
+  readonly orchestrationId?: string;
 }
 
 export interface CurrentDeployment {
@@ -68,8 +79,10 @@ export interface CurrentDeployment {
   readonly deployedAt: string;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
-  readonly configHash: string;
-  readonly configS3Key: string;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
+  readonly configHash?: string;
+  readonly configS3Key?: string;
 }
 
 export interface EnvironmentDeploymentSummary {

@@ -11,6 +11,10 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { create as createDeployment } from '../../lib/persistence/deployments.js';
+import {
+  create as createDeploymentOrchestration,
+  updateStatus as updateDeploymentOrchestrationStatus,
+} from '../../lib/persistence/deployment-orchestrations.js';
 import { getConfig as getRevisionConfig } from '../../lib/persistence/mapping-revisions.js';
 import { get as getVersion, getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
 import { validateCdmDeployGuard } from './cdm-deploy-guard.js';
@@ -19,6 +23,8 @@ import {
   buildRuntimeDeployArtifact,
   getRuntimeRelayClient,
 } from './runtime-relay.js';
+import { executeRuntimeOperationWithRetry } from './orchestration-retry.js';
+import { getRuntimeApiClient } from './runtime-api-client.js';
 
 type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 type DeploymentSourceType = 'revision' | 'version';
@@ -33,6 +39,11 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+}
+
+interface OrchestrationContext {
+  readonly orchestrationId: string;
+  readonly requestId: string;
 }
 
 function mapRelayStatusCodeToHttp(statusCode: number): number {
@@ -87,6 +98,35 @@ function parseDeployRequest(body: Record<string, unknown> | null): DeployRequest
 
 function isRevisionDeployDisallowed(environment: DeploymentEnvironment, sourceType: DeploymentSourceType): boolean {
   return sourceType === 'revision' && environment !== 'DEV';
+}
+
+async function createOrchestrationContext(input: {
+  mappingId: string;
+  environment: DeploymentEnvironment;
+  artifactId: string;
+}): Promise<OrchestrationContext> {
+  const requestId = generateRequestId();
+  const orchestration = await createDeploymentOrchestration({
+    mappingId: input.mappingId,
+    operationType: 'deploy',
+    targetEnvironment: input.environment,
+    artifactId: input.artifactId,
+    requestId,
+    requestedBy: 'system',
+  });
+
+  await updateDeploymentOrchestrationStatus({
+    orchestrationId: orchestration.orchestrationId,
+    status: 'in_progress',
+    attemptCount: 1,
+    artifactId: input.artifactId,
+    requestId,
+  });
+
+  return {
+    orchestrationId: orchestration.orchestrationId,
+    requestId,
+  };
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -163,15 +203,32 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         config,
       });
 
+      const orchestration = await createOrchestrationContext({
+        mappingId,
+        environment: request.environment,
+        artifactId: artifact.artifactId,
+      });
+
       const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
       if (!payloadCheck.ok) {
+        await updateDeploymentOrchestrationStatus({
+          orchestrationId: orchestration.orchestrationId,
+          status: 'failed',
+          attemptCount: 1,
+          artifactId: artifact.artifactId,
+          requestId: orchestration.requestId,
+          lastErrorCode: ERROR_CODES.PAYLOAD_TOO_LARGE,
+          lastErrorMessage: `Payload too large (${payloadCheck.payloadBytes} > ${payloadCheck.limitBytes})`,
+        });
+
         return errorResponse(
-          ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE,
-          `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce mapping payload size or raise MAX_DEPLOY_ARTIFACT_PAYLOAD_BYTES.`,
+          ERROR_CODES.PAYLOAD_TOO_LARGE,
+          `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce artifact size below the 5MB MVP limit.`,
           413,
           false,
-          undefined,
+          orchestration.requestId,
           {
+            orchestrationId: orchestration.orchestrationId,
             artifactId: artifact.artifactId,
             snapshotId: artifact.snapshotId,
             payloadBytes: payloadCheck.payloadBytes,
@@ -180,18 +237,56 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         );
       }
 
-      const relay = await getRuntimeRelayClient().pushArtifact(request.environment, artifact);
-      if (!relay.ok) {
+      const retryResult = await executeRuntimeOperationWithRetry<void>({
+        mappingId,
+        environment: request.environment,
+        operationType: 'deploy',
+        orchestrationId: orchestration.orchestrationId,
+        requestId: orchestration.requestId,
+        artifactId: artifact.artifactId,
+        runtimeApiClient: getRuntimeApiClient(),
+        executeAttempt: async () => {
+          const relay = await getRuntimeRelayClient().pushArtifact(request.environment, artifact, {
+            requestId: orchestration.requestId,
+            orchestrationId: orchestration.orchestrationId,
+            operation: 'deploy',
+            triggeredBy: 'system',
+          });
+
+          if (relay.ok) {
+            return {
+              ok: true,
+              statusCode: relay.statusCode,
+              requestId: relay.requestId,
+              data: undefined,
+            };
+          }
+
+          return {
+            ok: false,
+            statusCode: mapRelayStatusCodeToHttp(relay.statusCode),
+            requestId: relay.requestId,
+            errorCode: relay.errorCode,
+            message: relay.message,
+            retryable: relay.retryable,
+          };
+        },
+      });
+
+      if (!retryResult.ok) {
         return errorResponse(
-          relay.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
-          relay.message,
-          mapRelayStatusCodeToHttp(relay.statusCode),
-          relay.retryable,
-          relay.requestId,
+          retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+          retryResult.message,
+          retryResult.statusCode,
+          retryResult.retryable,
+          retryResult.requestId,
           {
+            orchestrationId: orchestration.orchestrationId,
             environment: request.environment,
             artifactId: artifact.artifactId,
             snapshotId: artifact.snapshotId,
+            attemptCount: retryResult.attemptCount,
+            finalStatus: retryResult.finalStatus,
           },
         );
       }
@@ -208,7 +303,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         config,
       });
 
-      return jsonResponse(201, created);
+      await updateDeploymentOrchestrationStatus({
+        orchestrationId: orchestration.orchestrationId,
+        status: 'succeeded',
+        attemptCount: retryResult.attemptCount,
+        artifactId: artifact.artifactId,
+        requestId: retryResult.requestId,
+      });
+
+      return jsonResponse(201, {
+        ...created,
+        orchestrationId: orchestration.orchestrationId,
+      }, retryResult.requestId);
     }
 
     const version = await getVersion(mappingId, request.sourceNumber);
@@ -238,15 +344,32 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       config,
     });
 
+    const orchestration = await createOrchestrationContext({
+      mappingId,
+      environment: request.environment,
+      artifactId: artifact.artifactId,
+    });
+
     const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
     if (!payloadCheck.ok) {
+      await updateDeploymentOrchestrationStatus({
+        orchestrationId: orchestration.orchestrationId,
+        status: 'failed',
+        attemptCount: 1,
+        artifactId: artifact.artifactId,
+        requestId: orchestration.requestId,
+        lastErrorCode: ERROR_CODES.PAYLOAD_TOO_LARGE,
+        lastErrorMessage: `Payload too large (${payloadCheck.payloadBytes} > ${payloadCheck.limitBytes})`,
+      });
+
       return errorResponse(
-        ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE,
-        `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce mapping payload size or raise MAX_DEPLOY_ARTIFACT_PAYLOAD_BYTES.`,
+        ERROR_CODES.PAYLOAD_TOO_LARGE,
+        `Deployment artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce artifact size below the 5MB MVP limit.`,
         413,
         false,
-        undefined,
+        orchestration.requestId,
         {
+          orchestrationId: orchestration.orchestrationId,
           artifactId: artifact.artifactId,
           snapshotId: artifact.snapshotId,
           payloadBytes: payloadCheck.payloadBytes,
@@ -255,18 +378,56 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     }
 
-    const relay = await getRuntimeRelayClient().pushArtifact(request.environment, artifact);
-    if (!relay.ok) {
+    const retryResult = await executeRuntimeOperationWithRetry<void>({
+      mappingId,
+      environment: request.environment,
+      operationType: 'deploy',
+      orchestrationId: orchestration.orchestrationId,
+      requestId: orchestration.requestId,
+      artifactId: artifact.artifactId,
+      runtimeApiClient: getRuntimeApiClient(),
+      executeAttempt: async () => {
+        const relay = await getRuntimeRelayClient().pushArtifact(request.environment, artifact, {
+          requestId: orchestration.requestId,
+          orchestrationId: orchestration.orchestrationId,
+          operation: 'deploy',
+          triggeredBy: 'system',
+        });
+
+        if (relay.ok) {
+          return {
+            ok: true,
+            statusCode: relay.statusCode,
+            requestId: relay.requestId,
+            data: undefined,
+          };
+        }
+
+        return {
+          ok: false,
+          statusCode: mapRelayStatusCodeToHttp(relay.statusCode),
+          requestId: relay.requestId,
+          errorCode: relay.errorCode,
+          message: relay.message,
+          retryable: relay.retryable,
+        };
+      },
+    });
+
+    if (!retryResult.ok) {
       return errorResponse(
-        relay.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
-        relay.message,
-        mapRelayStatusCodeToHttp(relay.statusCode),
-        relay.retryable,
-        relay.requestId,
+        retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+        retryResult.message,
+        retryResult.statusCode,
+        retryResult.retryable,
+        retryResult.requestId,
         {
+          orchestrationId: orchestration.orchestrationId,
           environment: request.environment,
           artifactId: artifact.artifactId,
           snapshotId: artifact.snapshotId,
+          attemptCount: retryResult.attemptCount,
+          finalStatus: retryResult.finalStatus,
         },
       );
     }
@@ -283,7 +444,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       config,
     });
 
-    return jsonResponse(201, created);
+    await updateDeploymentOrchestrationStatus({
+      orchestrationId: orchestration.orchestrationId,
+      status: 'succeeded',
+      attemptCount: retryResult.attemptCount,
+      artifactId: artifact.artifactId,
+      requestId: retryResult.requestId,
+    });
+
+    return jsonResponse(201, {
+      ...created,
+      orchestrationId: orchestration.orchestrationId,
+    }, retryResult.requestId);
   } catch (error) {
     const isArtifactIntegrityError =
       (error as { name?: string } | null | undefined)?.name === 'DeploymentArtifactIntegrityError';

@@ -854,7 +854,7 @@ Rollback:
 - pointer-only reassignment in target runtime
 - append-only rollback history event (`rollbackOf` linkage)
 - no artifact content mutation/deletion
-- if artifact missing locally in target runtime: return `artifact_not_available_for_rollback` (recommended HTTP 409), no implicit auto-import in MVP
+- if artifact missing locally in target runtime: return `ARTIFACT_NOT_PRESENT` (HTTP 409), no implicit auto-import in MVP
 
 ### 16.5 Runtime-local execution and preview invariant
 
@@ -871,3 +871,135 @@ Preview response contract should include runtime provenance:
 - Runtime deploy/preview endpoints are HTTPS and reachable from SANDBOX.
 - Access model for this phase: internal public endpoint allowlisting.
 - Private connectivity topology (e.g., private link/VPC peering) is deferred.
+
+---
+
+## 17) Runtime Bootstrap Internal API Contract (FS-082)
+
+FS-082 codifies the runtime-environment bootstrap API surface used by SANDBOX orchestration and runtime execution.
+
+### 17.1 Route surface (runtime internal)
+
+These routes are internal runtime endpoints and are not part of the public product API table in Section 2:
+
+| Method | Path | Responsibility |
+|---|---|---|
+| `POST` | `/internal/deploy` | Validate deploy payload, persist immutable snapshot/schema objects locally, update active pointer, append history |
+| `POST` | `/internal/rollback` | Validate rollback target exists locally, repoint active pointer, append rollback event |
+| `POST` | `/internal/execute` | Resolve active pointer/snapshot from local runtime resources and execute mapping |
+| `GET` | `/internal/health` | Liveness/readiness probe for runtime dependencies |
+| `GET` | `/internal/status/{mappingId}` | Active snapshot pointer + recent deployment metadata or deterministic not-deployed state |
+
+### 17.2 Handler separation of concerns
+
+- Deploy/rollback handler is write-path only (artifact persistence + pointer/history updates).
+- Runtime execute handler is read/compute only (no deployment-state mutations).
+- Status/health handler is read-only diagnostics/metadata surface.
+
+This separation keeps deployment mutations isolated from execution path behavior.
+
+### 17.3 Runtime internal error semantics
+
+Runtime internal APIs use the canonical error envelope from Section 5.
+
+Expected deterministic failure classes in this slice include:
+- deploy hash/integrity mismatch -> validation/conflict style deterministic error (no pointer update)
+- deploy payload too large -> `DEPLOY_ARTIFACT_TOO_LARGE` (`413`)
+- rollback target snapshot missing locally -> `ARTIFACT_NOT_PRESENT` (`409`)
+- execute/status with no active pointer -> deterministic not-deployed/not-found style error contract
+
+All paths preserve request correlation via `requestId` in headers/envelope.
+
+### 17.4 Runtime-local execution invariant
+
+For `/internal/execute` and runtime preview behavior:
+- pointer resolution and artifact/schema retrieval are local to the runtime environment
+- no runtime fetch of SANDBOX deployment state is allowed
+- schema payloads required for execution are pre-copied during deploy into runtime-local S3
+
+### 17.5 MVP transport and indexing decisions
+
+- deploy transport: direct request-body payload relay only for MVP
+- history indexing: `DeploymentHistoryTable` uses PK/SK access only in MVP; no speculative GSI
+
+---
+
+## 18) Control-Plane Remote Orchestration Contract Addendum (FS-083)
+
+FS-083 Rev 2 codifies the orchestration contract between SANDBOX control plane and runtime internal APIs.
+
+### 18.1 Orchestration status model
+
+Control-plane deployment orchestration tracks explicit state per operation:
+
+- `queued`
+- `in_progress`
+- `retrying`
+- `succeeded`
+- `failed`
+- `timed_out`
+
+Minimum orchestration metadata includes:
+- `orchestrationId`
+- `mappingId`
+- `operationType` (`deploy|promote|rollback|preview`)
+- `targetEnvironment`
+- optional `sourceEnvironment`
+- optional `artifactId`
+- `attemptCount`
+- optional `lastErrorCode`
+- optional `lastErrorMessage`
+- request/actor timestamps
+
+### 18.2 Promote contract (same artifact, full payload)
+
+Promotion must:
+- preserve artifact identity (`artifactId` + `artifactHash`)
+- send full artifact payload on every promote request (same path as deploy)
+- avoid any `hasArtifact` preflight split flow in MVP
+
+Runtime may treat already-present matching artifact as idempotent storage no-op.
+
+### 18.3 Payload-size enforcement (MVP hard limit)
+
+FS-083 establishes an explicit payload cap:
+- **5 MB max raw JSON body** for deploy/promote artifact request payloads
+
+Error semantics:
+- control-plane preflight oversize rejection: `PAYLOAD_TOO_LARGE` (`413`)
+- runtime defense-in-depth oversize rejection: `DEPLOY_ARTIFACT_TOO_LARGE` (`413`)
+
+### 18.4 Timeout reconciliation strategy
+
+On ambiguous timeout outcomes, canonical reconciliation is runtime status polling.
+
+- control plane polls runtime status endpoint (`GET /internal/status/{mappingId}` or equivalent runtime status query)
+- callback/event-bridge mechanisms are out of scope in MVP
+- status vocabulary for reconciliation: `not_found`, `received`, `stored`, `activated`, `failed`
+
+Interpretation baseline:
+- `stored` or `activated` -> reconcile as success
+- `failed` or `not_found` -> reconcile as failure
+
+### 18.5 Rollback locality rule
+
+Rollback is permitted only for artifacts already present in target runtime local storage.
+
+- missing local artifact -> `ARTIFACT_NOT_PRESENT` (`409`)
+- no on-demand artifact import in MVP
+- control plane should return remediation guidance (deploy/promote artifact first, then retry rollback)
+
+### 18.6 Environment configuration ownership
+
+Canonical source of runtime endpoint routing config is a persisted control-plane admin settings record.
+
+Fallback:
+- environment variables may bootstrap local/dev or initial setup
+- env-var reads are fallback behavior, not canonical long-term source of truth
+
+### 18.7 QA/PREPROD compatibility policy
+
+For legacy records:
+- raw persisted value `QA` may remain at-rest for audit fidelity
+- API/domain presentation normalizes `QA -> PREPROD` for runtime behavior/UI consistency
+- optional audit/detail surfaces may disclose historical label context where needed

@@ -265,12 +265,16 @@ SANDBOX infrastructure must support:
 - artifact registry/provenance metadata store
 - outbound HTTPS connectivity to runtime internal endpoints
 - environment routing configuration for DEV/PREPROD/PROD runtime targets
+- persisted admin settings/config record backing runtime endpoint routing (canonical source)
+- environment-variable config fallback for bootstrap/local-dev only
 
 ### 12.4 Transfer and connectivity assumptions (MVP)
 
 - No cross-account role assumption in deploy/promote flows.
 - Canonical transfer uses direct payload push from SANDBOX to runtime deploy API request body.
+- Promote uses the same transfer mode as deploy (full payload push each time; no hasArtifact preflight optimization in MVP).
 - Runtime ingestion endpoint enforces maximum artifact payload size and deterministic oversize rejection.
+- FS-083 explicit MVP payload cap: 5 MB raw JSON body (`PAYLOAD_TOO_LARGE` preflight / `DEPLOY_ARTIFACT_TOO_LARGE` runtime defense-in-depth).
 - Runtime endpoints are HTTPS and reachable via internal public endpoint allowlisting from SANDBOX.
 - Private connectivity constructs (e.g., PrivateLink/VPC peering) are deferred from MVP.
 
@@ -279,3 +283,98 @@ SANDBOX infrastructure must support:
 - Retention policy is configurable by runtime environment.
 - MVP default: retain all runtime artifacts locally.
 - Rollback guarantee is bounded by configured retention/rollback window.
+- Rollback in MVP is local-only: target artifact must already exist in runtime local storage (`ARTIFACT_NOT_PRESENT` on miss).
+
+---
+
+## 13) Runtime Bootstrap Template Contract Addendum (FS-082)
+
+FS-082 defines the reusable runtime bootstrap stack contract implemented via root `template.yaml` for each runtime account.
+
+### 13.1 Template scope
+
+The bootstrap template is intentionally minimal and runtime-scoped. It provisions only:
+- internal runtime API surface (`HttpApi`)
+- runtime deployment/execute/status lambdas
+- runtime deployment-state persistence resources
+- runtime artifact storage resources
+- required IAM/logging resources
+
+Authn/authz resources and perimeter hardening are explicitly out of this phase.
+
+### 13.2 Parameterization contract
+
+Runtime bootstrap parameter set:
+- `EnvironmentName` (`dev|preprod|prod`)
+- `ServiceName` (default `keyra-runtime`)
+- `LogRetentionDays` (default `30` for all envs in MVP, including prod unless org policy overrides)
+- `ArtifactsBucketName` (optional explicit override)
+- `ApiStageName` (default `internal`)
+- `SnapshotsPrefix` (default `runtime/snapshots/`)
+- `SchemasPrefix` (default `runtime/schemas/`)
+
+Naming pattern:
+- tables: `${EnvironmentName}-${ServiceName}-active-snapshots`, `${EnvironmentName}-${ServiceName}-deployment-history`
+- bucket: `${EnvironmentName}-${ServiceName}-${AWS::AccountId}` (or override)
+- lambdas: `${EnvironmentName}-${ServiceName}-{deploy|execute|status}`
+- API: `${EnvironmentName}-${ServiceName}-api`
+
+### 13.3 Required template outputs
+
+Runtime bootstrap stack outputs consumed by operators/control-plane configuration:
+- `RuntimeApiUrl`
+- `RuntimeApiId`
+- `ActiveSnapshotsTableName`
+- `DeploymentHistoryTableName`
+- `RuntimeArtifactsBucketName`
+- `DeployHandlerFunctionArn`
+- `RuntimeExecuteFunctionArn`
+- `StatusFunctionArn`
+
+### 13.4 Runtime bootstrap environment variables
+
+Required lambda env vars:
+- `ACTIVE_SNAPSHOTS_TABLE`
+- `DEPLOYMENT_HISTORY_TABLE`
+- `RUNTIME_ARTIFACTS_BUCKET`
+- `SNAPSHOTS_PREFIX`
+- `SCHEMAS_PREFIX`
+- `ENVIRONMENT_NAME`
+- `LOG_LEVEL`
+
+### 13.5 Runtime bootstrap resource defaults
+
+- API type: `AWS::Serverless::HttpApi` (MVP decision)
+- deploy transport mode: direct request-body relay only (signed URL pull deferred)
+- promotion transport mode: full artifact payload push on every promote (same as deploy)
+- `DeploymentHistoryTable` index posture: PK/SK only, no speculative GSI in MVP
+- schema payload isolation: deploy always copies required schema objects into runtime-local S3 per artifact set
+- retention safety: DynamoDB/S3 data resources use retain-oriented CloudFormation policies (`DeletionPolicy/UpdateReplacePolicy`)
+
+---
+
+## 14) Remote Orchestration Reconciliation and Config Notes (FS-083)
+
+FS-083 adds infrastructure-facing requirements for orchestration reliability and configuration ownership.
+
+### 14.1 Reconciliation path requirement
+
+For ambiguous timeout outcomes during deploy/promote/rollback:
+- control plane must poll runtime status endpoint for reconciliation
+- runtime must expose status data sufficient to differentiate: `not_found`, `received`, `stored`, `activated`, `failed`
+- callback/event-bridge designs are out of scope in MVP
+
+### 14.2 Endpoint config ownership
+
+Canonical runtime endpoint routing/timeout/retry config should be managed in persisted control-plane settings.
+
+Infrastructure implications:
+- provide storage and deployment path for persisted settings source
+- preserve env-var fallback for bootstrap/local/dev without making env-vars canonical long-term source
+
+### 14.3 Legacy environment label compatibility
+
+No destructive migration is required in MVP for old `QA` deployment records.
+- persistence may retain historical `QA` values
+- domain/view layer handles `QA -> PREPROD` normalization
+- infrastructure must not enforce backfill requirements as a deployment prerequisite

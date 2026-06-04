@@ -34,6 +34,8 @@ const CURRENT_DEPLOYMENTS: CurrentDeployments = {
       deployedAt: '2026-01-03T00:00:00Z',
       sourceType: 'version',
       sourceNumber: 2,
+      artifactId: 'artifact-dev-2',
+      artifactHash: 'hash-dev-2-abcdef',
       configHash: 'abc',
       configS3Key: 's3://bucket/map-1/v2.json',
     },
@@ -49,6 +51,8 @@ const DEPLOY_RECORD: DeploymentRecord = {
   environment: 'DEV',
   sourceType: 'revision',
   sourceNumber: 3,
+  artifactId: 'artifact-dev-3',
+  artifactHash: 'hash-dev-3-fedcba',
   configS3Key: 's3://bucket/map-1/rev3.json',
   configHash: 'def',
   deployedAt: '2026-01-03T01:00:00Z',
@@ -443,6 +447,12 @@ describe('DeploymentPage', () => {
     await waitFor(() => screen.getByTestId('back-to-editor-link'));
   });
 
+  it('environment selector displays Preprod label', async () => {
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('environment-selector'));
+    expect(screen.getByTestId('env-tab-PREPROD').textContent).toBe('Preprod');
+  });
+
   it('current deployment strip shows for active environment', async () => {
     renderPage(createMockAdapter());
 
@@ -451,5 +461,58 @@ describe('DeploymentPage', () => {
     const strip = screen.getByTestId('current-deploy-strip-DEV');
     expect(strip.textContent).toContain('v2');
     expect(strip.textContent).toContain('Current');
+    expect(strip.textContent).toContain('artifact-dev-2');
+    expect(strip.textContent).toContain('hash-dev-2-a');
+  });
+
+  it('shows operation details with orchestration + artifact after successful deploy', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockResolvedValue({
+        ...DEPLOY_RECORD,
+        orchestrationId: 'orc-deploy-1',
+      }),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-operation-details'));
+
+    const details = screen.getByTestId('deploy-operation-details');
+    expect(details.textContent).toContain('orc-deploy-1');
+    expect(details.textContent).toContain('succeeded');
+    expect(details.textContent).toContain('artifact-dev-3');
+  });
+
+  it('shows operation details with attempt/final status from failed deploy response details', async () => {
+    const user = userEvent.setup();
+    const deployErr = Object.assign(new Error('Runtime unavailable'), {
+      code: 'SERVICE_UNAVAILABLE',
+      retryable: true,
+      details: {
+        orchestrationId: 'orc-deploy-fail-1',
+        attemptCount: 3,
+        finalStatus: 'timed_out',
+        artifactId: 'artifact-dev-timeout',
+      },
+    });
+
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockRejectedValue(deployErr),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-operation-details'));
+
+    const details = screen.getByTestId('deploy-operation-details');
+    expect(details.textContent).toContain('orc-deploy-fail-1');
+    expect(details.textContent).toContain('timed out');
+    expect(details.textContent).toContain('Attempts: 3');
+    expect(details.textContent).toContain('artifact-dev-timeout');
   });
 });

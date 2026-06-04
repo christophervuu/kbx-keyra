@@ -645,6 +645,39 @@ describe('HttpAdapter (CRUD)', () => {
     await expect(adapter.listProjects()).rejects.toBe(error);
   });
 
+  it('previewOnServer maps to POST /mappings/:id/preview', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      output: { ok: true },
+      diagnostics: [],
+      metadata: {
+        environment: 'DEV',
+        artifactId: 'artifact-dev-1',
+        artifactHash: 'hash-dev-1',
+        deployedAt: '2026-06-04T00:00:00.000Z',
+        sourceType: 'version',
+        sourceNumber: 1,
+        engineVersion: '1.0.0',
+      },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.previewOnServer('m-1', {
+      environment: 'DEV',
+      sourceData: { a: 1 },
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/preview',
+      method: 'POST',
+      body: {
+        environment: 'DEV',
+        sourceData: { a: 1 },
+      },
+    });
+  });
+
   it.each([
     ['listTemplates', (a: HttpAdapter) => a.listTemplates()],
     ['getTemplate', (a: HttpAdapter) => a.getTemplate('t-1')],
@@ -663,10 +696,6 @@ describe('HttpAdapter (CRUD)', () => {
       (a: HttpAdapter) => a.linkPublishedSchema({ repo: 'r', branch: 'b', path: '/a.xsd' }),
     ],
     ['listActivity', (a: HttpAdapter) => a.listActivity()],
-    [
-      'previewOnServer',
-      (a: HttpAdapter) => a.previewOnServer('m-1', { environment: 'DEV', sourceData: {} }),
-    ],
   ])('%s throws FeatureNotEnabledError', async (_methodName, invoke) => {
     const adapter = new HttpAdapter(API_URL);
 

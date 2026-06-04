@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "forge/active/FS-081/tasks/T-06.md",
+                "file": "forge/active/FS-083/tasks/T-07.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "T-06"
+              "title": "T-07"
             }
           }
         ]
@@ -182,40 +182,40 @@
   },
   "active": "9fc165ccd6a75d01",
   "lastOpenFiles": [
-    "forge/active/FS-081/tasks/T-05.md",
-    "forge/active/FS-081/tasks/T-06.md",
-    "forge/active/FS-081/tasks/T-02.md",
-    "tests/lambda/mapping/preview-mapping.test.ts",
-    "src/lambda/mapping/preview-mapping.ts",
-    "src/lambda/deployment/runtime-relay.ts",
-    "forge/active/FS-081/tasks/T-01.md",
-    "forge/active/FS-083/spec.md",
-    "forge/active/FS-082/spec.md",
-    "forge/active/FS-081/spec.md",
-    "forge/active/FS-083/tasks/T-07.md",
     "forge/active/FS-083/tasks/T-06.md",
+    "tests/lambda/deployment/orchestration-retry.test.ts",
+    "src/lambda/deployment/orchestration-retry.ts",
+    "tests/lambda/mapping/save-deploy-separation.test.ts",
+    "src/lib/persistence/deployment-orchestrations.ts",
+    "tests/lambda/deployment/runtime-environment-config.test.ts",
+    "src/lambda/deployment/runtime-api-client.ts",
+    "src/lambda/deployment/environment-config.ts",
+    "forge/active/FS-083/tasks/T-07.md",
     "forge/active/FS-083/tasks/T-05.md",
     "forge/active/FS-083/tasks/T-04.md",
     "forge/active/FS-083/tasks/T-03.md",
     "forge/active/FS-083/tasks/T-02.md",
     "forge/active/FS-083/tasks/T-01.md",
-    "forge/active/FS-083/tasks",
-    "forge/active/FS-083",
     "forge/active/FS-082/tasks/T-06.md",
+    "forge/active/FS-082/spec.md",
+    "forge/active/FS-083/spec.md",
+    "scripts/runtime-bootstrap-verification-runbook.md",
+    "tests/lambda/runtime/runtime-handlers.test.ts",
+    "tests/lambda/runtime",
+    "src/lambda/runtime/status.ts",
     "forge/active/FS-082/tasks/T-05.md",
     "forge/active/FS-082/tasks/T-04.md",
     "forge/active/FS-082/tasks/T-03.md",
     "forge/active/FS-082/tasks/T-02.md",
+    "forge/active/FS-081/tasks/T-06.md",
+    "forge/active/FS-081/tasks/T-05.md",
+    "forge/active/FS-081/tasks/T-02.md",
+    "forge/active/FS-081/tasks/T-01.md",
+    "forge/active/FS-081/spec.md",
     "forge/active/FS-082/tasks/T-01.md",
-    "forge/active/FS-082/tasks",
-    "forge/active/FS-082",
     "forge/active/FS-081/tasks/T-03.md",
     "forge/active/FS-081/tasks/T-04.md",
-    "forge/active/FS-081/tasks",
-    "forge/active/FS-081",
     "forge/active/FS-080/tasks/T-05.md",
-    "forge/completed/FS-080/tasks/T-02.md",
-    "forge/completed/FS-080/tasks/T-05.md",
-    "forge/completed/FS-080/tasks"
+    "forge/completed/FS-080/tasks/T-02.md"
   ]
 }

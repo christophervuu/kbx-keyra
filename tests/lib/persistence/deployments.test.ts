@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  ActiveSnapshotItem,
+  DeploymentHistoryItem,
   CreateDeploymentInput,
   DeploymentCurrentItem,
   DeploymentItem,
@@ -85,6 +87,34 @@ function makeHistoryItem(overrides: Partial<DeploymentItem> = {}): DeploymentIte
     configHash: 'a'.repeat(64),
     deployedAt: '2026-06-01T00:00:00.000Z',
     deployedBy: 'user-1',
+    ...overrides,
+  };
+}
+
+function makeRuntimeActiveSnapshot(overrides: Partial<ActiveSnapshotItem> = {}): ActiveSnapshotItem {
+  return {
+    mappingId: 'mapping-1',
+    activeSnapshotId: 'snapshot-1',
+    snapshotHash: 'hash-1',
+    activatedAt: '2026-06-01T00:00:00.000Z',
+    activatedBy: 'control-plane',
+    sourceType: 'revision',
+    sourceNumber: 5,
+    ...overrides,
+  };
+}
+
+function makeRuntimeHistoryItem(overrides: Partial<DeploymentHistoryItem> = {}): DeploymentHistoryItem {
+  return {
+    mappingId: 'mapping-1',
+    eventAt: '2026-06-01T00:00:00.000Z',
+    eventType: 'deploy',
+    snapshotId: 'snapshot-1',
+    snapshotHash: 'hash-1',
+    requestedBy: 'control-plane',
+    sourceType: 'revision',
+    sourceNumber: 5,
+    requestId: 'req-1',
     ...overrides,
   };
 }
@@ -293,6 +323,107 @@ describe('persistence deployments', () => {
     expect(mod.deployments.getCurrent).toBe(mod.getCurrent);
     expect(mod.deployments.getCurrentAll).toBe(mod.getCurrentAll);
     expect(mod.deployments.listHistory).toBe(mod.listHistory);
+    expect(mod.deployments.upsertActiveSnapshot).toBe(mod.upsertActiveSnapshot);
+    expect(mod.deployments.getActiveSnapshot).toBe(mod.getActiveSnapshot);
+    expect(mod.deployments.appendDeploymentHistory).toBe(mod.appendDeploymentHistory);
+    expect(mod.deployments.listDeploymentHistory).toBe(mod.listDeploymentHistory);
+  });
+
+  it('upsertActiveSnapshot writes runtime active pointer item', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({});
+
+    const written = await mod.upsertActiveSnapshot({
+      mappingId: 'mapping-1',
+      activeSnapshotId: 'snapshot-1',
+      snapshotHash: 'hash-1',
+      activatedBy: 'control-plane',
+      sourceType: 'revision',
+      sourceNumber: 5,
+    });
+
+    expect(written.mappingId).toBe('mapping-1');
+    expect(written.activeSnapshotId).toBe('snapshot-1');
+
+    const putCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { TableName: string; Item: ActiveSnapshotItem };
+    };
+    expect(putCommand.input.TableName).toBe('keyra-active-snapshots');
+    expect(putCommand.input.Item.activeSnapshotId).toBe('snapshot-1');
+  });
+
+  it('getActiveSnapshot returns runtime pointer or null', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock
+      .mockResolvedValueOnce({ Item: makeRuntimeActiveSnapshot() })
+      .mockResolvedValueOnce({ Item: undefined });
+
+    const found = await mod.getActiveSnapshot('mapping-1');
+    const missing = await mod.getActiveSnapshot('mapping-2');
+
+    expect(found?.activeSnapshotId).toBe('snapshot-1');
+    expect(missing).toBeNull();
+  });
+
+  it('appendDeploymentHistory writes append-only runtime history event', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({});
+
+    const written = await mod.appendDeploymentHistory({
+      mappingId: 'mapping-1',
+      eventType: 'rollback',
+      snapshotId: 'snapshot-1',
+      snapshotHash: 'hash-1',
+      requestedBy: 'control-plane',
+      sourceType: 'version',
+      sourceNumber: 2,
+      rollbackOf: 'PREPROD#2026-06-01T00:00:00.000Z',
+      requestId: 'req-rollback-1',
+    });
+
+    expect(written.eventType).toBe('rollback');
+    expect(written.rollbackOf).toBe('PREPROD#2026-06-01T00:00:00.000Z');
+
+    const putCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { TableName: string; Item: DeploymentHistoryItem };
+    };
+
+    expect(putCommand.input.TableName).toBe('keyra-deployment-history');
+    expect(putCommand.input.Item.requestId).toBe('req-rollback-1');
+  });
+
+  it('listDeploymentHistory queries runtime history in descending order', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({
+      Items: [
+        makeRuntimeHistoryItem({ eventAt: '2026-06-03T00:00:00.000Z', sourceNumber: 7 }),
+        makeRuntimeHistoryItem({ eventAt: '2026-06-02T00:00:00.000Z', sourceNumber: 6 }),
+      ],
+    });
+
+    const result = await mod.listDeploymentHistory('mapping-1', 2);
+
+    expect(result.map((item) => item.sourceNumber)).toEqual([7, 6]);
+
+    const queryCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: {
+        TableName: string;
+        KeyConditionExpression: string;
+        ExpressionAttributeValues: Record<string, unknown>;
+        ScanIndexForward: boolean;
+        Limit: number;
+      };
+    };
+
+    expect(queryCommand.input.TableName).toBe('keyra-deployment-history');
+    expect(queryCommand.input.KeyConditionExpression).toBe('mappingId = :mappingId');
+    expect(queryCommand.input.ExpressionAttributeValues[':mappingId']).toBe('mapping-1');
+    expect(queryCommand.input.ScanIndexForward).toBe(false);
+    expect(queryCommand.input.Limit).toBe(2);
   });
 
   it('getCurrent PREPROD falls back to legacy QA current key', async () => {

@@ -12,7 +12,7 @@ This is a living document. Update it when the project structure changes. Do not 
 src/        Backend and shared source code
 ui/         Frontend source code (React / TypeScript / Vite)
 tests/      Test files
-scripts/    Local tooling/runner scripts (includes UI backend-only guardrail and no-browser-secret policy checks, FS-075 deterministic Phase 2 gate runner, and FS-075 prompt eval runner for PR/release threshold modes)
+scripts/    Local tooling/runner scripts (includes UI backend-only guardrail and no-browser-secret policy checks, FS-075 deterministic Phase 2 gate runner, FS-075 prompt eval runner for PR/release threshold modes, and FS-082 runtime bootstrap verification runbook)
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
 .github/    CI workflow definitions (includes FS-075 Phase 2 acceptance gate workflow)
@@ -86,10 +86,18 @@ src/
       deploy-mapping.ts POST /mappings/:mappingId/deploy handler (revision/version deploy with environment policy enforcement)
       promote-deployment.ts POST /mappings/:mappingId/promote handler (version-backed promotion only)
       rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)
+      runtime-deploy.ts Internal runtime POST /internal/deploy handler (FS-082 T-04) — validates runtime deploy payload, persists immutable runtime snapshot, updates active pointer, appends history
+      runtime-rollback.ts Internal runtime POST /internal/rollback handler (FS-082 T-04) — validates snapshot presence in runtime history, repoints active pointer, appends rollback event
       list-deployments.ts GET /mappings/:mappingId/deployments handler (optional environment filter)
       get-current-deployments.ts GET /mappings/:mappingId/deployments/current handler
       runtime-relay.ts Shared runtime artifact relay module for control-plane deploy/promote (artifact identity/hash construction, payload-size guard, runtime relay client abstraction) (FS-081 T-03)
+      environment-config.ts Runtime environment configuration loader/validator (persisted settings canonical + env fallback), including endpoint/timeouts/retry policy schema (FS-083 T-02)
+      runtime-api-client.ts Typed runtime internal API client contracts (deploy/rollback/preview/status), requestId propagation, timeout handling, and error envelope normalization (FS-083 T-02)
+      orchestration-retry.ts Shared control-plane orchestration retry/reconciliation helper (retry/backoff/jitter, timeout status polling, and terminal status mapping) (FS-083 T-05)
       index.ts          Deployment lambda barrel exports
+    runtime/          Runtime execution/status lambdas (FS-082 T-05)
+      execute.ts        Internal runtime POST /internal/execute handler — resolves active snapshot from runtime-local DynamoDB/S3 only and executes mapping
+      status.ts         Internal runtime GET /internal/health and GET /internal/status/{mappingId} handler — reports readiness plus active snapshot/history summary
     shared/           Shared Lambda handler utilities (FS-057 T-01)
       index.ts         Shared lambda utilities barrel export
       types.ts         Shared API Gateway event/response types
@@ -128,6 +136,7 @@ src/
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
       deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory) with immutable snapshot writes (FS-064 T-01)
+      deployment-orchestrations.ts Control-plane orchestration persistence operations (create/get/updateStatus) for deploy/promote lifecycle transitions (FS-083 T-03)
       s3/               Shared S3 content helpers for schemas and mappings
         index.ts          S3 helper barrel exports
         schema-content.ts Schema original/processed content put/get/delete helpers
@@ -811,9 +820,14 @@ tests/
       get-version.test.ts Get mapping version tests (200 + revision pointer + 404)
       create-version.test.ts Create mapping version tests (201 from latest revision)
       save-version.test.ts Save mapping version shim tests (delegates to create-version flow)
+      save-deploy-separation.test.ts Save/update path regression tests asserting Save != Deploy (no deploy/promote orchestration writes) (FS-083 T-03)
       preview-mapping.test.ts Server preview handler tests (runtime environment routing, local active-artifact execution, provenance metadata, not-deployed behavior) (FS-081 T-05)
     deployment/       Deployment lambda handler tests (FS-064 T-02)
       deployment-handlers.test.ts Unit tests for deploy/promote/rollback/list/current handlers and policy/error behavior
+      runtime-environment-config.test.ts Unit tests for deployment environment config parsing/validation and runtime API client contract/error normalization (FS-083 T-02)
+      orchestration-retry.test.ts Unit tests for retry classifier/backoff behavior and timeout reconciliation via runtime status polling (FS-083 T-05)
+    runtime/          Runtime lambda handler tests (FS-082 T-05)
+      runtime-handlers.test.ts Unit tests for /internal/execute and /internal/health|status/{mappingId} behavior/contracts
     shared/           Shared lambda utility tests (FS-057 T-01)
       response.test.ts Response/error envelope and CORS header tests
       request.test.ts  Request body/path/query parsing tests

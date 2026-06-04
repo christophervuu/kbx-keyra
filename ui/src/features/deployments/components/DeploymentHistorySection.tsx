@@ -34,6 +34,13 @@ function HistoryRow({ record, isRollingBack, onRollback }: HistoryRowProps) {
         <time dateTime={record.deployedAt}>{new Date(record.deployedAt).toLocaleString()}</time>
       </td>
       <td className="px-4 py-3 text-xs text-slate-500">{metaLabel}</td>
+      <td className="px-4 py-3 text-xs text-slate-500" data-testid={`history-artifact-${record.environmentDeployedAt}`}>
+        {record.artifactId ? (
+          <span className="font-mono text-slate-400">{record.artifactId}</span>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
+      </td>
       <td className="px-4 py-3 text-right">
         <button
           type="button"
@@ -159,6 +166,9 @@ export function DeploymentHistorySection({
                 </th>
                 <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">
                   Notes
+                </th>
+                <th className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Artifact
                 </th>
                 <th className="px-4 py-2" />
               </tr>

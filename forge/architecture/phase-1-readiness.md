@@ -336,6 +336,50 @@ FS-076 clarification for GitHub scope:
 
 ---
 
+## 9) Runtime Bootstrap Boundary Notes (FS-082)
+
+FS-082 clarifies the minimum runtime bootstrap contract needed before deployment lifecycle implementation can be considered phase-ready.
+
+### 9.1 Runtime bootstrap prerequisites
+
+Per runtime account (`DEV`, `PREPROD`, `PROD`), readiness now assumes:
+- internal runtime API (`/internal/deploy`, `/internal/rollback`, `/internal/execute`, `/internal/health`, `/internal/status/{mappingId}`)
+- local active-pointer table (`mappingId -> activeSnapshotId`)
+- local append-only deployment history table
+- local immutable runtime artifact/schema storage
+- generic runtime execute lambda decoupled from deploy mutation path
+
+### 9.2 Execution isolation requirement
+
+Readiness boundary now explicitly includes execution isolation:
+- runtime execution and preview resolve deployment state from runtime-local storage only
+- runtime execution cannot depend on SANDBOX deployment-state reads
+- deploy operation must copy required schema payloads into runtime-local storage
+
+### 9.3 MVP defaults relevant to phase planning
+
+- runtime API type: `HttpApi`
+- deploy transfer mode: direct request-body relay only
+- promote transfer mode: full artifact payload push on every promote (same as deploy)
+- deploy/promote payload hard cap: 5 MB raw JSON body (preflight reject + runtime defense-in-depth reject)
+- deployment history indexing: PK/SK only, no GSI until query need is concrete
+- default runtime log retention baseline: 30 days (including prod unless org policy overrides)
+
+### 9.4 Planning implication
+
+This bootstrap contract reduces ambiguity between FS-081 architecture and implementation-phase specs:
+- FS-081 defines cross-account deployment model and promotion/rollback semantics
+- FS-082 defines concrete per-environment runtime bootstrap substrate required to implement those semantics deterministically
+
+FS-083 adds orchestration-layer clarifications that must now be treated as readiness constraints:
+- control-plane orchestration status lifecycle must be explicit (`queued|in_progress|retrying|succeeded|failed|timed_out`)
+- ambiguous timeout outcomes must reconcile via runtime status polling (no callbacks/event bridge in MVP)
+- rollback is local-artifact-only (`ARTIFACT_NOT_PRESENT` on missing local artifact)
+- runtime endpoint config source is persisted control-plane settings with env-var fallback (bootstrap/local-dev)
+- QA historical values remain at-rest; domain/view layers normalize `QA -> PREPROD`
+
+---
+
 ## Cross-Reference Index
 
 - Architecture docs:

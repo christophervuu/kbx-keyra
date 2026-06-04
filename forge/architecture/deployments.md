@@ -153,7 +153,7 @@ Promotion rules:
 
 Rollback rules:
 - Rollback is pointer-only and append-only in history.
-- If target artifact is not locally available, runtime returns `artifact_not_available_for_rollback`.
+- If target artifact is not locally available, runtime returns `ARTIFACT_NOT_PRESENT`.
 - Runtime does not auto-import rollback artifacts in MVP.
 
 ---
@@ -168,17 +168,40 @@ For FS-081 MVP, SANDBOX control plane performs **direct payload push**:
 
 ### 7.2 Payload-size limit
 
-Runtime deploy ingestion API enforces configured maximum payload size:
-- Oversize payloads are rejected with deterministic actionable diagnostics.
-- Recommended stable code: `DEPLOY_ARTIFACT_TOO_LARGE` (HTTP 413).
+FS-083 Rev 2 establishes an explicit MVP hard limit:
+- maximum deploy/promote artifact payload: **5 MB raw JSON request body**
+- control-plane must fail fast before runtime call when payload exceeds limit
+
+Error contract:
+- control-plane preflight rejection: `PAYLOAD_TOO_LARGE` (HTTP 413)
+- runtime ingestion rejection (defense-in-depth): `DEPLOY_ARTIFACT_TOO_LARGE` (HTTP 413)
+- both errors must include actionable guidance to reduce artifact size
 
 ### 7.3 Idempotent retries
 
 Retries are client-driven and keyed by `artifactId`/`snapshotId`:
 - Repeated delivery of identical artifact to same environment must be safe.
 - Runtime responses for duplicate-safe retries must be deterministic.
+- Promotion uses the same transfer path as deploy: full artifact payload is pushed every time (no `hasArtifact` preflight optimization in MVP).
 
-### 7.4 Network assumption (MVP)
+### 7.4 Timeout reconciliation via status polling
+
+FS-083 Rev 2 canonicalizes reconciliation for ambiguous timeout outcomes:
+- if control-plane deploy/promote/rollback request times out, control plane must poll runtime status endpoint
+- callbacks/event bridge are out of scope for MVP
+
+Canonical reconciliation states:
+- `not_found`
+- `received`
+- `stored`
+- `activated`
+- `failed`
+
+Interpretation baseline:
+- `stored`/`activated` -> reconcile orchestration as success
+- `failed`/`not_found` -> reconcile orchestration as failure with deterministic error details
+
+### 7.5 Network assumption (MVP)
 
 - Runtime deploy/preview endpoints are HTTPS and reachable from SANDBOX.
 - Access model for this phase: internal public endpoint allowlisting.
@@ -195,8 +218,9 @@ Retries are client-driven and keyed by `artifactId`/`snapshotId`:
 | `SOURCE_NOT_FOUND` | 404 | Referenced revision/version not found |
 | `SNAPSHOT_INTEGRITY_ERROR` | 500 | Artifact/snapshot integrity mismatch |
 | `DEPLOY_BLOCKED_CDM_SCHEMA_STATE` | 409 | CDM deploy guardrail block |
-| `DEPLOY_ARTIFACT_TOO_LARGE` | 413 | Direct artifact payload exceeds configured size |
-| `artifact_not_available_for_rollback` | 409 | Requested rollback artifact not present locally |
+| `PAYLOAD_TOO_LARGE` | 413 | Control-plane preflight payload-size rejection (FS-083, 5 MB limit) |
+| `DEPLOY_ARTIFACT_TOO_LARGE` | 413 | Runtime ingestion payload-size rejection |
+| `ARTIFACT_NOT_PRESENT` | 409 | Requested rollback artifact not present locally |
 
 ---
 
@@ -214,7 +238,9 @@ All control-plane deployment routes remain under `/mappings/:mappingId/`.
 
 Runtime-plane internal endpoints (not public product API):
 - Deploy ingestion endpoint (artifact push + validation + activation)
+- Runtime rollback endpoint (pointer-only rollback to local artifact)
 - Runtime preview endpoint (execute active local artifact)
+- Runtime status endpoint for timeout reconciliation polling
 
 ### Request/response environment model
 
@@ -254,7 +280,7 @@ Environment status shape is now `{ DEV, PREPROD, PROD }`.
 1. Control plane requests rollback in target runtime by deployment history identity.
 2. Runtime verifies referenced artifact exists locally.
 3. Runtime appends rollback event (`rollbackOf`) and repoints active pointer.
-4. If missing locally: return `artifact_not_available_for_rollback` with remediation (redeploy/promote artifact explicitly).
+4. If missing locally: return `ARTIFACT_NOT_PRESENT` with remediation (deploy/promote artifact explicitly, then retry rollback).
 
 ---
 
@@ -276,7 +302,54 @@ Environment status shape is now `{ DEV, PREPROD, PROD }`.
 
 ---
 
-## 14) Module Architecture
+## 14) Control-Plane Orchestration State Model (FS-083)
+
+Control plane maintains orchestration records separate from runtime-local deployment history.
+
+Canonical orchestration status values:
+- `queued`
+- `in_progress`
+- `retrying`
+- `succeeded`
+- `failed`
+- `timed_out`
+
+Minimum orchestration record fields:
+- `orchestrationId`
+- `mappingId`
+- `operationType` (`deploy|promote|rollback|preview`)
+- `targetEnvironment`
+- optional `sourceEnvironment`
+- optional `artifactId`
+- `status`
+- `attemptCount`
+- optional `lastErrorCode`
+- optional `lastErrorMessage`
+- `requestedBy`
+- `requestedAt`
+- optional `completedAt`
+
+This model is control-plane audit/state metadata and does not replace runtime-local active pointer or history tables.
+
+---
+
+## 15) Environment Configuration Ownership (FS-083)
+
+Canonical configuration source for runtime endpoint routing is a **persisted control-plane admin settings record**.
+
+Fallback behavior:
+- environment variables may be used as bootstrap/local-dev fallback
+- env-var fallback is not the long-term canonical source of truth
+
+Environment routing config includes per-runtime-environment:
+- `runtimeApiBaseUrl`
+- route paths (`deploy`, `rollback`, `preview`, `status`)
+- timeout settings
+- retry policy settings
+
+---
+
+## 16) Module Architecture
 
 ```
 src/lib/persistence/
@@ -299,9 +372,81 @@ src/lambda/deployment/
 
 ---
 
-## 15) Cross-References
+## 17) Cross-References
 
 - `forge/architecture/backend-api.md`
 - `forge/architecture/infrastructure.md`
 - `forge/architecture/persistence-model.md`
 - `forge/active/FS-081/spec.md`
+
+---
+
+## 18) Runtime Bootstrap Stack Contract (FS-082)
+
+FS-082 defines a reusable per-runtime-account bootstrap stack implemented via root `template.yaml`.
+
+### 18.1 Runtime bootstrap resources (per environment)
+
+Minimum resources provisioned in each runtime account (`DEV`, `PREPROD`, `PROD`):
+
+1. API: `AWS::Serverless::HttpApi` (internal runtime API)
+2. Lambda handlers:
+   - deploy/rollback write-path handler
+   - runtime execute handler
+   - status/health read-path handler
+3. DynamoDB:
+   - `ActiveSnapshotsTable` (current pointer per mapping)
+   - `DeploymentHistoryTable` (append-only deploy/rollback events)
+4. S3:
+   - runtime artifacts bucket for immutable snapshot and schema payload objects
+5. Logging/IAM:
+   - explicit CloudWatch LogGroups with retention parameter
+   - least-privilege lambda execution roles
+
+### 18.2 Runtime bootstrap data model
+
+`ActiveSnapshotsTable` (runtime lookup path):
+- PK: `mappingId`
+- canonical fields: `activeSnapshotId`, `snapshotHash`, `activatedAt`, `activatedBy`, `sourceType`, `sourceNumber`, optional schema bundle reference metadata
+- access pattern: O(1) by `mappingId` for execute/status
+
+`DeploymentHistoryTable` (runtime audit path):
+- PK: `mappingId`
+- SK: `eventAt` (ISO8601 sortable)
+- canonical fields: `eventType` (`deploy|rollback`), `snapshotId`, `snapshotHash`, `requestedBy`, `sourceType`, `sourceNumber`, optional `rollbackOf`, `requestId`
+- access pattern: mapping-scoped descending history query
+- index policy: no GSI in MVP; add only when concrete query requirements appear
+
+### 18.3 Runtime artifact/object layout
+
+Runtime-local S3 prefixes:
+- snapshots: `runtime/snapshots/{mappingId}/{snapshotId}.json`
+- schemas: `runtime/schemas/{mappingId}/{snapshotId}/{schemaRole}-{schemaId}.json`
+
+Invariants:
+- snapshot objects are immutable and never overwritten
+- deploy is idempotent for same `snapshotId` + hash; mismatch is rejected
+- deploy always copies required schema payloads into runtime-local storage for that deployed artifact set
+- runtime execution must not depend on SANDBOX or GitHub schema reads
+
+### 18.4 Runtime internal API routes
+
+Runtime internal route surface (not public product API):
+- `POST /internal/deploy`
+- `POST /internal/rollback`
+- `POST /internal/execute`
+- `GET /internal/health`
+- `GET /internal/status/{mappingId}`
+
+Responsibilities:
+- deploy: validate integrity, write immutable artifacts, update active pointer, append history
+- rollback: repoint pointer to existing local snapshot, append rollback event only
+- execute: resolve local pointer/artifacts and run generic mapping runtime
+- health/status: readiness and active-snapshot visibility
+
+### 18.5 Runtime bootstrap operational defaults
+
+- API type: `HttpApi` for MVP runtime stack
+- deploy transport: direct request-body payload relay only in MVP
+- log retention default: 30 days (including prod unless org policy overrides)
+- data durability defaults: DynamoDB/S3 resources use retain-oriented update/delete policies in template

@@ -1,5 +1,10 @@
 import type { MappingConfig } from '../../lib/persistence/types.js';
 import { computeConfigHash } from '../../lib/persistence/hash.js';
+import { getRuntimeApiClient, toRuntimeRelayClient } from './runtime-api-client.js';
+import {
+  DeploymentEnvironmentConfigError,
+  loadDeploymentEnvironmentSettings,
+} from './environment-config.js';
 
 export type RuntimeDeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 export type RuntimeDeploymentSourceType = 'revision' | 'version';
@@ -38,10 +43,17 @@ export interface RuntimeRelayClient {
   pushArtifact(
     environment: RuntimeDeploymentEnvironment,
     artifact: RuntimeDeployArtifact,
+    options?: {
+      readonly requestId?: string;
+      readonly orchestrationId?: string;
+      readonly operation?: 'deploy' | 'promote';
+      readonly promotedFrom?: RuntimeDeploymentEnvironment;
+      readonly triggeredBy?: 'user' | 'system';
+    },
   ): Promise<RuntimeRelayResponse>;
 }
 
-const MAX_ARTIFACT_PAYLOAD_BYTES_DEFAULT = 1024 * 1024; // 1MB
+const MAX_ARTIFACT_PAYLOAD_BYTES_DEFAULT = 5 * 1024 * 1024; // 5MB (FS-083 Rev 2)
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -123,24 +135,19 @@ export function assertArtifactPayloadWithinLimit(artifact: RuntimeDeployArtifact
   };
 }
 
-class NoopRuntimeRelayClient implements RuntimeRelayClient {
-  async pushArtifact(
-    environment: RuntimeDeploymentEnvironment,
-    artifact: RuntimeDeployArtifact,
-  ): Promise<RuntimeRelayResponse> {
-    void environment;
-    void artifact;
-
-    return {
-      ok: true,
-      statusCode: 201,
-      requestId: 'runtime-relay-noop',
-    };
-  }
-}
-
-const defaultRelayClient = new NoopRuntimeRelayClient();
+let cachedRelayClient: RuntimeRelayClient | null = null;
 
 export function getRuntimeRelayClient(): RuntimeRelayClient {
-  return defaultRelayClient;
+  if (!cachedRelayClient) {
+    cachedRelayClient = toRuntimeRelayClient(getRuntimeApiClient());
+  }
+
+  return cachedRelayClient;
 }
+
+export async function runtimeEnvironmentSettingsAvailable(): Promise<boolean> {
+  const settings = await loadDeploymentEnvironmentSettings();
+  return settings !== null;
+}
+
+export { DeploymentEnvironmentConfigError };

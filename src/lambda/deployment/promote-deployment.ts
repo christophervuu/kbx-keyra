@@ -11,6 +11,10 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { create as createDeployment, getCurrent } from '../../lib/persistence/deployments.js';
+import {
+  create as createDeploymentOrchestration,
+  updateStatus as updateDeploymentOrchestrationStatus,
+} from '../../lib/persistence/deployment-orchestrations.js';
 import { getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
 import { validateCdmDeployGuard } from './cdm-deploy-guard.js';
 import {
@@ -18,6 +22,8 @@ import {
   buildRuntimeDeployArtifact,
   getRuntimeRelayClient,
 } from './runtime-relay.js';
+import { executeRuntimeOperationWithRetry } from './orchestration-retry.js';
+import { getRuntimeApiClient } from './runtime-api-client.js';
 
 type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 
@@ -30,6 +36,11 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+}
+
+interface OrchestrationContext {
+  readonly orchestrationId: string;
+  readonly requestId: string;
 }
 
 function mapRelayStatusCodeToHttp(statusCode: number): number {
@@ -71,6 +82,37 @@ function parsePromoteRequest(body: Record<string, unknown> | null): PromoteReque
   }
 
   return { fromEnvironment, toEnvironment };
+}
+
+async function createOrchestrationContext(input: {
+  mappingId: string;
+  fromEnvironment: DeploymentEnvironment;
+  toEnvironment: DeploymentEnvironment;
+  artifactId: string;
+}): Promise<OrchestrationContext> {
+  const requestId = generateRequestId();
+  const orchestration = await createDeploymentOrchestration({
+    mappingId: input.mappingId,
+    operationType: 'promote',
+    targetEnvironment: input.toEnvironment,
+    sourceEnvironment: input.fromEnvironment,
+    artifactId: input.artifactId,
+    requestId,
+    requestedBy: 'system',
+  });
+
+  await updateDeploymentOrchestrationStatus({
+    orchestrationId: orchestration.orchestrationId,
+    status: 'in_progress',
+    attemptCount: 1,
+    artifactId: input.artifactId,
+    requestId,
+  });
+
+  return {
+    orchestrationId: orchestration.orchestrationId,
+    requestId,
+  };
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -156,36 +198,104 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       config,
     });
 
-    const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
+    const artifactId = source.artifactId ?? artifact.artifactId;
+    const artifactHash = source.artifactHash ?? artifact.artifactHash;
+
+    const promoteArtifact = {
+      ...artifact,
+      artifactId,
+      snapshotId: artifactId,
+      artifactHash,
+      sourceConfigHash: artifactHash,
+    };
+
+    const orchestration = await createOrchestrationContext({
+      mappingId,
+      fromEnvironment: request.fromEnvironment,
+      toEnvironment: request.toEnvironment,
+      artifactId,
+    });
+
+    const payloadCheck = assertArtifactPayloadWithinLimit(promoteArtifact);
     if (!payloadCheck.ok) {
+      await updateDeploymentOrchestrationStatus({
+        orchestrationId: orchestration.orchestrationId,
+        status: 'failed',
+        attemptCount: 1,
+        artifactId,
+        requestId: orchestration.requestId,
+        lastErrorCode: ERROR_CODES.PAYLOAD_TOO_LARGE,
+        lastErrorMessage: `Payload too large (${payloadCheck.payloadBytes} > ${payloadCheck.limitBytes})`,
+      });
+
       return errorResponse(
-        ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE,
-        `Promotion artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce mapping payload size or raise MAX_DEPLOY_ARTIFACT_PAYLOAD_BYTES.`,
+        ERROR_CODES.PAYLOAD_TOO_LARGE,
+        `Promotion artifact payload is too large (${payloadCheck.payloadBytes} bytes > limit ${payloadCheck.limitBytes} bytes). Reduce artifact size below the 5MB MVP limit.`,
         413,
         false,
-        undefined,
+        orchestration.requestId,
         {
-          artifactId: artifact.artifactId,
-          snapshotId: artifact.snapshotId,
+          orchestrationId: orchestration.orchestrationId,
+          artifactId,
+          snapshotId: artifactId,
           payloadBytes: payloadCheck.payloadBytes,
           limitBytes: payloadCheck.limitBytes,
         },
       );
     }
 
-    const relay = await getRuntimeRelayClient().pushArtifact(request.toEnvironment, artifact);
-    if (!relay.ok) {
-      return errorResponse(
-        relay.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
-        relay.message,
-        mapRelayStatusCodeToHttp(relay.statusCode),
-        relay.retryable,
-        relay.requestId,
-        {
-          environment: request.toEnvironment,
-          artifactId: artifact.artifactId,
-          snapshotId: artifact.snapshotId,
+    const retryResult = await executeRuntimeOperationWithRetry<void>({
+      mappingId,
+      environment: request.toEnvironment,
+      operationType: 'promote',
+      orchestrationId: orchestration.orchestrationId,
+      requestId: orchestration.requestId,
+      artifactId,
+      runtimeApiClient: getRuntimeApiClient(),
+      executeAttempt: async () => {
+        const relay = await getRuntimeRelayClient().pushArtifact(request.toEnvironment, promoteArtifact, {
+          requestId: orchestration.requestId,
+          orchestrationId: orchestration.orchestrationId,
+          operation: 'promote',
           promotedFrom: request.fromEnvironment,
+          triggeredBy: 'system',
+        });
+
+        if (relay.ok) {
+          return {
+            ok: true,
+            statusCode: relay.statusCode,
+            requestId: relay.requestId,
+            data: undefined,
+          };
+        }
+
+        return {
+          ok: false,
+          statusCode: mapRelayStatusCodeToHttp(relay.statusCode),
+          requestId: relay.requestId,
+          errorCode: relay.errorCode,
+          message: relay.message,
+          retryable: relay.retryable,
+        };
+      },
+    });
+
+    if (!retryResult.ok) {
+      return errorResponse(
+        retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+        retryResult.message,
+        retryResult.statusCode,
+        retryResult.retryable,
+        retryResult.requestId,
+        {
+          orchestrationId: orchestration.orchestrationId,
+          environment: request.toEnvironment,
+          artifactId,
+          snapshotId: artifactId,
+          promotedFrom: request.fromEnvironment,
+          attemptCount: retryResult.attemptCount,
+          finalStatus: retryResult.finalStatus,
         },
       );
     }
@@ -196,14 +306,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       sourceType: 'version',
       sourceNumber: source.sourceNumber,
       deployedBy: 'system',
-      artifactId: artifact.artifactId,
-      artifactHash: artifact.artifactHash,
+      artifactId,
+      artifactHash,
       ...(cdmGuard.cdmTraceability.length > 0 ? { cdmSchemaTraceability: cdmGuard.cdmTraceability } : {}),
       promotedFrom: request.fromEnvironment,
       config,
     });
 
-    return jsonResponse(201, created);
+    await updateDeploymentOrchestrationStatus({
+      orchestrationId: orchestration.orchestrationId,
+      status: 'succeeded',
+      attemptCount: retryResult.attemptCount,
+      artifactId,
+      requestId: retryResult.requestId,
+    });
+
+    return jsonResponse(201, {
+      ...created,
+      orchestrationId: orchestration.orchestrationId,
+    }, retryResult.requestId);
   } catch (error) {
     const isArtifactIntegrityError =
       (error as { name?: string } | null | undefined)?.name === 'DeploymentArtifactIntegrityError';

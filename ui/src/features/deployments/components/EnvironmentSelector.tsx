@@ -11,9 +11,9 @@ const ENVIRONMENTS: Environment[] = ['DEV', 'PREPROD', 'PROD'];
 
 const envLabels: Record<Environment, string> = {
   DEV: 'DEV',
-  PREPROD: 'PREPROD',
+  PREPROD: 'Preprod',
   PROD: 'PROD',
-  QA: 'QA (legacy)',
+  QA: 'Preprod (legacy QA)',
   SANDBOX: 'SANDBOX',
 };
 

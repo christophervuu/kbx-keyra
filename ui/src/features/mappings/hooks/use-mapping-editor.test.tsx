@@ -139,6 +139,9 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    deployMapping: vi.fn(),
+    promoteDeployment: vi.fn(),
+    rollbackDeployment: vi.fn(),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -476,6 +479,33 @@ describe('useMappingEditor', () => {
       });
 
       expect(adapter.saveMapping).not.toHaveBeenCalled();
+    });
+
+    it('save updates mapping only and does not trigger deployment orchestration APIs (Save != Deploy)', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateRule(0, {
+          target: 'A.B',
+          expression: 'static("saved-only")',
+        });
+      });
+
+      await act(async () => {
+        await result.current.actions.save();
+      });
+
+      expect(adapter.saveMapping).toHaveBeenCalled();
+      expect(adapter.deployMapping).not.toHaveBeenCalled();
+      expect(adapter.promoteDeployment).not.toHaveBeenCalled();
+      expect(adapter.rollbackDeployment).not.toHaveBeenCalled();
     });
   });
 

@@ -433,6 +433,109 @@ export interface CreateRollbackDeploymentInput {
   readonly rollbackOf: string;
 }
 
+export type RuntimeDeploymentEventType = 'deploy' | 'rollback';
+
+export type DeploymentOrchestrationOperationType = 'deploy' | 'promote' | 'rollback' | 'preview';
+
+export type DeploymentOrchestrationStatus =
+  | 'queued'
+  | 'in_progress'
+  | 'retrying'
+  | 'succeeded'
+  | 'failed'
+  | 'timed_out';
+
+export interface DeploymentOrchestrationItem {
+  readonly orchestrationId: string;
+  readonly mappingId: string;
+  readonly operationType: DeploymentOrchestrationOperationType;
+  readonly targetEnvironment: DeploymentEnvironment;
+  readonly sourceEnvironment?: DeploymentEnvironment;
+  readonly artifactId?: string;
+  readonly status: DeploymentOrchestrationStatus;
+  readonly attemptCount: number;
+  readonly lastErrorCode?: string;
+  readonly lastErrorMessage?: string;
+  readonly requestId: string;
+  readonly requestedBy: string;
+  readonly requestedAt: ISODateString;
+  readonly completedAt?: ISODateString;
+}
+
+export interface CreateDeploymentOrchestrationInput {
+  readonly mappingId: string;
+  readonly operationType: DeploymentOrchestrationOperationType;
+  readonly targetEnvironment: DeploymentEnvironment;
+  readonly sourceEnvironment?: DeploymentEnvironment;
+  readonly artifactId?: string;
+  readonly requestId: string;
+  readonly requestedBy: string;
+}
+
+export interface UpdateDeploymentOrchestrationStatusInput {
+  readonly orchestrationId: string;
+  readonly status: DeploymentOrchestrationStatus;
+  readonly attemptCount?: number;
+  readonly artifactId?: string;
+  readonly requestId?: string;
+  readonly lastErrorCode?: string;
+  readonly lastErrorMessage?: string;
+  readonly completedAt?: ISODateString;
+}
+
+/**
+ * Runtime bootstrap table item: active snapshot pointer per mapping.
+ */
+export interface ActiveSnapshotItem {
+  readonly mappingId: string;
+  readonly activeSnapshotId: string;
+  readonly snapshotHash: string;
+  readonly activatedAt: ISODateString;
+  readonly activatedBy: string;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly schemaBundleRef?: string;
+}
+
+/**
+ * Runtime bootstrap table item: append-only deployment/rollback history.
+ */
+export interface DeploymentHistoryItem {
+  readonly mappingId: string;
+  readonly eventAt: ISODateString;
+  readonly eventType: RuntimeDeploymentEventType;
+  readonly snapshotId: string;
+  readonly snapshotHash: string;
+  readonly requestedBy: string;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly rollbackOf?: string;
+  readonly requestId: string;
+}
+
+export interface UpsertActiveSnapshotInput {
+  readonly mappingId: string;
+  readonly activeSnapshotId: string;
+  readonly snapshotHash: string;
+  readonly activatedBy: string;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly schemaBundleRef?: string;
+}
+
+export interface AppendDeploymentHistoryInput {
+  readonly mappingId: string;
+  readonly eventType: RuntimeDeploymentEventType;
+  readonly snapshotId: string;
+  readonly snapshotHash: string;
+  readonly requestedBy: string;
+  readonly sourceType: DeploymentSourceType;
+  readonly sourceNumber: number;
+  readonly rollbackOf?: string;
+  readonly requestId: string;
+  readonly eventAt?: ISODateString;
+}
+
 export interface CreateProjectInput {
   readonly name: string;
   readonly description: string;

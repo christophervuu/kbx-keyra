@@ -613,9 +613,12 @@ export class HttpAdapter extends LocalStorageAdapter {
   }
 
   override async previewOnServer(mappingId: string, input: ServerPreviewInput): Promise<ServerPreviewResult> {
-    void mappingId;
-    void input;
-    throw this.featureNotEnabled('previewOnServer');
+    return httpRequest<ServerPreviewResult>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/preview`,
+      method: 'POST',
+      body: input,
+    });
   }
 
   private featureNotEnabled(featureName: string): FeatureNotEnabledError {

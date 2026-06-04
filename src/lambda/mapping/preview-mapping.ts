@@ -1,9 +1,8 @@
-import { execute } from '../../engine/index.js';
 import {
   ERROR_CODES,
   errorResponse,
+  generateRequestId,
   getItem,
-  getObject,
   internalError,
   jsonResponse,
   parseBody,
@@ -13,6 +12,12 @@ import {
 } from '../shared/index.js';
 import { getCurrent } from '../../lib/persistence/deployments.js';
 import { normalizeRuntimeDeploymentEnvironment, type RuntimeDeploymentEnvironment } from '../../lib/persistence/types.js';
+import {
+  create as createDeploymentOrchestration,
+  updateStatus as updateDeploymentOrchestrationStatus,
+} from '../../lib/persistence/deployment-orchestrations.js';
+import { getRuntimeApiClient } from '../deployment/runtime-api-client.js';
+import { executeRuntimeOperationWithRetry } from '../deployment/orchestration-retry.js';
 
 interface MappingMetadata {
   readonly mappingId: string;
@@ -23,12 +28,9 @@ interface PreviewRequest {
   readonly sourceData: Readonly<Record<string, unknown>>;
 }
 
-interface DeploymentSnapshotPayload {
-  readonly config?: unknown;
-}
-
-interface MappingConfig {
-  readonly engineVersion?: string;
+interface OrchestrationContext {
+  readonly orchestrationId: string;
+  readonly requestId: string;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -43,15 +45,6 @@ function getMappingsTableOrThrow(): string {
   }
 
   return table;
-}
-
-function getStorageBucketOrThrow(): string {
-  const bucket = getEnvValue('STORAGE_BUCKET')?.trim();
-  if (!bucket) {
-    throw new Error('Missing required environment variable: STORAGE_BUCKET');
-  }
-
-  return bucket;
 }
 
 function parseRuntimeEnvironment(value: unknown): RuntimeDeploymentEnvironment | null {
@@ -84,13 +77,30 @@ function parsePreviewRequest(body: Record<string, unknown> | null): PreviewReque
   };
 }
 
-function parseSnapshotConfig(payloadRaw: string): MappingConfig | null {
-  const payload = JSON.parse(payloadRaw) as DeploymentSnapshotPayload;
-  if (!payload || typeof payload !== 'object' || !payload.config || typeof payload.config !== 'object') {
-    return null;
-  }
+async function createOrchestrationContext(input: {
+  mappingId: string;
+  environment: RuntimeDeploymentEnvironment;
+}): Promise<OrchestrationContext> {
+  const requestId = generateRequestId();
+  const orchestration = await createDeploymentOrchestration({
+    mappingId: input.mappingId,
+    operationType: 'preview',
+    targetEnvironment: input.environment,
+    requestId,
+    requestedBy: 'system',
+  });
 
-  return payload.config as MappingConfig;
+  await updateDeploymentOrchestrationStatus({
+    orchestrationId: orchestration.orchestrationId,
+    status: 'in_progress',
+    attemptCount: 1,
+    requestId,
+  });
+
+  return {
+    orchestrationId: orchestration.orchestrationId,
+    requestId,
+  };
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -119,51 +129,113 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(ERROR_CODES.RESOURCE_NOT_FOUND, `Mapping with id '${mappingId}' not found`, 404, false);
     }
 
-    const current = await getCurrent(mappingId, request.environment);
-    if (!current) {
+    const orchestration = await createOrchestrationContext({
+      mappingId,
+      environment: request.environment,
+    });
+
+    const retryResult = await executeRuntimeOperationWithRetry({
+      mappingId,
+      environment: request.environment,
+      operationType: 'preview',
+      orchestrationId: orchestration.orchestrationId,
+      requestId: orchestration.requestId,
+      runtimeApiClient: getRuntimeApiClient(),
+      executeAttempt: async () =>
+        getRuntimeApiClient().preview({
+          mappingId,
+          environment: request.environment,
+          sourceData: request.sourceData,
+          requestId: orchestration.requestId,
+          orchestrationId: orchestration.orchestrationId,
+          triggeredBy: 'system',
+        }),
+    });
+
+    if (!retryResult.ok) {
+      const isNotDeployed = retryResult.errorCode === ERROR_CODES.SOURCE_NOT_FOUND;
+      const normalizedCode: (typeof ERROR_CODES)[keyof typeof ERROR_CODES] = isNotDeployed
+        ? ERROR_CODES.NOT_DEPLOYED
+        : (retryResult.errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES]);
+      const normalizedStatus = isNotDeployed ? 404 : retryResult.statusCode;
+      const normalizedMessage = isNotDeployed
+        ? `NOT_DEPLOYED: no active deployment found for '${mappingId}' in environment '${request.environment}'`
+        : retryResult.message;
+
+      await updateDeploymentOrchestrationStatus({
+        orchestrationId: orchestration.orchestrationId,
+        status: retryResult.finalStatus,
+        attemptCount: retryResult.attemptCount,
+        requestId: retryResult.requestId,
+        lastErrorCode: normalizedCode,
+        lastErrorMessage: normalizedMessage,
+      });
+
       return errorResponse(
-        ERROR_CODES.SOURCE_NOT_FOUND,
-        `No active deployment found for '${mappingId}' in environment '${request.environment}'`,
-        404,
-        false,
+        normalizedCode,
+        normalizedMessage,
+        normalizedStatus,
+        retryResult.retryable,
+        retryResult.requestId,
+        {
+          orchestrationId: orchestration.orchestrationId,
+          environment: request.environment,
+          mappingId,
+          attemptCount: retryResult.attemptCount,
+          finalStatus: retryResult.finalStatus,
+        },
       );
     }
 
-    const rawSnapshot = await getObject({
-      Bucket: getStorageBucketOrThrow(),
-      Key: current.configS3Key,
-    });
+    const previewData = retryResult.data;
+    if (!previewData) {
+      const message = 'Runtime preview response missing data payload.';
+      await updateDeploymentOrchestrationStatus({
+        orchestrationId: orchestration.orchestrationId,
+        status: 'failed',
+        attemptCount: retryResult.attemptCount,
+        requestId: retryResult.requestId,
+        lastErrorCode: ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
+        lastErrorMessage: message,
+      });
 
-    const config = parseSnapshotConfig(rawSnapshot);
-    if (!config) {
       return errorResponse(
         ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
-        `Deployment snapshot payload invalid: ${mappingId}:${current.configS3Key}`,
+        message,
         500,
         false,
+        retryResult.requestId,
+        {
+          orchestrationId: orchestration.orchestrationId,
+          environment: request.environment,
+          mappingId,
+        },
       );
     }
 
-    const result = execute(
-      config as Parameters<typeof execute>[0],
-      request.sourceData,
-      null,
-      null,
-    );
+    const current = await getCurrent(mappingId, request.environment);
+
+    await updateDeploymentOrchestrationStatus({
+      orchestrationId: orchestration.orchestrationId,
+      status: 'succeeded',
+      attemptCount: retryResult.attemptCount,
+      artifactId: previewData.artifactId ?? undefined,
+      requestId: retryResult.requestId,
+    });
 
     return jsonResponse(200, {
-      output: (result.output ?? {}) as Readonly<Record<string, unknown>>,
-      diagnostics: result.diagnostics,
+      output: (previewData.output ?? {}) as Readonly<Record<string, unknown>>,
+      diagnostics: previewData.diagnostics,
       metadata: {
-        environment: request.environment,
-        artifactId: current.artifactId ?? null,
-        artifactHash: current.artifactHash ?? null,
-        deployedAt: current.deployedAt,
-        sourceType: current.sourceType,
-        sourceNumber: current.sourceNumber,
-        engineVersion: config.engineVersion ?? null,
+        environment: previewData.environment,
+        artifactId: previewData.artifactId,
+        artifactHash: previewData.artifactHash,
+        deployedAt: current?.deployedAt ?? null,
+        sourceType: current?.sourceType ?? null,
+        sourceNumber: current?.sourceNumber ?? null,
+        engineVersion: null,
       },
-    });
+    }, retryResult.requestId);
   } catch {
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);

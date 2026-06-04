@@ -40,6 +40,8 @@ const CURRENT_WITH_MIXED: CurrentDeployments = {
       deployedAt: '2026-01-02T10:00:00Z',
       sourceType: 'version',
       sourceNumber: 1,
+      artifactId: 'artifact-dev-1',
+      artifactHash: 'hash-dev-1-abcdef',
       configHash: 'abc',
       configS3Key: 's3://bucket/map-1/v1.json',
     },
@@ -53,6 +55,8 @@ const CURRENT_WITH_MIXED: CurrentDeployments = {
       deployedAt: '2026-01-01T10:00:00Z',
       sourceType: 'revision',
       sourceNumber: 1,
+      artifactId: 'artifact-preprod-1',
+      artifactHash: 'hash-preprod-1-xyz',
       configHash: 'xyz',
       configS3Key: 's3://bucket/map-1/rev1.json',
     },
@@ -68,6 +72,8 @@ const HISTORY_RECORDS: DeploymentRecord[] = [
     environment: 'DEV',
     sourceType: 'version',
     sourceNumber: 1,
+    artifactId: 'artifact-dev-1',
+    artifactHash: 'hash-dev-1-abcdef',
     configS3Key: 's3://bucket/map-1/v1.json',
     configHash: 'abc',
     deployedAt: '2026-01-02T10:00:00Z',
@@ -79,6 +85,8 @@ const HISTORY_RECORDS: DeploymentRecord[] = [
     environment: 'DEV',
     sourceType: 'revision',
     sourceNumber: 2,
+    artifactId: 'artifact-dev-rev2',
+    artifactHash: 'hash-dev-rev2-def',
     configS3Key: 's3://bucket/map-1/rev2.json',
     configHash: 'def',
     deployedAt: '2026-01-01T09:00:00Z',
@@ -92,6 +100,8 @@ const PROMOTE_RECORD: DeploymentRecord = {
   environment: 'PREPROD',
   sourceType: 'version',
   sourceNumber: 1,
+  artifactId: 'artifact-dev-1',
+  artifactHash: 'hash-dev-1-abcdef',
   configS3Key: 's3://bucket/map-1/v1.json',
   configHash: 'abc',
   deployedAt: '2026-01-02T11:00:00Z',
@@ -105,6 +115,8 @@ const ROLLBACK_RECORD: DeploymentRecord = {
   environment: 'DEV',
   sourceType: 'revision',
   sourceNumber: 2,
+  artifactId: 'artifact-dev-rev2',
+  artifactHash: 'hash-dev-rev2-def',
   configS3Key: 's3://bucket/map-1/rev2.json',
   configHash: 'def',
   deployedAt: '2026-01-02T12:00:00Z',
@@ -252,6 +264,13 @@ describe('T-06: Environment comparison panel', () => {
     expect(screen.getByTestId('env-source-DEV').textContent).toBe('v1');
   });
 
+  it('shows artifact identity on environment cards', async () => {
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('env-artifact-DEV'));
+    expect(screen.getByTestId('env-artifact-DEV').textContent).toContain('artifact-dev-1');
+    expect(screen.getByTestId('env-artifact-PREPROD').textContent).toContain('artifact-preprod-1');
+  });
+
   it('PREPROD source label shows revision number', async () => {
     renderPage(createMockAdapter());
     await waitFor(() => screen.getByTestId('env-source-PREPROD'));
@@ -383,6 +402,17 @@ describe('T-06: Deployment history', () => {
     await waitFor(() => screen.getByTestId('history-table-body'));
     // v1 entry
     expect(screen.getByTestId('history-table-body').textContent).toContain('v1');
+  });
+
+  it('history rows render artifact identity column values', async () => {
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('history-table-body'));
+    expect(
+      screen.getByTestId(`history-artifact-${HISTORY_RECORDS[0].environmentDeployedAt}`).textContent,
+    ).toContain('artifact-dev-1');
+    expect(
+      screen.getByTestId(`history-artifact-${HISTORY_RECORDS[1].environmentDeployedAt}`).textContent,
+    ).toContain('artifact-dev-rev2');
   });
 
   it('shows source label for revision entry', async () => {

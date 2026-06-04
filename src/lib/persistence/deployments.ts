@@ -2,14 +2,18 @@ import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 import { computeConfigHash } from './hash.js';
 import { dynamoClient } from './clients.js';
-import { TABLE_NAMES, deploymentCurrentKey, deploymentHistorySortKey } from './config.js';
+import { RUNTIME_TABLE_NAMES, TABLE_NAMES, deploymentCurrentKey, deploymentHistorySortKey } from './config.js';
 import { put as putDeploymentSnapshot } from './s3/deployment-snapshot.js';
 import type {
+  ActiveSnapshotItem,
+  AppendDeploymentHistoryInput,
+  DeploymentHistoryItem,
   CreateRollbackDeploymentInput,
   CreateDeploymentInput,
   DeploymentCurrentItem,
   DeploymentEnvironment,
   DeploymentItem,
+  UpsertActiveSnapshotInput,
 } from './types.js';
 import { normalizeRuntimeDeploymentEnvironment } from './types.js';
 
@@ -24,6 +28,24 @@ export class DeploymentArtifactIntegrityError extends Error {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+async function putRuntimeHistoryEvent(item: DeploymentHistoryItem): Promise<void> {
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: RUNTIME_TABLE_NAMES.deploymentHistory,
+      Item: item,
+    }),
+  );
+}
+
+async function putRuntimeActiveSnapshot(item: ActiveSnapshotItem): Promise<void> {
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: RUNTIME_TABLE_NAMES.activeSnapshots,
+      Item: item,
+    }),
+  );
 }
 
 function toDeploymentCurrentItem(item: DeploymentItem): DeploymentCurrentItem {
@@ -223,10 +245,75 @@ export async function listHistory(
   return items;
 }
 
+export async function upsertActiveSnapshot(input: UpsertActiveSnapshotInput): Promise<ActiveSnapshotItem> {
+  const item: ActiveSnapshotItem = {
+    mappingId: input.mappingId,
+    activeSnapshotId: input.activeSnapshotId,
+    snapshotHash: input.snapshotHash,
+    activatedAt: nowIso(),
+    activatedBy: input.activatedBy,
+    sourceType: input.sourceType,
+    sourceNumber: input.sourceNumber,
+    ...(input.schemaBundleRef ? { schemaBundleRef: input.schemaBundleRef } : {}),
+  };
+
+  await putRuntimeActiveSnapshot(item);
+  return item;
+}
+
+export async function getActiveSnapshot(mappingId: string): Promise<ActiveSnapshotItem | null> {
+  const result = await dynamoClient.send(
+    new GetCommand({
+      TableName: RUNTIME_TABLE_NAMES.activeSnapshots,
+      Key: { mappingId },
+    }),
+  );
+
+  return (result.Item as ActiveSnapshotItem | undefined) ?? null;
+}
+
+export async function appendDeploymentHistory(input: AppendDeploymentHistoryInput): Promise<DeploymentHistoryItem> {
+  const item: DeploymentHistoryItem = {
+    mappingId: input.mappingId,
+    eventAt: input.eventAt ?? nowIso(),
+    eventType: input.eventType,
+    snapshotId: input.snapshotId,
+    snapshotHash: input.snapshotHash,
+    requestedBy: input.requestedBy,
+    sourceType: input.sourceType,
+    sourceNumber: input.sourceNumber,
+    ...(input.rollbackOf ? { rollbackOf: input.rollbackOf } : {}),
+    requestId: input.requestId,
+  };
+
+  await putRuntimeHistoryEvent(item);
+  return item;
+}
+
+export async function listDeploymentHistory(mappingId: string, limit?: number): Promise<DeploymentHistoryItem[]> {
+  const result = await dynamoClient.send(
+    new QueryCommand({
+      TableName: RUNTIME_TABLE_NAMES.deploymentHistory,
+      KeyConditionExpression: 'mappingId = :mappingId',
+      ExpressionAttributeValues: {
+        ':mappingId': mappingId,
+      },
+      ScanIndexForward: false,
+      ...(typeof limit === 'number' ? { Limit: limit } : {}),
+    }),
+  );
+
+  return (result.Items as DeploymentHistoryItem[] | undefined) ?? [];
+}
+
 export const deployments = {
   create,
   createRollback,
   getCurrent,
   getCurrentAll,
   listHistory,
+  upsertActiveSnapshot,
+  getActiveSnapshot,
+  appendDeploymentHistory,
+  listDeploymentHistory,
 };

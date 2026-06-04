@@ -6,7 +6,11 @@ import { EnvironmentComparisonPanel } from './EnvironmentComparisonPanel';
 import { EnvironmentSelector } from './EnvironmentSelector';
 import { RevisionDeploySection } from './RevisionDeploySection';
 import { VersionDeploySection } from './VersionDeploySection';
-import type { CdmDeployBlockUiIssue } from '../hooks/use-deployment-page';
+import type {
+  CdmDeployBlockUiIssue,
+  DeploymentActionArtifactDetails,
+  DeploymentActionOrchestrationDetails,
+} from '../hooks/use-deployment-page';
 import { useDeploymentPage } from '../hooks/use-deployment-page';
 
 import { ErrorBanner } from '@/components/ErrorBanner';
@@ -23,6 +27,8 @@ interface CurrentDeploymentStripProps {
   environment: Environment;
   sourceType: 'revision' | 'version' | null;
   sourceNumber: number | null;
+  artifactId?: string;
+  artifactHash?: string;
   status: 'current' | 'stale' | 'not-deployed';
 }
 
@@ -30,6 +36,8 @@ function CurrentDeploymentStrip({
   environment,
   sourceType,
   sourceNumber,
+  artifactId,
+  artifactHash,
   status,
 }: CurrentDeploymentStripProps) {
   const statusConfig = {
@@ -51,12 +59,21 @@ function CurrentDeploymentStrip({
         : `v${sourceNumber ?? '?'}`;
 
   return (
-    <div
-      className={`flex items-center justify-between rounded border px-3 py-2 text-sm ${cfg.cls}`}
-      data-testid={`current-deploy-strip-${environment}`}
-    >
-      <span className="font-medium">{environment} — {deployedLabel}</span>
-      <span className="text-xs uppercase tracking-wide opacity-80">{cfg.label}</span>
+    <div className={`rounded border px-3 py-2 text-sm ${cfg.cls}`} data-testid={`current-deploy-strip-${environment}`}>
+      <div className="flex items-center justify-between">
+        <span className="font-medium">{environment} — {deployedLabel}</span>
+        <span className="text-xs uppercase tracking-wide opacity-80">{cfg.label}</span>
+      </div>
+      {status !== 'not-deployed' && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs opacity-90" data-testid={`current-deploy-artifact-${environment}`}>
+          <span>
+            Artifact: <span className="font-mono text-slate-200">{artifactId ?? '—'}</span>
+          </span>
+          <span>
+            Hash: <span className="font-mono text-slate-300">{artifactHash ? artifactHash.slice(0, 12) : '—'}</span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -67,8 +84,19 @@ function CurrentDeploymentStrip({
 
 interface FeedbackBannerProps {
   feedback:
-    | { kind: 'success'; message: string }
-    | { kind: 'error'; message: string; cdmBlockIssues?: readonly CdmDeployBlockUiIssue[] };
+    | {
+      kind: 'success';
+      message: string;
+      orchestration?: DeploymentActionOrchestrationDetails;
+      artifact?: DeploymentActionArtifactDetails;
+    }
+    | {
+      kind: 'error';
+      message: string;
+      cdmBlockIssues?: readonly CdmDeployBlockUiIssue[];
+      orchestration?: DeploymentActionOrchestrationDetails;
+      artifact?: DeploymentActionArtifactDetails;
+    };
   onDismiss: () => void;
 }
 
@@ -127,6 +155,57 @@ function remediationActionPath(issue: CdmDeployBlockUiIssue): string {
 
 function FeedbackBanner({ feedback, onDismiss }: FeedbackBannerProps) {
   const { kind, message } = feedback;
+
+  function orchestrationStatusLabel(value: string): string {
+    return value.replace(/_/g, ' ');
+  }
+
+  function renderOperationDetails() {
+    if (!feedback.orchestration && !feedback.artifact) {
+      return null;
+    }
+
+    return (
+      <div
+        className="mt-2 w-full rounded border border-slate-700/60 bg-slate-950/50 px-3 py-2 text-xs text-slate-300"
+        data-testid="deploy-operation-details"
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {feedback.orchestration?.orchestrationId && (
+            <span>
+              Orchestration: <span className="font-mono">{feedback.orchestration.orchestrationId}</span>
+            </span>
+          )}
+          {(feedback.orchestration?.finalStatus ?? feedback.orchestration?.status) && (
+            <span>
+              Status:{' '}
+              <span className="font-medium uppercase">
+                {orchestrationStatusLabel(feedback.orchestration?.finalStatus ?? feedback.orchestration?.status ?? '')}
+              </span>
+            </span>
+          )}
+          {typeof feedback.orchestration?.attemptCount === 'number' && (
+            <span>Attempts: {feedback.orchestration.attemptCount}</span>
+          )}
+        </div>
+        {(feedback.artifact?.artifactId || feedback.artifact?.artifactHash) && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {feedback.artifact?.artifactId && (
+              <span>
+                Artifact: <span className="font-mono">{feedback.artifact.artifactId}</span>
+              </span>
+            )}
+            {feedback.artifact?.artifactHash && (
+              <span>
+                Hash: <span className="font-mono">{feedback.artifact.artifactHash.slice(0, 12)}</span>
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (kind === 'success') {
     return (
       <div
@@ -145,6 +224,7 @@ function FeedbackBanner({ feedback, onDismiss }: FeedbackBannerProps) {
         >
           <X size={14} aria-hidden="true" />
         </button>
+        {renderOperationDetails()}
       </div>
     );
   }
@@ -197,6 +277,7 @@ function FeedbackBanner({ feedback, onDismiss }: FeedbackBannerProps) {
       >
         <X size={14} aria-hidden="true" />
       </button>
+      {renderOperationDetails()}
     </div>
   );
 }
@@ -335,6 +416,8 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
                 environment={environment}
                 sourceType={envSummary.deployment?.sourceType ?? null}
                 sourceNumber={envSummary.deployment?.sourceNumber ?? null}
+                artifactId={envSummary.deployment?.artifactId}
+                artifactHash={envSummary.deployment?.artifactHash}
                 status={envSummary.status}
               />
             </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAdapter } from '@/lib/api/adapter-provider';
+import { toAppError } from '@/lib/state/app-error';
 import type { Environment, ServerPreviewResult } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -94,10 +95,13 @@ export function useServerPreview({
 
       setResult(serverResult);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const appError = toAppError(err);
+      const message = appError.message;
 
       if (message === '__timeout__') {
         setError('Server preview timed out after 10 seconds');
+      } else if (appError.code === 'NOT_DEPLOYED') {
+        setError(`No deployed artifact found in ${env}. Deploy to ${env} first, then run server preview.`);
       } else if (message.includes(OFFLINE_MODE_ERROR_FRAGMENT)) {
         setIsAvailable(false);
         setError('Server preview is not available in offline mode');

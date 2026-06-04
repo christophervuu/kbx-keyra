@@ -46,6 +46,8 @@ interface EnvCardProps {
   environment: Environment;
   sourceType: 'revision' | 'version' | null;
   sourceNumber: number | null;
+  artifactId?: string;
+  artifactHash?: string;
   deployedAt: string | null;
   status: DeploymentStatus;
   /** Whether a promote action is in progress */
@@ -57,6 +59,8 @@ function EnvCard({
   environment,
   sourceType,
   sourceNumber,
+  artifactId,
+  artifactHash,
   deployedAt,
   status,
   isPromoting,
@@ -109,6 +113,12 @@ function EnvCard({
             <time dateTime={deployedAt}>
               {new Date(deployedAt).toLocaleString()}
             </time>
+          </p>
+        )}
+        {status !== 'not-deployed' && (
+          <p className="mt-1 text-[11px] text-slate-500" data-testid={`env-artifact-${environment}`}>
+            Artifact <span className="font-mono text-slate-300">{artifactId ?? '—'}</span>{' '}
+            · Hash <span className="font-mono text-slate-400">{artifactHash ? artifactHash.slice(0, 12) : '—'}</span>
           </p>
         )}
       </div>
@@ -175,6 +185,8 @@ export function EnvironmentComparisonPanel({
               environment={env}
               sourceType={summary?.deployment?.sourceType ?? null}
               sourceNumber={summary?.deployment?.sourceNumber ?? null}
+              artifactId={summary?.deployment?.artifactId}
+              artifactHash={summary?.deployment?.artifactHash}
               deployedAt={summary?.deployment?.deployedAt ?? null}
               status={summary?.status ?? 'not-deployed'}
               isPromoting={isPromoting}
