@@ -5,6 +5,8 @@ const validateMock = vi.hoisted(() => vi.fn());
 const sharedMocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
   requireFields: vi.fn(),
+  getItem: vi.fn(),
+  getObject: vi.fn(),
   putItem: vi.fn(),
   putObject: vi.fn(),
   jsonResponse: vi.fn(),
@@ -39,6 +41,7 @@ describe('create-mapping handler', () => {
     vi.resetModules();
     const env = getEnvStore();
     env.MAPPINGS_TABLE = 'Mappings';
+    env.SCHEMAS_TABLE = 'Schemas';
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parseBody.mockReset().mockReturnValue({
@@ -48,6 +51,8 @@ describe('create-mapping handler', () => {
       rules: [],
     });
     sharedMocks.requireFields.mockReset().mockReturnValue({ ok: true });
+    sharedMocks.getItem.mockReset().mockResolvedValue(null);
+    sharedMocks.getObject.mockReset().mockResolvedValue('');
     sharedMocks.putItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
@@ -68,6 +73,34 @@ describe('create-mapping handler', () => {
     expect(parsed.mappingId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(sharedMocks.putObject).toHaveBeenCalledTimes(1);
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads target schema content and passes it to validate for coverage derivation', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
+    });
+    sharedMocks.getItem.mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject.mockResolvedValue('{"type":"object"}');
+    validateMock.mockReturnValue({ diagnostics: [], coverage: { percentage: 50 } });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    expect(sharedMocks.getItem).toHaveBeenCalledWith({
+      TableName: 'Schemas',
+      Key: { schemaId: 'schema-1' },
+    });
+    expect(sharedMocks.getObject).toHaveBeenCalledWith({
+      Bucket: 'Content',
+      Key: 'schemas/schema-1/content.json',
+    });
+    expect(validateMock).toHaveBeenCalledTimes(1);
+    expect(validateMock.mock.calls[0]?.[2]).toEqual({ type: 'object' });
   });
 
   it('missing projectId returns 400', async () => {

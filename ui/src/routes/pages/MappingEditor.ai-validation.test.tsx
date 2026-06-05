@@ -7,6 +7,8 @@ import type { ApiAdapter } from '@/lib/api';
 import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 import MappingEditor from '@/routes/pages/MappingEditor';
 
+import type { ValidationResult as EngineValidationResult } from '@/lib/engine';
+
 const MOCK_CONFIG: MappingConfig = {
   id: 'mapping-1',
   projectId: 'project-1',
@@ -199,6 +201,21 @@ function renderPage(adapter: ApiAdapter) {
   );
 }
 
+function createValidationErrorResult(targetPath: string): EngineValidationResult {
+  return {
+    valid: false,
+    diagnostics: [
+      {
+        code: 'KEYRA-E005',
+        severity: 'error',
+        message: 'Type mismatch',
+        targetPath,
+        ruleIndex: 0,
+      },
+    ],
+  };
+}
+
 describe('MappingEditor AI Validation integration', () => {
   it('renders AI panel in rules view and keeps deterministic summary visible', async () => {
     const adapter = createMockAdapter();
@@ -236,5 +253,49 @@ describe('MappingEditor AI Validation integration', () => {
 
     fireEvent.click(screen.getByTestId('ai-validation-issue-link-issue-1-0'));
     expect(screen.getByTestId('rule-row-0')).toHaveAttribute('data-active', 'true');
+  });
+
+  it('shows selected scalar header as error when validation has error diagnostics', async () => {
+    const engine = await import('@/lib/engine');
+    const validateSpy = vi
+      .spyOn(engine, 'validateMapping')
+      .mockReturnValue(createValidationErrorResult('Order.Header.Currency'));
+
+    const adapter = createMockAdapter();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    // Expand container nodes to reveal leaf target row.
+    await waitFor(() => {
+      expect(screen.getByTestId('expand-toggle-Order')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('expand-toggle-Order'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('expand-toggle-Order.Header')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('expand-toggle-Order.Header'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('target-field-row-Order.Header.Currency')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-Order.Header.Currency'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('header-status-icon')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const headerStatus = screen.getByTestId('header-status-icon');
+      expect(headerStatus).toHaveClass('text-red-400');
+    });
+
+    validateSpy.mockRestore();
   });
 });

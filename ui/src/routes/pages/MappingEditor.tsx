@@ -31,10 +31,11 @@ import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
 import { useMappingEditor, useVersionHistory, useTargetStatus, useAutoMapWorkspace } from '@/features/mappings/hooks';
+import type { TargetFieldStatus } from '@/features/mappings/components';
 import { useExpressionBuilder } from '@/features/mappings/hooks';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
-import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
+import type { SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -370,9 +371,9 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   // Derived: target status map (for ObjectSummaryPanel child info)
   // ---------------------------------------------------------------------------
-  const targetMappingStatus = useMemo<Map<string, MappingNodeStatus> | undefined>(() => {
+  const targetMappingStatus = useMemo<Map<string, TargetFieldStatus> | undefined>(() => {
     if (!editor.parsedTargetSchema) return undefined;
-    const statusMap = new Map<string, MappingNodeStatus>();
+    const statusMap = new Map<string, TargetFieldStatus>();
     const targetPaths = collectTargetSchemaPaths(editor.parsedTargetSchema.nodes);
     for (const path of targetPaths) statusMap.set(path, 'unmapped');
 
@@ -385,19 +386,26 @@ export default function MappingEditor() {
 
     for (const [path, indexes] of ruleIndexesByTarget.entries()) {
       if (!statusMap.has(path)) continue;
-      let hasDiagnostics = false;
+      let hasErrorDiagnostics = false;
+      let hasWarningDiagnostics = false;
       for (const ruleIndex of indexes) {
         const diagnostics = editor.validation.diagnosticsForRule(ruleIndex);
-        if (
-          diagnostics.some(
-            (d) => d.severity === 'warning' || d.severity === 'error',
-          )
-        ) {
-          hasDiagnostics = true;
+        if (diagnostics.some((d) => d.severity === 'error')) {
+          hasErrorDiagnostics = true;
           break;
         }
+        if (diagnostics.some((d) => d.severity === 'warning')) {
+          hasWarningDiagnostics = true;
+        }
       }
-      statusMap.set(path, hasDiagnostics ? 'warning' : 'mapped');
+
+      if (hasErrorDiagnostics) {
+        statusMap.set(path, 'error');
+      } else if (hasWarningDiagnostics) {
+        statusMap.set(path, 'warning');
+      } else {
+        statusMap.set(path, 'mapped');
+      }
     }
     return statusMap;
   }, [editor.parsedTargetSchema, effectiveRules, editor.validation]);
@@ -428,9 +436,9 @@ export default function MappingEditor() {
     return findNodeByPath(editor.parsedTargetSchema.nodes, selectedTargetPath) ?? null;
   }, [selectedTargetPath, editor.parsedTargetSchema]);
 
-  const selectedNodeStatus = useMemo((): 'unmapped' | 'mapped' | 'warning' | 'error' => {
+  const selectedNodeStatus = useMemo((): TargetFieldStatus => {
     if (!selectedTargetPath || !targetMappingStatus) return 'unmapped';
-    return (targetMappingStatus.get(selectedTargetPath) as 'unmapped' | 'mapped' | 'warning' | 'error') ?? 'unmapped';
+    return targetMappingStatus.get(selectedTargetPath) ?? 'unmapped';
   }, [selectedTargetPath, targetMappingStatus]);
 
   const selectedNodeExpression = useMemo(() => {

@@ -86,9 +86,9 @@ function buildConfigS3Key(mappingId: string): string {
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const mappingId = parsePathParam(event, 'id');
+  const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: mappingId', 400, false);
   }
 
   const body = parseBody(event);

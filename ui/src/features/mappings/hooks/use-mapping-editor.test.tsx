@@ -95,7 +95,7 @@ const MOCK_INFERRED_TARGET_SCHEMA: SchemaDetail = {
     schemaId: 'target-schema-1',
     name: 'Inferred Target Schema',
     format: 'json-schema',
-    fieldCount: 2,
+    fieldCount: 3,
     origin: 'local',
     status: 'ready',
     inferred: true,
@@ -103,7 +103,7 @@ const MOCK_INFERRED_TARGET_SCHEMA: SchemaDetail = {
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
   },
-  content: JSON.stringify({ A: { B: 'text' } }),
+  content: JSON.stringify({ A: { B: 'text', C: 123 } }),
 };
 
 // ---------------------------------------------------------------------------
@@ -276,6 +276,31 @@ describe('useMappingEditor', () => {
       expect(result.current.parsedTargetSchema).not.toBeNull();
       expect(result.current.parsedTargetSchema?.inferred).toBe(true);
       expect(result.current.parsedTargetSchema?.nodes.length ?? 0).toBeGreaterThan(0);
+    });
+
+    it('uses inferred-schema reconstruction for engine validation payloads', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_INFERRED_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') return Promise.resolve(MOCK_INFERRED_TARGET_SCHEMA);
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      await waitFor(() => {
+        expect(result.current.validation.result).not.toBeNull();
+      });
+
+      expect(result.current.validation.result?.valid).toBe(true);
+      expect(result.current.validation.result?.diagnostics.some((d) => d.severity === 'error')).toBe(false);
     });
 
     it('transitions to error state on config load failure', async () => {

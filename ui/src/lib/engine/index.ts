@@ -114,15 +114,28 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
 }
 
 /**
- * Normalizes UI rule type to engine RuleType.
- * Engine supports: 'string' | 'number' | 'boolean' | 'array' | 'object'
- * UI adds: 'null' | 'any' — these map to 'string' as a safe default for engine consumption.
+ * Normalizes UI/persisted rule type to engine RuleType.
+ *
+ * Engine supports: 'string' | 'number' | 'boolean' | 'array' | 'object'.
+ *
+ * UI historically persisted additional/legacy values (for example: 'null',
+ * 'any', 'direct', 'transform'). We defensively coerce unknown values to
+ * 'string' so validation/execution are driven by expression semantics rather
+ * than stale metadata labels.
  */
-function normalizeRuleType(type: MappingRule['type']): EngineMappingRule['type'] {
-  if (type === 'null' || type === 'any') {
-    return 'string';
+function normalizeRuleType(type: MappingRule['type'] | string | undefined): EngineMappingRule['type'] {
+  switch (type) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'array':
+    case 'object':
+      return type;
+    case 'null':
+    case 'any':
+    default:
+      return 'string';
   }
-  return type;
 }
 
 // ---------------------------------------------------------------------------

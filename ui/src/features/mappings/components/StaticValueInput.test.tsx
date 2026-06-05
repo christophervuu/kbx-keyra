@@ -73,6 +73,14 @@ describe('StaticValueInput — AE-02: string target', () => {
     expect(onValueChange).toHaveBeenLastCalledWith({ type: 'string', value: 'hello' });
   });
 
+  it('keeps numeric-looking input as string for string target', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    renderInput({ targetType: 'string', onValueChange });
+    await user.type(screen.getByTestId('static-value-text-input'), '10');
+    expect(onValueChange).toHaveBeenLastCalledWith({ type: 'string', value: '10' });
+  });
+
   it('fires onValidChange(true) for valid string input', async () => {
     const user = userEvent.setup();
     const onValidChange = vi.fn();

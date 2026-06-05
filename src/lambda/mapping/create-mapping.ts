@@ -7,6 +7,8 @@ import type {
 import {
   ERROR_CODES,
   errorResponse,
+  getItem,
+  getObject,
   internalError,
   jsonResponse,
   parseBody,
@@ -70,6 +72,7 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
+const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 
 function getMappingsTableOrThrow(): string {
@@ -88,6 +91,55 @@ function getContentBucketOrThrow(): string {
   }
 
   return bucket;
+}
+
+function getSchemasTable(): string | null {
+  const table = SCHEMAS_TABLE?.trim();
+  return table && table.length > 0 ? table : null;
+}
+
+interface SchemaMetadata {
+  readonly schemaId: string;
+  readonly format: 'json-schema' | 'xsd';
+}
+
+function buildSchemaContentS3Key(schemaId: string, format: SchemaMetadata['format']): string {
+  return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
+}
+
+async function loadTargetSchemaContent(schemaId: string | undefined): Promise<unknown | null> {
+  if (!schemaId) {
+    return null;
+  }
+
+  const schemasTable = getSchemasTable();
+  if (!schemasTable) {
+    return null;
+  }
+
+  try {
+    const schemaMetadata = await getItem<SchemaMetadata>({
+      TableName: schemasTable,
+      Key: { schemaId },
+    });
+
+    if (!schemaMetadata) {
+      return null;
+    }
+
+    const rawSchema = await getObject({
+      Bucket: getContentBucketOrThrow(),
+      Key: buildSchemaContentS3Key(schemaId, schemaMetadata.format),
+    });
+
+    if (schemaMetadata.format === 'xsd') {
+      return rawSchema;
+    }
+
+    return JSON.parse(rawSchema) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function generateMappingId(): string {
@@ -139,13 +191,14 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
   };
 }
 
-function deriveStatusAndCoverage(config: MappingConfig): { status: MappingMetadata['status']; coverage: number; ruleCount: number } {
+async function deriveStatusAndCoverage(config: MappingConfig): Promise<{ status: MappingMetadata['status']; coverage: number; ruleCount: number }> {
   const ruleCount = config.rules.length;
   if (ruleCount === 0) {
     return { status: 'draft', coverage: 0, ruleCount };
   }
 
-  const result = validate(toEngineConfig(config), null, null);
+  const targetSchema = await loadTargetSchemaContent(config.targetSchemaRef?.schemaId);
+  const result = validate(toEngineConfig(config), null, targetSchema);
   const hasErrors = result.diagnostics.some((diagnostic) => diagnostic.severity === 'error');
 
   return {
@@ -183,7 +236,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     };
 
     const configS3Key = buildConfigS3Key(mappingId);
-    const derivation = deriveStatusAndCoverage(config);
+    const derivation = await deriveStatusAndCoverage(config);
 
     const metadata: MappingMetadata = {
       mappingId,

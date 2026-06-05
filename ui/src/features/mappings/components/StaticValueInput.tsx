@@ -74,7 +74,13 @@ function inferType(raw: string): InferredType {
 /**
  * Converts a raw input string to a StaticValueBranch.
  */
-function parseStaticValue(raw: string): StaticValueBranch {
+function parseStaticValue(raw: string, targetType: string): StaticValueBranch {
+  // String targets should always emit a string literal branch, even when input
+  // looks numeric (e.g. "10"). This preserves user intent for string outputs.
+  if (normaliseTargetType(targetType) === 'string') {
+    return { type: 'string', value: raw };
+  }
+
   const trimmed = raw.trim();
   const type = inferType(raw);
   switch (type) {
@@ -169,7 +175,7 @@ export function StaticValueInput({
 
       onValidChange(nextIsValid);
       if (nextIsValid) {
-        onValueChange(parseStaticValue(next));
+        onValueChange(parseStaticValue(next, targetType));
       }
     },
     [targetType, onValueChange, onValidChange],

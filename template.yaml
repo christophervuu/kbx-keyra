@@ -75,6 +75,37 @@ Parameters:
     Default: https://example-opensearch.local
     Description: OpenSearch endpoint for schema-node indexing and query.
 
+  PromptRegistryTableName:
+    Type: String
+    Default: integrations-keyra-promptregistry
+    Description: Prompt registry DynamoDB table used by shared AI runtime.
+
+  DslAssetBucketName:
+    Type: String
+    Default: integrations-keyra
+    Description: S3 bucket containing shared AI DSL reference assets.
+
+  DslAssetKey:
+    Type: String
+    Default: prompt-assets/dsl/keyra-dsl-reference.md
+    Description: S3 key for the shared AI DSL reference asset.
+
+  GitHubModelsEndpoint:
+    Type: String
+    Default: https://models.github.ai/inference
+    Description: GitHub Models endpoint used by AI runtime model client.
+
+  GitHubToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: GitHub token used by AI runtime model client.
+
+  AutoMapStepFunctionsArn:
+    Type: String
+    Default: ''
+    Description: Optional Step Functions ARN for auto-map large workload handoff.
+
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
   HasArtifactsBucketName: !Not [!Equals [!Ref ArtifactsBucketName, '']]
@@ -498,7 +529,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}
+            Path: /mappings/{mappingId}
             Method: get
 
   UpdateMappingFunction:
@@ -527,7 +558,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}
+            Path: /mappings/{mappingId}
             Method: put
 
   DeleteMappingFunction:
@@ -554,7 +585,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}
+            Path: /mappings/{mappingId}
             Method: delete
 
   DuplicateMappingFunction:
@@ -581,7 +612,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/duplicate
+            Path: /mappings/{mappingId}/duplicate
             Method: post
 
   ListMappingsFunction:
@@ -631,7 +662,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/versions
+            Path: /mappings/{mappingId}/versions
             Method: get
 
   GetVersionFunction:
@@ -658,7 +689,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/versions/{version}
+            Path: /mappings/{mappingId}/versions/{version}
             Method: get
 
   SaveVersionFunction:
@@ -687,7 +718,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/versions
+            Path: /mappings/{mappingId}/versions
             Method: post
 
   PreviewMappingFunction:
@@ -719,7 +750,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/preview
+            Path: /mappings/{mappingId}/preview
             Method: post
 
   DeployMappingFunction:
@@ -756,7 +787,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/deploy
+            Path: /mappings/{mappingId}/deploy
             Method: post
 
   PromoteDeploymentFunction:
@@ -793,7 +824,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/promote
+            Path: /mappings/{mappingId}/promote
             Method: post
 
   RollbackDeploymentFunction:
@@ -830,7 +861,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/rollback
+            Path: /mappings/{mappingId}/rollback
             Method: post
 
   ListDeploymentsFunction:
@@ -857,7 +888,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/deployments
+            Path: /mappings/{mappingId}/deployments
             Method: get
 
   GetCurrentDeploymentsFunction:
@@ -884,8 +915,231 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/deployments/current
+            Path: /mappings/{mappingId}/deployments/current
             Method: get
+
+  ExplainRuleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-explainrule
+      CodeUri: .
+      Handler: src/lambda/ai/explain-rule.handler
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/explain-rule
+            Method: post
+
+  SuggestExpressionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-suggestexpression
+      CodeUri: .
+      Handler: src/lambda/ai/suggest-expression.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/suggest-expression
+            Method: post
+
+  SmartFixFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-smartfix
+      CodeUri: .
+      Handler: src/lambda/ai/smart-fix.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/smart-fix
+            Method: post
+
+  ValidateMappingsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-validatemappings
+      CodeUri: .
+      Handler: src/lambda/ai/validate-mappings.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/validate-mappings
+            Method: post
+
+  AutoMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-automap
+      CodeUri: .
+      Handler: src/lambda/ai/auto-map.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+          AUTO_MAP_STEP_FUNCTIONS_ARN: !Ref AutoMapStepFunctionsArn
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aoss:APIAccessAll
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map
+            Method: post
 
   CreateSchemaFunction:
     Type: AWS::Serverless::Function

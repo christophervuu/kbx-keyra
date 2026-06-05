@@ -13,6 +13,7 @@ import {
   conflict,
   errorResponse,
   getItem,
+  getObject,
   internalError,
   jsonResponse,
   notFound,
@@ -93,6 +94,7 @@ function getEnvValue(key: string): string | undefined {
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
 const MAPPING_REVISIONS_TABLE = getEnvValue('MAPPING_REVISIONS_TABLE');
+const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 
 function getMappingsTableOrThrow(): string {
@@ -120,6 +122,55 @@ function getContentBucketOrThrow(): string {
   }
 
   return bucket;
+}
+
+function getSchemasTable(): string | null {
+  const table = SCHEMAS_TABLE?.trim();
+  return table && table.length > 0 ? table : null;
+}
+
+interface SchemaMetadata {
+  readonly schemaId: string;
+  readonly format: 'json-schema' | 'xsd';
+}
+
+function buildSchemaContentS3Key(schemaId: string, format: SchemaMetadata['format']): string {
+  return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
+}
+
+async function loadTargetSchemaContent(schemaId: string | undefined): Promise<unknown | null> {
+  if (!schemaId) {
+    return null;
+  }
+
+  const schemasTable = getSchemasTable();
+  if (!schemasTable) {
+    return null;
+  }
+
+  try {
+    const schemaMetadata = await getItem<SchemaMetadata>({
+      TableName: schemasTable,
+      Key: { schemaId },
+    });
+
+    if (!schemaMetadata) {
+      return null;
+    }
+
+    const rawSchema = await getObject({
+      Bucket: getContentBucketOrThrow(),
+      Key: buildSchemaContentS3Key(schemaId, schemaMetadata.format),
+    });
+
+    if (schemaMetadata.format === 'xsd') {
+      return rawSchema;
+    }
+
+    return JSON.parse(rawSchema) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function toEngineConfig(config: MappingConfig): EngineMappingConfig {
@@ -158,13 +209,14 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
   };
 }
 
-function deriveStatusAndCoverage(config: MappingConfig): { status: MappingMetadata['status']; coverage: number; ruleCount: number } {
+async function deriveStatusAndCoverage(config: MappingConfig): Promise<{ status: MappingMetadata['status']; coverage: number; ruleCount: number }> {
   const ruleCount = config.rules.length;
   if (ruleCount === 0) {
     return { status: 'draft', coverage: 0, ruleCount };
   }
 
-  const result = validate(toEngineConfig(config), null, null);
+  const targetSchema = await loadTargetSchemaContent(config.targetSchemaRef?.schemaId);
+  const result = validate(toEngineConfig(config), null, targetSchema);
   const hasErrors = result.diagnostics.some((diagnostic) => diagnostic.severity === 'error');
 
   return {
@@ -183,9 +235,9 @@ function toRevisionS3Key(mappingId: string, revision: number): string {
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const mappingId = parsePathParam(event, 'id');
+  const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: mappingId', 400, false);
   }
 
   const body = parseBody(event);
@@ -253,7 +305,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    const derivation = deriveStatusAndCoverage(config);
+    const derivation = await deriveStatusAndCoverage(config);
     const updatedAt = new Date().toISOString();
 
     const revisionConfigS3Key = toRevisionS3Key(mappingId, nextRevision);

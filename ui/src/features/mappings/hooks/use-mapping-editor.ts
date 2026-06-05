@@ -7,7 +7,7 @@ import type { EngineValidationState } from './use-engine-validation';
 import type { SaveStatus } from '../components/EditorTopBar';
 import type { UnsavedChangeSummary } from '../types';
 
-import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
+import { parseInferredSchema, parseJsonSchema, parseXsd, treeToJsonSchema } from '@/features/schemas';
 import { useAdapter } from '@/lib/api';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 import type { ValidationSampleDataInput } from '@/lib/types/domain';
@@ -305,6 +305,31 @@ function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
 }
 
 /**
+ * Converts schema detail content to an engine-compatible schema payload for
+ * validation. Inferred schemas store sample payload text as content; for engine
+ * validation we must validate against the parsed inferred tree reconstructed as
+ * JSON Schema.
+ */
+function getValidationSchemaContent(
+  schema: SchemaDetail | null,
+  parsedSchema: ParsedSchema | null,
+): unknown | null {
+  if (schema === null) {
+    return null;
+  }
+
+  if (schema.metadata.inferred === true) {
+    if (parsedSchema === null) {
+      return null;
+    }
+
+    return treeToJsonSchema(parsedSchema.nodes);
+  }
+
+  return schema.content;
+}
+
+/**
  * Merges draftRules into a saved rules array.
  *
  * For each draft entry:
@@ -550,8 +575,14 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     return { ...config, rules: effectiveRules, config: configOptions };
   }, [config, rules, draftRules, configOptions]);
 
-  const sourceSchemaContent = sourceSchema?.content ?? null;
-  const targetSchemaContent = targetSchema?.content ?? null;
+  const sourceSchemaContent = useMemo(
+    () => getValidationSchemaContent(sourceSchema, parsedSourceSchema),
+    [sourceSchema, parsedSourceSchema],
+  );
+  const targetSchemaContent = useMemo(
+    () => getValidationSchemaContent(targetSchema, parsedTargetSchema),
+    [targetSchema, parsedTargetSchema],
+  );
 
   const validation = useEngineValidation(
     validationConfig,

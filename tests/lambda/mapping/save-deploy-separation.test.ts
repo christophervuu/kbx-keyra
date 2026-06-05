@@ -7,6 +7,7 @@ const sharedMocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
   requireFields: vi.fn(),
   getItem: vi.fn(),
+  getObject: vi.fn(),
   query: vi.fn(),
   putObject: vi.fn(),
   updateItem: vi.fn(),
