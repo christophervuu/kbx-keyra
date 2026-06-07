@@ -15,22 +15,22 @@ import type { FileFetcher } from '../../../../src/lib/schema/cdm/index.js';
 describe('normalizeDependencyPath', () => {
   it('resolves a same-directory ref (./)', () => {
     expect(
-      normalizeDependencyPath('JSONSchemas/CommonDataModels/Payment', './CommonTypes.json'),
-    ).toBe('JSONSchemas/CommonDataModels/Payment/CommonTypes.json');
+      normalizeDependencyPath('JSONSchemas-bundled/CommonDataModels/Payment', './CommonTypes.json'),
+    ).toBe('JSONSchemas-bundled/CommonDataModels/Payment/CommonTypes.json');
   });
 
   it('resolves a parent-directory ref (../)', () => {
     expect(
       normalizeDependencyPath(
-        'JSONSchemas/CommonDataModels/Payment',
+        'JSONSchemas-bundled/CommonDataModels/Payment',
         '../../Definitions/Common/PaymentTypes.json',
       ),
-    ).toBe('JSONSchemas/Definitions/Common/PaymentTypes.json');
+    ).toBe('JSONSchemas-bundled/Definitions/Common/PaymentTypes.json');
   });
 
   it('caps traversal at repo root (does not escape)', () => {
     expect(
-      normalizeDependencyPath('JSONSchemas/CommonDataModels', '../../../../escape.txt'),
+      normalizeDependencyPath('JSONSchemas-bundled/CommonDataModels', '../../../../escape.txt'),
     ).toBe('escape.txt');
   });
 
@@ -41,10 +41,10 @@ describe('normalizeDependencyPath', () => {
   it('resolves multi-level parent traversal', () => {
     expect(
       normalizeDependencyPath(
-        'JSONSchemas/CommonDataModels/Payment/V2',
+        'JSONSchemas-bundled/CommonDataModels/Payment/V2',
         '../../../Definitions/Base.json',
       ),
-    ).toBe('JSONSchemas/Definitions/Base.json');
+    ).toBe('JSONSchemas-bundled/Definitions/Base.json');
   });
 });
 
@@ -54,31 +54,31 @@ describe('normalizeDependencyPath', () => {
 
 describe('isAllowedDependencyPath', () => {
   it('allows paths within CoreSchemas', () => {
-    expect(isAllowedDependencyPath('JSONSchemas/CoreSchemas')).toBe(true);
-    expect(isAllowedDependencyPath('JSONSchemas/CoreSchemas/SomeType.json')).toBe(true);
-    expect(isAllowedDependencyPath('JSONSchemas/CoreSchemas/Sub/Foo.json')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/CoreSchemas')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/CoreSchemas/SomeType.json')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/CoreSchemas/Sub/Foo.json')).toBe(true);
   });
 
   it('allows paths within Definitions', () => {
-    expect(isAllowedDependencyPath('JSONSchemas/Definitions')).toBe(true);
-    expect(isAllowedDependencyPath('JSONSchemas/Definitions/Common/Types.json')).toBe(true);
-    expect(isAllowedDependencyPath('JSONSchemas/Definitions/Custom/Foo.json')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Definitions')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Definitions/Common/Types.json')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Definitions/Custom/Foo.json')).toBe(true);
   });
 
   it('allows paths within Events', () => {
-    expect(isAllowedDependencyPath('JSONSchemas/Events')).toBe(true);
-    expect(isAllowedDependencyPath('JSONSchemas/Events/OrderPlaced.json')).toBe(true);
-    expect(isAllowedDependencyPath('JSONSchemas/Events/Payment/Authorized.json')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Events')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Events/OrderPlaced.json')).toBe(true);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Events/Payment/Authorized.json')).toBe(true);
   });
 
   it('rejects paths within Sample Payloads', () => {
-    expect(isAllowedDependencyPath('JSONSchemas/Sample Payloads')).toBe(false);
-    expect(isAllowedDependencyPath('JSONSchemas/Sample Payloads/Payment.json')).toBe(false);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Sample Payloads')).toBe(false);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Sample Payloads/Payment.json')).toBe(false);
   });
 
   it('rejects paths within CommonDataModels (not in allowlist)', () => {
-    expect(isAllowedDependencyPath('JSONSchemas/CommonDataModels')).toBe(false);
-    expect(isAllowedDependencyPath('JSONSchemas/CommonDataModels/Payment/Payment.json')).toBe(false);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/CommonDataModels')).toBe(false);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/CommonDataModels/Payment/Payment.json')).toBe(false);
   });
 
   it('rejects arbitrary paths outside all known roots', () => {
@@ -88,7 +88,7 @@ describe('isAllowedDependencyPath', () => {
 
   it('rejects paths that would be under Sample Payloads even if also under an allowed root', () => {
     // Strict prefix match — Sample Payloads is checked first
-    expect(isAllowedDependencyPath('JSONSchemas/Sample Payloads/CoreSchemas/Foo.json')).toBe(false);
+    expect(isAllowedDependencyPath('JSONSchemas-bundled/Sample Payloads/CoreSchemas/Foo.json')).toBe(false);
   });
 });
 
@@ -221,14 +221,14 @@ describe('resolveDependencies', () => {
     });
 
     const fetcher = mockFetcher({
-      'JSONSchemas/CoreSchemas/Base.json': {
+      'JSONSchemas-bundled/CoreSchemas/Base.json': {
         content: JSON.stringify({ type: 'object', properties: { id: { type: 'string' } } }),
         sha: 'abc111',
       },
     });
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Payment/Payment.json',
+      'JSONSchemas-bundled/CommonDataModels/Payment/Payment.json',
       rootContent,
       'main',
       fetcher,
@@ -236,7 +236,7 @@ describe('resolveDependencies', () => {
 
     expect(result.errors).toHaveLength(0);
     expect(result.dependencies).toHaveLength(1);
-    expect(result.dependencies[0]!.path).toBe('JSONSchemas/CoreSchemas/Base.json');
+    expect(result.dependencies[0]!.path).toBe('JSONSchemas-bundled/CoreSchemas/Base.json');
     expect(result.dependencies[0]!.sha).toBe('abc111');
   });
 
@@ -248,7 +248,7 @@ describe('resolveDependencies', () => {
     });
 
     const fetcher = mockFetcher({
-      'JSONSchemas/Definitions/Common/Base.json': {
+      'JSONSchemas-bundled/Definitions/Common/Base.json': {
         content: JSON.stringify({
           properties: {
             shared: { $ref: './SharedType.json' },
@@ -256,14 +256,14 @@ describe('resolveDependencies', () => {
         }),
         sha: 'aaa',
       },
-      'JSONSchemas/Definitions/Common/SharedType.json': {
+      'JSONSchemas-bundled/Definitions/Common/SharedType.json': {
         content: JSON.stringify({ type: 'string' }),
         sha: 'bbb',
       },
     });
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Order/Order.json',
+      'JSONSchemas-bundled/CommonDataModels/Order/Order.json',
       rootContent,
       'main',
       fetcher,
@@ -273,8 +273,8 @@ describe('resolveDependencies', () => {
     expect(result.dependencies).toHaveLength(2);
 
     const paths = result.dependencies.map((d) => d.path);
-    expect(paths).toContain('JSONSchemas/Definitions/Common/Base.json');
-    expect(paths).toContain('JSONSchemas/Definitions/Common/SharedType.json');
+    expect(paths).toContain('JSONSchemas-bundled/Definitions/Common/Base.json');
+    expect(paths).toContain('JSONSchemas-bundled/Definitions/Common/SharedType.json');
   });
 
   it('deduplicates shared dependencies', async () => {
@@ -286,7 +286,7 @@ describe('resolveDependencies', () => {
     });
 
     const fetcher = mockFetcher({
-      'JSONSchemas/Events/A.json': {
+      'JSONSchemas-bundled/Events/A.json': {
         content: JSON.stringify({ type: 'string' }),
         sha: 'aaa',
       },
@@ -294,7 +294,7 @@ describe('resolveDependencies', () => {
 
     const result = await resolveDependencies(
       // The root path's base is JSONSchemas/Events for this test
-      'JSONSchemas/Events/Root.json',
+      'JSONSchemas-bundled/Events/Root.json',
       rootContent,
       'main',
       fetcher,
@@ -319,7 +319,7 @@ describe('resolveDependencies', () => {
     const fetcher = mockFetcher({});
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Payment/Payment.json',
+      'JSONSchemas-bundled/CommonDataModels/Payment/Payment.json',
       rootContent,
       'main',
       fetcher,
@@ -342,13 +342,13 @@ describe('resolveDependencies', () => {
 
     const result = await resolveDependencies(
       // Base: JSONSchemas/CommonDataModels/Order
-      'JSONSchemas/CommonDataModels/Order/Order.json',
+      'JSONSchemas-bundled/CommonDataModels/Order/Order.json',
       rootContent,
       'main',
       fetcher,
     );
 
-    // ./AnotherFile.json resolves to JSONSchemas/CommonDataModels/Order/AnotherFile.json
+    // ./AnotherFile.json resolves to JSONSchemas-bundled/CommonDataModels/Order/AnotherFile.json
     // which is NOT in the allowlist (only CoreSchemas/Definitions/Events allowed)
     expect(result.dependencies).toHaveLength(0);
     expect(result.errors).toHaveLength(1);
@@ -369,7 +369,7 @@ describe('resolveDependencies', () => {
     const fetcher = mockFetcher({}); // nothing available
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Payment/Payment.json',
+      'JSONSchemas-bundled/CommonDataModels/Payment/Payment.json',
       rootContent,
       'main',
       fetcher,
@@ -378,7 +378,7 @@ describe('resolveDependencies', () => {
     expect(result.dependencies).toHaveLength(0);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe('UNRESOLVED_REF');
-    expect(result.errors[0]!.resolvedPath).toBe('JSONSchemas/CoreSchemas/Missing.json');
+    expect(result.errors[0]!.resolvedPath).toBe('JSONSchemas-bundled/CoreSchemas/Missing.json');
   });
 
   // -----------------------------------------------------------------------
@@ -391,13 +391,13 @@ describe('resolveDependencies', () => {
     });
 
     const fetcher = mockFetcher({
-      'JSONSchemas/Definitions/Common/A.json': {
+      'JSONSchemas-bundled/Definitions/Common/A.json': {
         content: JSON.stringify({
           properties: { prev: { $ref: './B.json' } },
         }),
         sha: 'a',
       },
-      'JSONSchemas/Definitions/Common/B.json': {
+      'JSONSchemas-bundled/Definitions/Common/B.json': {
         content: JSON.stringify({
           properties: { back: { $ref: './A.json' } }, // cycle back to A
         }),
@@ -406,7 +406,7 @@ describe('resolveDependencies', () => {
     });
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Test/Test.json',
+      'JSONSchemas-bundled/CommonDataModels/Test/Test.json',
       rootContent,
       'main',
       fetcher,
@@ -424,7 +424,7 @@ describe('resolveDependencies', () => {
     });
 
     const fetcher = mockFetcher({
-      'JSONSchemas/Definitions/Common/Self.json': {
+      'JSONSchemas-bundled/Definitions/Common/Self.json': {
         content: JSON.stringify({
           properties: { again: { $ref: './Self.json' } }, // self-ref
         }),
@@ -433,7 +433,7 @@ describe('resolveDependencies', () => {
     });
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Test/Test.json',
+      'JSONSchemas-bundled/CommonDataModels/Test/Test.json',
       rootContent,
       'main',
       fetcher,
@@ -458,7 +458,7 @@ describe('resolveDependencies', () => {
       if (nextRef) {
         contentObj.properties = { next: { $ref: nextRef } };
       }
-      deps[`JSONSchemas/CoreSchemas/dep${i}.json`] = {
+      deps[`JSONSchemas-bundled/CoreSchemas/dep${i}.json`] = {
         content: JSON.stringify(contentObj),
         sha: `sha${i}`,
       };
@@ -471,7 +471,7 @@ describe('resolveDependencies', () => {
     });
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Test/Test.json',
+      'JSONSchemas-bundled/CommonDataModels/Test/Test.json',
       rootContent,
       'main',
       fetcher,
@@ -494,7 +494,7 @@ describe('resolveDependencies', () => {
     for (let i = 1; i <= 3; i++) {
       const ref = `../../Definitions/dep${i}.json`;
       (rootObj.properties as Record<string, unknown>)[`prop${i}`] = { $ref: ref };
-      deps[`JSONSchemas/Definitions/dep${i}.json`] = {
+      deps[`JSONSchemas-bundled/Definitions/dep${i}.json`] = {
         content: JSON.stringify({ type: 'string' }),
         sha: `sha${i}`,
       };
@@ -503,7 +503,7 @@ describe('resolveDependencies', () => {
     const fetcher = mockFetcher(deps);
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Test/Test.json',
+      'JSONSchemas-bundled/CommonDataModels/Test/Test.json',
       JSON.stringify(rootObj),
       'main',
       fetcher,
@@ -529,7 +529,7 @@ describe('resolveDependencies', () => {
     const fetcher = mockFetcher({});
 
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Test/Test.json',
+      'JSONSchemas-bundled/CommonDataModels/Test/Test.json',
       rootContent,
       'main',
       fetcher,
@@ -560,7 +560,7 @@ describe('resolveDependencies', () => {
 
   it('returns errors when root content is not parseable JSON', async () => {
     const result = await resolveDependencies(
-      'JSONSchemas/CommonDataModels/Test/Test.json',
+      'JSONSchemas-bundled/CommonDataModels/Test/Test.json',
       'not json',
       'main',
       mockFetcher({}),

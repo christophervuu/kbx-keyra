@@ -49,8 +49,8 @@ interface OpenAIModelClient {
     readonly completions: {
       create(request: {
         readonly model: string;
-        readonly temperature: number;
-        readonly max_tokens: number;
+        readonly temperature?: number;
+        readonly max_completion_tokens: number;
         readonly messages: readonly {
           readonly role: 'system' | 'user';
           readonly content: string;
@@ -227,22 +227,93 @@ function extractProviderErrorDetails(error: unknown): ProviderErrorDetails {
 }
 
 function normalizeResponseSchema(schema: object): object {
-  const record = schema as Record<string, unknown>;
-  const typeValue = record.type;
-  const isObjectSchema = typeValue === 'object' || (Array.isArray(typeValue) && typeValue.includes('object'));
-
-  if (!isObjectSchema) {
-    return schema;
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
-  if (Object.prototype.hasOwnProperty.call(record, 'additionalProperties')) {
-    return schema;
+  function includesObjectType(typeValue: unknown): boolean {
+    return typeValue === 'object' || (Array.isArray(typeValue) && typeValue.includes('object'));
   }
 
-  return {
-    ...record,
-    additionalProperties: false,
-  };
+  function normalizeNullableSchema(node: unknown): unknown {
+    if (!isRecord(node)) {
+      return {
+        anyOf: [node, { type: 'null' }],
+      };
+    }
+
+    const anyOf = Array.isArray(node.anyOf) ? node.anyOf : [];
+    const hasNullBranch = anyOf.some((entry) => isRecord(entry) && entry.type === 'null');
+    if (hasNullBranch) {
+      return node;
+    }
+
+    return {
+      anyOf: [node, { type: 'null' }],
+    };
+  }
+
+  function normalizeSchemaNode(node: unknown): unknown {
+    if (!isRecord(node)) {
+      return node;
+    }
+
+    const normalized: Record<string, unknown> = { ...node };
+
+    if (Array.isArray(normalized.anyOf)) {
+      normalized.anyOf = normalized.anyOf.map((entry) => normalizeSchemaNode(entry));
+    }
+    if (Array.isArray(normalized.oneOf)) {
+      normalized.oneOf = normalized.oneOf.map((entry) => normalizeSchemaNode(entry));
+    }
+    if (Array.isArray(normalized.allOf)) {
+      normalized.allOf = normalized.allOf.map((entry) => normalizeSchemaNode(entry));
+    }
+
+    if (Array.isArray(normalized.items)) {
+      normalized.items = normalized.items.map((entry) => normalizeSchemaNode(entry));
+    } else if (isRecord(normalized.items)) {
+      normalized.items = normalizeSchemaNode(normalized.items);
+    }
+
+    const hasObjectProperties = isRecord(normalized.properties);
+    if (hasObjectProperties) {
+      const properties = normalized.properties as Record<string, unknown>;
+      const normalizedProperties: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(properties)) {
+        normalizedProperties[key] = normalizeSchemaNode(value);
+      }
+
+      const propertyKeys = Object.keys(normalizedProperties);
+      const originalRequired = Array.isArray(normalized.required)
+        ? normalized.required.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const requiredSet = new Set(originalRequired);
+
+      for (const key of propertyKeys) {
+        if (!requiredSet.has(key)) {
+          normalizedProperties[key] = normalizeNullableSchema(normalizedProperties[key]);
+        }
+      }
+
+      normalized.properties = normalizedProperties;
+      normalized.required = propertyKeys;
+    }
+
+    const isObjectSchema = includesObjectType(normalized.type) || hasObjectProperties;
+    if (isObjectSchema && !Object.prototype.hasOwnProperty.call(normalized, 'additionalProperties')) {
+      normalized.additionalProperties = false;
+    }
+
+    return normalized;
+  }
+
+  return normalizeSchemaNode(schema) as object;
+}
+
+function modelSupportsExplicitTemperature(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return !normalized.startsWith('openai/gpt-5');
 }
 
 export class ModelClient {
@@ -281,31 +352,32 @@ export class ModelClient {
 
     try {
       const normalizedResponseSchema = normalizeResponseSchema(params.responseSchema);
+      const requestPayload = {
+        model: params.model,
+        ...(modelSupportsExplicitTemperature(params.model) ? { temperature: params.temperature } : {}),
+        max_completion_tokens: params.maxTokens,
+        messages: [
+          {
+            role: 'system' as const,
+            content: params.systemMessage,
+          },
+          {
+            role: 'user' as const,
+            content: params.userMessage,
+          },
+        ],
+        response_format: {
+          type: 'json_schema' as const,
+          json_schema: {
+            name: params.promptId,
+            strict: true as const,
+            schema: normalizedResponseSchema,
+          },
+        },
+      };
 
       const response = await raceWithTimeout(
-        this.client.chat.completions.create({
-          model: params.model,
-          temperature: params.temperature,
-          max_tokens: params.maxTokens,
-          messages: [
-            {
-              role: 'system',
-              content: params.systemMessage,
-            },
-            {
-              role: 'user',
-              content: params.userMessage,
-            },
-          ],
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: params.promptId,
-              strict: true,
-              schema: normalizedResponseSchema,
-            },
-          },
-        }),
+        this.client.chat.completions.create(requestPayload),
         params.timeoutMs,
       );
 

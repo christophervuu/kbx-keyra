@@ -62,7 +62,7 @@ describe('list-cdm-schemas handler', () => {
     env.CDM_REPO_OWNER = 'KBXT';
     env.CDM_REPO_NAME = 'KBX-Canonicals';
     env.CDM_REPO_BRANCH = 'main';
-    env.CDM_ROOT_PATH = 'JSONSchemas/CommonDataModels';
+    env.CDM_ROOT_PATH = 'JSONSchemas-bundled/CommonDataModels';
     env.CDM_LIST_CACHE_TTL_MS = '60000';
     env.CDM_LIST_CACHE_STALE_GRACE_MS = '900000';
     env.CDM_GITHUB_READ_MAX_ATTEMPTS = '3';
@@ -137,19 +137,19 @@ describe('list-cdm-schemas handler', () => {
         payload: [
           {
             name: 'Patient',
-            path: 'JSONSchemas/CommonDataModels/Patient',
+            path: 'JSONSchemas-bundled/CommonDataModels/Patient',
             type: 'dir',
             sha: 'sha-dir-1',
-            html_url: 'https://github.com/KBXT/KBX-Canonicals/tree/main/JSONSchemas/CommonDataModels/Patient',
+            html_url: 'https://github.com/KBXT/KBX-Canonicals/tree/main/JSONSchemas-bundled/CommonDataModels/Patient',
           },
           {
             name: 'Encounter.json',
-            path: 'JSONSchemas/CommonDataModels/Encounter.json',
+            path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
             type: 'file',
             sha: 'sha-file-1',
             size: 321,
             download_url:
-              'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas/CommonDataModels/Encounter.json',
+              'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas-bundled/CommonDataModels/Encounter.json',
           },
         ],
       }),
@@ -160,7 +160,7 @@ describe('list-cdm-schemas handler', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const calledUrl = fetchMock.mock.calls[0]?.[0] as string;
-    expect(calledUrl).toContain('/repos/KBXT/KBX-Canonicals/contents/JSONSchemas/CommonDataModels?ref=main');
+    expect(calledUrl).toContain('/repos/KBXT/KBX-Canonicals/contents/JSONSchemas-bundled/CommonDataModels?ref=main');
 
     expect(result.statusCode).toBe(200);
     expect(result.headers).toMatchObject({
@@ -174,18 +174,18 @@ describe('list-cdm-schemas handler', () => {
     expect(JSON.parse(result.body)).toEqual([
       {
         name: 'Patient',
-        path: 'JSONSchemas/CommonDataModels/Patient',
+        path: 'JSONSchemas-bundled/CommonDataModels/Patient',
         type: 'dir',
         sha: 'sha-dir-1',
-        htmlUrl: 'https://github.com/KBXT/KBX-Canonicals/tree/main/JSONSchemas/CommonDataModels/Patient',
+        htmlUrl: 'https://github.com/KBXT/KBX-Canonicals/tree/main/JSONSchemas-bundled/CommonDataModels/Patient',
       },
       {
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-file-1',
         size: 321,
-        downloadUrl: 'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas/CommonDataModels/Encounter.json',
+        downloadUrl: 'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas-bundled/CommonDataModels/Encounter.json',
       },
     ]);
   });
@@ -199,7 +199,7 @@ describe('list-cdm-schemas handler', () => {
 
     expect(result.statusCode).toBe(200);
     const calledUrl = fetchMock.mock.calls[0]?.[0] as string;
-    expect(calledUrl).toContain('/contents/JSONSchemas/CommonDataModels/Patient?ref=main');
+    expect(calledUrl).toContain('/contents/JSONSchemas-bundled/CommonDataModels/Patient?ref=main');
   });
 
   it('falls back to cached listing with degraded markers on transient GitHub failure (AE-01)', async () => {
@@ -214,7 +214,7 @@ describe('list-cdm-schemas handler', () => {
           payload: [
             {
               name: 'Patient',
-              path: 'JSONSchemas/CommonDataModels/Patient',
+              path: 'JSONSchemas-bundled/CommonDataModels/Patient',
               type: 'dir',
               sha: 'sha-dir-1',
             },
@@ -247,7 +247,7 @@ describe('list-cdm-schemas handler', () => {
     expect(JSON.parse(second.body)).toEqual([
       {
         name: 'Patient',
-        path: 'JSONSchemas/CommonDataModels/Patient',
+        path: 'JSONSchemas-bundled/CommonDataModels/Patient',
         type: 'dir',
         sha: 'sha-dir-1',
       },
@@ -266,7 +266,7 @@ describe('list-cdm-schemas handler', () => {
           payload: [
             {
               name: 'Patient',
-              path: 'JSONSchemas/CommonDataModels/Patient',
+              path: 'JSONSchemas-bundled/CommonDataModels/Patient',
               type: 'dir',
               sha: 'sha-dir-1',
             },
@@ -321,7 +321,7 @@ describe('list-cdm-schemas handler', () => {
 
     expect(result.statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.');
+    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas-bundled/CommonDataModels/* is allowed.');
   });
 
   it('rejects nested traversal attempts that try to escape CDM root', async () => {
@@ -332,7 +332,7 @@ describe('list-cdm-schemas handler', () => {
 
     expect(result.statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.');
+    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas-bundled/CommonDataModels/* is allowed.');
   });
 
   it('returns canonical not-found-path-mismatch classification for missing CDM path', async () => {
@@ -442,7 +442,7 @@ describe('list-cdm-schemas handler', () => {
         event: 'cdm-github-read-terminal',
         operation: 'browse',
         repo: 'KBXT/KBX-Canonicals',
-        path: 'JSONSchemas/CommonDataModels',
+        path: 'JSONSchemas-bundled/CommonDataModels',
         requestId: 'req-list-1',
         correlationId: 'corr-list-1',
         outcome: 'failed',
@@ -495,6 +495,6 @@ describe('list-cdm-schemas handler', () => {
     expect(calledUrl).toContain('/repos/KBXT/KBX-Canonicals/contents/');
     expect(calledUrl).not.toContain('/git/refs');
     expect(calledUrl).not.toContain('/git/trees');
-    expect(calledUrl).not.toContain('/contents/JSONSchemas/CommonDataModels?ref=main&message=');
+    expect(calledUrl).not.toContain('/contents/JSONSchemas-bundled/CommonDataModels?ref=main&message=');
   });
 });

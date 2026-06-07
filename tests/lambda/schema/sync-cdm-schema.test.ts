@@ -87,7 +87,7 @@ describe('sync-cdm-schema handler', () => {
     env.CDM_REPO_OWNER = 'KBXT';
     env.CDM_REPO_NAME = 'KBX-Canonicals';
     env.CDM_REPO_BRANCH = 'main';
-    env.CDM_ROOT_PATH = 'JSONSchemas/CommonDataModels';
+    env.CDM_ROOT_PATH = 'JSONSchemas-bundled/CommonDataModels';
     env.SCHEMAS_TABLE = 'Schemas';
     env.CONTENT_BUCKET = 'Content';
     env.CDM_GITHUB_READ_MAX_ATTEMPTS = '3';
@@ -106,7 +106,7 @@ describe('sync-cdm-schema handler', () => {
         type: 'github',
         repo: 'KBXT/KBX-Canonicals',
         branch: 'main',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         commitSha: 'sha-old',
       },
       updatedAt: '2026-06-03T00:00:00.000Z',
@@ -176,7 +176,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -220,7 +220,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-old',
       }),
@@ -250,7 +250,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
       }),
@@ -335,10 +335,10 @@ describe('sync-cdm-schema handler', () => {
         headers: { get: vi.fn().mockReturnValue(null) },
         json: vi.fn().mockResolvedValue({
           name: 'Encounter.json',
-          path: 'JSONSchemas/CommonDataModels/Encounter.json',
+          path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
           type: 'file',
           sha: 'sha-new',
-          download_url: 'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas/CommonDataModels/Encounter.json',
+          download_url: 'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas-bundled/CommonDataModels/Encounter.json',
         }),
       })
       .mockResolvedValueOnce({
@@ -369,7 +369,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -473,7 +473,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -511,7 +511,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -553,7 +553,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -585,7 +585,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-old',
       }),
@@ -606,7 +606,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -642,7 +642,7 @@ describe('sync-cdm-schema handler', () => {
       headers: { get: vi.fn().mockReturnValue(null) },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-new',
         content: Buffer.from(content, 'utf8').toString('base64'),

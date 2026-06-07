@@ -1218,7 +1218,7 @@ Resources:
           CDM_REPO_OWNER: KBXT
           CDM_REPO_NAME: KBX-Canonicals
           CDM_REPO_BRANCH: main
-          CDM_ROOT_PATH: JSONSchemas/CommonDataModels
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
       Events:
         ApiEvent:
           Type: Api
@@ -1247,7 +1247,7 @@ Resources:
           CDM_REPO_NAME: KBX-Canonicals
           CDM_REPO_BRANCH: main
           CDM_REPO_ID: '1052821334'
-          CDM_ROOT_PATH: JSONSchemas/CommonDataModels
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ProjectsTable
@@ -1287,7 +1287,7 @@ Resources:
           CDM_REPO_NAME: KBX-Canonicals
           CDM_REPO_BRANCH: main
           CDM_REPO_ID: '1052821334'
-          CDM_ROOT_PATH: JSONSchemas/CommonDataModels
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref SchemaMetadataTable

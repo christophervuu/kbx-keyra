@@ -8,7 +8,7 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { encodeGitHubPath, isWithinCdmRoot, normalizeCdmPath } from './cdm-path.js';
+import { CDM_ROOT_PATH, encodeGitHubPath, isWithinCdmRoot, normalizeCdmPath } from './cdm-path.js';
 import {
   executeGitHubReadWithRetry,
   isCdmGitHubReadError,
@@ -213,7 +213,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const normalizedPath = normalizeCdmPath(requestedPath);
 
   if (!normalizedPath || !isWithinCdmRoot(normalizedPath)) {
-    const err = validationError('Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.');
+    const err = validationError(`Invalid path. Only ${CDM_ROOT_PATH}/* is allowed.`);
     return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 

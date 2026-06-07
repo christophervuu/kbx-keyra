@@ -54,7 +54,7 @@ describe('link-cdm-schema handler', () => {
     env.CDM_REPO_NAME = 'KBX-Canonicals';
     env.CDM_REPO_ID = '1052821334';
     env.CDM_REPO_BRANCH = 'main';
-    env.CDM_ROOT_PATH = 'JSONSchemas/CommonDataModels';
+    env.CDM_ROOT_PATH = 'JSONSchemas-bundled/CommonDataModels';
     env.PROJECTS_TABLE = 'Projects';
     env.SCHEMAS_TABLE = 'Schemas';
     env.CONTENT_BUCKET = 'Content';
@@ -138,7 +138,7 @@ describe('link-cdm-schema handler', () => {
       },
       json: vi.fn().mockResolvedValue({
         name: 'Encounter.json',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         type: 'file',
         sha: 'sha-enc-1',
         content: Buffer.from(content, 'utf8').toString('base64'),
@@ -160,7 +160,7 @@ describe('link-cdm-schema handler', () => {
     expect(payload.source.repo).toBe('KBXT/KBX-Canonicals');
     expect(payload.source.repoId).toBe(1052821334);
     expect(payload.source.branch).toBe('main');
-    expect(payload.source.path).toBe('JSONSchemas/CommonDataModels/Encounter.json');
+    expect(payload.source.path).toBe('JSONSchemas-bundled/CommonDataModels/Encounter.json');
     expect(payload.source.commitSha).toBe('sha-enc-1');
     expect(payload.sourceRepoId).toBe(1052821334);
 
@@ -194,7 +194,7 @@ describe('link-cdm-schema handler', () => {
           repo: 'KBXT/KBX-Canonicals',
           repoId: 1052821334,
           branch: 'main',
-          path: 'JSONSchemas/CommonDataModels/Encounter.json',
+          path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
           commitSha: 'sha-enc-existing',
         },
         sourceRepoId: 1052821334,
@@ -237,7 +237,7 @@ describe('link-cdm-schema handler', () => {
 
     expect(result.statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.');
+    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas-bundled/CommonDataModels/* is allowed.');
   });
 
   it('rejects nested traversal patterns that attempt to escape CDM root', async () => {
@@ -251,13 +251,13 @@ describe('link-cdm-schema handler', () => {
 
     expect(result.statusCode).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas/CommonDataModels/* is allowed.');
+    expect(sharedMocks.validationError).toHaveBeenCalledWith('Invalid path. Only JSONSchemas-bundled/CommonDataModels/* is allowed.');
   });
 
   it('rejects unsupported file formats before GitHub read', async () => {
     sharedMocks.parseBody.mockReturnValue({
       projectId: 'proj-1',
-      path: 'JSONSchemas/CommonDataModels/README.md',
+      path: 'JSONSchemas-bundled/CommonDataModels/README.md',
     });
 
     const { handler } = await importHandler();
@@ -366,7 +366,7 @@ describe('link-cdm-schema handler', () => {
         event: 'cdm-github-read-terminal',
         operation: 'link',
         repo: 'KBXT/KBX-Canonicals',
-        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
         requestId: 'req-link-1',
         correlationId: 'corr-link-1',
         outcome: 'failed',
@@ -388,10 +388,10 @@ describe('link-cdm-schema handler', () => {
         },
         json: vi.fn().mockResolvedValue({
           name: 'Encounter.json',
-          path: 'JSONSchemas/CommonDataModels/Encounter.json',
+          path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
           type: 'file',
           sha: 'sha-enc-2',
-          download_url: 'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas/CommonDataModels/Encounter.json',
+          download_url: 'https://raw.githubusercontent.com/KBXT/KBX-Canonicals/main/JSONSchemas-bundled/CommonDataModels/Encounter.json',
         }),
       })
       .mockResolvedValueOnce({

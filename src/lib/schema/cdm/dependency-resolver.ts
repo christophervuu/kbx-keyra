@@ -61,16 +61,16 @@ export type FileFetcher = (
  * The only directories that are valid dependency sources for CDM schemas.
  */
 const ALLOWED_DEPENDENCY_ROOTS: readonly string[] = [
-  'JSONSchemas/CoreSchemas',
-  'JSONSchemas/Definitions',
-  'JSONSchemas/Events',
+  'JSONSchemas-bundled/CoreSchemas',
+  'JSONSchemas-bundled/Definitions',
+  'JSONSchemas-bundled/Events',
 ];
 
 /**
  * Directories that must never be treated as dependency sources.
  */
 const FORBIDDEN_DEPENDENCY_ROOTS: readonly string[] = [
-  'JSONSchemas/Sample Payloads',
+  'JSONSchemas-bundled/Sample Payloads',
 ];
 
 const DEFAULT_MAX_DEPTH = 10;

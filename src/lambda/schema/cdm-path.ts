@@ -3,7 +3,7 @@ function getEnvValue(key: string): string | undefined {
   return env?.[key];
 }
 
-export const CDM_ROOT_PATH = (getEnvValue('CDM_ROOT_PATH')?.trim() || 'JSONSchemas/CommonDataModels').replace(/(^\/|\/$)/g, '');
+export const CDM_ROOT_PATH = (getEnvValue('CDM_ROOT_PATH')?.trim() || 'JSONSchemas-bundled/CommonDataModels').replace(/(^\/|\/$)/g, '');
 
 export function normalizeCdmPath(rawPath: string | null): string | null {
   if (rawPath === null) {
