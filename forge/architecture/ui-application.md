@@ -694,12 +694,26 @@ All pages render inside a single shell route:
 
 ### Breadcrumb Strategy
 
-Breadcrumbs are derived from `location.pathname` segments:
-- Home is always first
-- Intermediate segments are links
-- Last segment is current-page text
-- Dynamic IDs display raw parameter values by default
-- `BreadcrumbContext` allows route pages/features to register human-readable labels for dynamic segments (e.g., project/mapping/schema names)
+Breadcrumbs are location-derived but route-shape-aware for project surfaces.
+
+Baseline behavior:
+
+- `Home` is always first.
+- The final segment is always current-page text (`aria-current="page"`) and never a link.
+- `BreadcrumbContext` allows route pages/features to register human-readable labels for dynamic segments (for example, project/mapping/schema names).
+
+FS-086 hierarchy contract for project/mapping/deployment routes:
+
+- `/projects/:projectId` -> `Home / Projects / {projectName}`
+- `/projects/:projectId/mappings/:mappingId` -> `Home / Projects / {projectName} / Mappings / {mappingName}`
+- `/projects/:projectId/mappings/:mappingId/deploy` -> `Home / Projects / {projectName} / Mappings / {mappingName} / Deployment`
+- `/projects/:projectId/deployments` -> `Home / Projects / {projectName} / Deployments`
+
+Clickability constraints (route-reality-aware):
+
+- `Projects` is structural and non-clickable until a real `/projects` route exists.
+- `Mappings` is structural and non-clickable in the hierarchy.
+- Dynamic project/mapping segments are linkable only when they represent real parent routes in the current path.
 
 ### Route Constants
 
@@ -2378,6 +2392,58 @@ Schema editing is intentionally split into three layers:
    - reconstruct -> `adapter.updateSchema(schemaId, { content, fieldCount })` -> re-parse -> exit edit mode
 
 This separation keeps row-level interactions deterministic/testable while concentrating persistence concerns in a single hook.
+
+## Project Overview Workspace Architecture (FS-086)
+
+FS-086 supersedes the FS-085 right-rail default for `/projects/:projectId` and defines Project Overview as a single-column, mappings-first workspace aligned to the FS-084 shell visual hierarchy.
+
+### Layout + hierarchy contract
+
+- `ProjectHeader` is the first surface: project identity, compact summary line, and primary actions.
+- Main content is single-column with `MappingListSection` as the default operational surface.
+- Default Project Overview does **not** render a right rail.
+- Default Project Overview does **not** render a Deployment Activity card.
+- Default Project Overview does **not** render an always-visible lower schema-management grid.
+
+### Mappings surface contract
+
+`MappingListSection` is the operational center and includes:
+
+- table columns: `Name`, `Source -> Target`, `Rules`, `Coverage`, `Status`, `Deployment`, `Last Modified`, `Actions`
+- search over mapping name and source/target schema text
+- no legacy "continue" panel in default Project Overview layout
+- table container uses full available content width to preserve Source -> Target and Actions readability
+
+### Mapping row deployment/action contract
+
+`MappingRow` uses a single compact deployment column and normalized wording:
+
+- display precedence: any `deploying` -> `Deploying`; any `stale` -> `Changed since deploy`; else highest deployed env (`PROD` > `QA` > `DEV`); otherwise `Not deployed`
+- raw `stale` wording is not shown in primary UI copy
+
+Row actions are status-based and navigation-only:
+
+- `draft` -> `Open` (hide `Deploy`)
+- `ready` -> `Open` + `Deploy`
+- `has-errors` -> `Fix` when supported, otherwise `Open` fallback (hide `Deploy`)
+
+`Deploy` is route navigation to mapping deployment, not inline execution.
+
+### Linked schemas interaction contract
+
+Schema access from Project Overview is on-demand via a lightweight interaction opened from the project summary linked-schema trigger (for example, `{N} linked schemas`).
+
+- Preferred implementation order:
+  1. existing shared dialog/modal primitive
+  2. existing accessible third-party/wrapper modal already used by app
+  3. compact inline expansion fallback
+- Do not introduce a new custom modal infrastructure for this surface.
+- Rows are compact and text-first: name + origin (when useful) + normalized format label + field count + usage count.
+- Format normalization includes simplified user-facing labels such as:
+  - `json-schema` -> `JSON`
+  - `xsd` -> `XSD`
+  - inferred JSON/XML variants -> `Inferred JSON` / `Inferred XML`
+- Interaction accessibility expectations follow existing modal conventions: focus trap, Escape close, keyboard-reachable actions, accessible title/label, backdrop behavior consistent with existing modal usage, and focus return to linked-schema trigger on close.
 
 ### Project Overview CDM link flow (FS-076 / FS-078)
 

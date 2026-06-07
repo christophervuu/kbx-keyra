@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ProjectOverviewSkeleton } from '../ProjectOverviewSkeleton';
 import { ProjectErrorState } from '../ProjectErrorState';
 import { ProjectNotFoundState } from '../ProjectNotFoundState';
+import { ProjectOverviewSkeleton } from '../ProjectOverviewSkeleton';
 
 // ---------------------------------------------------------------------------
 // ProjectOverviewSkeleton
@@ -39,9 +39,9 @@ describe('ProjectOverviewSkeleton', () => {
     expect(screen.getByTestId('skeleton-header-area')).toBeInTheDocument();
   });
 
-  it('AE-15: renders summary row skeleton', () => {
+  it('does not render legacy summary row skeleton in FS-086 layout', () => {
     render(<ProjectOverviewSkeleton />);
-    expect(screen.getByTestId('skeleton-summary-row')).toBeInTheDocument();
+    expect(screen.queryByTestId('skeleton-summary-row')).not.toBeInTheDocument();
   });
 
   it('AE-15: renders mappings area skeleton', () => {
@@ -49,9 +49,9 @@ describe('ProjectOverviewSkeleton', () => {
     expect(screen.getByTestId('skeleton-mappings-area')).toBeInTheDocument();
   });
 
-  it('AE-15: renders schemas area skeleton', () => {
+  it('does not render legacy schemas area skeleton in FS-086 layout', () => {
     render(<ProjectOverviewSkeleton />);
-    expect(screen.getByTestId('skeleton-schemas-area')).toBeInTheDocument();
+    expect(screen.queryByTestId('skeleton-schemas-area')).not.toBeInTheDocument();
   });
 
   it('AE-15: no tab bar skeleton (tabs removed in T-02)', () => {

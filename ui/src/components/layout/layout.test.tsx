@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { AppLayout } from '@/components/layout/AppLayout';
 import { BreadcrumbProvider, useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
@@ -69,6 +70,8 @@ function renderBreadcrumbs(path: string) {
             <Route path="/" element={<div />} />
             <Route path="/projects/:projectId" element={<div />} />
             <Route path="/projects/:projectId/mappings/:mappingId" element={<div />} />
+            <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div />} />
+            <Route path="/projects/:projectId/deployments" element={<div />} />
             <Route path="/schemas" element={<div />} />
             <Route path="/schemas/:schemaId" element={<div />} />
             <Route path="*" element={<div />} />
@@ -236,12 +239,36 @@ describe('Breadcrumbs', () => {
     renderBreadcrumbs('/projects/abc-123/mappings/map-456');
 
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByText('Projects')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'abc-123' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Mappings' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
+    expect(screen.getByText('Mappings')).toBeInTheDocument();
     // Last segment is plain text, not a link
     expect(screen.getByText('map-456')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'map-456' })).not.toBeInTheDocument();
+  });
+
+  it('renders breadcrumbs for mapping deployment hierarchy', () => {
+    renderBreadcrumbs('/projects/abc-123/mappings/map-456/deploy');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'abc-123' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'map-456' })).toBeInTheDocument();
+    expect(screen.getByText('Deployment')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Deployment' })).not.toBeInTheDocument();
+  });
+
+  it('renders breadcrumbs for project deployments hierarchy', () => {
+    renderBreadcrumbs('/projects/abc-123/deployments');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'abc-123' })).toBeInTheDocument();
+    expect(screen.getByText('Deployments')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Deployments' })).not.toBeInTheDocument();
   });
 
   it('last segment is not a link (AE-05)', () => {
@@ -252,21 +279,21 @@ describe('Breadcrumbs', () => {
     expect(lastSegment).toHaveAttribute('aria-current', 'page');
   });
 
-  it('breadcrumb links navigate to parent routes (AE-05)', async () => {
+  it('breadcrumb links navigate to valid parent routes (AE-05)', async () => {
     const user = userEvent.setup();
     renderBreadcrumbs('/projects/abc-123/mappings/map-456');
 
     const homeLink = screen.getByRole('link', { name: 'Home' });
     expect(homeLink).toHaveAttribute('href', '/');
 
-    const projectsLink = screen.getByRole('link', { name: 'Projects' });
-    expect(projectsLink).toHaveAttribute('href', '/projects');
+    // Projects remains structural/non-clickable until /projects route exists.
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
 
     const projectLink = screen.getByRole('link', { name: 'abc-123' });
     expect(projectLink).toHaveAttribute('href', '/projects/abc-123');
 
-    const mappingsLink = screen.getByRole('link', { name: 'Mappings' });
-    expect(mappingsLink).toHaveAttribute('href', '/projects/abc-123/mappings');
+    // Mappings is structural in this hierarchy and is intentionally non-clickable.
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
 
     // Clicking home navigates
     await user.click(homeLink);
@@ -314,8 +341,9 @@ describe('Breadcrumbs', () => {
     );
 
     expect(screen.getByText('My Project')).toBeInTheDocument();
-    // "Projects" static segment still renders correctly
-    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    // "Projects" static segment still renders correctly as non-clickable
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
   });
 
   it('falls back to raw segment when context has no label for that segment', () => {

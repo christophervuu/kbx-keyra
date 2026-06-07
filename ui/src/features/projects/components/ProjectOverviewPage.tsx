@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-
+import { LinkedSchemasDialog } from './LinkedSchemasDialog';
 import { MappingListSection } from './MappingListSection';
 import { ProjectErrorState } from './ProjectErrorState';
 import { ProjectHeader } from './ProjectHeader';
 import { ProjectNotFoundState } from './ProjectNotFoundState';
 import { ProjectOverviewSkeleton } from './ProjectOverviewSkeleton';
-import { ProjectSummaryRow } from './ProjectSummaryRow';
-import { SchemaManagementSection } from './SchemaManagementSection';
 import { SchemaUploadDialog } from './SchemaUploadDialog';
 import { useProjectOverview } from '../hooks/use-project-overview';
 
@@ -23,6 +21,7 @@ import { PATHS } from '@/routes/paths';
 function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [showLinkedSchemasDialog, setShowLinkedSchemasDialog] = useState(false);
   const { recordActivity } = useRecentActivity();
 
   const {
@@ -32,10 +31,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     mappings,
     updateName,
     updateDescription,
-    updateTags,
-    removeSchema,
     addSchemaRef,
-    resyncSchema,
     deleteMappingAction,
     duplicateMappingAction,
     deleteProjectAction,
@@ -121,9 +117,18 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     setShowUploadDialog(true);
   }
 
-  function handleViewSchema(schemaId: string) {
-    navigate(PATHS.SCHEMA_DETAIL.replace(':schemaId', schemaId));
+  function handleOpenLinkedSchemas() {
+    setShowLinkedSchemasDialog(true);
   }
+
+  function handleCloseLinkedSchemas() {
+    setShowLinkedSchemasDialog(false);
+  }
+
+  const usageBySchemaId = schemas.reduce<Record<string, number>>((acc, schema) => {
+    acc[schema.schemaId] = schemasReferencingMapping(schema.schemaId).length;
+    return acc;
+  }, {});
 
   return (
     <div data-testid="page-project-overview">
@@ -133,44 +138,40 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           project={project}
           mappingCount={mappings.length}
           schemaCount={schemas.length}
+          errorCount={mappings.filter((m) => m.status === 'has-errors').length}
           onUpdateName={updateName}
           onUpdateDescription={updateDescription}
-          onUpdateTags={updateTags}
           onCreateMapping={handleCreateMapping}
-          onAddSchema={handleOpenSchemaUpload}
+          onLinkedSchemasClick={handleOpenLinkedSchemas}
+          linkedSchemasExpanded={showLinkedSchemasDialog}
+          linkedSchemasControlsId="linked-schemas-dialog"
           onDuplicateProject={handleDuplicateProject}
           onDeleteProject={handleDeleteProject}
         />
 
-        {/* Section 2 — Summary Row (FS-050 T-03) */}
-        <ProjectSummaryRow
-          mappingCount={mappings.length}
-          schemaCount={schemas.length}
-          errorCount={mappings.filter((m) => m.status === 'has-errors').length}
-          projectId={projectId}
-        />
-
-        {/* Section 3 — Mappings (promoted above schemas, AE-06) */}
-        <MappingListSection
-          mappings={mappings}
-          projectId={projectId}
-          onCreateMapping={handleCreateMapping}
-          onDuplicate={duplicateMappingAction}
-          onDelete={deleteMappingAction}
-        />
-
-        {/* Section 4 — Schemas */}
-        <SchemaManagementSection
-          projectId={projectId}
-          schemas={schemas}
-          onUpload={handleOpenSchemaUpload}
-          onLink={addSchemaRef}
-          onRemove={removeSchema}
-          onResync={resyncSchema}
-          onView={handleViewSchema}
-          mappingsReferencingSchema={schemasReferencingMapping}
-        />
+        {/* Section 2 — full-width mappings content */}
+        <div className="min-w-0" data-testid="project-overview-main-column">
+          <MappingListSection
+            mappings={mappings}
+            projectId={projectId}
+            onCreateMapping={handleCreateMapping}
+            onDuplicate={duplicateMappingAction}
+            onDelete={deleteMappingAction}
+          />
+        </div>
       </div>
+
+      <LinkedSchemasDialog
+        open={showLinkedSchemasDialog}
+        onClose={handleCloseLinkedSchemas}
+        schemas={schemas}
+        usageBySchemaId={usageBySchemaId}
+        onAddSchema={() => {
+          setShowLinkedSchemasDialog(false);
+          handleOpenSchemaUpload();
+        }}
+        dialogId="linked-schemas-dialog"
+      />
 
       {/* Schema Upload Dialog */}
       <SchemaUploadDialog

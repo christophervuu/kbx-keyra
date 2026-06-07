@@ -4,7 +4,7 @@ import { useBreadcrumbLabels } from './BreadcrumbContext';
 
 interface BreadcrumbSegment {
   label: string;
-  path: string;
+  path?: string;
 }
 
 function formatSegment(
@@ -31,12 +31,75 @@ function formatSegment(
     .join(' ');
 }
 
+function buildProjectHierarchyBreadcrumbs(
+  segments: string[],
+  params: Record<string, string | undefined>,
+  labels: ReadonlyMap<string, string>,
+): BreadcrumbSegment[] {
+  const crumbs: BreadcrumbSegment[] = [{ label: 'Home', path: '/' }];
+
+  // Structural segment must exist even without a /projects route.
+  crumbs.push({ label: 'Projects' });
+
+  const projectId = params.projectId ?? segments[1];
+  if (!projectId) return crumbs;
+
+  const projectLabel = formatSegment(projectId, params, labels);
+  const projectPath = `/projects/${projectId}`;
+
+  // /projects/:projectId
+  if (segments.length === 2) {
+    crumbs.push({ label: projectLabel });
+    return crumbs;
+  }
+
+  crumbs.push({ label: projectLabel, path: projectPath });
+
+  const section = segments[2];
+
+  // /projects/:projectId/deployments
+  if (section === 'deployments') {
+    crumbs.push({ label: 'Deployments' });
+    return crumbs;
+  }
+
+  // /projects/:projectId/mappings/:mappingId[/deploy]
+  if (section === 'mappings') {
+    crumbs.push({ label: 'Mappings' });
+
+    const mappingId = params.mappingId ?? segments[3];
+    if (!mappingId) return crumbs;
+
+    const mappingLabel = formatSegment(mappingId, params, labels);
+    const mappingPath = `/projects/${projectId}/mappings/${mappingId}`;
+
+    if (segments.length === 4) {
+      crumbs.push({ label: mappingLabel });
+      return crumbs;
+    }
+
+    crumbs.push({ label: mappingLabel, path: mappingPath });
+
+    if (segments[4] === 'deploy') {
+      crumbs.push({ label: 'Deployment' });
+      return crumbs;
+    }
+  }
+
+  return crumbs;
+}
+
 function buildBreadcrumbs(
   pathname: string,
   params: Record<string, string | undefined>,
   labels: ReadonlyMap<string, string>,
 ): BreadcrumbSegment[] {
   const segments = pathname.split('/').filter(Boolean);
+
+  if (segments[0] === 'projects') {
+    return buildProjectHierarchyBreadcrumbs(segments, params, labels);
+  }
+
   const crumbs: BreadcrumbSegment[] = [{ label: 'Home', path: '/' }];
 
   let currentPath = '';
@@ -81,6 +144,10 @@ export function Breadcrumbs() {
               )}
               {isLast ? (
                 <span className="text-slate-300" aria-current="page">
+                  {crumb.label}
+                </span>
+              ) : !crumb.path ? (
+                <span className="text-slate-500" aria-disabled="true">
                   {crumb.label}
                 </span>
               ) : (
