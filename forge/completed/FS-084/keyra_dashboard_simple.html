@@ -1,0 +1,194 @@
+
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  .dash{display:flex;min-height:580px;background:#0d1117;border-radius:12px;overflow:hidden;font-size:13px;color:#c9d1d9;font-family:var(--font-sans)}
+  .sidebar{background:#010409;border-right:0.5px solid #21262d;display:flex;flex-direction:column;transition:width 0.2s ease;overflow:hidden}
+  .sidebar.expanded{width:192px}
+  .sidebar.collapsed{width:48px}
+  .sidebar-top{display:flex;align-items:center;justify-content:space-between;padding:14px 12px;border-bottom:0.5px solid #21262d;min-height:48px}
+  .logo-text{font-weight:600;font-size:15px;color:#fff;letter-spacing:-0.3px;white-space:nowrap;overflow:hidden;opacity:1;transition:opacity 0.15s}
+  .sidebar.collapsed .logo-text{opacity:0;width:0}
+  .logo-text span{color:#58a6ff}
+  .toggle-btn{background:none;border:none;cursor:pointer;color:#484f58;display:flex;align-items:center;justify-content:center;padding:4px;border-radius:6px;flex-shrink:0;transition:color 0.15s}
+  .toggle-btn:hover{color:#8b949e}
+  .nav-section{padding:12px 0}
+  .nav-label{padding:4px 14px 4px;font-size:10px;letter-spacing:0.08em;color:#484f58;text-transform:uppercase;font-weight:500;white-space:nowrap;overflow:hidden;opacity:1;transition:opacity 0.15s}
+  .sidebar.collapsed .nav-label{opacity:0}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;color:#8b949e;border-left:2px solid transparent;transition:all 0.15s;white-space:nowrap}
+  .nav-item.active{color:#fff;border-left-color:#58a6ff;background:rgba(88,166,255,0.06)}
+  .nav-item:hover:not(.active){color:#c9d1d9;background:rgba(255,255,255,0.03)}
+  .nav-item i{font-size:16px;flex-shrink:0}
+  .nav-item-label{overflow:hidden;opacity:1;transition:opacity 0.15s;font-size:13px}
+  .sidebar.collapsed .nav-item-label{opacity:0;width:0}
+  .sidebar.collapsed .nav-item{padding:8px 0;justify-content:center;border-left:2px solid transparent}
+  .sidebar.collapsed .nav-item.active{border-left-color:#58a6ff}
+  .main{flex:1;padding:24px;display:flex;flex-direction:column;gap:20px;overflow:auto;min-width:0}
+  .top-bar{display:flex;align-items:flex-end;justify-content:space-between}
+  .page-title{font-size:20px;font-weight:600;color:#fff}
+  .page-sub{font-size:12px;color:#484f58;margin-top:2px}
+  .new-proj-btn{display:flex;align-items:center;gap:6px;background:#21262d;border:0.5px solid #30363d;border-radius:6px;padding:7px 12px;color:#c9d1d9;font-size:12px;cursor:pointer;transition:background 0.15s}
+  .new-proj-btn:hover{background:#30363d}
+  .new-proj-btn i{font-size:14px}
+  .content-row{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
+  .panel{background:#161b22;border:0.5px solid #21262d;border-radius:10px;padding:16px}
+  .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .section-title{font-size:13px;font-weight:500;color:#fff}
+  .search-row{display:flex;gap:8px;margin-bottom:12px}
+  .search-box{flex:1;background:#0d1117;border:0.5px solid #30363d;border-radius:6px;padding:7px 10px;color:#c9d1d9;font-size:12px;display:flex;align-items:center;gap:6px}
+  .search-box i{color:#484f58;font-size:14px}
+  .search-box span{color:#484f58}
+  .view-btns{display:flex;background:#0d1117;border:0.5px solid #30363d;border-radius:6px;overflow:hidden}
+  .view-btn{padding:7px 9px;cursor:pointer;color:#484f58;display:flex;align-items:center;font-size:14px;transition:color 0.15s}
+  .view-btn.active{color:#c9d1d9;background:#21262d}
+  .proj-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .proj-card{background:#0d1117;border:0.5px solid #21262d;border-radius:8px;padding:14px;cursor:pointer;transition:border-color 0.15s}
+  .proj-card:hover{border-color:#388bfd}
+  .proj-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+  .proj-name{font-size:13px;font-weight:500;color:#fff}
+  .proj-desc{font-size:11px;color:#484f58;line-height:1.5;margin-bottom:10px}
+  .proj-meta{display:flex;gap:10px}
+  .proj-stat{display:flex;align-items:center;gap:4px;font-size:11px;color:#8b949e}
+  .proj-stat i{font-size:12px}
+  .proj-footer{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:0.5px solid #21262d}
+  .proj-date{font-size:10px;color:#484f58}
+  .badge{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500}
+  .badge-draft{background:rgba(110,118,129,0.2);color:#8b949e}
+  .open-btn{background:rgba(88,166,255,0.1);color:#58a6ff;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer}
+  .recent-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid #21262d}
+  .recent-item:last-child{border-bottom:none;padding-bottom:0}
+  .recent-icon{width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+  .ri-map{background:rgba(88,166,255,0.1);color:#58a6ff}
+  .ri-proj{background:rgba(63,185,80,0.1);color:#3fb950}
+  .ri-schema{background:rgba(210,153,34,0.12);color:#d29922}
+  .recent-info{flex:1;min-width:0}
+  .recent-name{font-size:12px;color:#c9d1d9;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .recent-action{font-size:10px;color:#484f58;margin-top:1px}
+  .recent-time{font-size:10px;color:#484f58;white-space:nowrap;flex-shrink:0}
+  .empty-activity{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 0;gap:6px}
+  .empty-activity i{font-size:22px;color:#21262d}
+  .empty-activity span{font-size:11px;color:#484f58;text-align:center}
+</style>
+
+<h2 class="sr-only">KeyRa dashboard showing projects and recent activity</h2>
+
+<div class="dash">
+  <div class="sidebar expanded" id="sidebar">
+    <div class="sidebar-top">
+      <div class="logo-text">Key<span>Ra</span></div>
+      <button class="toggle-btn" id="toggleBtn" aria-label="Toggle sidebar">
+        <i class="ti ti-layout-sidebar-left-collapse" style="font-size:16px" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <div class="nav-item active" title="Home">
+        <i class="ti ti-layout-dashboard" aria-hidden="true"></i>
+        <span class="nav-item-label">Home</span>
+      </div>
+      <div class="nav-item" title="Schemas">
+        <i class="ti ti-sitemap" aria-hidden="true"></i>
+        <span class="nav-item-label">Schemas</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="top-bar">
+      <div>
+        <div class="page-title">Dashboard</div>
+        <div class="page-sub">Overview of all projects and mappings</div>
+      </div>
+      <div class="new-proj-btn">
+        <i class="ti ti-plus" aria-hidden="true"></i>
+        New project
+      </div>
+    </div>
+
+    <div class="content-row">
+      <div class="panel">
+        <div class="section-header">
+          <div class="section-title">Projects</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="view-btns">
+              <div class="view-btn active" title="Grid view"><i class="ti ti-layout-grid" aria-hidden="true"></i></div>
+              <div class="view-btn" title="List view"><i class="ti ti-list" aria-hidden="true"></i></div>
+            </div>
+          </div>
+        </div>
+        <div class="search-row">
+          <div class="search-box">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <span>Search projects…</span>
+          </div>
+        </div>
+        <div class="proj-grid">
+          <div class="proj-card">
+            <div class="proj-card-top">
+              <div class="proj-name">chris-test</div>
+              <div class="badge badge-draft">Draft</div>
+            </div>
+            <div class="proj-desc">Testing KeyRa's mapping and schema functionality across multiple data types.</div>
+            <div class="proj-meta">
+              <div class="proj-stat"><i class="ti ti-git-branch" aria-hidden="true"></i>3 mappings</div>
+              <div class="proj-stat"><i class="ti ti-file-code" aria-hidden="true"></i>7 schemas</div>
+            </div>
+            <div class="proj-footer">
+              <div class="proj-date">Edited today</div>
+              <div class="open-btn">Open</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="section-header">
+          <div class="section-title">Recent activity</div>
+        </div>
+        <div class="recent-item">
+          <div class="recent-icon ri-map"><i class="ti ti-git-branch" aria-hidden="true"></i></div>
+          <div class="recent-info">
+            <div class="recent-name">settlement-to-cpg</div>
+            <div class="recent-action">Mapping edited</div>
+          </div>
+          <div class="recent-time">15h ago</div>
+        </div>
+        <div class="recent-item">
+          <div class="recent-icon ri-proj"><i class="ti ti-folder" aria-hidden="true"></i></div>
+          <div class="recent-info">
+            <div class="recent-name">chris-test</div>
+            <div class="recent-action">Project created</div>
+          </div>
+          <div class="recent-time">Today</div>
+        </div>
+        <div class="recent-item">
+          <div class="recent-icon ri-schema"><i class="ti ti-file-code" aria-hidden="true"></i></div>
+          <div class="recent-info">
+            <div class="recent-name">test</div>
+            <div class="recent-action">Schema updated</div>
+          </div>
+          <div class="recent-time">Just now</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const sidebar = document.getElementById('sidebar');
+  const btn = document.getElementById('toggleBtn');
+  const icon = btn.querySelector('i');
+  btn.addEventListener('click', () => {
+    const isExpanded = sidebar.classList.contains('expanded');
+    sidebar.classList.toggle('expanded', !isExpanded);
+    sidebar.classList.toggle('collapsed', isExpanded);
+    icon.className = isExpanded
+      ? 'ti ti-layout-sidebar-left-expand'
+      : 'ti ti-layout-sidebar-left-collapse';
+  });
+  document.querySelectorAll('.view-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.view-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    });
+  });
+</script>

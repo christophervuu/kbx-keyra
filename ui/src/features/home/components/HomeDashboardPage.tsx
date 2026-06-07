@@ -1,10 +1,9 @@
-// HomeDashboardPage — Two-column layout (FS-049 T-05)
-// Main column: MetricsBar → NeedsAttention → ContinueWhereYouLeftOff → ProjectList
-// Right rail: ActivityPlaceholder
+// HomeDashboardPage — Dashboard workspace layout (FS-084 T-02)
 
 import { useNavigate } from 'react-router-dom';
 
-import { Button } from '@/components/Button';
+import { Plus } from 'lucide-react';
+
 import { PageHeader } from '@/components/PageHeader';
 import { PATHS } from '@/routes/paths';
 
@@ -12,12 +11,9 @@ import { useDashboardData } from '../hooks/use-dashboard-data';
 import { useRecentActivity } from '../hooks/use-recent-activity';
 import type { RecentActivityEntry } from '../types';
 import { ActivityPlaceholder } from './ActivityPlaceholder';
-import { ContinueWhereYouLeftOff } from './ContinueWhereYouLeftOff';
 import { DashboardEmptyState } from './DashboardEmptyState';
 import { DashboardErrorBanner } from './DashboardErrorBanner';
 import { DashboardSkeleton } from './DashboardSkeleton';
-import { MetricsBar } from './MetricsBar';
-import { NeedsAttention } from './NeedsAttention';
 import { ProjectList } from './ProjectList';
 
 // ---------------------------------------------------------------------------
@@ -64,9 +60,14 @@ function DashboardHeader({ onCreateProject }: { onCreateProject: () => void }) {
       title="Dashboard"
       description="Overview of all projects and mappings"
       actions={
-        <Button variant="primary" size="sm" onClick={onCreateProject}>
-          Create Project
-        </Button>
+        <button
+          type="button"
+          onClick={onCreateProject}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <Plus size={14} aria-hidden="true" />
+          New project
+        </button>
       }
     />
   );
@@ -78,7 +79,7 @@ function DashboardHeader({ onCreateProject }: { onCreateProject: () => void }) {
 
 export function HomeDashboardPage() {
   const navigate = useNavigate();
-  const { loadState, metrics, projects, retry } = useDashboardData();
+  const { loadState, projects, retry } = useDashboardData();
   const { getRecentItems } = useRecentActivity();
 
   const handleCreateProject = () => navigate(PATHS.CREATE_PROJECT);
@@ -117,14 +118,13 @@ export function HomeDashboardPage() {
         <DashboardHeader onCreateProject={handleCreateProject} />
         <TwoColumnLayout
           main={<DashboardErrorBanner onRetry={retry} />}
-          rail={<ActivityPlaceholder />}
+          rail={<ActivityPlaceholder items={[]} />}
         />
       </PageShell>
     );
   }
 
   const recentItems = getRecentItems();
-  const errorsCount = metrics?.statusBreakdown.hasErrors ?? 0;
 
   // --- Empty state (loaded, no projects) ---
   if (loadState === 'loaded' && projects.length === 0) {
@@ -132,14 +132,8 @@ export function HomeDashboardPage() {
       <PageShell>
         <DashboardHeader onCreateProject={handleCreateProject} />
         <TwoColumnLayout
-          main={
-            <>
-              <MetricsBar metrics={metrics} loading={false} />
-              <NeedsAttention errorsCount={errorsCount} />
-              <DashboardEmptyState />
-            </>
-          }
-          rail={<ActivityPlaceholder />}
+          main={<DashboardEmptyState />}
+          rail={<ActivityPlaceholder items={recentItems} onItemClick={handleRecentItemClick} />}
         />
       </PageShell>
     );
@@ -150,18 +144,8 @@ export function HomeDashboardPage() {
     <PageShell>
       <DashboardHeader onCreateProject={handleCreateProject} />
       <TwoColumnLayout
-        main={
-          <>
-            <MetricsBar metrics={metrics} loading={false} />
-            <NeedsAttention errorsCount={errorsCount} />
-            <ContinueWhereYouLeftOff
-              items={recentItems}
-              onItemClick={handleRecentItemClick}
-            />
-            <ProjectList projects={projects} onProjectClick={handleProjectClick} />
-          </>
-        }
-        rail={<ActivityPlaceholder />}
+        main={<ProjectList projects={projects} onProjectClick={handleProjectClick} />}
+        rail={<ActivityPlaceholder items={recentItems} onItemClick={handleRecentItemClick} />}
       />
     </PageShell>
   );

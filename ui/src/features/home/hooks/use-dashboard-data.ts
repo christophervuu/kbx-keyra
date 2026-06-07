@@ -53,12 +53,14 @@ function buildProjectListItem(
   project: ProjectMetadata,
   mappings: MappingMetadata[],
   deploymentsList: Array<CurrentDeployments | null>,
+  schemaCount: number,
 ): ProjectListItem {
   return {
     projectId: project.projectId,
     name: project.name,
     description: project.description,
     mappingCount: mappings.length,
+    schemaCount,
     updatedAt: project.updatedAt,
     worstStatus: deriveWorstStatus(mappings),
     devDeploy: worstEnvDeployStatus(deploymentsList, 'DEV'),
@@ -152,9 +154,24 @@ export function useDashboardData(): UseDashboardDataResult {
 
         if (cancelled) return;
 
-        const projectItems = projectList.map((p, i) =>
-          buildProjectListItem(p, mappingArrays[i] ?? [], deploymentArrays[i] ?? []),
-        );
+        const projectItems = projectList.map((p, i) => {
+          const projectMappings = mappingArrays[i] ?? [];
+
+          const sourceSchemaIds = projectMappings
+            .map((mapping) => mapping.sourceSchemaId)
+            .filter((id): id is string => Boolean(id));
+          const targetSchemaIds = projectMappings
+            .map((mapping) => mapping.targetSchemaId)
+            .filter((id): id is string => Boolean(id));
+          const uniqueSchemaIds = new Set([...sourceSchemaIds, ...targetSchemaIds]);
+
+          return buildProjectListItem(
+            p,
+            projectMappings,
+            deploymentArrays[i] ?? [],
+            uniqueSchemaIds.size,
+          );
+        });
 
         setMetrics(computeMetrics(projectList, mappingArrays, schemaList.length));
         setProjects(projectItems);

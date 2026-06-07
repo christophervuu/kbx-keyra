@@ -6,7 +6,38 @@ import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { BreadcrumbProvider, useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
-import { NavBar } from '@/components/layout/NavBar';
+import { NavBar, SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/components/layout/NavBar';
+
+let storage: Record<string, string> = {};
+
+const localStorageMock = {
+  getItem: (key: string) => storage[key] ?? null,
+  setItem: (key: string, value: string) => {
+    storage[key] = value;
+  },
+  removeItem: (key: string) => {
+    delete storage[key];
+  },
+  clear: () => {
+    storage = {};
+  },
+};
+
+beforeEach(() => {
+  storage = {};
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock,
+    writable: true,
+  });
+});
+
+function resetSidebarPreference() {
+  try {
+    window.localStorage.removeItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
+  } catch {
+    // ignore localStorage unavailability in certain jsdom modes
+  }
+}
 
 function renderNavBar(path = '/') {
   return render(
@@ -108,29 +139,35 @@ function renderBreadcrumbsWithLabel(
 }
 
 describe('NavBar', () => {
+  beforeEach(() => {
+    resetSidebarPreference();
+  });
+
   it('renders the app name', () => {
     renderNavBar();
 
-    expect(screen.getByText('KeyRa')).toBeInTheDocument();
+    expect(screen.getByText('Key')).toBeInTheDocument();
+    expect(screen.getByText('Ra')).toBeInTheDocument();
   });
 
-  it('renders all 4 primary nav links (AE-04)', () => {
+  it('renders all 4 primary nav links in expanded mode', () => {
     renderNavBar();
 
-    expect(screen.getByRole('link', { name: /Home/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Schemas/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Templates/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Settings/ })).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-home')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-schemas')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-templates')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-settings')).toBeInTheDocument();
   });
 
-  it('highlights the active link', () => {
+  it('highlights the active link with non-color active marker (AE-03)', () => {
     renderNavBar('/schemas');
 
-    const schemasLink = screen.getByRole('link', { name: /Schemas/ });
-    expect(schemasLink).toHaveClass('bg-slate-700');
+    const schemasLink = screen.getByTestId('sidebar-link-schemas');
+    expect(schemasLink).toHaveClass('border-l-blue-400');
+    expect(schemasLink).toHaveClass('font-semibold');
   });
 
-  it('navigates to correct route on click (AE-04)', async () => {
+  it('navigates to correct route on click', async () => {
     const user = userEvent.setup();
     renderNavBar('/');
 
@@ -139,10 +176,44 @@ describe('NavBar', () => {
     expect(screen.getByTestId('page-schemas')).toBeInTheDocument();
   });
 
-  it('has accessible navigation landmark', () => {
+  it('supports collapsing to icon-only mode and expanding back (AE-02)', async () => {
+    const user = userEvent.setup();
     renderNavBar();
 
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    const sidebar = screen.getByTestId('app-sidebar');
+    const toggle = screen.getByTestId('sidebar-toggle');
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
+  });
+
+  it('persists collapse preference in localStorage (AE-08)', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderNavBar();
+
+    await user.click(screen.getByTestId('sidebar-toggle'));
+
+    unmount();
+    renderNavBar();
+
+    expect(screen.getByTestId('app-sidebar')).toHaveAttribute('data-collapsed', 'true');
+  });
+
+  it('has accessible navigation landmarks', () => {
+    renderNavBar();
+
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Sidebar navigation' })).toBeInTheDocument();
   });
 });
 
@@ -280,10 +351,14 @@ describe('Breadcrumbs', () => {
 });
 
 describe('AppLayout', () => {
-  it('renders NavBar, Breadcrumbs, and page content together', () => {
+  beforeEach(() => {
+    resetSidebarPreference();
+  });
+
+  it('renders sidebar, Breadcrumbs, and page content together', () => {
     renderAppLayout('/schemas', <div data-testid="page-content">Page</div>);
 
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
@@ -291,8 +366,15 @@ describe('AppLayout', () => {
   it('renders Not Found page within the shell (AE-10)', () => {
     renderAppLayout('/unknown/path', <div />);
 
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
     expect(screen.getByTestId('page-not-found')).toBeInTheDocument();
+  });
+
+  it('does not render top-nav landmark on primary routes (AE-01)', () => {
+    renderAppLayout('/', <div data-testid="page-content">Content</div>);
+
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
   });
 
   it('renders content in a main element', () => {
@@ -320,9 +402,18 @@ describe('AppLayout', () => {
     );
 
     expect(screen.getByTestId('inner-page')).toBeInTheDocument();
-    // "Schemas" appears in both the NavBar link and the breadcrumb — confirm
+    // "Schemas" appears in both the sidebar link and the breadcrumb — confirm
     // at least one instance is present in the breadcrumb nav
     const breadcrumbNav = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(breadcrumbNav).getByText('Schemas')).toBeInTheDocument();
+  });
+
+  it('keeps focused workspace routes usable with sidebar and no dual top-nav (AE-09)', () => {
+    renderAppLayout('/projects/p1/mappings/m1', <div data-testid="page-content">Editor</div>);
+
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
 });

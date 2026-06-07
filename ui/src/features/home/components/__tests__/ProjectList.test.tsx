@@ -5,6 +5,21 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ProjectList } from '../ProjectList';
 import type { ProjectListItem } from '../../types';
 
+let storage: Record<string, string> = {};
+
+const localStorageMock = {
+  getItem: (key: string) => storage[key] ?? null,
+  setItem: (key: string, value: string) => {
+    storage[key] = value;
+  },
+  removeItem: (key: string) => {
+    delete storage[key];
+  },
+  clear: () => {
+    storage = {};
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -15,6 +30,7 @@ function makeProject(overrides: Partial<ProjectListItem> = {}): ProjectListItem 
     name: 'Alpha Project',
     description: 'Order system',
     mappingCount: 2,
+    schemaCount: 1,
     updatedAt: '2026-04-01T00:00:00Z',
     worstStatus: 'ready',
     devDeploy: 'not-deployed',
@@ -36,6 +52,10 @@ const PROJECTS: ProjectListItem[] = [
 
 describe('ProjectList', () => {
   beforeEach(() => {
+    Object.defineProperty(window, 'localStorage', {
+      value: localStorageMock,
+      writable: true,
+    });
     localStorage.clear();
   });
 
@@ -76,20 +96,10 @@ describe('ProjectList', () => {
   });
 
   it('filters by status via filter dropdown', () => {
+    // Removed in FS-084 redesign; ensure projects panel still renders without sort/filter controls.
     render(<ProjectList projects={PROJECTS} onProjectClick={vi.fn()} />);
-    fireEvent.change(screen.getByRole('combobox', { name: /filter by status/i }), {
-      target: { value: 'has-errors' },
-    });
-    expect(screen.getByText('Gamma')).toBeInTheDocument();
-    expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
-    expect(screen.queryByText('Beta')).not.toBeInTheDocument();
-  });
-
-  it('toggles sort direction', () => {
-    render(<ProjectList projects={PROJECTS} onProjectClick={vi.fn()} />);
-    const toggleBtn = screen.getByRole('button', { name: /sort ascending/i });
-    fireEvent.click(toggleBtn);
-    expect(screen.getByRole('button', { name: /sort descending/i })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /filter by status/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sort ascending/i })).not.toBeInTheDocument();
   });
 
   it('switches to table view via toggle button', () => {

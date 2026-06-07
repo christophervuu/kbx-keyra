@@ -11,22 +11,24 @@ export function AppLayout() {
 
   return (
     <BreadcrumbProvider>
-      <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <div className="flex min-h-screen bg-slate-950 text-slate-100">
         <NavBar />
-        {/* Breadcrumbs are suppressed on focused workspace routes (Mapping Editor,
-            Test Lab) — each provides its own context bar for project/mapping navigation. */}
-        {!isFocusedWorkspace && <Breadcrumbs />}
-        {isFocusedWorkspace ? (
-          <main className="flex-1">
-            <Outlet />
-          </main>
-        ) : (
-          <main className="flex-1 px-6 py-6">
-            <div className="mx-auto max-w-7xl">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Breadcrumbs are suppressed on focused workspace routes (Mapping Editor,
+              Test Lab) — each provides its own context bar for project/mapping navigation. */}
+          {!isFocusedWorkspace && <Breadcrumbs />}
+          {isFocusedWorkspace ? (
+            <main className="flex-1">
               <Outlet />
-            </div>
-          </main>
-        )}
+            </main>
+          ) : (
+            <main className="flex-1 px-6 py-6">
+              <div className="mx-auto max-w-7xl">
+                <Outlet />
+              </div>
+            </main>
+          )}
+        </div>
       </div>
     </BreadcrumbProvider>
   );

@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 import { AdapterProvider } from '@/lib/api';
+import type { CurrentDeployments } from '@/lib/api/types';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectMetadata, SchemaMetadata } from '@/lib/types/domain';
 
@@ -59,6 +60,13 @@ function makeMapping(overrides: Partial<MappingMetadata> = {}): MappingMetadata 
 // ---------------------------------------------------------------------------
 
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
+  const emptyDeployments: CurrentDeployments = {
+    DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
+    PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
+    PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+    QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+  };
+
   return {
     listProjects: vi.fn().mockResolvedValue([]),
     listSchemas: vi.fn().mockResolvedValue([]),
@@ -82,6 +90,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    getCurrentDeployments: vi.fn().mockResolvedValue(emptyDeployments),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -207,7 +216,7 @@ describe('HomeDashboardPage', () => {
     expect(screen.queryByText(/schema library/i)).not.toBeInTheDocument();
   });
 
-  it('renders MetricsBar directly in the loaded state', async () => {
+  it('does not render metrics region in the loaded state (AE-10)', async () => {
     const adapter = createMockAdapter({
       listProjects: vi.fn().mockResolvedValue([makeProject()]),
       listSchemas: vi.fn().mockResolvedValue([makeSchema('s-1')]),
@@ -215,11 +224,12 @@ describe('HomeDashboardPage', () => {
     });
     renderPage(adapter);
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: /dashboard metrics/i })).toBeInTheDocument();
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument();
     });
+    expect(screen.queryByRole('region', { name: /dashboard metrics/i })).not.toBeInTheDocument();
   });
 
-  it('renders MetricsBar in the empty state', async () => {
+  it('does not render metrics region in the empty state (AE-10)', async () => {
     const adapter = createMockAdapter({
       listProjects: vi.fn().mockResolvedValue([]),
       listSchemas: vi.fn().mockResolvedValue([]),
@@ -228,7 +238,7 @@ describe('HomeDashboardPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/no projects yet/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole('region', { name: /dashboard metrics/i })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /dashboard metrics/i })).not.toBeInTheDocument();
   });
 
   it('retry button triggers a re-fetch on error', async () => {
@@ -247,7 +257,7 @@ describe('HomeDashboardPage', () => {
     });
   });
 
-  it('renders NeedsAttention section in the loaded state', async () => {
+  it('renders Projects panel in the loaded state (AE-04/AE-05)', async () => {
     const adapter = createMockAdapter({
       listProjects: vi.fn().mockResolvedValue([makeProject()]),
       listSchemas: vi.fn().mockResolvedValue([]),
@@ -255,11 +265,11 @@ describe('HomeDashboardPage', () => {
     });
     renderPage(adapter);
     await waitFor(() => {
-      expect(screen.getByTestId('needs-attention')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /^projects$/i })).toBeInTheDocument();
     });
   });
 
-  it('renders NeedsAttention section in the empty state', async () => {
+  it('renders projects empty state in the empty state (AE-06)', async () => {
     const adapter = createMockAdapter({
       listProjects: vi.fn().mockResolvedValue([]),
       listSchemas: vi.fn().mockResolvedValue([]),
@@ -268,7 +278,7 @@ describe('HomeDashboardPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/no projects yet/i)).toBeInTheDocument();
     });
-    expect(screen.getByTestId('needs-attention')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^projects$/i })).not.toBeInTheDocument();
   });
 
   it('renders ActivityPlaceholder in the right rail for loaded state', async () => {
@@ -304,6 +314,35 @@ describe('HomeDashboardPage', () => {
       expect(screen.getByText(/no projects yet/i)).toBeInTheDocument();
     });
     expect(screen.getByTestId('activity-placeholder')).toBeInTheDocument();
+  });
+
+  it('renders New project button in header (AE-04)', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /new project/i })).toBeInTheDocument();
+    });
+  });
+
+  it('renders search and view toggle controls in Projects panel (AE-05/AE-07)', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('searchbox', { name: /search projects/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /grid view/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /table view/i })).toBeInTheDocument();
   });
 
   it('does not render ContinueWhereYouLeftOff when no recent items (empty localStorage)', async () => {

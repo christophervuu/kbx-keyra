@@ -58,7 +58,7 @@ ui/src/
     PageHeader.tsx            Primitive page heading block
     StatusBadge.tsx           Primitive deploy status badge
     layout/                   App shell components
-      AppLayout.tsx           NavBar + Breadcrumbs + Outlet wrapper (provides BreadcrumbProvider)
+      AppLayout.tsx           Sidebar-first shell (`NavBar` sidebar) + Breadcrumbs + Outlet wrapper (provides BreadcrumbProvider)
       BreadcrumbContext.tsx   Split context for breadcrumb label registration (FS-050 T-01)
       Breadcrumbs.tsx         Path-derived breadcrumb navigation (reads from BreadcrumbContext)
       index.ts                Layout component barrel
@@ -67,7 +67,7 @@ ui/src/
     use-async-state.ts        Async state lifecycle hook
 
   features/
-    home/                     Home dashboard feature module (metrics, list modes, recent activity, attention summary)
+    home/                     Home dashboard feature module (Projects panel + Recent activity panel workspace layout)
       index.ts                Feature barrel
       components/             Dashboard page composition and state UI (skeleton/error/empty/loaded)
       hooks/                  Dashboard data + view mode + recent-activity orchestration
@@ -676,9 +676,21 @@ Router runtime config (`App.tsx`):
 
 All pages render inside a single shell route:
 
-- `AppLayout` provides `NavBar` + `Breadcrumbs` + content container (`<Outlet />`)
+- `AppLayout` provides a **sidebar-first shell**: left `NavBar` sidebar + right content column with optional `Breadcrumbs` and content container (`<Outlet />`)
+- `NavBar` is now a collapsible sidebar (not a top row). Primary routes render this sidebar as the global navigation surface.
+- Sidebar collapse preference is persisted client-side in localStorage (`keyra:app-sidebar-collapsed`) and gracefully defaults to expanded when storage is unavailable.
 - Mapping Editor and Test Lab are treated as focused-workspace routes: breadcrumbs are suppressed and content renders full-bleed (`<main className="flex-1">`) rather than the constrained `max-w-7xl` container
+- Focused routes continue to render within the sidebar shell; top navigation is not reintroduced, and dual top+side navigation is prohibited.
 - Not Found route is also rendered inside shell
+
+### Sidebar Navigation Pattern (FS-084)
+
+`NavBar` now represents the application sidebar contract:
+
+- Expanded mode: KeyRa brand text, workspace label, icon + text nav rows
+- Collapsed mode: icon-only rows with accessible labels/tooltips
+- Active state uses both color and structural cues (left indicator + emphasized typography), avoiding color-only signaling
+- Interaction contract includes hover states and visible `focus-visible` ring treatment on nav rows and collapse toggle
 
 ### Breadcrumb Strategy
 
@@ -713,6 +725,38 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ---
 
+## Home Dashboard Architecture (FS-084)
+
+FS-084 redefines the Home dashboard toward a workspace composition aligned to the spec-local canonical target: `forge/active/FS-084/keyra_dashboard_simple.html`.
+
+### Layout + hierarchy
+
+- Header: `Dashboard` title + muted subtitle + right-aligned `New project` action
+- Main content row (desktop):
+  - dominant **Projects** panel (left)
+  - secondary **Recent activity** panel (right)
+- Narrower desktop widths may stack panels vertically while preserving hierarchy.
+
+### Panel contracts
+
+- **Projects panel (`ProjectList` + `ProjectCard`)**
+  - section title + grid/list toggle
+  - search input
+  - project cards with name, status badge, description, mapping/schema counts, edited timestamp, and Open affordance
+  - intentional empty state when filters/search yield no results
+
+- **Recent activity panel (`ActivityPlaceholder`)**
+  - renders recent entries when available
+  - renders intentional placeholder empty state when activity data is absent/unimplemented
+  - empty state is explicit and polished (not implied failure)
+
+### Removed surfaces in redesigned dashboard
+
+- The prior dashboard metrics strip is removed from Home dashboard composition in FS-084.
+- Attention/continue sections from earlier dashboard IA are not part of the default FS-084 dashboard layout.
+
+---
+
 ## Mapping Editor Architecture
 
 FS-020 redesigns the Mapping Editor from an 8-panel grid into a **three-column focused-authoring layout** with a collapsible bottom area. FS-021 adds the two-row top context model and inline preview strip. FS-022 consolidates toolbar controls into panel-local surfaces, removes Focus/Breadcrumb drill-down mode, introduces persistent resizable panel layout, adds Rules View search, and makes inline preview auto-run on Apply unconditional when source data is present. FS-048 introduces an Auto-Map review workspace mode in the center authoring panel.
@@ -721,8 +765,8 @@ FS-020 redesigns the Mapping Editor from an 8-panel grid into a **three-column f
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────┐
-│ Row 1: NavBar (global navigation)                                                 │
-│ Row 2: EditorTopBar (mapping context + save/deploy + Auto-Map workspace re-entry) │
+│ Left: App shell sidebar (global navigation)                                       │
+│ Top of editor area: EditorTopBar (mapping context + save/deploy + Auto-Map)      │
 ├──────────────────────┬┬──────────────────────────────┬┬───────────────────────────┤
 │ Source Panel         ││ Builder / Workspace Panel    ││ Target Panel              │
 │ SourceSchemaPanel    ││ Node-type builder (target)   ││ TargetWorklist (target)   │
@@ -1263,11 +1307,11 @@ Completion + validation derivation:
 
 This replaces the legacy "No rules yet" empty state from `RuleList` in the target-driven view. `RuleList`'s own empty state is still shown in Rules View.
 
-### Top Bar Contract (FS-021, FS-039)
+### Top Bar Contract (FS-021, FS-039, FS-084 note)
 
 `EditorTopBar` is the canonical metadata strip for Mapping Editor pages. FS-021 T-01 redesigns it as a **2-row layout** replacing the previous single-row strip:
 
-- **Row 1 (NavBar):** global navigation (provided by `AppLayout`; breadcrumbs suppressed on editor route)
+- **Row 1 (App shell sidebar):** global navigation is provided by `AppLayout` as a left collapsible sidebar (not a top row)
 - **Row 2 (context bar):** mapping identity, save state, deploy badges, schema names, action buttons
 
 Props contract:

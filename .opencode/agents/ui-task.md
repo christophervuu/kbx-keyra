@@ -1,7 +1,7 @@
 ---
 description: UI task agent — implements one approved UI task with verification
 mode: primary
-model: github-copilot/claude-sonnet-4.6
+model: github-copilot/gpt-5.3-codex
 temperature: 0.2
 tools:
   read: true
