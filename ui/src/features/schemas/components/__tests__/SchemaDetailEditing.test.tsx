@@ -17,16 +17,16 @@ import { SchemaDetailPage } from '../SchemaDetailPage';
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const LOCAL_SCHEMA: SchemaDetail = {
+const UPLOADED_SCHEMA: SchemaDetail = {
   metadata: {
-    schemaId: 'schema-local-1',
-    name: 'My Local Schema',
+    schemaId: 'schema-uploaded-1',
+    name: 'My Uploaded Schema',
     format: 'json-schema',
     fieldCount: 2,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
     scope: 'project',
-    description: 'A local schema',
+    description: 'An uploaded schema',
     updatedBy: 'local-user',
     inferred: false,
     syncStatus: 'sync-failed',
@@ -46,7 +46,7 @@ const LOCAL_SCHEMA: SchemaDetail = {
 
 // A schema with an object field that has children (for confirm-delete test)
 const NESTED_SCHEMA: SchemaDetail = {
-  metadata: { ...LOCAL_SCHEMA.metadata, schemaId: 'schema-nested-1' },
+  metadata: { ...UPLOADED_SCHEMA.metadata, schemaId: 'schema-nested-1' },
   content: {
     type: 'object',
     properties: {
@@ -68,10 +68,10 @@ const NESTED_SCHEMA: SchemaDetail = {
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
     listSchemas: vi.fn(),
-    getSchema: vi.fn().mockResolvedValue(LOCAL_SCHEMA),
+    getSchema: vi.fn().mockResolvedValue(UPLOADED_SCHEMA),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockImplementation((_id, _input) =>
-      Promise.resolve({ ...LOCAL_SCHEMA.metadata }),
+      Promise.resolve({ ...UPLOADED_SCHEMA.metadata }),
     ),
     deleteSchema: vi.fn(),
     listMappings: vi.fn(),
@@ -110,7 +110,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   } as unknown as ApiAdapter;
 }
 
-function renderPage(adapter: ApiAdapter, schemaId = 'schema-local-1') {
+function renderPage(adapter: ApiAdapter, schemaId = 'schema-uploaded-1') {
   return render(
     <AdapterProvider adapter={adapter}>
       <MemoryRouter initialEntries={[`/schemas/${schemaId}`]}>
@@ -151,7 +151,7 @@ describe('SchemaDetailPage — T-05 editing operations', () => {
 
     await waitFor(() => {
       expect(adapter.updateSchema).toHaveBeenCalledWith(
-        'schema-local-1',
+        'schema-uploaded-1',
         expect.objectContaining({
           content: expect.objectContaining({ type: 'object' }),
           fieldCount: expect.any(Number),
@@ -209,8 +209,8 @@ describe('SchemaDetailPage — T-05 editing operations', () => {
     let resolveUpdate!: () => void;
     const updateSchema = vi.fn(
       () =>
-        new Promise<typeof LOCAL_SCHEMA.metadata>((res) => {
-          resolveUpdate = () => res(LOCAL_SCHEMA.metadata);
+        new Promise<typeof UPLOADED_SCHEMA.metadata>((res) => {
+          resolveUpdate = () => res(UPLOADED_SCHEMA.metadata);
         }),
     );
     adapter = createMockAdapter({ updateSchema });

@@ -12,10 +12,9 @@ function makeItem(overrides: Partial<SchemaLibraryItem>): SchemaLibraryItem {
     schemaId: 'schema-1',
     name: 'Test Schema',
     description: undefined,
-    origin: 'local',
-    scope: 'project',
+    origin: 'uploaded',
     format: 'json-schema',
-    displayFormat: 'JSON Schema',
+    displayFormat: 'JSON',
     fieldCount: 10,
     syncStatus: 'local',
     projectCount: 0,
@@ -30,7 +29,6 @@ const EMPTY_FILTERS: SchemaLibraryFilters = {
   search: '',
   origins: [],
   formats: [],
-  scopes: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -77,19 +75,19 @@ describe('filterSchemas', () => {
 
   describe('origin filter', () => {
     const items = [
-      makeItem({ schemaId: '1', origin: 'local' }),
-      makeItem({ schemaId: '2', origin: 'published' }),
+      makeItem({ schemaId: '1', origin: 'uploaded' }),
+      makeItem({ schemaId: '2', origin: 'inferred' }),
       makeItem({ schemaId: '3', origin: 'cdm' }),
     ];
 
     it('single origin filter', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: ['local'] });
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: ['uploaded'] });
       expect(result).toHaveLength(1);
       expect(result[0].schemaId).toBe('1');
     });
 
     it('multiple origins use OR logic', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: ['local', 'cdm'] });
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: ['uploaded', 'cdm'] });
       expect(result).toHaveLength(2);
       const ids = result.map((r) => r.schemaId);
       expect(ids).toContain('1');
@@ -104,7 +102,7 @@ describe('filterSchemas', () => {
 
   describe('format filter', () => {
     const items = [
-      makeItem({ schemaId: '1', displayFormat: 'JSON Schema' }),
+      makeItem({ schemaId: '1', displayFormat: 'JSON' }),
       makeItem({ schemaId: '2', displayFormat: 'XSD' }),
       makeItem({ schemaId: '3', displayFormat: 'Inferred' }),
     ];
@@ -121,47 +119,28 @@ describe('filterSchemas', () => {
     });
   });
 
-  describe('scope filter', () => {
-    const items = [
-      makeItem({ schemaId: '1', scope: 'global' }),
-      makeItem({ schemaId: '2', scope: 'project' }),
-    ];
-
-    it('filters by scope', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, scopes: ['global'] });
-      expect(result).toHaveLength(1);
-      expect(result[0].schemaId).toBe('1');
-    });
-
-    it('empty scopes array returns all', () => {
-      const result = filterSchemas(items, EMPTY_FILTERS);
-      expect(result).toHaveLength(2);
-    });
-  });
-
   describe('combined filters (AND between categories)', () => {
     const items = [
-      makeItem({ schemaId: '1', name: 'Alpha', origin: 'local', displayFormat: 'JSON Schema', scope: 'global' }),
-      makeItem({ schemaId: '2', name: 'Beta', origin: 'published', displayFormat: 'JSON Schema', scope: 'global' }),
-      makeItem({ schemaId: '3', name: 'Gamma', origin: 'local', displayFormat: 'XSD', scope: 'project' }),
+      makeItem({ schemaId: '1', name: 'Alpha', origin: 'uploaded', displayFormat: 'JSON' }),
+      makeItem({ schemaId: '2', name: 'Beta', origin: 'inferred', displayFormat: 'JSON' }),
+      makeItem({ schemaId: '3', name: 'Gamma', origin: 'uploaded', displayFormat: 'XSD' }),
     ];
 
     it('applies AND logic across search + origin + format', () => {
       const result = filterSchemas(items, {
         search: 'alpha',
-        origins: ['local'],
-        formats: ['JSON Schema'],
-        scopes: [],
+        origins: ['uploaded'],
+        formats: ['JSON'],
       });
       expect(result).toHaveLength(1);
       expect(result[0].schemaId).toBe('1');
     });
 
-    it('origin + scope combination', () => {
+    it('origin + format combination', () => {
       const result = filterSchemas(items, {
         ...EMPTY_FILTERS,
-        origins: ['local'],
-        scopes: ['project'],
+        origins: ['uploaded'],
+        formats: ['XSD'],
       });
       expect(result).toHaveLength(1);
       expect(result[0].schemaId).toBe('3');
@@ -258,19 +237,19 @@ describe('sortSchemas', () => {
 
   describe('sort by origin', () => {
     const items = [
-      makeItem({ schemaId: '1', origin: 'local' }),
+      makeItem({ schemaId: '1', origin: 'uploaded' }),
       makeItem({ schemaId: '2', origin: 'cdm' }),
-      makeItem({ schemaId: '3', origin: 'published' }),
+      makeItem({ schemaId: '3', origin: 'inferred' }),
     ];
 
-    it('ascending (cdm=0, published=1, local=2)', () => {
+    it('ascending (cdm=0, uploaded=1, inferred=2)', () => {
       const sorted = sortSchemas(items, asc('origin'));
-      expect(sorted.map((i) => i.origin)).toEqual(['cdm', 'published', 'local']);
+      expect(sorted.map((i) => i.origin)).toEqual(['cdm', 'uploaded', 'inferred']);
     });
 
     it('descending', () => {
       const sorted = sortSchemas(items, desc('origin'));
-      expect(sorted.map((i) => i.origin)).toEqual(['local', 'published', 'cdm']);
+      expect(sorted.map((i) => i.origin)).toEqual(['inferred', 'uploaded', 'cdm']);
     });
   });
 });

@@ -22,9 +22,8 @@ function makeSchemaMeta(overrides: Partial<SchemaMetadata> = {}): SchemaMetadata
     name: 'Customer Schema',
     format: 'json-schema',
     fieldCount: 10,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
-    scope: 'project',
     syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
@@ -271,7 +270,7 @@ describe('SchemaLibraryPage', () => {
   it('shows no-results message when filters yield zero results', async () => {
     const adapter = createMockAdapter({
       listSchemas: vi.fn().mockResolvedValue([
-        makeSchemaMeta({ schemaId: 's-1', name: 'Alpha', origin: 'local' }),
+        makeSchemaMeta({ schemaId: 's-1', name: 'Alpha', origin: 'uploaded' }),
       ]),
       listProjects: vi.fn().mockResolvedValue([]),
     });
@@ -337,7 +336,7 @@ describe('SchemaLibraryPage', () => {
   it('toggling origin filter updates displayed cards', async () => {
     const adapter = createMockAdapter({
       listSchemas: vi.fn().mockResolvedValue([
-        makeSchemaMeta({ schemaId: 's-1', name: 'Local Schema', origin: 'local' }),
+        makeSchemaMeta({ schemaId: 's-1', name: 'Uploaded Schema', origin: 'uploaded' }),
         makeSchemaMeta({ schemaId: 's-2', name: 'CDM Schema', origin: 'cdm' }),
       ]),
       listProjects: vi.fn().mockResolvedValue([]),

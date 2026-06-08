@@ -7,6 +7,7 @@ import { useAdapter } from '@/lib/api';
 import type { CurrentDeployments } from '@/lib/api/types';
 import type { AppError } from '@/lib/state/app-error';
 import type { DeployStatus } from '@/lib/types/domain';
+import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
 import type {
   MappingMetadata,
   ProjectDetail,
@@ -50,7 +51,6 @@ function buildSchemaCardData(detail: SchemaDetail): SchemaCardData {
     format: metadata.format,
     origin: metadata.origin,
     sourceType: metadata.source.type,
-    scope: 'project-level',
     fieldCount: metadata.fieldCount,
     syncStatus: metadata.syncStatus,
     isInferred: false,
@@ -153,9 +153,11 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
         if (cancelled) return;
 
         // Load schemas and current deployments in parallel (best-effort)
+        const linkedSchemaIds = normalizeProjectLinkedSchemaIds(detail);
+
         const [schemaResults, deploymentResults] = await Promise.all([
           Promise.allSettled(
-            detail.schemaRefs.map((ref) => adapter.getSchema(ref.schemaId)),
+            linkedSchemaIds.map((schemaId) => adapter.getSchema(schemaId)),
           ),
           Promise.allSettled(
             detail.mappings.map((m) => adapter.getCurrentDeployments(m.mappingId)),
@@ -178,7 +180,10 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
           ]),
         );
 
-        setProject(detail);
+        setProject({
+          ...detail,
+          linkedSchemaIds,
+        });
         setSchemaDetails(loaded);
         setMappingsMeta([...detail.mappings]);
         setDeploymentsMap(deploymentsMap);
@@ -288,9 +293,21 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
     async (schemaId: string) => {
       const current = projectRef.current;
       if (!current) return;
-      const newRefs = current.schemaRefs.filter((r) => r.schemaId !== schemaId);
-      await adapter.updateProject(projectId, { schemaRefs: newRefs });
-      setProject((prev) => (prev ? { ...prev, schemaRefs: newRefs } : prev));
+
+      const currentLinkedSchemaIds = normalizeProjectLinkedSchemaIds(current);
+      const nextLinkedSchemaIds = currentLinkedSchemaIds.filter((id) => id !== schemaId);
+      const nextSchemaRefs = current.schemaRefs.filter((r) => r.schemaId !== schemaId);
+
+      await adapter.updateProject(projectId, { linkedSchemaIds: nextLinkedSchemaIds });
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              linkedSchemaIds: nextLinkedSchemaIds,
+              schemaRefs: nextSchemaRefs,
+            }
+          : prev,
+      );
       setSchemaDetails((prev) => prev.filter((d) => d.metadata.schemaId !== schemaId));
     },
     [adapter, projectId],
@@ -300,10 +317,26 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
     async (ref: SchemaRef) => {
       const current = projectRef.current;
       if (!current) return;
-      const newRefs = [...current.schemaRefs, ref];
-      await adapter.updateProject(projectId, { schemaRefs: newRefs });
+
+      const currentLinkedSchemaIds = normalizeProjectLinkedSchemaIds(current);
+      if (currentLinkedSchemaIds.includes(ref.schemaId)) return;
+
+      const nextLinkedSchemaIds = [...currentLinkedSchemaIds, ref.schemaId];
+      const nextSchemaRefs = current.schemaRefs.some((existing) => existing.schemaId === ref.schemaId)
+        ? current.schemaRefs
+        : [...current.schemaRefs, ref];
+
+      await adapter.updateProject(projectId, { linkedSchemaIds: nextLinkedSchemaIds });
       const detail = await adapter.getSchema(ref.schemaId);
-      setProject((prev) => (prev ? { ...prev, schemaRefs: newRefs } : prev));
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              linkedSchemaIds: nextLinkedSchemaIds,
+              schemaRefs: nextSchemaRefs,
+            }
+          : prev,
+      );
       setSchemaDetails((prev) => [...prev, detail]);
     },
     [adapter, projectId],
@@ -363,11 +396,12 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
     // Create the duplicate project
     const slug = `${current.slug}-copy-${Date.now()}`;
+    const linkedSchemaIds = normalizeProjectLinkedSchemaIds(current);
     const newProject = await adapter.createProject({
       name: `${current.name} (Copy)`,
       description: current.description,
       slug,
-      schemaRefs: [...current.schemaRefs],
+      linkedSchemaIds,
       tags: [...current.tags],
     });
 

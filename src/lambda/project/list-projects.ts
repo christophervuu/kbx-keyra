@@ -19,6 +19,7 @@ interface ProjectRecord {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: string;
@@ -77,14 +78,41 @@ async function getMappingCount(projectId: string): Promise<number> {
   return mappings.length;
 }
 
+function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds' | 'schemaRefs'>): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((ref) => ref.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
 function toProjectMetadata(project: ProjectRecord, mappingCount: number): ProjectMetadata {
+  const schemaCount = normalizeLinkedSchemaIds(project).length;
+
   return {
     projectId: project.projectId,
     name: project.name,
     description: project.description,
     slug: project.slug,
     mappingCount,
-    schemaCount: project.schemaRefs.length,
+    schemaCount,
     updatedAt: project.updatedAt,
   };
 }

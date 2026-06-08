@@ -2,30 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/Button';
 import { useAdapter } from '@/lib/api';
-import type { GitHubFile, SchemaRef } from '@/lib/types/domain';
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
+import type { SchemaMetadata, SchemaRef } from '@/lib/types/domain';
 
 export interface SchemaLinkPickerProps {
   readonly projectId: string;
-  /** IDs of schemas already attached to the project */
   attachedSchemaIds: readonly string[];
-  /** Called when the user confirms a schema selection */
   onConfirm: (ref: SchemaRef) => void;
-  /** Called when the picker is dismissed */
   onClose: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-/**
- * Modal picker that lists all schemas not already attached to the project.
- * The user selects one and confirms to link it.
- */
 export function SchemaLinkPicker({
   projectId,
   attachedSchemaIds,
@@ -33,94 +18,78 @@ export function SchemaLinkPicker({
   onClose,
 }: SchemaLinkPickerProps) {
   const adapter = useAdapter();
-  const [entries, setEntries] = useState<GitHubFile[]>([]);
+  const [entries, setEntries] = useState<SchemaMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const fileEntries = useMemo(
-    () => entries.filter((entry) => entry.type === 'file'),
-    [entries],
+  const availableSchemas = useMemo(
+    () => entries.filter((entry) => !attachedSchemaIds.includes(entry.schemaId)),
+    [entries, attachedSchemaIds],
   );
 
-  void attachedSchemaIds;
+  void projectId;
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const all = await adapter.listCdmSchemas();
+        const all = await adapter.listSchemas();
         if (!cancelled) {
           setEntries(Array.isArray(all) ? all : []);
         }
       } catch {
         if (!cancelled) {
-          setError('Unable to load CDM Library right now. Please retry in a moment.');
+          setError('Unable to load schemas right now. Please retry in a moment.');
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
+
     void load();
-    return () => { cancelled = true; };
-  }, [adapter, attachedSchemaIds]);
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter]);
 
   async function handleRetry() {
     setLoading(true);
     setError(null);
     try {
-      const all = await adapter.listCdmSchemas();
+      const all = await adapter.listSchemas();
       setEntries(Array.isArray(all) ? all : []);
     } catch {
-      setError('Unable to load CDM Library right now. Please retry in a moment.');
+      setError('Unable to load schemas right now. Please retry in a moment.');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleLinkSelected() {
+  function handleLinkSelected() {
     if (!selectedId) return;
 
-    const target = fileEntries.find((entry) => entry.path === selectedId);
-    if (!target) {
-      return;
-    }
+    const target = availableSchemas.find((entry) => entry.schemaId === selectedId);
+    if (!target) return;
 
-    setLoading(true);
-    setError(null);
-    try {
-      const linked = await adapter.linkCdmSchema({
-        projectId,
-        path: target.path,
-      });
-      onConfirm({
-        schemaId: linked.schemaId,
-        type: 'github',
-        commitSha: linked.source.type === 'github' ? linked.source.commitSha : undefined,
-      });
-    } catch {
-      setError('Unable to link this CDM schema right now. Please check access and try again.');
-    } finally {
-      setLoading(false);
-    }
+    onConfirm({
+      schemaId: target.schemaId,
+      type: target.source.type === 'github' ? 'github' : 'local',
+      commitSha: target.source.type === 'github' ? target.source.commitSha : undefined,
+    });
   }
 
   return (
-    /* Backdrop */
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       role="presentation"
       data-testid="schema-link-picker-overlay"
     >
-      <div
-        className="absolute inset-0 bg-black/60"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden="true" />
 
-      {/* Dialog */}
       <div
         role="dialog"
         aria-modal="true"
@@ -128,16 +97,10 @@ export function SchemaLinkPicker({
         className="relative z-10 w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-6 shadow-xl"
         data-testid="schema-link-picker"
       >
-        <h2 className="mb-2 text-sm font-semibold text-slate-100">
-          Link from CDM Library
-        </h2>
-        <p className="mb-4 text-xs text-slate-400">
-          Source: KBXT/KBX-Canonicals · JSONSchemas/CommonDataModels/
-        </p>
+        <h2 className="mb-2 text-sm font-semibold text-slate-100">Link Existing Schema</h2>
+        <p className="mb-4 text-xs text-slate-400">Choose a schema from the shared Schema Library.</p>
 
-        {loading && (
-          <p className="text-sm text-slate-400">Loading CDM library…</p>
-        )}
+        {loading && <p className="text-sm text-slate-400">Loading schemas…</p>}
 
         {!loading && error && (
           <div className="mb-3 rounded border border-amber-600/30 bg-amber-950/40 p-3">
@@ -150,32 +113,30 @@ export function SchemaLinkPicker({
           </div>
         )}
 
-        {!loading && !error && fileEntries.length === 0 && (
-          <p className="text-sm text-slate-400">
-            No CDM schemas available to link from this directory.
-          </p>
+        {!loading && !error && availableSchemas.length === 0 && (
+          <p className="text-sm text-slate-400">No schemas available to link.</p>
         )}
 
-        {!loading && !error && fileEntries.length > 0 && (
+        {!loading && !error && availableSchemas.length > 0 && (
           <ul
             className="mb-4 max-h-64 overflow-y-auto space-y-1 rounded border border-slate-700"
             role="listbox"
-            aria-label="Available CDM schemas"
+            aria-label="Available schemas"
           >
-            {fileEntries.map((entry) => (
+            {availableSchemas.map((entry) => (
               <li
-                key={entry.path}
+                key={entry.schemaId}
                 role="option"
-                aria-selected={selectedId === entry.path}
-                onClick={() => setSelectedId(entry.path)}
+                aria-selected={selectedId === entry.schemaId}
+                onClick={() => setSelectedId(entry.schemaId)}
                 className={`flex cursor-pointer items-center justify-between px-3 py-2 text-sm transition-colors ${
-                  selectedId === entry.path
+                  selectedId === entry.schemaId
                     ? 'bg-blue-600/20 text-slate-100'
                     : 'text-slate-300 hover:bg-slate-800'
                 }`}
               >
                 <span>{entry.name}</span>
-                <span className="text-xs text-slate-500">{entry.path}</span>
+                <span className="text-xs text-slate-500">{entry.origin.toUpperCase()}</span>
               </li>
             ))}
           </ul>
@@ -189,7 +150,7 @@ export function SchemaLinkPicker({
             variant="primary"
             size="sm"
             disabled={!selectedId || loading}
-            onClick={() => void handleLinkSelected()}
+            onClick={handleLinkSelected}
             data-testid="schema-link-confirm"
           >
             Link Schema

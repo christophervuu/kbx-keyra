@@ -42,7 +42,8 @@ Note: Deployments table is now in scope and documented in `forge/architecture/de
 | `name` | — | String | Display name |
 | `description` | — | String | Project description |
 | `slug` | — | String | URL-safe identifier |
-| `schemaRefs` | — | List | `[{ schemaId, type, commitSha? }]` |
+| `linkedSchemaIds` | — | List | Canonical FS-087 project-linked schema IDs (`string[]`) |
+| `schemaRefs` | — | List | Compatibility bridge `[{ schemaId, type, commitSha? }]` (non-authoritative) |
 | `tags` | — | List | String tags for filtering |
 | `createdAt` | — | String | ISO 8601 |
 | `updatedAt` | — | String | ISO 8601 |
@@ -83,12 +84,12 @@ GSI: `projectId-index` — PK=`projectId`, projects all attributes. Used by `lis
 | `name` | — | String | Display name |
 | `format` | — | String | `json-schema` / `xsd` |
 | `fieldCount` | — | Number | Total leaf fields |
-| `origin` | — | String | `cdm` / `published` / `local` |
+| `origin` | — | String | Canonical `cdm` / `uploaded` / `inferred` (legacy `published|local` normalize to `uploaded`) |
 | `status` | — | String | `ingesting` / `ready` / `error` |
-| `scope` | — | String | `global` / `project` |
+| `scope` | — | String | Compatibility-only metadata (`global` / `project`), non-authoritative for access |
 | `description` | — | String | Optional description |
 | `inferred` | — | Boolean | Whether schema was inferred from sample |
-| `syncStatus` | — | String | `synced` / `not-synced` / `local-changes` |
+| `syncStatus` | — | String | Canonical `synced` / `update-available` / `sync-failed` (legacy values normalize at read boundaries) |
 | `source` | — | Map | `{ type: 'upload' }` or `{ type: 'github', repo, branch, path, commitSha? }` |
 | `createdAt` | — | String | ISO 8601 |
 | `updatedAt` | — | String | ISO 8601 |
@@ -166,6 +167,22 @@ Rules:
 - Versions do not store separate config blobs; versions reference revisions by `revisionNumber`.
 
 ---
+
+## FS-087 compatibility and ownership addendum
+
+Canonical storage semantics after FS-087:
+
+- Schema availability is shared across projects; schema ownership is not encoded by `projectId` in schema tables.
+- Project relevance linkage is canonicalized via `linkedSchemaIds`; legacy `schemaRefs` remains a bridge for staged compatibility.
+- Legacy schema fields remain permissible in persisted records only for compatibility:
+  - `origin: local|published` normalize to canonical `uploaded` at read boundaries.
+  - `scope` is non-authoritative metadata and must not drive access behavior.
+
+Audit-confirmed unaffected ownership/index surfaces:
+
+- `SchemaMetadata` PK (`schemaId`) and `SchemaNodes` PK/SK (`schemaId`, `path`) require no migration for cross-project shared access.
+- Existing mapping `projectId-index` remains mapping-list access only and does not encode schema ownership.
+- S3 and OpenSearch schema storage/indexing remain schemaId-scoped and require no FS-087 key/index migration.
 
 ## 4) Access Patterns
 

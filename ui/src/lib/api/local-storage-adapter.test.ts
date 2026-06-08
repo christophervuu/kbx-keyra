@@ -95,6 +95,7 @@ describe('LocalStorageAdapter', () => {
 
     const detail = await adapter.getProject(created.projectId);
     expect(detail.projectId).toBe(created.projectId);
+    expect(detail.linkedSchemaIds).toEqual([]);
 
     const updated = await adapter.updateProject(created.projectId, { name: 'Project Two' });
     expect(updated.name).toBe('Project Two');
@@ -151,7 +152,7 @@ describe('LocalStorageAdapter', () => {
     });
 
     expect(nameUpdated.name).toBe('Renamed Schema');
-    expect(nameUpdated.scope).toBe('global');
+    expect(nameUpdated.scope).toBeUndefined();
 
     const scopeUpdated = await adapter.updateSchema(created.schemaId, {
       scope: 'project',
@@ -344,7 +345,7 @@ describe('LocalStorageAdapter', () => {
     expect(schemas).toEqual([]);
   });
 
-  it('normalizes missing schema origin to local when listing schemas', async () => {
+  it('normalizes missing schema origin to uploaded when listing schemas', async () => {
     const baseMetadata = {
       schemaId: 'schema-legacy-missing-origin',
       name: 'Legacy Missing Origin',
@@ -375,10 +376,10 @@ describe('LocalStorageAdapter', () => {
     const schemas = await adapter.listSchemas();
 
     expect(schemas).toHaveLength(1);
-    expect(schemas[0].origin).toBe('local');
+    expect(schemas[0].origin).toBe('uploaded');
   });
 
-  it('normalizes invalid schema origin to local when loading schema detail', async () => {
+  it('normalizes invalid schema origin to uploaded when loading schema detail', async () => {
     const metadataWithInvalidOrigin = {
       schemaId: 'schema-legacy-invalid-origin',
       name: 'Legacy Invalid Origin',
@@ -409,7 +410,42 @@ describe('LocalStorageAdapter', () => {
     const adapter = new LocalStorageAdapter();
     const detail = await adapter.getSchema('schema-legacy-invalid-origin');
 
-    expect(detail.metadata.origin).toBe('local');
+    expect(detail.metadata.origin).toBe('uploaded');
+  });
+
+  it('deduplicates and trims linkedSchemaIds from legacy schemaRefs fallback', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createProject({
+      name: 'Legacy refs project',
+      description: 'desc',
+      slug: 'legacy-refs',
+      schemaRefs: [
+        { schemaId: ' schema-a ', type: 'local' },
+        { schemaId: 'schema-a', type: 'github' },
+        { schemaId: 'schema-b', type: 'published' },
+        { schemaId: '   ', type: 'local' },
+      ],
+    });
+
+    const detail = await adapter.getProject(created.projectId);
+    expect(detail.linkedSchemaIds).toEqual(['schema-a', 'schema-b']);
+  });
+
+  it('prefers linkedSchemaIds and normalizes duplicates/whitespace', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createProject({
+      name: 'Canonical links project',
+      description: 'desc',
+      slug: 'canonical-links',
+      linkedSchemaIds: [' schema-x ', 'schema-x', 'schema-y', '   '],
+      schemaRefs: [{ schemaId: 'schema-z', type: 'local' }],
+    });
+
+    const detail = await adapter.getProject(created.projectId);
+    expect(detail.linkedSchemaIds).toEqual(['schema-x', 'schema-y']);
+    expect(detail.schemaRefs).toEqual([{ schemaId: 'schema-z', type: 'local' }]);
   });
 
   it('querySchemaNodes returns empty array in offline mode', async () => {
@@ -780,24 +816,24 @@ describe('LocalStorageAdapter', () => {
     await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("y")'));
     await adapter.createVersion(created.mappingId);
 
-    const qaV1 = await adapter.deployMapping(created.mappingId, {
-      environment: 'QA',
+    const preprodV1 = await adapter.deployMapping(created.mappingId, {
+      environment: 'PREPROD',
       sourceType: 'version',
       sourceNumber: 1,
     });
 
     await adapter.deployMapping(created.mappingId, {
-      environment: 'QA',
+      environment: 'PREPROD',
       sourceType: 'version',
       sourceNumber: 2,
     });
 
     const rollback = await adapter.rollbackDeployment(created.mappingId, {
-      environment: 'QA',
-      deploymentSK: qaV1.environmentDeployedAt,
+      environment: 'PREPROD',
+      deploymentSK: preprodV1.environmentDeployedAt,
     });
 
-    expect(rollback.rollbackOf).toBe(qaV1.environmentDeployedAt);
+    expect(rollback.rollbackOf).toBe(preprodV1.environmentDeployedAt);
     expect(rollback.sourceNumber).toBe(1);
 
     const current = await adapter.getCurrentDeployments(created.mappingId);

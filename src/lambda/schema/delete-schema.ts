@@ -25,6 +25,13 @@ interface SchemaMetadata {
 interface ProjectRecord {
   readonly projectId: string;
   readonly schemaRefs?: ReadonlyArray<{ readonly schemaId?: string }>;
+  readonly linkedSchemaIds?: ReadonlyArray<string>;
+}
+
+interface MappingRecord {
+  readonly mappingId: string;
+  readonly sourceSchemaId?: string;
+  readonly targetSchemaId?: string;
 }
 
 interface SchemaNodeKey {
@@ -40,6 +47,7 @@ function getEnvValue(key: string): string | undefined {
 const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const SCHEMA_NODES_TABLE = getEnvValue('SCHEMA_NODES_TABLE');
 const PROJECTS_TABLE = getEnvValue('PROJECTS_TABLE');
+const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 
 function getSchemasTableOrThrow(): string {
@@ -78,14 +86,38 @@ function getContentBucketOrThrow(): string {
   return bucket;
 }
 
+function getMappingsTableOrThrow(): string {
+  const table = MAPPINGS_TABLE?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: MAPPINGS_TABLE');
+  }
+
+  return table;
+}
+
 function contentKey(schemaId: string, format: SchemaFormat): string {
   return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
 }
 
 function referencingProjectIds(projects: readonly ProjectRecord[], schemaId: string): string[] {
   return projects
-    .filter((project) => (project.schemaRefs ?? []).some((ref) => ref.schemaId === schemaId))
+    .filter((project) => {
+      const inSchemaRefs = (project.schemaRefs ?? []).some((ref) => ref.schemaId === schemaId);
+      const inLinkedSchemaIds = (project.linkedSchemaIds ?? []).some((id) => id === schemaId);
+      return inSchemaRefs || inLinkedSchemaIds;
+    })
     .map((project) => project.projectId)
+    .filter((id): id is string => typeof id === 'string' && id.trim() !== '');
+}
+
+async function findDependentMappings(schemaId: string): Promise<readonly string[]> {
+  const mappings = await scan<MappingRecord>({
+    TableName: getMappingsTableOrThrow(),
+  });
+
+  return mappings
+    .filter((mapping) => mapping.sourceSchemaId === schemaId || mapping.targetSchemaId === schemaId)
+    .map((mapping) => mapping.mappingId)
     .filter((id): id is string => typeof id === 'string' && id.trim() !== '');
 }
 
@@ -112,6 +144,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const refs = referencingProjectIds(projects, schemaId);
     if (refs.length > 0) {
       const err = conflict(`Schema is referenced by projects: [${refs.join(', ')}]`);
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable);
+    }
+
+    const dependentMappings = await findDependentMappings(schemaId);
+    if (dependentMappings.length > 0) {
+      const err = conflict(`Schema is referenced by mappings: [${dependentMappings.join(', ')}]`);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
 

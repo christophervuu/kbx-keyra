@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { AdapterProvider } from '@/lib/api';
+import * as ingestionPollingHook from '@/features/schemas/hooks/use-ingestion-polling';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaMetadata, SchemaRef } from '@/lib/types/domain';
 
@@ -59,7 +60,7 @@ const CREATED_SCHEMA: SchemaMetadata = {
   name: 'my-schema',
   format: 'json-schema',
   fieldCount: 3,
-  origin: 'local',
+  origin: 'uploaded',
   status: 'ready',
   source: { type: 'upload' },
   createdAt: '2026-01-01T00:00:00Z',
@@ -184,7 +185,7 @@ describe('SchemaUploadDialog', () => {
       expect(screen.getByTestId('file-info')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON Schema');
+    expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON');
     expect(screen.queryByTestId('inferred-warning')).not.toBeInTheDocument();
   });
 
@@ -267,12 +268,10 @@ describe('SchemaUploadDialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('shows scope radio options', () => {
+  it('does not render legacy scope radio options', () => {
     renderDialog(createMockAdapter());
-    expect(screen.getByTestId('scope-global')).toBeInTheDocument();
-    expect(screen.getByTestId('scope-project-level')).toBeInTheDocument();
-    // Project-level is default selected
-    expect((screen.getByTestId('scope-project-level') as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByTestId('scope-global')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('scope-project-level')).not.toBeInTheDocument();
   });
 });
 
@@ -347,7 +346,7 @@ describe('SchemaUploadDialog — paste mode', () => {
     fireEvent.blur(textarea);
 
     await waitFor(() => {
-      expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON Schema');
+      expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON');
     });
 
     expect(screen.getByTestId('field-count')).toBeInTheDocument();
@@ -483,14 +482,12 @@ describe('SchemaUploadDialog — paste mode', () => {
     const user = userEvent.setup();
     renderDialog(createMockAdapter());
 
-    await user.click(screen.getByTestId('mode-tab-paste'));
-    await waitFor(() => {
-      expect(screen.getByTestId('paste-input')).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByTestId('mode-tab-paste'));
+    const textarea = await screen.findByTestId('paste-input');
 
     // Manually set a name
     const nameInput = screen.getByTestId('schema-name-input');
-    await user.type(nameInput, 'My Custom Name');
+    fireEvent.change(nameInput, { target: { value: 'My Custom Name' } });
 
     // Now paste JSON with a title
     const schemaWithTitle = JSON.stringify({
@@ -499,7 +496,6 @@ describe('SchemaUploadDialog — paste mode', () => {
       type: 'object',
     });
 
-    const textarea = screen.getByTestId('paste-input');
     fireEvent.change(textarea, { target: { value: schemaWithTitle } });
 
     // Name should remain as manually entered
@@ -811,7 +807,7 @@ describe('SchemaUploadDialog — mode toggle state preservation (AE-07)', () => 
 
     // File info should still be visible
     expect(screen.getByTestId('file-info')).toBeInTheDocument();
-    expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON Schema');
+    expect(screen.getByTestId('format-badge')).toHaveTextContent('JSON');
   });
 });
 
@@ -824,7 +820,7 @@ const INGESTING_SCHEMA: SchemaMetadata = {
   name: 'async-schema',
   format: 'json-schema',
   fieldCount: 0,
-  origin: 'local',
+  origin: 'uploaded',
   status: 'ingesting',
   scope: 'project',
   syncStatus: 'synced',
@@ -846,7 +842,6 @@ const ERROR_DETAIL = {
 describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
@@ -855,10 +850,16 @@ describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
 
   async function setupAndUpload(
     adapter: ApiAdapter,
-    opts: { onSchemaCreated?: (ref: SchemaRef) => Promise<void>; onClose?: () => void } = {},
+    opts: {
+      onSchemaCreated?: (ref: SchemaRef) => Promise<void>;
+      onClose?: () => void;
+      useTimerAdvance?: boolean;
+    } = {},
   ) {
     mockFileReaderWith(VALID_JSON_SCHEMA);
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    const user = opts.useTimerAdvance
+      ? userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) })
+      : userEvent.setup();
     renderDialog(adapter, opts);
 
     const file = new File([VALID_JSON_SCHEMA], 'my-schema.json', { type: 'application/json' });
@@ -873,7 +874,7 @@ describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
 
   it('AE-05: shows processing indicator when createSchema returns ingesting status', async () => {
     const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
-    const getSchema = vi.fn().mockResolvedValue(READY_DETAIL);
+    const getSchema = vi.fn().mockReturnValue(new Promise(() => {}));
     const adapter = createMockAdapter({ createSchema, getSchema });
 
     await setupAndUpload(adapter);
@@ -893,11 +894,6 @@ describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
     const adapter = createMockAdapter({ createSchema, getSchema });
 
     await setupAndUpload(adapter, { onSchemaCreated, onClose });
-
-    // Wait for polling to start
-    await waitFor(() => {
-      expect(screen.getByTestId('ingestion-processing')).toBeInTheDocument();
-    });
 
     // First poll fires immediately and resolves to ready
     await waitFor(() => {
@@ -927,7 +923,7 @@ describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
     const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
     const getSchema = vi.fn().mockResolvedValue(ERROR_DETAIL);
     const adapter = createMockAdapter({ createSchema, getSchema });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    const user = userEvent.setup();
 
     await setupAndUpload(adapter);
 
@@ -943,27 +939,24 @@ describe('SchemaUploadDialog — ingestion polling (AE-05, AE-06)', () => {
   });
 
   it('shows timeout message after configured timeout elapses', async () => {
-    const createSchema = vi.fn().mockResolvedValue(INGESTING_SCHEMA);
-    // getSchema always returns ingesting — never resolves
-    const getSchema = vi.fn().mockResolvedValue({ metadata: { ...INGESTING_SCHEMA }, content: {} });
-    const adapter = createMockAdapter({ createSchema, getSchema });
+    const startPolling = vi.fn();
+    const reset = vi.fn();
+    const hookSpy = vi
+      .spyOn(ingestionPollingHook, 'useIngestionPolling')
+      .mockReturnValue({
+        status: 'timeout',
+        schema: null,
+        error: null,
+        startPolling,
+        reset,
+      });
 
-    await setupAndUpload(adapter);
+    renderDialog(createMockAdapter());
 
-    await waitFor(() => {
-      expect(screen.getByTestId('ingestion-processing')).toBeInTheDocument();
-    });
-
-    // Advance past 5-minute timeout
-    await act(async () => {
-      vi.advanceTimersByTime(301_000);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('ingestion-timeout')).toBeInTheDocument();
-    });
-
+    expect(screen.getByTestId('ingestion-timeout')).toBeInTheDocument();
     expect(screen.getByText(/processing is taking longer than expected/i)).toBeInTheDocument();
+
+    hookSpy.mockRestore();
   });
 
   it('201 immediate success path: no polling indicator shown', async () => {

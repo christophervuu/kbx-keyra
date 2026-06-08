@@ -24,7 +24,6 @@ export function SchemaLibraryPage() {
     setSearch,
     toggleOriginFilter,
     toggleFormatFilter,
-    toggleScopeFilter,
     setSort,
     clearFilters,
     retry,
@@ -100,8 +99,7 @@ export function SchemaLibraryPage() {
   const hasActiveFilters =
     filters.search.length > 0 ||
     filters.origins.length > 0 ||
-    filters.formats.length > 0 ||
-    filters.scopes.length > 0;
+    filters.formats.length > 0;
 
   return (
     <div data-testid="page-schema-library" className="flex flex-col gap-6 p-6">
@@ -127,19 +125,15 @@ export function SchemaLibraryPage() {
         <SchemaLibraryFiltersPanel
           origins={filters.origins}
           formats={filters.formats}
-          scopes={filters.scopes}
           onToggleOrigin={toggleOriginFilter}
           onToggleFormat={toggleFormatFilter}
-          onToggleScope={toggleScopeFilter}
         />
 
         <ActiveFilterChips
           origins={filters.origins}
           formats={filters.formats}
-          scopes={filters.scopes}
           onRemoveOrigin={toggleOriginFilter}
           onRemoveFormat={toggleFormatFilter}
-          onRemoveScope={toggleScopeFilter}
           onClearAll={clearFilters}
         />
       </div>

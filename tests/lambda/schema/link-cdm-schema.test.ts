@@ -73,6 +73,7 @@ describe('link-cdm-schema handler', () => {
       name: 'Project 1',
       description: '',
       slug: 'project-1',
+      linkedSchemaIds: [],
       schemaRefs: [],
       tags: [],
       createdAt: '2026-06-03T00:00:00.000Z',
@@ -170,12 +171,61 @@ describe('link-cdm-schema handler', () => {
 
     const projectUpdate = sharedMocks.updateItem.mock.calls[0]?.[0] as { ExpressionAttributeValues?: Record<string, unknown> } | undefined;
     const schemaRefs = projectUpdate?.ExpressionAttributeValues?.[':schemaRefs'] as Array<Record<string, unknown>> | undefined;
+    const linkedSchemaIds = projectUpdate?.ExpressionAttributeValues?.[':linkedSchemaIds'] as string[] | undefined;
     expect(schemaRefs).toHaveLength(1);
+    expect(linkedSchemaIds).toHaveLength(1);
     expect(schemaRefs?.[0]).toEqual({
       schemaId: payload.schemaId,
       type: 'github',
       commitSha: 'sha-enc-1',
     });
+  });
+
+  it('normalizes linkedSchemaIds when linking existing CDM schema to project', async () => {
+    sharedMocks.scan.mockResolvedValue([
+      {
+        schemaId: 'schema-existing',
+        name: 'Encounter',
+        format: 'json-schema',
+        fieldCount: 1,
+        origin: 'cdm',
+        status: 'ready',
+        scope: 'project',
+        syncStatus: 'synced',
+        source: {
+          type: 'github',
+          repo: 'KBXT/KBX-Canonicals',
+          repoId: 1052821334,
+          branch: 'main',
+          path: 'JSONSchemas-bundled/CommonDataModels/Encounter.json',
+          commitSha: 'sha-enc-existing',
+        },
+        sourceRepoId: 1052821334,
+        createdAt: '2026-06-03T00:00:00.000Z',
+        updatedAt: '2026-06-03T00:00:00.000Z',
+      },
+    ]);
+    sharedMocks.getItem.mockResolvedValue({
+      projectId: 'proj-1',
+      name: 'Project 1',
+      description: '',
+      slug: 'project-1',
+      linkedSchemaIds: [' schema-existing ', 'schema-existing', '   '],
+      schemaRefs: [],
+      tags: [],
+      createdAt: '2026-06-03T00:00:00.000Z',
+      updatedAt: '2026-06-03T00:00:00.000Z',
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' } as never);
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.updateItem).toHaveBeenCalledTimes(1);
+    const updateCall = sharedMocks.updateItem.mock.calls[0]?.[0] as {
+      ExpressionAttributeValues?: Record<string, unknown>;
+    };
+    expect(updateCall.ExpressionAttributeValues?.[':linkedSchemaIds']).toEqual(['schema-existing']);
   });
 
   it('returns idempotent success for duplicate link in same project', async () => {
@@ -207,6 +257,7 @@ describe('link-cdm-schema handler', () => {
       name: 'Project 1',
       description: '',
       slug: 'project-1',
+      linkedSchemaIds: ['schema-existing'],
       schemaRefs: [{ schemaId: 'schema-existing', type: 'github', commitSha: 'sha-enc-existing' }],
       tags: [],
       createdAt: '2026-06-03T00:00:00.000Z',

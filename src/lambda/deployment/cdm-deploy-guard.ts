@@ -1,5 +1,9 @@
 import { getItem } from '../shared/index.js';
-import type { DeploymentCdmSchemaTraceabilityEntry } from '../../lib/persistence/types.js';
+import {
+  normalizeSchemaOrigin,
+  type DeploymentCdmSchemaTraceabilityEntry,
+  type SchemaOrigin,
+} from '../../lib/persistence/types.js';
 
 type SchemaReferenceRole = 'source' | 'target';
 
@@ -41,7 +45,7 @@ type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 interface SchemaMetadataRecord {
   readonly schemaId: string;
   readonly name?: string;
-  readonly origin: 'cdm' | 'published' | 'local';
+  readonly origin: SchemaOrigin | string;
   readonly status: SchemaIngestStatus;
   readonly syncStatus?: SchemaSyncStatus;
   readonly source?: {
@@ -158,7 +162,7 @@ export async function validateCdmDeployGuard(mapping: MappingSchemaRefs): Promis
       continue;
     }
 
-    if (schema.origin !== 'cdm') {
+    if (normalizeSchemaOrigin(schema.origin) !== 'cdm') {
       continue;
     }
 

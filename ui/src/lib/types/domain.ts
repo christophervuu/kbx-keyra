@@ -12,10 +12,20 @@ export type DeployStatus = 'deployed' | 'stale' | 'not-deployed' | 'deploying';
 
 export type SchemaFormat = 'json-schema' | 'xsd';
 
-export type SchemaOrigin = 'cdm' | 'published' | 'local';
+/**
+ * Legacy-compatible schema origin values accepted at read boundaries.
+ * Canonical FS-087 values are `cdm | uploaded | inferred`.
+ */
+export type SchemaOrigin = 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
+
+export type CanonicalSchemaOrigin = 'cdm' | 'uploaded' | 'inferred';
 
 export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 
+/**
+ * @deprecated FS-087 compatibility-only field.
+ * Scope must not determine schema availability behavior.
+ */
 export type SchemaScope = 'global' | 'project';
 
 /**
@@ -104,6 +114,7 @@ export interface Project {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: ISODateString;
@@ -157,9 +168,12 @@ export interface SchemaMetadata {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly fieldCount: number;
-  readonly origin: SchemaOrigin;
+  readonly origin: CanonicalSchemaOrigin;
   readonly status: SchemaIngestStatus;
-  readonly scope: SchemaScope;
+  /**
+   * @deprecated FS-087 compatibility-only field.
+   */
+  readonly scope?: SchemaScope;
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
@@ -263,6 +277,7 @@ export interface CreateProjectInput {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs?: readonly SchemaRef[];
   readonly tags?: readonly string[];
 }
@@ -271,6 +286,7 @@ export interface UpdateProjectInput {
   readonly name?: string;
   readonly description?: string;
   readonly slug?: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs?: readonly SchemaRef[];
   readonly tags?: readonly string[];
 }
@@ -290,6 +306,9 @@ export interface CreateSchemaInput {
   readonly origin: SchemaOrigin;
   readonly content: Readonly<Record<string, unknown>> | string;
   readonly source?: SchemaSourceInfo;
+  /**
+   * @deprecated FS-087 compatibility-only field.
+   */
   readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
@@ -299,6 +318,9 @@ export interface CreateSchemaInput {
 export interface UpdateSchemaInput {
   readonly name?: string;
   readonly description?: string;
+  /**
+   * @deprecated FS-087 compatibility-only field.
+   */
   readonly scope?: SchemaScope;
   readonly content?: Readonly<Record<string, unknown>> | string;
   readonly fieldCount?: number;
@@ -321,6 +343,46 @@ export interface LinkCdmSchemaInput {
   readonly branch?: string;
   readonly path: string;
   readonly name?: string;
+}
+
+export function normalizeSchemaOrigin(origin: SchemaOrigin | string | null | undefined): CanonicalSchemaOrigin {
+  if (origin === 'cdm') {
+    return 'cdm';
+  }
+
+  if (origin === 'inferred') {
+    return 'inferred';
+  }
+
+  return 'uploaded';
+}
+
+export function normalizeProjectLinkedSchemaIds(input: {
+  linkedSchemaIds?: readonly string[];
+  schemaRefs?: readonly SchemaRef[];
+}): readonly string[] {
+  const values = Array.isArray(input.linkedSchemaIds)
+    ? input.linkedSchemaIds
+    : (input.schemaRefs ?? []).map((schemaRef) => schemaRef.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 // ---------------------------------------------------------------------------

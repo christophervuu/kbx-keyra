@@ -1,4 +1,4 @@
-// SchemaLibraryFiltersPanel — Multi-select filter toggles for origin, format, scope (FS-016 T-03)
+// SchemaLibraryFiltersPanel — Multi-select filter toggles for origin and format (FS-016 T-03)
 
 import type { SchemaOrigin } from '@/lib/types';
 
@@ -11,10 +11,8 @@ import type { DisplayFormat } from '../types';
 export interface SchemaLibraryFiltersPanelProps {
   origins: SchemaOrigin[];
   formats: DisplayFormat[];
-  scopes: Array<'global' | 'project'>;
   onToggleOrigin: (origin: SchemaOrigin) => void;
   onToggleFormat: (format: DisplayFormat) => void;
-  onToggleScope: (scope: 'global' | 'project') => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,28 +74,21 @@ function FilterGroup({ label, children }: FilterGroupProps) {
 
 const ORIGIN_OPTIONS: Array<{ value: SchemaOrigin; label: string }> = [
   { value: 'cdm', label: 'CDM' },
-  { value: 'published', label: 'Published' },
-  { value: 'local', label: 'Local' },
+  { value: 'uploaded', label: 'Uploaded' },
+  { value: 'inferred', label: 'Inferred' },
 ];
 
 const FORMAT_OPTIONS: Array<{ value: DisplayFormat; label: string }> = [
-  { value: 'JSON Schema', label: 'JSON Schema' },
+  { value: 'JSON', label: 'JSON' },
   { value: 'XSD', label: 'XSD' },
   { value: 'Inferred', label: 'Inferred' },
-];
-
-const SCOPE_OPTIONS: Array<{ value: 'global' | 'project'; label: string }> = [
-  { value: 'global', label: 'Global' },
-  { value: 'project', label: 'Project-Level' },
 ];
 
 export function SchemaLibraryFiltersPanel({
   origins,
   formats,
-  scopes,
   onToggleOrigin,
   onToggleFormat,
-  onToggleScope,
 }: SchemaLibraryFiltersPanelProps) {
   return (
     <div className="flex flex-wrap gap-4">
@@ -119,17 +110,6 @@ export function SchemaLibraryFiltersPanel({
             label={label}
             active={formats.includes(value)}
             onClick={() => onToggleFormat(value)}
-          />
-        ))}
-      </FilterGroup>
-
-      <FilterGroup label="Scope">
-        {SCOPE_OPTIONS.map(({ value, label }) => (
-          <ToggleButton
-            key={value}
-            label={label}
-            active={scopes.includes(value)}
-            onClick={() => onToggleScope(value)}
           />
         ))}
       </FilterGroup>

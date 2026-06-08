@@ -39,6 +39,7 @@ describe('delete-schema handler', () => {
     env.SCHEMAS_TABLE = 'Schemas';
     env.SCHEMA_NODES_TABLE = 'SchemaNodes';
     env.PROJECTS_TABLE = 'Projects';
+    env.MAPPINGS_TABLE = 'Mappings';
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('schema-1');
@@ -75,6 +76,22 @@ describe('delete-schema handler', () => {
     expect(result.statusCode).toBe(409);
     const parsed = JSON.parse(result.body) as { error: { message: string } };
     expect(parsed.error.message).toContain('proj-1');
+  });
+
+  it('mapping-dependent schema returns 409 conflict with mapping ids', async () => {
+    sharedMocks.scan
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { mappingId: 'map-1', sourceSchemaId: 'schema-1' },
+        { mappingId: 'map-2', sourceSchemaId: 'other', targetSchemaId: 'other' },
+      ]);
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'schema-1' } });
+
+    expect(result.statusCode).toBe(409);
+    const parsed = JSON.parse(result.body) as { error: { message: string } };
+    expect(parsed.error.message).toContain('map-1');
   });
 
   it('missing schema returns 404', async () => {

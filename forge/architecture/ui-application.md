@@ -2366,7 +2366,7 @@ Responsibilities:
 - derives usage data for both display (`SchemaUsageSection`) and action gating (`SchemaActions` remove blocking)
 - Phase 0 algorithm:
   - `listProjects()`
-  - hydrate each with `getProject(projectId)` to inspect `schemaRefs`
+  - hydrate each with `getProject(projectId)` to inspect canonical `linkedSchemaIds` (with compatibility fallback from legacy `schemaRefs`)
   - keep referencing projects
   - `listMappings(projectId)` for each referencing project
   - classify mapping role as `source` or `target`
@@ -2392,6 +2392,27 @@ Schema editing is intentionally split into three layers:
    - reconstruct -> `adapter.updateSchema(schemaId, { content, fieldCount })` -> re-parse -> exit edit mode
 
 This separation keeps row-level interactions deterministic/testable while concentrating persistence concerns in a single hook.
+
+## FS-087 Shared Schema Library + Linked Schema Model
+
+FS-087 establishes canonical schema availability semantics across UI surfaces:
+
+- Schema Library is shared across all projects (no scope-based availability boundary).
+- Project-level schema relationships are relevance links only, canonicalized as `linkedSchemaIds: string[]`.
+- Legacy `schemaRefs` is consumed as compatibility bridge for read-time normalization and staged rollout safety.
+- Mapping source/target references remain explicit schema IDs and are unchanged by scope simplification.
+
+Compatibility normalization contract:
+
+- Canonical origins displayed by UI are `CDM`, `Uploaded`, `Inferred`.
+- Legacy `origin: local|published` normalizes to canonical `uploaded` in adapter/domain read paths.
+- Legacy `scope` may still exist in records but is non-authoritative compatibility metadata and must not drive access behavior or user-facing availability concepts.
+
+Project flow impacts:
+
+- Project-linked schema surfaces show only linked schemas for relevance.
+- Add Schema and mapping schema selectors can access the shared library; linked schemas are prioritized/grouped where applicable.
+- Unlink is hard-blocked when active mappings in the same project reference the schema; dependency details are surfaced to the user.
 
 ## Project Overview Workspace Architecture (FS-086)
 
@@ -2458,9 +2479,9 @@ CDM-linked cards in Project Overview:
 - Show canonical CDM provenance label `CDM (KBXT/KBX-Canonicals)` and sync-state badges driven by `metadata.syncStatus`.
 - Hide remove action for CDM entries to enforce read-only behavior at the project schema surface.
 
-### Action visibility rules (origin x scope x format)
+### Action visibility rules (origin x compatibility-metadata x format)
 
-Current implementation in `SchemaActions` and shared CDM action policy utilities (`cdm-action-policy`) uses metadata/surface-driven conditional rendering:
+Current implementation in `SchemaActions` and shared CDM action policy utilities (`cdm-action-policy`) uses metadata/surface-driven conditional rendering. FS-087 removes scope as a user-facing access concept; any retained scope fields are compatibility metadata only:
 
 - CDM schemas in **Schema Detail**: Re-sync (active) and View Raw only; edit/replace/remove/promote/sync-to-GitHub actions are hidden
 - Non-CDM schemas:
@@ -2470,7 +2491,7 @@ Current implementation in `SchemaActions` and shared CDM action policy utilities
   - Replace file
   - Remove (blocked if usage mappings exist)
   - View Raw
-- `scope === 'project'`: additional Promote to Global action + confirm flow
+- Legacy compatibility note: previously project-scoped records surfaced Promote-to-Global affordance; FS-087 canonical UX removes scope-driven access semantics and associated promote action.
 
 FS-078 surface policy clarifications:
 

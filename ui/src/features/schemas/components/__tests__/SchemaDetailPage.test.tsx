@@ -38,16 +38,16 @@ const CDM_SCHEMA: SchemaDetail = {
   },
 };
 
-const LOCAL_SCHEMA: SchemaDetail = {
+const UPLOADED_SCHEMA: SchemaDetail = {
   metadata: {
-    schemaId: 'schema-local-1',
-    name: 'My Local Schema',
+    schemaId: 'schema-uploaded-1',
+    name: 'My Uploaded Schema',
     format: 'json-schema',
     fieldCount: 5,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
     scope: 'project',
-    description: 'A local schema',
+    description: 'An uploaded schema',
     updatedBy: 'local-user',
     inferred: false,
     syncStatus: 'sync-failed',
@@ -70,10 +70,10 @@ const LOCAL_SCHEMA: SchemaDetail = {
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
     listSchemas: vi.fn(),
-    getSchema: vi.fn().mockResolvedValue(LOCAL_SCHEMA),
+    getSchema: vi.fn().mockResolvedValue(UPLOADED_SCHEMA),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockImplementation((_id, input) =>
-      Promise.resolve({ ...LOCAL_SCHEMA.metadata, ...input }),
+      Promise.resolve({ ...UPLOADED_SCHEMA.metadata, ...input }),
     ),
     deleteSchema: vi.fn(),
     listMappings: vi.fn(),
@@ -116,7 +116,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 // Render helper
 // ---------------------------------------------------------------------------
 
-function renderPage(adapter: ApiAdapter, schemaId = 'schema-local-1') {
+function renderPage(adapter: ApiAdapter, schemaId = 'schema-uploaded-1') {
   return render(
     <AdapterProvider adapter={adapter}>
       <MemoryRouter initialEntries={[`/schemas/${schemaId}`]}>
@@ -164,12 +164,12 @@ describe('SchemaDetailPage', () => {
 
     // CDM badge
     expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
-    // Global scope badge
-    expect(screen.getByText('Global')).toBeInTheDocument();
+    // Scope badge removed from UI
+    expect(screen.queryByText('Global')).not.toBeInTheDocument();
     // Field count
     expect(screen.getByText(/12 fields/i)).toBeInTheDocument();
     // Format
-    expect(screen.getByText('JSON Schema')).toBeInTheDocument();
+    expect(screen.getByText('JSON')).toBeInTheDocument();
     // Description (read-only plain text)
     expect(screen.getByText('CDM customer object')).toBeInTheDocument();
     expect(screen.getByTestId('cdm-read-only-note')).toHaveTextContent(
@@ -182,17 +182,17 @@ describe('SchemaDetailPage', () => {
     expect(heading).not.toHaveAttribute('role', 'button');
   });
 
-  it('renders local schema metadata with editable name and description', async () => {
+  it('renders uploaded schema metadata with editable name and description', async () => {
     renderPage(adapter);
 
     await waitFor(() => {
       expect(screen.getByTestId('schema-detail-metadata')).toBeInTheDocument();
     });
 
-    // Local badge
-    expect(screen.getByText('Local')).toBeInTheDocument();
-    // Project-Level scope badge
-    expect(screen.getByText('Project-Level')).toBeInTheDocument();
+    // Uploaded badge
+    expect(screen.getByText('Uploaded')).toBeInTheDocument();
+    // Legacy access-scope badge remains absent from UI
+    expect(screen.queryByText('Project-Level')).not.toBeInTheDocument();
     // Name is rendered as an editable button
     const nameButton = screen.getByRole('button', { name: /edit schema name/i });
     expect(nameButton).toBeInTheDocument();
@@ -200,9 +200,9 @@ describe('SchemaDetailPage', () => {
 
   it('renders Unknown origin badge for malformed origin values', async () => {
     const legacyOriginSchema: SchemaDetail = {
-      ...LOCAL_SCHEMA,
+      ...UPLOADED_SCHEMA,
       metadata: {
-        ...LOCAL_SCHEMA.metadata,
+        ...UPLOADED_SCHEMA.metadata,
         schemaId: 'schema-legacy-origin',
         origin: 'legacy-origin' as unknown as SchemaDetail['metadata']['origin'],
       },
@@ -239,7 +239,7 @@ describe('SchemaDetailPage', () => {
 
     await waitFor(() => {
       expect(adapter.updateSchema).toHaveBeenCalledWith(
-        'schema-local-1',
+        'schema-uploaded-1',
         expect.objectContaining({ name: 'Updated Name' }),
       );
     });
@@ -263,7 +263,7 @@ describe('SchemaDetailPage', () => {
     const getSchema = vi
       .fn()
       .mockRejectedValueOnce(new Error('Network failure'))
-      .mockResolvedValueOnce(LOCAL_SCHEMA);
+      .mockResolvedValueOnce(UPLOADED_SCHEMA);
     adapter = createMockAdapter({ getSchema });
     renderPage(adapter);
 
@@ -319,7 +319,7 @@ describe('SchemaDetailPage', () => {
       expect(screen.getByTestId('schema-detail-tree')).toBeInTheDocument();
     });
 
-    // Edit button visible for local json-schema
+    // Edit button visible for uploaded json-schema
     expect(screen.getByTestId('edit-schema-button')).toBeInTheDocument();
     // Save/cancel not visible yet
     expect(screen.queryByTestId('editing-banner')).not.toBeInTheDocument();
@@ -386,14 +386,13 @@ describe('SchemaDetailPage', () => {
     expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('action-promote')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
   });
 
   it('XSD format schema does not show edit mode controls', async () => {
     const XSD_SCHEMA: SchemaDetail = {
       metadata: {
-        ...LOCAL_SCHEMA.metadata,
+        ...UPLOADED_SCHEMA.metadata,
         schemaId: 'schema-xsd-1',
         format: 'xsd',
         name: 'XSD Schema',

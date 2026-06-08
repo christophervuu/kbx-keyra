@@ -3,6 +3,7 @@ import { DeleteCommand, GetCommand, PutCommand, ScanCommand, UpdateCommand } fro
 import { dynamoClient } from './clients.js';
 import { TABLE_NAMES } from './config.js';
 import type { CreateSchemaMetadataInput, SchemaIngestStatus, SchemaMetadataItem } from './types.js';
+import { normalizeSchemaOrigin } from './types.js';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -24,9 +25,9 @@ export async function create(input: CreateSchemaMetadataInput): Promise<SchemaMe
     name: input.name,
     format: input.format,
     fieldCount: input.fieldCount,
-    origin: input.origin,
+    origin: normalizeSchemaOrigin(input.origin),
     status: input.status ?? 'ingesting',
-    scope: input.scope,
+    ...(input.scope !== undefined ? { scope: input.scope } : {}),
     description: input.description,
     inferred: input.inferred,
     syncStatus: input.syncStatus ?? 'not-synced',

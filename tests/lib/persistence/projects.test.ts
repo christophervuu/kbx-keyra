@@ -47,6 +47,7 @@ describe('persistence projects', () => {
     expect(result.createdAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(result.updatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(result.createdAt).toBe(result.updatedAt);
+    expect(result.linkedSchemaIds).toEqual(['schema-1']);
 
     expect(sendMock).toHaveBeenCalledTimes(1);
     const command = sendMock.mock.calls[0]?.[0] as {
@@ -57,6 +58,7 @@ describe('persistence projects', () => {
           name: string;
           description: string;
           slug: string;
+          linkedSchemaIds?: readonly string[];
           schemaRefs: readonly { schemaId: string; type: string }[];
           tags: readonly string[];
           createdAt: string;
@@ -78,6 +80,7 @@ describe('persistence projects', () => {
         name: 'Project 1',
         description: 'Desc',
         slug: 'project-1',
+        linkedSchemaIds: [],
         schemaRefs: [],
         tags: [],
         createdAt: '2026-05-15T00:00:00.000Z',
@@ -90,6 +93,7 @@ describe('persistence projects', () => {
     const missing = await projects.get('missing');
 
     expect(found?.projectId).toBe('project-1');
+    expect(found?.linkedSchemaIds).toEqual([]);
     expect(missing).toBeNull();
 
     const firstCall = sendMock.mock.calls[0]?.[0] as { input: { TableName: string; Key: { projectId: string } } };
@@ -109,7 +113,8 @@ describe('persistence projects', () => {
           name: 'Project 1',
           description: 'Desc',
           slug: 'project-1',
-          schemaRefs: [],
+          linkedSchemaIds: ['schema-1'],
+          schemaRefs: [{ schemaId: 'schema-1', type: 'local' }],
           tags: [],
           createdAt: '2026-05-15T00:00:00.000Z',
           updatedAt: '2026-05-15T00:00:00.000Z',

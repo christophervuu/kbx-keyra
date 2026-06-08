@@ -12,6 +12,16 @@ describe('SchemaPresentationPrimitives', () => {
     expect(getSchemaOriginLabel('cdm')).toBe('CDM (KBXT/KBX-Canonicals)');
   });
 
+  it('returns canonical uploaded origin label for uploaded and legacy aliases', () => {
+    expect(getSchemaOriginLabel('uploaded')).toBe('Uploaded');
+    expect(getSchemaOriginLabel('published')).toBe('Uploaded');
+    expect(getSchemaOriginLabel('local')).toBe('Uploaded');
+  });
+
+  it('returns inferred origin label', () => {
+    expect(getSchemaOriginLabel('inferred')).toBe('Inferred');
+  });
+
   it('normalizes legacy status values to sync-failed', () => {
     expect(normalizeSchemaSyncStatusForDisplay('not-synced')).toBe('sync-failed');
     expect(normalizeSchemaSyncStatusForDisplay('local-changes')).toBe('sync-failed');

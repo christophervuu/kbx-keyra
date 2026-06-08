@@ -19,9 +19,30 @@ const SCHEMA_DETAIL_A: SchemaDetail = {
     name: 'Schema Alpha',
     format: 'json-schema',
     fieldCount: 4,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
     source: { type: 'upload' },
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+  content: {},
+};
+
+const SCHEMA_DETAIL_B: SchemaDetail = {
+  metadata: {
+    schemaId: 'schema-b',
+    name: 'Schema Beta',
+    format: 'xsd',
+    fieldCount: 2,
+    origin: 'cdm',
+    status: 'ready',
+    source: {
+      type: 'github',
+      repo: 'KBXT/KBX-Canonicals',
+      branch: 'main',
+      path: 'JSONSchemas/CommonDataModels/Beta.json',
+      commitSha: 'sha-beta',
+    },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
   },
@@ -47,6 +68,7 @@ const PROJECT_WITH_SCHEMAS: ProjectDetail = {
   description: '',
   slug: 'my-project',
   schemaRefs: [{ schemaId: 'schema-a', type: 'local' }],
+  linkedSchemaIds: ['schema-a'],
   tags: [],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
@@ -55,8 +77,10 @@ const PROJECT_WITH_SCHEMAS: ProjectDetail = {
 
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
-    listSchemas: vi.fn(),
-    getSchema: vi.fn().mockResolvedValue(SCHEMA_DETAIL_A),
+    listSchemas: vi.fn().mockResolvedValue([SCHEMA_DETAIL_A.metadata, SCHEMA_DETAIL_B.metadata]),
+    getSchema: vi.fn().mockImplementation(async (id: string) =>
+      id === 'schema-b' ? SCHEMA_DETAIL_B : SCHEMA_DETAIL_A,
+    ),
     createSchema: vi.fn(),
     deleteSchema: vi.fn(),
     listMappings: vi.fn(),
@@ -68,7 +92,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     listProjects: vi.fn(),
     getProject: vi.fn().mockResolvedValue(PROJECT_WITH_SCHEMAS),
     createProject: vi.fn(),
-    updateProject: vi.fn(),
+    updateProject: vi.fn().mockResolvedValue(PROJECT_WITH_SCHEMAS),
     deleteProject: vi.fn(),
     listTemplates: vi.fn(),
     getTemplate: vi.fn(),
@@ -167,11 +191,32 @@ describe('CreateMappingPage', () => {
       expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument();
     });
 
-    // Should include "Skip" option and the project schema
+    // Should include "Skip" option and linked schema
     const select = screen.getByTestId('schema-select-source-schema') as HTMLSelectElement;
     const options = Array.from(select.options).map((o) => o.text);
     expect(options.some((o) => /skip/i.test(o))).toBe(true);
     expect(options.some((o) => /schema alpha/i.test(o))).toBe(true);
+  });
+
+  it('schema selector groups linked schemas ahead of other available schemas', async () => {
+    const user = userEvent.setup();
+    renderPage(createMockAdapter());
+
+    await user.type(screen.getByLabelText(/mapping name/i), 'My Mapping');
+    await user.click(screen.getByTestId('next-button'));
+
+    const select = (await screen.findByTestId('schema-select-source-schema')) as HTMLSelectElement;
+    const linkedGroup = Array.from(select.querySelectorAll('optgroup')).find((group) =>
+      group.label.toLowerCase().includes('linked schemas'),
+    );
+    const otherGroup = Array.from(select.querySelectorAll('optgroup')).find((group) =>
+      group.label.toLowerCase().includes('other available schemas'),
+    );
+
+    expect(linkedGroup).toBeTruthy();
+    expect(otherGroup).toBeTruthy();
+    expect(linkedGroup?.textContent).toContain('Schema Alpha');
+    expect(otherGroup?.textContent).toContain('Schema Beta');
   });
 
   it('Back button on step 2 returns to step 1', async () => {
@@ -244,11 +289,42 @@ describe('CreateMappingPage', () => {
     await waitFor(() => {
       expect(createMapping).toHaveBeenCalledWith(
         expect.objectContaining({
-          sourceSchemaRef: { schemaId: 'schema-a', type: 'local' },
-          targetSchemaRef: { schemaId: 'schema-a', type: 'local' },
+          sourceSchemaRef: { schemaId: 'schema-a', type: 'published' },
+          targetSchemaRef: { schemaId: 'schema-a', type: 'published' },
         }),
       );
     });
+  });
+
+  it('selecting non-linked schema auto-links it to project as best effort', async () => {
+    const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
+    const updateProject = vi.fn().mockResolvedValue(PROJECT_WITH_SCHEMAS);
+    const adapter = createMockAdapter({ createMapping, updateProject });
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await user.type(screen.getByLabelText(/mapping name/i), 'My Mapping');
+    await user.click(screen.getByTestId('next-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-b');
+    await user.click(screen.getByTestId('next-button'));
+    await user.selectOptions(screen.getByTestId('schema-select-target-schema'), 'schema-b');
+    await user.click(screen.getByTestId('create-button'));
+
+    await waitFor(() => {
+      expect(updateProject).toHaveBeenCalledWith('proj-1', { linkedSchemaIds: ['schema-a', 'schema-b'] });
+    });
+
+    expect(createMapping).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSchemaRef: { schemaId: 'schema-b', type: 'github', commitSha: 'sha-beta' },
+        targetSchemaRef: { schemaId: 'schema-b', type: 'github', commitSha: 'sha-beta' },
+      }),
+    );
   });
 
   it('navigates to mapping editor after successful creation', async () => {

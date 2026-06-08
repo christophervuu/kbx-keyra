@@ -14,6 +14,14 @@ import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { PATHS } from '@/routes/paths';
 
+interface UnlinkConflictDetails {
+  dependentMappings?: Array<{ mappingId?: string; name?: string }>;
+}
+
+function isUnlinkConflictError(error: unknown): error is { code?: string; statusCode?: number; details?: unknown } {
+  return typeof error === 'object' && error !== null;
+}
+
 // ---------------------------------------------------------------------------
 // Inner page (receives resolved projectId)
 // ---------------------------------------------------------------------------
@@ -22,6 +30,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showLinkedSchemasDialog, setShowLinkedSchemasDialog] = useState(false);
+  const [unlinkBlockMessage, setUnlinkBlockMessage] = useState<string | null>(null);
   const { recordActivity } = useRecentActivity();
 
   const {
@@ -31,6 +40,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     mappings,
     updateName,
     updateDescription,
+    removeSchema,
     addSchemaRef,
     deleteMappingAction,
     duplicateMappingAction,
@@ -114,15 +124,49 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   }
 
   function handleOpenSchemaUpload() {
+    setUnlinkBlockMessage(null);
     setShowUploadDialog(true);
   }
 
   function handleOpenLinkedSchemas() {
+    setUnlinkBlockMessage(null);
     setShowLinkedSchemasDialog(true);
   }
 
   function handleCloseLinkedSchemas() {
+    setUnlinkBlockMessage(null);
     setShowLinkedSchemasDialog(false);
+  }
+
+  async function handleSchemaCreated(ref: { schemaId: string; type: 'github' | 'local' | 'published'; commitSha?: string }) {
+    await addSchemaRef(ref);
+    setShowUploadDialog(false);
+  }
+
+  async function handleRemoveSchema(schemaId: string) {
+    setUnlinkBlockMessage(null);
+    try {
+      await removeSchema(schemaId);
+    } catch (error) {
+      if (isUnlinkConflictError(error) && (error.code === 'CONFLICT' || error.statusCode === 409)) {
+        const details = (error.details ?? {}) as UnlinkConflictDetails;
+        const dependent = details.dependentMappings ?? [];
+        if (dependent.length > 0) {
+          const names = dependent
+            .map((item) => item.name)
+            .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+          setUnlinkBlockMessage(
+            names.length > 0
+              ? `Cannot unlink schema while used by mapping(s): ${names.join(', ')}. Update or delete those mappings first.`
+              : 'Cannot unlink schema while it is used by mappings in this project. Update or delete those mappings first.',
+          );
+        } else {
+          setUnlinkBlockMessage('Cannot unlink schema while it is used by mappings in this project. Update or delete those mappings first.');
+        }
+        return;
+      }
+      throw error;
+    }
   }
 
   const usageBySchemaId = schemas.reduce<Record<string, number>>((acc, schema) => {
@@ -142,12 +186,23 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           onUpdateName={updateName}
           onUpdateDescription={updateDescription}
           onCreateMapping={handleCreateMapping}
+          onAddSchema={handleOpenSchemaUpload}
           onLinkedSchemasClick={handleOpenLinkedSchemas}
           linkedSchemasExpanded={showLinkedSchemasDialog}
           linkedSchemasControlsId="linked-schemas-dialog"
           onDuplicateProject={handleDuplicateProject}
           onDeleteProject={handleDeleteProject}
         />
+
+        {unlinkBlockMessage && (
+          <div
+            role="alert"
+            className="rounded-md border border-amber-700 bg-amber-950 px-3 py-2 text-sm text-amber-200"
+            data-testid="schema-unlink-blocked-message"
+          >
+            {unlinkBlockMessage}
+          </div>
+        )}
 
         {/* Section 2 — full-width mappings content */}
         <div className="min-w-0" data-testid="project-overview-main-column">
@@ -166,6 +221,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
         onClose={handleCloseLinkedSchemas}
         schemas={schemas}
         usageBySchemaId={usageBySchemaId}
+        onUnlinkSchema={handleRemoveSchema}
         onAddSchema={() => {
           setShowLinkedSchemasDialog(false);
           handleOpenSchemaUpload();
@@ -176,11 +232,11 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
       {/* Schema Upload Dialog */}
       <SchemaUploadDialog
         open={showUploadDialog}
-        onClose={() => setShowUploadDialog(false)}
-        onSchemaCreated={async (ref) => {
-          await addSchemaRef(ref);
+        onClose={() => {
+          setUnlinkBlockMessage(null);
           setShowUploadDialog(false);
         }}
+        onSchemaCreated={handleSchemaCreated}
       />
     </div>
   );

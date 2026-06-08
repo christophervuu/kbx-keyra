@@ -57,7 +57,7 @@ function SyncIndicator({ state }: { state: SyncState }) {
 /**
  * Displays git/repository status for a schema.
  *
- * - Upload-source schemas (local only): renders a minimal "not connected" notice.
+ * - Upload-source schemas: renders a minimal "not connected" notice.
  * - GitHub-source schemas: renders full status card with repo, branch, path,
  *   commit SHA, and last synced timestamp.
  */
@@ -66,7 +66,7 @@ export function SchemaGitStatus({
   syncStatus,
   lastSyncedAt,
 }: SchemaGitStatusProps) {
-  // ---- Upload / local-only ----
+  // ---- Upload source ----
   if (source.type === 'upload') {
     return (
       <section
@@ -78,7 +78,7 @@ export function SchemaGitStatus({
           data-testid="git-status-local-only"
           className="text-sm text-slate-500"
         >
-          Local schema — not connected to a repository
+          Uploaded schema — not connected to a repository
         </p>
       </section>
     );

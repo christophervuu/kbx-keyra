@@ -216,7 +216,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 
 #### `PROJECTS_TABLE`
 - PK: `projectId` (String)
-- Main fields: `name`, `description`, `slug`, `schemaRefs[]`, `tags[]`, timestamps
+- Main fields: `name`, `description`, `slug`, canonical `linkedSchemaIds[]`, compatibility `schemaRefs[]`, `tags[]`, timestamps
 
 #### `MAPPINGS_TABLE`
 - PK: `mappingId` (String)
@@ -229,7 +229,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 
 #### `SCHEMAS_TABLE`
 - PK: `schemaId` (String)
-- Main fields: `name`, `format`, `fieldCount`, `origin`, `status`, `scope`, `description`, `inferred`, `syncStatus`, `source`, timestamps
+- Main fields: `name`, `format`, `fieldCount`, canonical `origin` (`cdm|uploaded|inferred`), `status`, compatibility `scope?` (non-authoritative), `description`, `inferred`, canonical `syncStatus` (`synced|update-available|sync-failed`), `source`, timestamps
 
 #### `SCHEMA_NODES_TABLE`
 - PK: `schemaId` (String), SK: `path` (String)
@@ -239,13 +239,30 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 - PK: `mappingId` (String), SK: `version` (Number)
 - Main fields: `revisionNumber`, `createdAt`, `createdBy`
 
+### FS-087 schema-access and compatibility addendum
+
+Canonical FS-087 model across schema/project handlers:
+
+- Schema availability is shared across projects; project linkage is relevance metadata only.
+- Canonical project linkage is `linkedSchemaIds: string[]`.
+- Legacy `schemaRefs` is retained as compatibility/read-time bridge and must not be treated as the long-term authoritative access model.
+- Canonical schema origins are `cdm | uploaded | inferred`; legacy aliases (`local`, `published`) are normalized to `uploaded` at read boundaries.
+- Legacy `scope` may remain in records as compatibility metadata, but must not drive access filtering or ownership logic.
+
+Audit-confirmed unaffected backend/AWS ownership surfaces (FS-087 T-02/T-09):
+
+- DynamoDB schema-entity ownership remains `schemaId`-centric (no `projectId` ownership key requirement).
+- S3 schema keying remains `schemas/{schemaId}/...` and scope-independent.
+- OpenSearch schema query/index filter remains `schemaId`-term based; no scope/project ownership filter.
+- Deployment snapshot/deploy guard behavior remains explicit schema-reference/provenance based (`sourceSchemaId`/`targetSchemaId` + optional `cdmSchemaTraceability`) and scope-independent.
+
 ### 7.2 Handler-to-table mapping
 
 | Handler | DynamoDB patterns |
 |---|---|
 | `project/create-project` | put project item |
 | `project/list-projects` | scan projects + scan mappings (counts) |
-| `project/get-project` | get project + query mappings by `projectId-index` + get schema metadata for refs |
+| `project/get-project` | get project + query mappings by `projectId-index` + get schema metadata by canonical `linkedSchemaIds` (with read-time fallback from legacy refs) |
 | `project/update-project` | update project fields |
 | `project/delete-project` | query mappings by `projectId-index`, conflict-or-delete |
 | `mapping/create-mapping` | put mapping metadata |
@@ -261,11 +278,11 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 | `mapping/create-version` | query latest version + put milestone item (optional implicit save path writes revision + mapping metadata) |
 | `mapping/save-version` | compatibility shim delegating to `create-version` |
 | `schema/create-schema` | put schema metadata; inline mode puts schema nodes |
-| `schema/list-schemas` | scan schemas |
+| `schema/list-schemas` | scan schemas (shared-library list; no scope-based access filtering) |
 | `schema/list-cdm-schemas` | root-guarded optional path validation + one-level GitHub read-only listing under CommonDataModels |
 | `schema/link-cdm-schema` | validate root-scoped CDM file path + project, fetch GitHub file/commit (read-only), persist/project CDM source metadata, and attach to project |
 | `schema/get-schema` | get schema metadata |
-| `schema/delete-schema` | get schema + scan/query project refs + delete schema + delete schema nodes |
+| `schema/delete-schema` | get schema + guard references across canonical `linkedSchemaIds` + compatibility refs + mapping references + delete schema + delete schema nodes |
 | `schema/query-schema-nodes` | get schema + OpenSearch query via `searchSchemaNodes`; on explicit degraded gate, fallback to PK-scoped schemaId query + in-memory substring filter |
 | `schema/sync-cdm-schema` | read linked source metadata, perform GitHub read-only compare/fetch, persist sync status and optional content/commitSha updates |
 

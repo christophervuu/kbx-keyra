@@ -23,7 +23,7 @@ function FormatBadge({ format }: { format: string }) {
         isXsd ? 'bg-purple-900/60 text-purple-300' : 'bg-blue-900/60 text-blue-300'
       }`}
     >
-      {isXsd ? 'XSD' : 'JSON Schema'}
+      {isXsd ? 'XSD' : 'JSON'}
     </span>
   );
 }
@@ -31,34 +31,21 @@ function FormatBadge({ format }: { format: string }) {
 /**
  * Color-coded origin badge (AE-13):
  * - CDM → blue
- * - Published → purple
- * - Local → gray
+ * - Uploaded → purple
+ * - Inferred → amber
  */
 function OriginBadge({ origin }: { origin: string }) {
   const config: Record<string, { cls: string; label: string }> = {
     cdm: { cls: 'bg-blue-100 text-blue-800', label: getSchemaOriginLabel('cdm') },
-    published: { cls: 'bg-purple-100 text-purple-800', label: 'Published' },
-    local: { cls: 'bg-gray-100 text-gray-700', label: 'Local' },
+    uploaded: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
+    inferred: { cls: 'bg-amber-100 text-amber-800', label: 'Inferred' },
+    published: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
+    local: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
   };
   const { cls, label } = config[origin] ?? { cls: 'bg-gray-100 text-gray-700', label: origin };
   return (
     <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${cls}`} data-testid={`origin-badge-${origin}`}>
       {label}
-    </span>
-  );
-}
-
-/**
- * Scope badge — Global vs Project (AE-13).
- */
-function ScopeBadge({ scope }: { scope: string }) {
-  const isGlobal = scope === 'global';
-  return (
-    <span
-      className="rounded border border-slate-600 px-1.5 py-0.5 text-xs font-medium text-slate-400"
-      data-testid={`scope-badge-${isGlobal ? 'global' : 'project'}`}
-    >
-      {isGlobal ? 'Global' : 'Project'}
     </span>
   );
 }
@@ -88,8 +75,7 @@ export interface SchemaCardProps {
 
 /**
  * Card displaying schema metadata with enhanced badges (FS-050 T-05, AE-13):
- * - Color-coded origin badge (CDM=blue, Published=purple, Local=gray)
- * - Scope badge (Global / Project)
+ * - Color-coded origin badge (CDM=blue, Uploaded=purple, Inferred=amber)
  * - Sync status indicator (non-local schemas only)
  * - "Used by N mappings" count
  * - Field count
@@ -161,7 +147,6 @@ export function SchemaCard({
       <div className="flex flex-wrap gap-1.5">
         <FormatBadge format={schema.format} />
         <OriginBadge origin={schema.origin} />
-        <ScopeBadge scope={schema.scope} />
       </div>
 
       {/* Stats row */}

@@ -6,6 +6,10 @@ import type {
   DeploymentSourceType,
 } from './types';
 
+import {
+  normalizeProjectLinkedSchemaIds,
+  normalizeSchemaOrigin,
+} from '@/lib/types';
 import type {
   ActivityEntry,
   AutoMapInput,
@@ -38,7 +42,6 @@ import type {
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
-  SchemaOrigin,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -66,8 +69,6 @@ const STORAGE_KEYS = {
 
 const MAX_MAPPING_VERSIONS = 50;
 
-const VALID_SCHEMA_ORIGINS: readonly SchemaOrigin[] = ['cdm', 'published', 'local'];
-
 function normalizeSchemaSyncStatusForStorage(value: unknown): SchemaMetadata['syncStatus'] {
   if (value === 'synced' || value === 'update-available' || value === 'sync-failed') {
     return value;
@@ -76,11 +77,6 @@ function normalizeSchemaSyncStatusForStorage(value: unknown): SchemaMetadata['sy
   return 'sync-failed';
 }
 
-function normalizeSchemaOrigin(origin: unknown): SchemaOrigin {
-  return typeof origin === 'string' && VALID_SCHEMA_ORIGINS.includes(origin as SchemaOrigin)
-    ? (origin as SchemaOrigin)
-    : 'local';
-}
 
 interface StoredSchema {
   metadata: SchemaMetadata;
@@ -359,7 +355,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     return this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => ({
       ...item.metadata,
       origin: normalizeSchemaOrigin(item.metadata.origin),
-      scope: item.metadata.scope ?? 'global',
+      ...(item.metadata.scope !== undefined ? { scope: item.metadata.scope } : {}),
       description: item.metadata.description ?? '',
       inferred: item.metadata.inferred ?? false,
       syncStatus: normalizeSchemaSyncStatusForStorage(item.metadata.syncStatus ?? 'sync-failed'),
@@ -376,7 +372,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     const metadata: SchemaMetadata = {
       ...found.metadata,
       origin: normalizeSchemaOrigin(found.metadata.origin),
-      scope: found.metadata.scope ?? 'global',
+      ...(found.metadata.scope !== undefined ? { scope: found.metadata.scope } : {}),
       description: found.metadata.description ?? '',
       inferred: found.metadata.inferred ?? false,
       syncStatus: normalizeSchemaSyncStatusForStorage(found.metadata.syncStatus ?? 'sync-failed'),
@@ -400,7 +396,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       fieldCount: 0,
       origin: normalizeSchemaOrigin(input.origin),
       status: 'ready',
-      scope: input.scope ?? 'global',
+      ...(input.scope !== undefined ? { scope: input.scope } : {}),
       description: input.description ?? '',
       updatedBy: 'local-user',
       inferred: input.inferred ?? false,
@@ -433,7 +429,6 @@ export class LocalStorageAdapter implements ApiAdapter {
     const currentMetadata = {
       ...current.metadata,
       origin: normalizeSchemaOrigin(current.metadata.origin),
-      scope: current.metadata.scope ?? 'global',
       description: current.metadata.description ?? '',
       inferred: current.metadata.inferred ?? false,
       syncStatus: normalizeSchemaSyncStatusForStorage(current.metadata.syncStatus ?? 'sync-failed'),
@@ -892,6 +887,21 @@ export class LocalStorageAdapter implements ApiAdapter {
   }
 
   // Projects
+  private normalizeProject(project: Project): Project {
+    const schemaRefs = project.schemaRefs ?? [];
+    const linkedSchemaIds = normalizeProjectLinkedSchemaIds({
+      linkedSchemaIds: project.linkedSchemaIds,
+      schemaRefs,
+    });
+
+    return {
+      ...project,
+      linkedSchemaIds,
+      schemaRefs,
+      tags: project.tags ?? [],
+    };
+  }
+
   async listProjects(): Promise<ProjectMetadata[]> {
     return this.readArray<Project>(STORAGE_KEYS.projects).map((project) => ({
       projectId: project.projectId,
@@ -909,12 +919,14 @@ export class LocalStorageAdapter implements ApiAdapter {
       throw this.notFound('Project', id);
     }
 
+    const normalizedProject = this.normalizeProject(project);
+
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings)
       .map((item) => item.metadata)
       .filter((item) => item.projectId === id);
 
     return {
-      ...project,
+      ...normalizedProject,
       mappings,
     };
   }
@@ -923,12 +935,19 @@ export class LocalStorageAdapter implements ApiAdapter {
     const projects = this.readArray<Project>(STORAGE_KEYS.projects);
     const timestamp = this.nowIso();
 
+    const schemaRefs = input.schemaRefs ?? [];
+    const linkedSchemaIds = normalizeProjectLinkedSchemaIds({
+      linkedSchemaIds: input.linkedSchemaIds,
+      schemaRefs,
+    });
+
     const project: Project = {
       projectId: crypto.randomUUID(),
       name: input.name,
       description: input.description,
       slug: input.slug,
-      schemaRefs: input.schemaRefs ?? [],
+      linkedSchemaIds,
+      schemaRefs,
       tags: input.tags ?? [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -954,9 +973,23 @@ export class LocalStorageAdapter implements ApiAdapter {
     }
 
     const current = projects[index];
+    const currentSchemaRefs = current.schemaRefs ?? [];
+    const nextSchemaRefs = input.schemaRefs ?? currentSchemaRefs;
+    const nextLinkedSchemaIds = input.linkedSchemaIds !== undefined || input.schemaRefs !== undefined
+      ? normalizeProjectLinkedSchemaIds({
+          linkedSchemaIds: input.linkedSchemaIds ?? current.linkedSchemaIds,
+          schemaRefs: nextSchemaRefs,
+        })
+      : normalizeProjectLinkedSchemaIds({
+          linkedSchemaIds: current.linkedSchemaIds,
+          schemaRefs: currentSchemaRefs,
+        });
+
     const next: Project = {
       ...current,
       ...input,
+      linkedSchemaIds: nextLinkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
       updatedAt: this.nowIso(),
     };
 

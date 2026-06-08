@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -70,32 +70,28 @@ describe('SchemaLibrarySearch', () => {
 describe('SchemaLibraryFiltersPanel', () => {
   const noop = vi.fn();
   const defaultProps = {
-    origins: [] as Array<'cdm' | 'published' | 'local'>,
-    formats: [] as Array<'JSON Schema' | 'XSD' | 'Inferred'>,
-    scopes: [] as Array<'global' | 'project'>,
+    origins: [] as Array<'cdm' | 'uploaded' | 'inferred'>,
+    formats: [] as Array<'JSON' | 'XSD' | 'Inferred'>,
     onToggleOrigin: noop,
     onToggleFormat: noop,
-    onToggleScope: noop,
   };
 
   it('renders all three origin options', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
+    const originGroup = screen.getByRole('group', { name: 'Filter by origin' });
+    expect(originGroup).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'CDM' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Published' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Local' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Uploaded' })).toBeInTheDocument();
+    expect(within(originGroup).getByRole('button', { name: 'Inferred' })).toBeInTheDocument();
   });
 
   it('renders all three format options', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
-    expect(screen.getByRole('button', { name: 'JSON Schema' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'XSD' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Inferred' })).toBeInTheDocument();
-  });
-
-  it('renders both scope options', () => {
-    render(<SchemaLibraryFiltersPanel {...defaultProps} />);
-    expect(screen.getByRole('button', { name: 'Global' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Project-Level' })).toBeInTheDocument();
+    const formatGroup = screen.getByRole('group', { name: 'Filter by format' });
+    expect(formatGroup).toBeInTheDocument();
+    expect(within(formatGroup).getByRole('button', { name: 'JSON' })).toBeInTheDocument();
+    expect(within(formatGroup).getByRole('button', { name: 'XSD' })).toBeInTheDocument();
+    expect(within(formatGroup).getByRole('button', { name: 'Inferred' })).toBeInTheDocument();
   });
 
   it('calls onToggleOrigin when origin button clicked', async () => {
@@ -112,16 +108,9 @@ describe('SchemaLibraryFiltersPanel', () => {
     expect(onToggleFormat).toHaveBeenCalledWith('XSD');
   });
 
-  it('calls onToggleScope when scope button clicked', async () => {
-    const onToggleScope = vi.fn();
-    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleScope={onToggleScope} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Global' }));
-    expect(onToggleScope).toHaveBeenCalledWith('global');
-  });
-
   it('active origin button has aria-pressed=true', () => {
-    render(<SchemaLibraryFiltersPanel {...defaultProps} origins={['published']} />);
-    expect(screen.getByRole('button', { name: 'Published' })).toHaveAttribute(
+    render(<SchemaLibraryFiltersPanel {...defaultProps} origins={['uploaded']} />);
+    expect(screen.getByRole('button', { name: 'Uploaded' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -142,7 +131,6 @@ describe('SchemaLibraryFiltersPanel', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
     expect(screen.getByRole('group', { name: 'Filter by origin' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Filter by format' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Filter by scope' })).toBeInTheDocument();
   });
 });
 
@@ -200,8 +188,6 @@ describe('SchemaLibrarySortControl', () => {
 
   it('has wrapper aria-label="Sort schemas"', () => {
     render(<SchemaLibrarySortControl field="name" direction="asc" onSort={vi.fn()} />);
-    expect(screen.getByRole('group', { hidden: true })).toBeFalsy; // fallback check
-    // The wrapper div has aria-label; verify it's present in DOM
     const wrapper = document.querySelector('[aria-label="Sort schemas"]');
     expect(wrapper).toBeInTheDocument();
   });
@@ -213,12 +199,10 @@ describe('SchemaLibrarySortControl', () => {
 
 describe('ActiveFilterChips', () => {
   const emptyProps = {
-    origins: [] as Array<'cdm' | 'published' | 'local'>,
-    formats: [] as Array<'JSON Schema' | 'XSD' | 'Inferred'>,
-    scopes: [] as Array<'global' | 'project'>,
+    origins: [] as Array<'cdm' | 'uploaded' | 'inferred'>,
+    formats: [] as Array<'JSON' | 'XSD' | 'Inferred'>,
     onRemoveOrigin: vi.fn(),
     onRemoveFormat: vi.fn(),
-    onRemoveScope: vi.fn(),
     onClearAll: vi.fn(),
   };
 
@@ -228,7 +212,7 @@ describe('ActiveFilterChips', () => {
   });
 
   it('renders chips for active origin filters', () => {
-    render(<ActiveFilterChips {...emptyProps} origins={['cdm', 'local']} />);
+    render(<ActiveFilterChips {...emptyProps} origins={['cdm', 'uploaded']} />);
     const chips = screen.getAllByTestId('filter-chip');
     expect(chips).toHaveLength(2);
   });
@@ -238,49 +222,30 @@ describe('ActiveFilterChips', () => {
     expect(screen.getByTestId('filter-chip')).toHaveTextContent('XSD');
   });
 
-  it('renders chips for active scope filters', () => {
-    render(<ActiveFilterChips {...emptyProps} scopes={['global']} />);
-    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Global');
-  });
-
-  it('renders "Project-Level" label for project scope', () => {
-    render(<ActiveFilterChips {...emptyProps} scopes={['project']} />);
-    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Project-Level');
-  });
-
   it('× button on origin chip calls onRemoveOrigin', async () => {
     const onRemoveOrigin = vi.fn();
     render(<ActiveFilterChips {...emptyProps} origins={['cdm']} onRemoveOrigin={onRemoveOrigin} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Cdm filter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove CDM filter' }));
     expect(onRemoveOrigin).toHaveBeenCalledWith('cdm');
   });
 
   it('× button on format chip calls onRemoveFormat', async () => {
     const onRemoveFormat = vi.fn();
     render(
-      <ActiveFilterChips {...emptyProps} formats={['JSON Schema']} onRemoveFormat={onRemoveFormat} />,
+      <ActiveFilterChips {...emptyProps} formats={['JSON']} onRemoveFormat={onRemoveFormat} />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Remove JSON Schema filter' }));
-    expect(onRemoveFormat).toHaveBeenCalledWith('JSON Schema');
-  });
-
-  it('× button on scope chip calls onRemoveScope', async () => {
-    const onRemoveScope = vi.fn();
-    render(
-      <ActiveFilterChips {...emptyProps} scopes={['global']} onRemoveScope={onRemoveScope} />,
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Global filter' }));
-    expect(onRemoveScope).toHaveBeenCalledWith('global');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove JSON filter' }));
+    expect(onRemoveFormat).toHaveBeenCalledWith('JSON');
   });
 
   it('shows Clear all button when filters are active', () => {
-    render(<ActiveFilterChips {...emptyProps} origins={['local']} />);
+    render(<ActiveFilterChips {...emptyProps} origins={['uploaded']} />);
     expect(screen.getByTestId('clear-all-button')).toBeInTheDocument();
   });
 
   it('Clear all button calls onClearAll', async () => {
     const onClearAll = vi.fn();
-    render(<ActiveFilterChips {...emptyProps} origins={['local']} onClearAll={onClearAll} />);
+    render(<ActiveFilterChips {...emptyProps} origins={['uploaded']} onClearAll={onClearAll} />);
     await userEvent.click(screen.getByTestId('clear-all-button'));
     expect(onClearAll).toHaveBeenCalled();
   });

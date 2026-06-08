@@ -26,10 +26,10 @@ const UPLOAD_SOURCE: UploadSourceInfo = {
 // ---------------------------------------------------------------------------
 
 describe('SchemaGitStatus', () => {
-  it('renders "local schema" message for upload source', () => {
+  it('renders upload-schema message for upload source', () => {
     render(<SchemaGitStatus source={UPLOAD_SOURCE} syncStatus="sync-failed" />);
     expect(screen.getByTestId('git-status-local-only')).toBeInTheDocument();
-    expect(screen.getByText(/local schema.*not connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/uploaded schema.*not connected/i)).toBeInTheDocument();
   });
 
   it('renders all fields for a GitHub source', () => {

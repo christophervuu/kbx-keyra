@@ -38,6 +38,7 @@ interface LinkedSchemasDialogProps {
   schemas: SchemaCardData[];
   usageBySchemaId: Record<string, number>;
   onAddSchema: () => void;
+  onUnlinkSchema?: (schemaId: string) => Promise<void>;
   labelledById?: string;
   descriptionId?: string;
   dialogId?: string;
@@ -49,6 +50,7 @@ export function LinkedSchemasDialog({
   schemas,
   usageBySchemaId,
   onAddSchema,
+  onUnlinkSchema,
   labelledById = 'linked-schemas-dialog-title',
   descriptionId = 'linked-schemas-dialog-description',
   dialogId,
@@ -149,7 +151,20 @@ export function LinkedSchemasDialog({
                     className="rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2"
                     data-testid={`linked-schema-row-${schema.schemaId}`}
                   >
-                    <p className="truncate text-sm font-medium text-slate-100">{schema.name}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="truncate text-sm font-medium text-slate-100">{schema.name}</p>
+                      {onUnlinkSchema && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void onUnlinkSchema(schema.schemaId)}
+                          aria-label={`Unlink schema ${schema.name}`}
+                          data-testid={`linked-schema-unlink-${schema.schemaId}`}
+                        >
+                          Unlink
+                        </Button>
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-slate-400">
                       {normalizeOriginLabel(schema.origin)} · {normalizeFormatLabel(schema.format, schema.isInferred)} ·{' '}
                       {schema.fieldCount} field{schema.fieldCount === 1 ? '' : 's'} ·{' '}

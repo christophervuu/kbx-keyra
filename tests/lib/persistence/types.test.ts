@@ -1,6 +1,8 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+  normalizeProjectLinkedSchemaIds,
+  normalizeSchemaOrigin,
   normalizeSchemaSyncStatus,
   toMappingMetadata,
   toProjectDetail,
@@ -28,6 +30,7 @@ type DomainProject = {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs: readonly { schemaId: string; type: 'github' | 'local' | 'published'; commitSha?: string }[];
   readonly tags: readonly string[];
   readonly createdAt: string;
@@ -66,9 +69,9 @@ type DomainSchemaMetadata = {
   readonly name: string;
   readonly format: 'json-schema' | 'xsd';
   readonly fieldCount: number;
-  readonly origin: 'cdm' | 'published' | 'local';
+  readonly origin: 'cdm' | 'uploaded' | 'inferred';
   readonly status: 'ingesting' | 'ready' | 'error';
-  readonly scope: 'global' | 'project';
+  readonly scope?: 'global' | 'project';
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
@@ -119,6 +122,36 @@ describe('persistence types', () => {
 
   it('project item includes all domain project fields', () => {
     expectTypeOf<ProjectItem>().toMatchTypeOf<DomainProject>();
+  });
+
+  it('normalizes schema origin aliases to canonical values', () => {
+    expect(normalizeSchemaOrigin('cdm')).toBe('cdm');
+    expect(normalizeSchemaOrigin('inferred')).toBe('inferred');
+    expect(normalizeSchemaOrigin('uploaded')).toBe('uploaded');
+    expect(normalizeSchemaOrigin('local')).toBe('uploaded');
+    expect(normalizeSchemaOrigin('published')).toBe('uploaded');
+    expect(normalizeSchemaOrigin('unknown-value')).toBe('uploaded');
+    expect(normalizeSchemaOrigin(undefined)).toBe('uploaded');
+  });
+
+  it('normalizes legacy schemaRefs to linkedSchemaIds', () => {
+    expect(
+      normalizeProjectLinkedSchemaIds({
+        schemaRefs: [
+          { schemaId: ' schema-a ', type: 'local' },
+          { schemaId: 'schema-a', type: 'published' },
+          { schemaId: 'schema-b', type: 'github' },
+          { schemaId: '   ', type: 'local' },
+        ],
+      }),
+    ).toEqual(['schema-a', 'schema-b']);
+
+    expect(
+      normalizeProjectLinkedSchemaIds({
+        linkedSchemaIds: [' schema-x ', 'schema-x', 'schema-y', '   '],
+        schemaRefs: [{ schemaId: 'schema-z', type: 'local' }],
+      }),
+    ).toEqual(['schema-x', 'schema-y']);
   });
 
   it('converter outputs align with domain metadata types', () => {
@@ -232,7 +265,8 @@ describe('persistence types', () => {
       name: 'Project 1',
       description: 'desc',
       slug: 'project-1',
-      schemaRefs: [],
+      linkedSchemaIds: ['schema-1'],
+      schemaRefs: [{ schemaId: 'schema-1', type: 'local' }],
       tags: [],
       createdAt: '2026-05-15T00:00:00.000Z',
       updatedAt: '2026-05-15T00:00:00.000Z',
@@ -315,6 +349,7 @@ describe('persistence types', () => {
 
     expect(projectDetail).toEqual({
       ...projectItem,
+      linkedSchemaIds: ['schema-1'],
       mappings: [
         {
           mappingId: 'map-1',
@@ -336,7 +371,7 @@ describe('persistence types', () => {
       name: 'Schema 1',
       format: 'json-schema',
       fieldCount: 12,
-      origin: 'local',
+      origin: 'uploaded',
       status: 'ready',
       scope: 'project',
       description: 'schema description',

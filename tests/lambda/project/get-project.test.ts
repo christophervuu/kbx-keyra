@@ -51,12 +51,13 @@ describe('get-project handler', () => {
         name: 'Project 1',
         description: 'Desc',
         slug: 'project-1',
+        linkedSchemaIds: ['schema-1', 'schema-2'],
         schemaRefs: [{ schemaId: 'schema-1', type: 'local' }, { schemaId: 'schema-2', type: 'local' }],
         tags: [],
         createdAt: '2026-05-15T00:00:00.000Z',
         updatedAt: '2026-05-15T00:00:00.000Z',
       })
-      .mockResolvedValueOnce({ schemaId: 'schema-1', name: 'S1' })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', name: 'S1', origin: 'local' })
       .mockResolvedValueOnce({ schemaId: 'schema-2', name: 'S2', syncStatus: 'local-changes' });
     sharedMocks.query.mockResolvedValueOnce([{ mappingId: 'map-1', projectId: 'proj-1', name: 'Map1' }]);
 
@@ -64,9 +65,11 @@ describe('get-project handler', () => {
     const result = await handler({ body: null, pathParameters: { id: 'proj-1' } });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as { mappings: unknown[]; schemas: unknown[] };
+    const parsed = JSON.parse(result.body) as { mappings: unknown[]; schemas: unknown[]; linkedSchemaIds?: string[] };
     expect(Array.isArray(parsed.mappings)).toBe(true);
     expect(Array.isArray(parsed.schemas)).toBe(true);
+    expect(parsed.linkedSchemaIds).toEqual(['schema-1', 'schema-2']);
+    expect((parsed.schemas[0] as { origin?: string }).origin).toBe('uploaded');
     expect((parsed.schemas[1] as { syncStatus?: string }).syncStatus).toBe('sync-failed');
   });
 
@@ -79,6 +82,32 @@ describe('get-project handler', () => {
     expect(result.statusCode).toBe(404);
   });
 
+  it('normalizes duplicate/whitespace linkedSchemaIds and does not duplicate schema loads', async () => {
+    sharedMocks.getItem
+      .mockResolvedValueOnce({
+        projectId: 'proj-1',
+        name: 'Project 1',
+        description: 'Desc',
+        slug: 'project-1',
+        linkedSchemaIds: [' schema-1 ', 'schema-1', 'schema-2', '   '],
+        schemaRefs: [{ schemaId: 'schema-legacy', type: 'local' }],
+        tags: [],
+        createdAt: '2026-05-15T00:00:00.000Z',
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', name: 'S1' })
+      .mockResolvedValueOnce({ schemaId: 'schema-2', name: 'S2' });
+    sharedMocks.query.mockResolvedValueOnce([]);
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'proj-1' } });
+    const parsed = JSON.parse(result.body) as { linkedSchemaIds: string[]; schemas: unknown[] };
+
+    expect(result.statusCode).toBe(200);
+    expect(parsed.linkedSchemaIds).toEqual(['schema-1', 'schema-2']);
+    expect(parsed.schemas).toHaveLength(2);
+  });
+
   it('omits missing schema refs gracefully', async () => {
     sharedMocks.getItem
       .mockResolvedValueOnce({
@@ -86,6 +115,7 @@ describe('get-project handler', () => {
         name: 'Project 1',
         description: 'Desc',
         slug: 'project-1',
+        linkedSchemaIds: ['schema-1', 'schema-missing'],
         schemaRefs: [{ schemaId: 'schema-1', type: 'local' }, { schemaId: 'schema-missing', type: 'local' }],
         tags: [],
         createdAt: '2026-05-15T00:00:00.000Z',

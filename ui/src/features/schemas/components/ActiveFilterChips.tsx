@@ -11,10 +11,8 @@ import type { DisplayFormat } from '../types';
 export interface ActiveFilterChipsProps {
   origins: SchemaOrigin[];
   formats: DisplayFormat[];
-  scopes: Array<'global' | 'project'>;
   onRemoveOrigin: (origin: SchemaOrigin) => void;
   onRemoveFormat: (format: DisplayFormat) => void;
-  onRemoveScope: (scope: 'global' | 'project') => void;
   onClearAll: () => void;
 }
 
@@ -54,8 +52,10 @@ function Chip({ label, onRemove, colorClass = 'bg-slate-700 text-slate-200' }: C
 
 const ORIGIN_COLORS: Record<SchemaOrigin, string> = {
   cdm: 'bg-purple-200 text-purple-900',
+  uploaded: 'bg-blue-200 text-blue-900',
+  inferred: 'bg-amber-200 text-amber-900',
   published: 'bg-blue-200 text-blue-900',
-  local: 'bg-green-200 text-green-900',
+  local: 'bg-blue-200 text-blue-900',
 };
 
 // ---------------------------------------------------------------------------
@@ -65,13 +65,11 @@ const ORIGIN_COLORS: Record<SchemaOrigin, string> = {
 export function ActiveFilterChips({
   origins,
   formats,
-  scopes,
   onRemoveOrigin,
   onRemoveFormat,
-  onRemoveScope,
   onClearAll,
 }: ActiveFilterChipsProps) {
-  const hasAny = origins.length > 0 || formats.length > 0 || scopes.length > 0;
+  const hasAny = origins.length > 0 || formats.length > 0;
 
   if (!hasAny) return null;
 
@@ -84,7 +82,7 @@ export function ActiveFilterChips({
       {origins.map((origin) => (
         <Chip
           key={`origin-${origin}`}
-          label={origin.charAt(0).toUpperCase() + origin.slice(1)}
+          label={origin === 'cdm' ? 'CDM' : origin === 'uploaded' || origin === 'published' || origin === 'local' ? 'Uploaded' : 'Inferred'}
           onRemove={() => onRemoveOrigin(origin)}
           colorClass={ORIGIN_COLORS[origin]}
         />
@@ -95,15 +93,6 @@ export function ActiveFilterChips({
           key={`format-${format}`}
           label={format}
           onRemove={() => onRemoveFormat(format)}
-        />
-      ))}
-
-      {scopes.map((scope) => (
-        <Chip
-          key={`scope-${scope}`}
-          label={scope === 'global' ? 'Global' : 'Project-Level'}
-          onRemove={() => onRemoveScope(scope)}
-          colorClass="bg-amber-100 text-amber-800"
         />
       ))}
 

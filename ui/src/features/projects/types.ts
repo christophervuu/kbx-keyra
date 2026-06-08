@@ -4,15 +4,12 @@
 
 import type { DeployStatus } from '@/lib/types/domain';
 
-/** Whether a schema is global (shared across projects) or project-scoped. */
-export type SchemaScope = 'global' | 'project-level';
 
 /** Load state for a project detail page. */
 export type ProjectLoadState = 'loading' | 'loaded' | 'error' | 'not-found';
 
 /**
  * Derived view model for schema cards shown in the project schema list.
- * Collapses domain SchemaMetadata + project-scope info into a flat display model.
  */
 export interface SchemaCardData {
   readonly schemaId: string;
@@ -20,7 +17,6 @@ export interface SchemaCardData {
   readonly format: string;
   readonly origin: string;
   readonly sourceType: 'github' | 'upload';
-  readonly scope: SchemaScope;
   readonly fieldCount: number;
   readonly syncStatus: string;
   readonly isInferred: boolean;

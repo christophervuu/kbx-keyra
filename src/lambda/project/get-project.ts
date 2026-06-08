@@ -10,7 +10,7 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
+import { normalizeSchemaOrigin, normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
 
 interface SchemaRef {
   readonly schemaId: string;
@@ -23,6 +23,7 @@ interface ProjectRecord {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: string;
@@ -47,9 +48,9 @@ interface SchemaMetadata {
   readonly name: string;
   readonly format: 'json-schema' | 'xsd';
   readonly fieldCount: number;
-  readonly origin: 'cdm' | 'published' | 'local';
+  readonly origin: 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
   readonly status: 'ingesting' | 'ready' | 'error';
-  readonly scope: 'global' | 'project';
+  readonly scope?: 'global' | 'project';
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
@@ -63,6 +64,31 @@ interface SchemaMetadata {
 interface ProjectDetail extends ProjectRecord {
   readonly mappings: readonly MappingMetadata[];
   readonly schemas: readonly SchemaMetadata[];
+}
+
+function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds' | 'schemaRefs'>): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((schemaRef) => schemaRef.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -130,6 +156,7 @@ async function loadSchemas(schemaIds: readonly string[]): Promise<SchemaMetadata
     if (schema) {
       schemas.push({
         ...schema,
+        origin: normalizeSchemaOrigin(schema.origin),
         syncStatus: normalizeSchemaSyncStatus(schema.syncStatus),
       });
     }
@@ -167,12 +194,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       },
     });
 
-    const schemaIds = (project.schemaRefs ?? [])
-      .map((schemaRef) => schemaRef.schemaId)
-      .filter((id): id is string => typeof id === 'string' && id !== '');
+    const schemaIds = normalizeLinkedSchemaIds(project);
 
     const detail: ProjectDetail = {
       ...project,
+      linkedSchemaIds: schemaIds,
       mappings: toMappingMetadataArray(mappingItems),
       schemas: await loadSchemas(schemaIds),
     };

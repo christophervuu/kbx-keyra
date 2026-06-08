@@ -40,8 +40,28 @@ describe('list-projects handler', () => {
 
   it('multiple projects returns array with mapping and schema counts', async () => {
     sharedMocks.scan.mockResolvedValue([
-      { projectId: 'p1', name: 'P1', description: '', slug: 'p1', schemaRefs: [{ schemaId: 's1', type: 'local' }], tags: [], createdAt: '', updatedAt: 'u1' },
-      { projectId: 'p2', name: 'P2', description: '', slug: 'p2', schemaRefs: [], tags: [], createdAt: '', updatedAt: 'u2' },
+      {
+        projectId: 'p1',
+        name: 'P1',
+        description: '',
+        slug: 'p1',
+        linkedSchemaIds: ['s1'],
+        schemaRefs: [{ schemaId: 's1', type: 'local' }],
+        tags: [],
+        createdAt: '',
+        updatedAt: 'u1',
+      },
+      {
+        projectId: 'p2',
+        name: 'P2',
+        description: '',
+        slug: 'p2',
+        linkedSchemaIds: [],
+        schemaRefs: [],
+        tags: [],
+        createdAt: '',
+        updatedAt: 'u2',
+      },
     ]);
     sharedMocks.query.mockResolvedValueOnce([{}, {}]).mockResolvedValueOnce([{}]);
 
@@ -55,6 +75,31 @@ describe('list-projects handler', () => {
     expect(parsed[0]?.schemaCount).toBe(1);
     expect(parsed[1]?.mappingCount).toBe(1);
     expect(parsed[1]?.schemaCount).toBe(0);
+  });
+
+  it('normalizes schemaCount from deduplicated/trimmed linkedSchemaIds', async () => {
+    sharedMocks.scan.mockResolvedValue([
+      {
+        projectId: 'p1',
+        name: 'P1',
+        description: '',
+        slug: 'p1',
+        linkedSchemaIds: [' s1 ', 's1', 's2', '   '],
+        schemaRefs: [{ schemaId: 'legacy-ignored', type: 'local' }],
+        tags: [],
+        createdAt: '',
+        updatedAt: 'u1',
+      },
+    ]);
+    sharedMocks.query.mockResolvedValueOnce([]);
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null });
+    const parsed = JSON.parse(result.body) as Array<{ schemaCount: number }>;
+
+    expect(result.statusCode).toBe(200);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.schemaCount).toBe(2);
   });
 
   it('empty projects returns empty array', async () => {

@@ -6,6 +6,7 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { PageHeader } from '@/components/PageHeader';
 import { PATHS } from '@/routes/paths';
+import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
 import type { SchemaMetadata, SchemaRef } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -72,20 +73,24 @@ const SKIP_VALUE = '__skip__';
 interface SchemaSelectorProps {
   label: string;
   schemas: SchemaMetadata[];
+  linkedSchemaIds: string[];
   value: string; // schemaId or SKIP_VALUE
   onChange: (value: string) => void;
   loading: boolean;
 }
 
 const FORMAT_LABELS: Record<string, string> = {
-  'json-schema': 'JSON Schema',
+  'json-schema': 'JSON',
   xsd: 'XSD',
   'sample-json': 'Sample JSON',
   'sample-xml': 'Sample XML',
   unknown: 'Unknown',
 };
 
-function SchemaSelector({ label, schemas, value, onChange, loading }: SchemaSelectorProps) {
+function SchemaSelector({ label, schemas, linkedSchemaIds, value, onChange, loading }: SchemaSelectorProps) {
+  const linked = schemas.filter((schema) => linkedSchemaIds.includes(schema.schemaId));
+  const available = schemas.filter((schema) => !linkedSchemaIds.includes(schema.schemaId));
+
   return (
     <div>
       <label htmlFor={`schema-select-${label}`} className="mb-1 block text-sm font-medium text-slate-300">
@@ -102,15 +107,57 @@ function SchemaSelector({ label, schemas, value, onChange, loading }: SchemaSele
           data-testid={`schema-select-${label.toLowerCase().replace(/\s+/g, '-')}`}
         >
           <option value={SKIP_VALUE}>Skip — add schema later</option>
-          {schemas.map((s) => (
-            <option key={s.schemaId} value={s.schemaId}>
-              {s.name} [{FORMAT_LABELS[s.format] ?? s.format}]
-            </option>
-          ))}
+
+          {linked.length > 0 && (
+            <optgroup label="Linked schemas">
+              {linked.map((s) => (
+                <option key={s.schemaId} value={s.schemaId}>
+                  {s.name} [{FORMAT_LABELS[s.format] ?? s.format}]
+                </option>
+              ))}
+            </optgroup>
+          )}
+
+          {available.length > 0 && (
+            <optgroup label="Other available schemas">
+              {available.map((s) => (
+                <option key={s.schemaId} value={s.schemaId}>
+                  {s.name} [{FORMAT_LABELS[s.format] ?? s.format}]
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       )}
     </div>
   );
+}
+
+function schemaRefForSelection(schema: SchemaMetadata): SchemaRef {
+  if (schema.source.type === 'github') {
+    return {
+      schemaId: schema.schemaId,
+      type: 'github',
+      commitSha: schema.source.commitSha,
+    };
+  }
+
+  return {
+    schemaId: schema.schemaId,
+    type: 'published',
+  };
+}
+
+function schemaRefFromSelectionId(
+  schemaId: string,
+  schemas: SchemaMetadata[],
+): SchemaRef {
+  const schema = schemas.find((item) => item.schemaId === schemaId);
+  if (!schema) {
+    return { schemaId, type: 'published' };
+  }
+
+  return schemaRefForSelection(schema);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,12 +176,13 @@ export function CreateMappingPage() {
   const [targetSchemaId, setTargetSchemaId] = useState<string>(SKIP_VALUE);
 
   const [schemas, setSchemas] = useState<SchemaMetadata[]>([]);
+  const [linkedSchemaIds, setLinkedSchemaIds] = useState<string[]>([]);
   const [schemasLoading, setSchemasLoading] = useState(true);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Load project schemas for dropdowns
+  // Load shared schema library and current project linked-schema IDs.
   useEffect(() => {
     if (!projectId) return;
 
@@ -143,18 +191,24 @@ export function CreateMappingPage() {
     async function load() {
       setSchemasLoading(true);
       try {
-        const project = await adapter.getProject(projectId!);
-        const results = await Promise.allSettled(
-          project.schemaRefs.map((ref) => adapter.getSchema(ref.schemaId)),
-        );
+        const [allSchemas, project] = await Promise.all([
+          adapter.listSchemas(),
+          adapter.getProject(projectId!),
+        ]);
+
         if (cancelled) return;
-        const loaded = results
-          .filter(
-            (r): r is PromiseFulfilledResult<{ metadata: SchemaMetadata; content: unknown }> =>
-              r.status === 'fulfilled',
-          )
-          .map((r) => r.value.metadata);
-        setSchemas(loaded);
+
+        const linkedIds = [...normalizeProjectLinkedSchemaIds(project)];
+        const sorted = [...allSchemas].sort((a, b) => {
+          const aLinked = linkedIds.includes(a.schemaId);
+          const bLinked = linkedIds.includes(b.schemaId);
+
+          if (aLinked !== bLinked) return aLinked ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+
+        setLinkedSchemaIds(linkedIds);
+        setSchemas(sorted);
       } catch {
         // Non-fatal: dropdowns will just be empty
       } finally {
@@ -208,13 +262,26 @@ export function CreateMappingPage() {
     try {
       const sourceSchemaRef: SchemaRef | undefined =
         sourceSchemaId !== SKIP_VALUE
-          ? { schemaId: sourceSchemaId, type: 'local' }
+          ? schemaRefFromSelectionId(sourceSchemaId, schemas)
           : undefined;
 
       const targetSchemaRef: SchemaRef | undefined =
         targetSchemaId !== SKIP_VALUE
-          ? { schemaId: targetSchemaId, type: 'local' }
+          ? schemaRefFromSelectionId(targetSchemaId, schemas)
           : undefined;
+
+      const selectedSchemaIds = [sourceSchemaId, targetSchemaId].filter((id) => id !== SKIP_VALUE);
+      const missingLinkedSchemaIds = selectedSchemaIds.filter((id) => !linkedSchemaIds.includes(id));
+
+      if (missingLinkedSchemaIds.length > 0) {
+        try {
+          const nextLinkedSchemaIds = [...new Set([...linkedSchemaIds, ...missingLinkedSchemaIds])];
+          await adapter.updateProject(projectId, { linkedSchemaIds: nextLinkedSchemaIds });
+          setLinkedSchemaIds(nextLinkedSchemaIds);
+        } catch {
+          // Best-effort relevance update only; explicit mapping refs remain canonical.
+        }
+      }
 
       const result = await adapter.createMapping({
         projectId,
@@ -305,6 +372,7 @@ export function CreateMappingPage() {
               <SchemaSelector
                 label="Source Schema"
                 schemas={schemas}
+                linkedSchemaIds={linkedSchemaIds}
                 value={sourceSchemaId}
                 onChange={setSourceSchemaId}
                 loading={schemasLoading}
@@ -321,6 +389,7 @@ export function CreateMappingPage() {
               <SchemaSelector
                 label="Target Schema"
                 schemas={schemas}
+                linkedSchemaIds={linkedSchemaIds}
                 value={targetSchemaId}
                 onChange={setTargetSchemaId}
                 loading={schemasLoading}

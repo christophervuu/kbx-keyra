@@ -9,6 +9,7 @@ import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
+import { HttpClientError } from '@/lib/api/http-client';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ const SCHEMA_DETAIL: SchemaDetail = {
     name: 'Schema One',
     format: 'json-schema',
     fieldCount: 5,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
@@ -48,7 +49,8 @@ const PROJECT_DETAIL: ProjectDetail = {
   name: 'My Project',
   description: 'A test project',
   slug: 'my-project',
-  schemaRefs: [{ schemaId: 'schema-1', type: 'local' }],
+  schemaRefs: [{ schemaId: 'schema-1', type: 'published' }],
+  linkedSchemaIds: ['schema-1'],
   tags: ['alpha'],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
@@ -311,6 +313,7 @@ describe('ProjectOverviewPage', () => {
     const noSchemasAdapter = createMockAdapter({
       getProject: vi.fn().mockResolvedValue({
         ...PROJECT_DETAIL,
+        linkedSchemaIds: [],
         schemaRefs: [],
       }),
     });
@@ -424,8 +427,68 @@ describe('ProjectOverviewPage — layout checks', () => {
     });
 
     expect(screen.getByTestId('header-create-mapping-btn')).toBeInTheDocument();
-    expect(screen.queryByTestId('header-add-schema-btn')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /add schema/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('header-add-schema-btn')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add schema/i })).toBeInTheDocument();
+  });
+
+  it('header Add Schema button opens schema upload dialog', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('header-add-schema-btn')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('header-add-schema-btn'));
+    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
+  });
+
+  it('linked schemas dialog can unlink a schema row', async () => {
+    const user = userEvent.setup();
+    const updateProject = vi.fn().mockResolvedValue(PROJECT_DETAIL);
+    const unlinkAdapter = createMockAdapter({ updateProject });
+    renderPage(unlinkAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('linked-schemas-trigger'));
+    await user.click(screen.getByTestId('linked-schema-unlink-schema-1'));
+
+    await waitFor(() => {
+      expect(updateProject).toHaveBeenCalledWith('proj-1', { linkedSchemaIds: [] });
+    });
+  });
+
+  it('shows unlink blocked message when backend returns conflict with dependent mappings', async () => {
+    const user = userEvent.setup();
+    const conflict = new HttpClientError('Conflict', {
+      code: 'CONFLICT',
+      statusCode: 409,
+      retryable: false,
+      details: {
+        dependentMappings: [{ mappingId: 'mapping-1', name: 'Mapping One' }],
+      },
+    });
+    const unlinkAdapter = createMockAdapter({
+      updateProject: vi.fn().mockRejectedValue(conflict),
+    });
+
+    renderPage(unlinkAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('linked-schemas-trigger'));
+    await user.click(screen.getByTestId('linked-schema-unlink-schema-1'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-unlink-blocked-message')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('schema-unlink-blocked-message')).toHaveTextContent('Mapping One');
   });
 
   it('AE-02: header shows compact summary line and hides tag UI', async () => {

@@ -26,8 +26,6 @@ export interface SchemaActionsProps {
   usageMappings: UsageMapping[];
   /** Whether edit mode is currently active */
   isEditing: boolean;
-  /** Called after scope is successfully updated to 'global' */
-  onScopePromoted?: () => void;
   /** Called after successful re-sync to refresh Schema Detail state */
   onResynced?: () => void;
 }
@@ -78,12 +76,10 @@ function PlaceholderButton({
  * Context-dependent action buttons for the Schema Detail page.
  *
  * Visibility rules:
- * - CDM schemas: Re-sync (placeholder), View Raw
+ * - CDM schemas: Re-sync, View Raw
  * - Non-CDM schemas: Edit (json-schema only), Auto-describe (placeholder),
  *   Sync to GitHub (placeholder), Replace file, Remove, View Raw
- * - Project-scoped schemas: additionally Promote to Global
  *
- * Confirmation modals are shown for Promote and Remove.
  * Remove is blocked when mappings reference the schema.
  */
 export function SchemaActions({
@@ -93,7 +89,6 @@ export function SchemaActions({
   onViewRaw,
   usageMappings,
   isEditing,
-  onScopePromoted,
   onResynced,
 }: SchemaActionsProps) {
   const adapter = useAdapter();
@@ -102,23 +97,18 @@ export function SchemaActions({
   const { metadata } = schema;
   const isCdm = metadata.origin === 'cdm';
   const isJsonSchema = metadata.format === 'json-schema';
-  const isProjectScoped = metadata.scope === 'project';
   const canResync = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'resync');
   const canEdit = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'edit') && isJsonSchema && !isEditing;
   const canReplace = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'replace');
-  const canPromote = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'promote-global') && isProjectScoped;
   const canRemove = isSchemaActionAllowed(metadata.origin, 'schema-detail', 'remove');
 
   // --- Modal states ---
-  const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [showRemoveBlocked, setShowRemoveBlocked] = useState(false);
-  const [isPromoting, setIsPromoting] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [resyncMessage, setResyncMessage] = useState<string | null>(null);
-  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   async function handleResync() {
     if (!canResync) return;
@@ -134,23 +124,6 @@ export function SchemaActions({
       setResyncError('Unable to re-sync right now. Please verify repository access and try again.');
     } finally {
       setIsResyncing(false);
-    }
-  }
-
-  // --- Promote to Global ---
-  async function handlePromoteConfirm() {
-    if (!canPromote) return;
-
-    setIsPromoting(true);
-    setPromoteError(null);
-    try {
-      await adapter.updateSchema(metadata.schemaId, { scope: 'global' });
-      setShowPromoteConfirm(false);
-      onScopePromoted?.();
-    } catch (err) {
-      setPromoteError(err instanceof Error ? err.message : 'Failed to promote schema');
-    } finally {
-      setIsPromoting(false);
     }
   }
 
@@ -244,18 +217,6 @@ export function SchemaActions({
               </Button>
             )}
 
-            {/* Promote to Global (project-scoped only) */}
-            {canPromote && (
-              <Button
-                variant="secondary"
-                size="sm"
-                data-testid="action-promote"
-                onClick={() => setShowPromoteConfirm(true)}
-              >
-                Promote to Global
-              </Button>
-            )}
-
             {/* Remove */}
             {canRemove && (
               <Button
@@ -310,34 +271,6 @@ export function SchemaActions({
           {resyncMessage}
         </p>
       )}
-
-      {/* ---- Promote confirmation ---- */}
-      <ConfirmDialog
-        open={showPromoteConfirm}
-        title="Promote schema to Global?"
-        message={
-          <span>
-            This will make the schema available to all projects. This action cannot be
-            undone.
-            {promoteError && (
-              <span
-                role="alert"
-                data-testid="promote-error"
-                className="mt-2 block text-red-400"
-              >
-                {promoteError}
-              </span>
-            )}
-          </span>
-        }
-        confirmLabel={isPromoting ? 'Promoting…' : 'Promote'}
-        cancelLabel="Cancel"
-        onConfirm={() => void handlePromoteConfirm()}
-        onCancel={() => {
-          setShowPromoteConfirm(false);
-          setPromoteError(null);
-        }}
-      />
 
       {/* ---- Remove confirmation (no blockers) ---- */}
       <ConfirmDialog

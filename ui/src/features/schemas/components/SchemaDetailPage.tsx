@@ -33,13 +33,17 @@ export interface SchemaDetailPageProps {
 function OriginBadge({ origin }: { origin: SchemaMetadata['origin'] }) {
   const styles: Record<SchemaMetadata['origin'], string> = {
     cdm: 'bg-purple-900/50 text-purple-300 border border-purple-700',
+    uploaded: 'bg-blue-900/50 text-blue-300 border border-blue-700',
+    inferred: 'bg-amber-900/50 text-amber-300 border border-amber-700',
     published: 'bg-blue-900/50 text-blue-300 border border-blue-700',
-    local: 'bg-slate-700 text-slate-300 border border-slate-600',
+    local: 'bg-blue-900/50 text-blue-300 border border-blue-700',
   };
   const labels: Record<SchemaMetadata['origin'], string> = {
     cdm: getSchemaOriginLabel('cdm'),
-    published: 'Published',
-    local: 'Local',
+    uploaded: 'Uploaded',
+    inferred: 'Inferred',
+    published: 'Uploaded',
+    local: 'Uploaded',
   };
   const className =
     styles[origin] ?? 'bg-slate-700 text-slate-300 border border-slate-600';
@@ -50,24 +54,6 @@ function OriginBadge({ origin }: { origin: SchemaMetadata['origin'] }) {
       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${className}`}
     >
       {label}
-    </span>
-  );
-}
-
-function ScopeBadge({ scope }: { scope: SchemaMetadata['scope'] }) {
-  const styles: Record<SchemaMetadata['scope'], string> = {
-    global: 'bg-green-900/50 text-green-300 border border-green-700',
-    project: 'bg-amber-900/50 text-amber-300 border border-amber-700',
-  };
-  const labels: Record<SchemaMetadata['scope'], string> = {
-    global: 'Global',
-    project: 'Project-Level',
-  };
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[scope]}`}
-    >
-      {labels[scope]}
     </span>
   );
 }
@@ -174,7 +160,7 @@ interface MetadataSectionProps {
 
 function MetadataSection({ metadata, onUpdateName, onUpdateDescription }: MetadataSectionProps) {
   const isEditable = metadata.origin !== 'cdm';
-  const formatLabel = metadata.format === 'json-schema' ? 'JSON Schema' : 'XSD';
+  const formatLabel = metadata.format === 'json-schema' ? 'JSON' : 'XSD';
 
   return (
     <section
@@ -199,7 +185,6 @@ function MetadataSection({ metadata, onUpdateName, onUpdateDescription }: Metada
       {/* Badges */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <OriginBadge origin={metadata.origin} />
-        <ScopeBadge scope={metadata.scope} />
         <span className="text-xs text-slate-500">{formatLabel}</span>
         <span className="text-xs text-slate-500">{metadata.fieldCount} fields</span>
       </div>
@@ -426,7 +411,6 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
         onViewRaw={() => setShowViewRaw(true)}
         usageMappings={usageMappings}
         isEditing={isEditing}
-        onScopePromoted={() => void retry()}
         onResynced={() => void retry()}
       />
 

@@ -34,7 +34,7 @@ function deriveSyncStatus(schema: SchemaMetadata): SyncStatus {
 function deriveDisplayFormat(schema: SchemaMetadata): DisplayFormat {
   if (schema.inferred === true) return 'Inferred';
   if (schema.format === 'xsd') return 'XSD';
-  return 'JSON Schema';
+  return 'JSON';
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,6 @@ const DEFAULT_FILTERS: SchemaLibraryFilters = {
   search: '',
   origins: [],
   formats: [],
-  scopes: [],
 };
 
 const DEFAULT_SORT: SchemaLibrarySort = {
@@ -70,7 +69,6 @@ export interface UseSchemaLibraryResult {
   setSearch: (term: string) => void;
   toggleOriginFilter: (origin: SchemaOrigin) => void;
   toggleFormatFilter: (format: DisplayFormat) => void;
-  toggleScopeFilter: (scope: 'global' | 'project') => void;
   /** If direction is omitted and the same field is already selected, toggles direction. */
   setSort: (field: SortField, direction?: SortDirection) => void;
   clearFilters: () => void;
@@ -141,7 +139,6 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
             name: schema.name,
             description: schema.description,
             origin: schema.origin,
-            scope: schema.scope,
             format: schema.format,
             displayFormat: deriveDisplayFormat(schema),
             fieldCount: schema.fieldCount,
@@ -203,15 +200,6 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     }));
   }, []);
 
-  const toggleScopeFilter = useCallback((scope: 'global' | 'project') => {
-    setFilters((f) => ({
-      ...f,
-      scopes: f.scopes.includes(scope)
-        ? f.scopes.filter((s) => s !== scope)
-        : [...f.scopes, scope],
-    }));
-  }, []);
-
   const setSort = useCallback((field: SortField, direction?: SortDirection) => {
     setSort_((current) => {
       if (direction != null) {
@@ -244,7 +232,6 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     setSearch,
     toggleOriginFilter,
     toggleFormatFilter,
-    toggleScopeFilter,
     setSort,
     clearFilters,
     retry,

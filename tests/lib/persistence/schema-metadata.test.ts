@@ -23,7 +23,6 @@ function makeCreateInput(overrides: Partial<CreateSchemaMetadataInput> = {}): Cr
     format: 'json-schema',
     fieldCount: 0,
     origin: 'local',
-    scope: 'project',
     source: {
       type: 'upload',
     },
@@ -37,9 +36,8 @@ function makeItem(overrides: Partial<SchemaMetadataItem> = {}): SchemaMetadataIt
     name: 'Order Schema',
     format: 'json-schema',
     fieldCount: 25,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
-    scope: 'project',
     syncStatus: 'not-synced',
     source: { type: 'upload' },
     createdAt: '2026-05-15T00:00:00.000Z',
@@ -72,6 +70,8 @@ describe('persistence schema-metadata', () => {
 
     expect(result.schemaId).toBe('schema-created-1');
     expect(result.status).toBe('ingesting');
+    expect(result.origin).toBe('uploaded');
+    expect(result.scope).toBeUndefined();
     expect(result.syncStatus).toBe('not-synced');
     expect(result.createdAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(result.updatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);

@@ -3,21 +3,36 @@ import {
   ERROR_CODES,
   S3ServiceError,
   errorResponse,
+  getItem,
   internalError,
   jsonResponse,
+  notFound,
   parseBody,
   putItem,
   putObject,
   requireFields,
+  updateItem,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import { normalizeSchemaOrigin, type CanonicalSchemaOrigin, type SchemaOrigin } from '../../lib/persistence/types.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
-type SchemaOrigin = 'cdm' | 'published' | 'local';
 type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 type SchemaScope = 'global' | 'project';
 type SchemaSyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
+
+interface SchemaRef {
+  readonly schemaId: string;
+  readonly type: 'github' | 'local' | 'published';
+  readonly commitSha?: string;
+}
+
+interface ProjectRecord {
+  readonly projectId: string;
+  readonly schemaRefs?: readonly SchemaRef[];
+  readonly linkedSchemaIds?: readonly string[];
+}
 
 interface SchemaNodeRecord {
   readonly schemaId: string;
@@ -52,9 +67,9 @@ interface SchemaMetadata {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly fieldCount: number;
-  readonly origin: SchemaOrigin;
+  readonly origin: CanonicalSchemaOrigin;
   readonly status: SchemaIngestStatus;
-  readonly scope: SchemaScope;
+  readonly scope?: SchemaScope;
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
@@ -74,6 +89,7 @@ function getEnvValue(key: string): string | undefined {
 const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const SCHEMA_NODES_TABLE = getEnvValue('SCHEMA_NODES_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
+const PROJECTS_TABLE = getEnvValue('PROJECTS_TABLE');
 
 function getSchemasTableOrThrow(): string {
   const table = SCHEMAS_TABLE?.trim();
@@ -102,6 +118,15 @@ function getContentBucketOrThrow(): string {
   return bucket;
 }
 
+function getProjectsTableOrThrow(): string {
+  const table = PROJECTS_TABLE?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: PROJECTS_TABLE');
+  }
+
+  return table;
+}
+
 function generateSchemaId(): string {
   const cryptoRef = globalThis.crypto as { randomUUID?: () => string } | undefined;
   if (cryptoRef && typeof cryptoRef.randomUUID === 'function') {
@@ -124,7 +149,7 @@ function asSchemaFormat(value: unknown): SchemaFormat | null {
 }
 
 function asSchemaOrigin(value: unknown): SchemaOrigin | null {
-  if (value === 'cdm' || value === 'published' || value === 'local') {
+  if (value === 'cdm' || value === 'inferred' || value === 'uploaded' || value === 'published' || value === 'local') {
     return value;
   }
 
@@ -133,6 +158,31 @@ function asSchemaOrigin(value: unknown): SchemaOrigin | null {
 
 function asSchemaScope(value: unknown): SchemaScope {
   return value === 'global' ? 'global' : 'project';
+}
+
+function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds' | 'schemaRefs'>): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((ref) => ref.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 function asSchemaSyncStatus(value: unknown): SchemaSyncStatus {
@@ -356,14 +406,16 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ? (format === 'json-schema' ? generateJsonSchemaNodes(schemaId, content) : generateXsdNodes(schemaId, content))
       : [];
 
+    const projectId = typeof body?.projectId === 'string' && body.projectId.trim() !== '' ? body.projectId.trim() : undefined;
+
     const metadata: SchemaMetadata = {
       schemaId,
       name: String(body?.name ?? ''),
       format,
       fieldCount: inline ? nodes.length : 0,
-      origin,
+      origin: normalizeSchemaOrigin(origin),
       status: inline ? 'ready' : 'ingesting',
-      scope: asSchemaScope(body?.scope),
+      ...(body?.scope !== undefined ? { scope: asSchemaScope(body?.scope) } : {}),
       ...(typeof body?.description === 'string' ? { description: body.description } : {}),
       ...(typeof body?.updatedBy === 'string' ? { updatedBy: body.updatedBy } : {}),
       inferred: typeof body?.inferred === 'boolean' ? body.inferred : false,
@@ -394,6 +446,52 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       }
     } else {
       console.log('Schema async ingestion kickoff intended', { schemaId, estimatedFieldCount: estimated });
+    }
+
+    if (projectId) {
+      const project = await getItem<ProjectRecord>({
+        TableName: getProjectsTableOrThrow(),
+        Key: { projectId },
+      });
+
+      if (!project) {
+        const err = notFound('Project', projectId);
+        return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+      }
+
+      const currentSchemaRefs = project.schemaRefs ?? [];
+      const hasSchemaRef = currentSchemaRefs.some((schemaRef) => schemaRef.schemaId === schemaId);
+      const nextSchemaRefs = hasSchemaRef
+        ? currentSchemaRefs
+        : [
+            ...currentSchemaRefs,
+            {
+              schemaId,
+              type: metadata.source.type === 'github' ? 'github' : 'published',
+            },
+          ];
+
+      const currentLinkedSchemaIds = normalizeLinkedSchemaIds(project);
+      const nextLinkedSchemaIds = currentLinkedSchemaIds.includes(schemaId)
+        ? currentLinkedSchemaIds
+        : [...currentLinkedSchemaIds, schemaId];
+
+      await updateItem({
+        TableName: getProjectsTableOrThrow(),
+        Key: { projectId },
+        UpdateExpression: 'SET #schemaRefs = :schemaRefs, #linkedSchemaIds = :linkedSchemaIds, #updatedAt = :updatedAt',
+        ExpressionAttributeNames: {
+          '#schemaRefs': 'schemaRefs',
+          '#linkedSchemaIds': 'linkedSchemaIds',
+          '#updatedAt': 'updatedAt',
+        },
+        ExpressionAttributeValues: {
+          ':schemaRefs': nextSchemaRefs,
+          ':linkedSchemaIds': nextLinkedSchemaIds,
+          ':updatedAt': new Date().toISOString(),
+        },
+        ReturnValues: 'ALL_NEW',
+      });
     }
 
     return jsonResponse(201, metadata);

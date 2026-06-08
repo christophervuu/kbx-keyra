@@ -6,16 +6,16 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
+import { normalizeSchemaOrigin, normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
 
 interface SchemaMetadata {
   readonly schemaId: string;
   readonly name: string;
   readonly format: 'json-schema' | 'xsd';
   readonly fieldCount: number;
-  readonly origin: 'cdm' | 'published' | 'local';
+  readonly origin: 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
   readonly status: 'ingesting' | 'ready' | 'error';
-  readonly scope: 'global' | 'project';
+  readonly scope?: 'global' | 'project';
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
@@ -52,6 +52,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const normalizedSchemas = schemas.map((schema) => ({
       ...schema,
+      origin: normalizeSchemaOrigin(schema.origin),
       syncStatus: normalizeSchemaSyncStatus(schema.syncStatus),
     }));
 

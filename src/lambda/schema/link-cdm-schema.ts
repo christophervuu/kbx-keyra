@@ -45,6 +45,7 @@ interface ProjectRecord {
   readonly description: string;
   readonly slug: string;
   readonly schemaRefs: readonly ProjectSchemaRef[];
+  readonly linkedSchemaIds?: readonly string[];
   readonly tags: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -64,9 +65,9 @@ interface SchemaMetadataRecord {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly fieldCount: number;
-  readonly origin: 'cdm' | 'published' | 'local';
+  readonly origin: 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
   readonly status: 'ingesting' | 'ready' | 'error';
-  readonly scope: 'global' | 'project';
+  readonly scope?: 'global' | 'project';
   readonly description?: string;
   readonly inferred?: boolean;
   readonly syncStatus: SchemaSyncStatus;
@@ -175,6 +176,31 @@ function generateSchemaId(): string {
   }
 
   return `schema-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds' | 'schemaRefs'>): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((ref) => ref.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 function toGitHubContentFileResponse(payload: unknown): GitHubContentFileResponse | 'invalid' {
@@ -306,16 +332,23 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           },
         ];
 
+        const currentLinkedSchemaIds = normalizeLinkedSchemaIds(project);
+        const nextLinkedSchemaIds = currentLinkedSchemaIds.includes(existing.schemaId)
+          ? currentLinkedSchemaIds
+          : [...currentLinkedSchemaIds, existing.schemaId];
+
         await updateItem({
           TableName: getProjectsTableOrThrow(),
           Key: { projectId },
-          UpdateExpression: 'SET #schemaRefs = :schemaRefs, #updatedAt = :updatedAt',
+          UpdateExpression: 'SET #schemaRefs = :schemaRefs, #linkedSchemaIds = :linkedSchemaIds, #updatedAt = :updatedAt',
           ExpressionAttributeNames: {
             '#schemaRefs': 'schemaRefs',
+            '#linkedSchemaIds': 'linkedSchemaIds',
             '#updatedAt': 'updatedAt',
           },
           ExpressionAttributeValues: {
             ':schemaRefs': updatedRefs,
+            ':linkedSchemaIds': nextLinkedSchemaIds,
             ':updatedAt': new Date().toISOString(),
           },
           ReturnValues: 'ALL_NEW',
@@ -440,16 +473,23 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       },
     ];
 
+    const currentLinkedSchemaIds = normalizeLinkedSchemaIds(project);
+    const nextLinkedSchemaIds = currentLinkedSchemaIds.includes(schemaId)
+      ? currentLinkedSchemaIds
+      : [...currentLinkedSchemaIds, schemaId];
+
     await updateItem({
       TableName: getProjectsTableOrThrow(),
       Key: { projectId },
-      UpdateExpression: 'SET #schemaRefs = :schemaRefs, #updatedAt = :updatedAt',
+      UpdateExpression: 'SET #schemaRefs = :schemaRefs, #linkedSchemaIds = :linkedSchemaIds, #updatedAt = :updatedAt',
       ExpressionAttributeNames: {
         '#schemaRefs': 'schemaRefs',
+        '#linkedSchemaIds': 'linkedSchemaIds',
         '#updatedAt': 'updatedAt',
       },
       ExpressionAttributeValues: {
         ':schemaRefs': updatedRefs,
+        ':linkedSchemaIds': nextLinkedSchemaIds,
         ':updatedAt': new Date().toISOString(),
       },
       ReturnValues: 'ALL_NEW',

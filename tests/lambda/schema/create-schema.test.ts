@@ -18,8 +18,11 @@ const sharedMocks = vi.hoisted(() => {
   return {
     parseBody: vi.fn(),
     requireFields: vi.fn(),
+    getItem: vi.fn(),
     putItem: vi.fn(),
     putObject: vi.fn(),
+    updateItem: vi.fn(),
+    notFound: vi.fn(),
     jsonResponse: vi.fn(),
     errorResponse: vi.fn(),
     internalError: vi.fn(),
@@ -53,6 +56,7 @@ describe('create-schema handler', () => {
     env.SCHEMAS_TABLE = 'Schemas';
     env.SCHEMA_NODES_TABLE = 'SchemaNodes';
     env.CONTENT_BUCKET = 'Content';
+    env.PROJECTS_TABLE = 'Projects';
 
     sharedMocks.parseBody.mockReset().mockReturnValue({
       name: 'Small Schema',
@@ -67,8 +71,11 @@ describe('create-schema handler', () => {
       },
     });
     sharedMocks.requireFields.mockReset().mockReturnValue({ ok: true });
+    sharedMocks.getItem.mockReset().mockResolvedValue(null);
     sharedMocks.putItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
+    sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
+    sharedMocks.notFound.mockReset().mockReturnValue({ code: 'RESOURCE_NOT_FOUND', message: 'missing', statusCode: 404, retryable: false, requestId: 'req-missing' });
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse
       .mockReset()
@@ -89,6 +96,7 @@ describe('create-schema handler', () => {
     const parsed = JSON.parse(result.body) as { status: string; fieldCount: number };
     expect(parsed.status).toBe('ready');
     expect(parsed.fieldCount).toBe(2);
+    expect((parsed as { origin?: string }).origin).toBe('uploaded');
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(3); // metadata + 2 nodes
 
     const firstNodePut = sharedMocks.putItem.mock.calls[1]?.[0] as { Item?: Record<string, unknown> } | undefined;
@@ -216,5 +224,39 @@ describe('create-schema handler', () => {
       true,
       'req-dynamo',
     );
+  });
+
+  it('upload with projectId links schema to project linkage fields', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'Project Upload',
+      format: 'json-schema',
+      origin: 'local',
+      projectId: 'proj-1',
+      content: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+    });
+    sharedMocks.getItem.mockResolvedValue({
+      projectId: 'proj-1',
+      schemaRefs: [],
+      linkedSchemaIds: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    expect(sharedMocks.updateItem).toHaveBeenCalledTimes(1);
+    const updateCall = sharedMocks.updateItem.mock.calls[0]?.[0] as {
+      ExpressionAttributeValues?: Record<string, unknown>;
+    };
+    expect(Array.isArray(updateCall.ExpressionAttributeValues?.[':schemaRefs'])).toBe(true);
+    expect(Array.isArray(updateCall.ExpressionAttributeValues?.[':linkedSchemaIds'])).toBe(true);
+
+    const refs = updateCall.ExpressionAttributeValues?.[':schemaRefs'] as Array<{ type: string }>;
+    expect(refs.at(-1)?.type).toBe('published');
   });
 });

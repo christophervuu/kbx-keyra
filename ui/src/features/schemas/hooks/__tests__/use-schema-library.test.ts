@@ -18,9 +18,8 @@ function makeSchemaMeta(overrides: Partial<SchemaMetadata> = {}): SchemaMetadata
     name: 'Schema One',
     format: 'json-schema',
     fieldCount: 10,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
-    scope: 'project',
     syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
@@ -40,6 +39,7 @@ function makeProjectDetail(
     slug: 'project-one',
     tags: [],
     schemaRefs: schemaIds.map((id) => ({ schemaId: id, type: 'local' as const })),
+    linkedSchemaIds: schemaIds,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     mappings: [],
@@ -143,7 +143,7 @@ describe('useSchemaLibrary', () => {
     const item = result.current.items[0];
     expect(item.schemaId).toBe('schema-1');
     expect(item.name).toBe('Schema One');
-    expect(item.displayFormat).toBe('JSON Schema');
+    expect(item.displayFormat).toBe('JSON');
   });
 
   it('transitions to error state when adapter fails', async () => {
@@ -281,10 +281,10 @@ describe('useSchemaLibrary', () => {
 
   describe('filter/sort state updates', () => {
     async function setupHook() {
-      const schemas = [
-        makeSchemaMeta({ schemaId: '1', name: 'Alpha', origin: 'local', scope: 'project', format: 'json-schema' }),
-        makeSchemaMeta({ schemaId: '2', name: 'Beta', origin: 'published', scope: 'global', format: 'xsd' }),
-        makeSchemaMeta({ schemaId: '3', name: 'Gamma', origin: 'cdm', scope: 'global', format: 'json-schema' }),
+        const schemas = [
+        makeSchemaMeta({ schemaId: '1', name: 'Alpha', origin: 'uploaded', format: 'json-schema' }),
+        makeSchemaMeta({ schemaId: '2', name: 'Beta', origin: 'uploaded', format: 'xsd' }),
+        makeSchemaMeta({ schemaId: '3', name: 'Gamma', origin: 'cdm', format: 'json-schema' }),
       ];
 
       const adapter = createMockAdapter({
@@ -315,15 +315,15 @@ describe('useSchemaLibrary', () => {
       const { result } = await setupHook();
 
       act(() => {
-        result.current.toggleOriginFilter('local');
+        result.current.toggleOriginFilter('uploaded');
       });
-      expect(result.current.filters.origins).toContain('local');
-      expect(result.current.filteredItems).toHaveLength(1);
+      expect(result.current.filters.origins).toContain('uploaded');
+      expect(result.current.filteredItems).toHaveLength(2);
 
       act(() => {
-        result.current.toggleOriginFilter('local');
+        result.current.toggleOriginFilter('uploaded');
       });
-      expect(result.current.filters.origins).not.toContain('local');
+      expect(result.current.filters.origins).not.toContain('uploaded');
       expect(result.current.filteredItems).toHaveLength(3);
     });
 
@@ -338,22 +338,12 @@ describe('useSchemaLibrary', () => {
       expect(result.current.filteredItems[0].schemaId).toBe('2');
     });
 
-    it('toggleScopeFilter filters by scope', async () => {
-      const { result } = await setupHook();
-
-      act(() => {
-        result.current.toggleScopeFilter('global');
-      });
-
-      expect(result.current.filteredItems).toHaveLength(2);
-    });
-
     it('clearFilters resets all filters', async () => {
       const { result } = await setupHook();
 
       act(() => {
         result.current.setSearch('alpha');
-        result.current.toggleOriginFilter('local');
+        result.current.toggleOriginFilter('uploaded');
       });
 
       act(() => {

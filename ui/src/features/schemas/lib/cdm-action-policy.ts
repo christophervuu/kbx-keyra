@@ -9,8 +9,7 @@ export type SchemaUiAction =
   | 'edit'
   | 'replace'
   | 'remove'
-  | 'publish'
-  | 'promote-global';
+  | 'publish';
 
 const CDM_ALLOWED_ACTIONS: Record<SchemaActionSurface, readonly SchemaUiAction[]> = {
   'project-overview': ['view', 'resync', 'unlink'],

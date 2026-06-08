@@ -24,7 +24,6 @@ function makeProjectSchema(overrides: Partial<SchemaCardData> = {}): SchemaCardD
     format: 'json-schema',
     origin: 'cdm',
     sourceType: 'github',
-    scope: 'project-level',
     fieldCount: 12,
     syncStatus: 'synced',
     isInferred: false,
@@ -38,9 +37,8 @@ function makeLibraryItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibr
     name: 'CDM Customer',
     description: 'Canonical CDM fixture',
     origin: 'cdm',
-    scope: 'global',
     format: 'json-schema',
-    displayFormat: 'JSON Schema',
+    displayFormat: 'JSON',
     fieldCount: 12,
     syncStatus: 'synced',
     projectCount: 2,
@@ -60,7 +58,6 @@ function makeDetailSchema(overrides: Partial<SchemaDetail['metadata']> = {}): Sc
       fieldCount: 12,
       origin: 'cdm',
       status: 'ready',
-      scope: 'global',
       description: 'Canonical CDM fixture',
       syncStatus: 'synced',
       source: {
@@ -210,7 +207,6 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
     expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('action-promote')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /unlink/i })).not.toBeInTheDocument();
   });

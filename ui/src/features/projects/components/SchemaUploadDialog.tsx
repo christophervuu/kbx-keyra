@@ -20,7 +20,7 @@ function stripExtension(filename: string): string {
 
 function formatLabel(fmt: DetectedFormat): string {
   switch (fmt) {
-    case 'json-schema': return 'JSON Schema';
+    case 'json-schema': return 'JSON';
     case 'xsd': return 'XSD';
     case 'sample-json': return 'Sample JSON';
     case 'sample-xml': return 'Sample XML';
@@ -50,8 +50,6 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type SchemaScope = 'global' | 'project-level';
 
 type InputMode = 'file' | 'paste';
 
@@ -208,7 +206,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   // Shared state
   const [schemaName, setSchemaName] = useState('');
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
-  const [scope, setScope] = useState<SchemaScope>('project-level');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -232,7 +229,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       setPasteError(null);
       setSchemaName('');
       setNameManuallyEdited(false);
-      setScope('project-level');
       setUploading(false);
       setUploadError(null);
       polling.reset();
@@ -443,22 +439,21 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       const created = await adapter.createSchema({
         name: schemaName.trim(),
         format: adapterFormat,
-        origin: scope === 'global' ? 'library' : 'local',
+        origin: activeInfo.isInferredFlag ? 'inferred' : 'uploaded',
         content: content,
-        fieldCount: activeInfo.fieldCount,
         inferred: activeInfo.isInferredFlag,
         source: { type: 'upload' },
       });
 
       if (created.status === 'ingesting') {
         // 202 async ingestion path — start polling
-        const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
+        const ref: SchemaRef = { schemaId: created.schemaId, type: 'published' };
         pendingSchemaRefRef.current = ref;
         polling.startPolling(created.schemaId);
         // Don't close yet — wait for polling to resolve
       } else {
         // 201 immediate success path
-        const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
+        const ref: SchemaRef = { schemaId: created.schemaId, type: 'published' };
         await onSchemaCreated(ref);
         onClose();
       }
@@ -642,37 +637,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
             data-testid="schema-name-input"
           />
         </div>
-
-        {/* Scope selection */}
-        <fieldset className="mb-4">
-          <legend className="mb-2 text-xs font-medium text-slate-400">Schema Scope</legend>
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="schema-scope"
-                value="global"
-                checked={scope === 'global'}
-                onChange={() => setScope('global')}
-                className="accent-blue-500"
-                data-testid="scope-global"
-              />
-              Global — available to all projects
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="schema-scope"
-                value="project-level"
-                checked={scope === 'project-level'}
-                onChange={() => setScope('project-level')}
-                className="accent-blue-500"
-                data-testid="scope-project-level"
-              />
-              Project-Level — only available in this project
-            </label>
-          </div>
-        </fieldset>
 
         {/* Polling: processing state */}
         {isPolling && (

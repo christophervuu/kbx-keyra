@@ -24,8 +24,10 @@ const ORIGIN_CONFIG: Record<
   { emoji: string; label: string; className: string }
 > = {
   cdm: { emoji: '📚', label: getSchemaOriginLabel('cdm'), className: 'bg-purple-100 text-purple-800' },
-  published: { emoji: '📄', label: 'Published', className: 'bg-blue-100 text-blue-800' },
-  local: { emoji: '💾', label: 'Local', className: 'bg-green-100 text-green-800' },
+  uploaded: { emoji: '📤', label: 'Uploaded', className: 'bg-blue-100 text-blue-800' },
+  inferred: { emoji: '✨', label: 'Inferred', className: 'bg-amber-100 text-amber-800' },
+  published: { emoji: '📤', label: 'Uploaded', className: 'bg-blue-100 text-blue-800' },
+  local: { emoji: '📤', label: 'Uploaded', className: 'bg-blue-100 text-blue-800' },
 };
 
 function OriginBadge({ origin }: OriginBadgeProps) {
@@ -40,23 +42,6 @@ function OriginBadge({ origin }: OriginBadgeProps) {
     >
       <span aria-hidden="true">{config.emoji}</span>
       {config.label}
-    </span>
-  );
-}
-
-interface ScopeBadgeProps {
-  scope: SchemaLibraryItem['scope'];
-}
-
-function ScopeBadge({ scope }: ScopeBadgeProps) {
-  const isGlobal = scope === 'global';
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        isGlobal ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-700'
-      }`}
-    >
-      {isGlobal ? 'Global' : 'Project-Level'}
     </span>
   );
 }
@@ -120,7 +105,6 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
       {/* Badges */}
       <div className="flex flex-wrap items-center gap-2">
         <OriginBadge origin={item.origin} />
-        <ScopeBadge scope={item.scope} />
       </div>
 
       {/* Description */}

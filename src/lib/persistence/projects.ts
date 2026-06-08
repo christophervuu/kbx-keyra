@@ -3,6 +3,7 @@ import { DeleteCommand, GetCommand, PutCommand, ScanCommand, UpdateCommand } fro
 import { dynamoClient } from './clients.js';
 import { TABLE_NAMES } from './config.js';
 import type { CreateProjectInput, ProjectItem, UpdateProjectInput } from './types.js';
+import { normalizeProjectLinkedSchemaIds } from './types.js';
 
 type ProjectUpdatableField = keyof UpdateProjectInput;
 
@@ -28,7 +29,7 @@ function buildProjectUpdateExpression(
   };
   const updates: string[] = ['#updatedAt = :updatedAt'];
 
-  const updatableKeys: readonly ProjectUpdatableField[] = ['name', 'description', 'slug', 'schemaRefs', 'tags'];
+  const updatableKeys: readonly ProjectUpdatableField[] = ['name', 'description', 'slug', 'linkedSchemaIds', 'schemaRefs', 'tags'];
 
   for (const key of updatableKeys) {
     const value = fields[key];
@@ -53,12 +54,19 @@ function buildProjectUpdateExpression(
 export async function create(input: CreateProjectInput): Promise<ProjectItem> {
   const timestamp = nowIso();
 
+  const schemaRefs = input.schemaRefs ?? [];
+  const linkedSchemaIds = normalizeProjectLinkedSchemaIds({
+    linkedSchemaIds: input.linkedSchemaIds,
+    schemaRefs,
+  });
+
   const item: ProjectItem = {
     projectId: createProjectId(),
     name: input.name,
     description: input.description,
     slug: input.slug,
-    schemaRefs: input.schemaRefs ?? [],
+    linkedSchemaIds,
+    schemaRefs,
     tags: input.tags ?? [],
     createdAt: timestamp,
     updatedAt: timestamp,

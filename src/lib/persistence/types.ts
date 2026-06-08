@@ -38,10 +38,22 @@ export type MappingStatus = 'draft' | 'ready' | 'has-errors';
 
 export type SchemaFormat = 'json-schema' | 'xsd';
 
-export type SchemaOrigin = 'cdm' | 'published' | 'local';
+/**
+ * Legacy-compatible persisted origin values.
+ *
+ * Canonical FS-087 values are: `cdm | uploaded | inferred`.
+ * Legacy aliases (`published`, `local`) are accepted on read and normalized.
+ */
+export type SchemaOrigin = 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
+
+export type CanonicalSchemaOrigin = 'cdm' | 'uploaded' | 'inferred';
 
 export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 
+/**
+ * @deprecated FS-087 compatibility-only field.
+ * Scope must not drive schema availability behavior.
+ */
 export type SchemaScope = 'global' | 'project';
 
 /**
@@ -181,6 +193,13 @@ export interface ProjectItem {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  /**
+   * Canonical FS-087 linkage model.
+   */
+  readonly linkedSchemaIds?: readonly string[];
+  /**
+   * @deprecated Legacy rich linkage payload retained for compatibility.
+   */
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: ISODateString;
@@ -219,7 +238,10 @@ export interface SchemaMetadataItem {
   readonly fieldCount: number;
   readonly origin: SchemaOrigin;
   readonly status: SchemaIngestStatus;
-  readonly scope: SchemaScope;
+  /**
+   * @deprecated FS-087 compatibility-only field.
+   */
+  readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
   readonly syncStatus: SchemaSyncStatus;
@@ -540,6 +562,7 @@ export interface CreateProjectInput {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs?: readonly SchemaRef[];
   readonly tags?: readonly string[];
 }
@@ -548,6 +571,7 @@ export interface UpdateProjectInput {
   readonly name?: string;
   readonly description?: string;
   readonly slug?: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs?: readonly SchemaRef[];
   readonly tags?: readonly string[];
 }
@@ -580,7 +604,10 @@ export interface CreateSchemaMetadataInput {
   readonly fieldCount: number;
   readonly origin: SchemaOrigin;
   readonly status?: SchemaIngestStatus;
-  readonly scope: SchemaScope;
+  /**
+   * @deprecated FS-087 compatibility-only field.
+   */
+  readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
   readonly syncStatus?: SchemaSyncStatus;
@@ -602,6 +629,7 @@ export interface ProjectDetail {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds: readonly string[];
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: ISODateString;
@@ -627,9 +655,12 @@ export interface SchemaMetadata {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly fieldCount: number;
-  readonly origin: SchemaOrigin;
+  readonly origin: CanonicalSchemaOrigin;
   readonly status: SchemaIngestStatus;
-  readonly scope: SchemaScope;
+  /**
+   * @deprecated FS-087 compatibility-only field.
+   */
+  readonly scope?: SchemaScope;
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
@@ -649,12 +680,40 @@ export function toProjectMetadata(item: ProjectItem): ProjectMetadata {
   };
 }
 
+export function normalizeProjectLinkedSchemaIds(
+  project: Pick<ProjectItem, 'linkedSchemaIds' | 'schemaRefs'>,
+): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((ref) => ref.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
 export function toProjectDetail(item: ProjectItem, mappings: readonly MappingMetadata[] = []): ProjectDetail {
   return {
     projectId: item.projectId,
     name: item.name,
     description: item.description,
     slug: item.slug,
+    linkedSchemaIds: normalizeProjectLinkedSchemaIds(item),
     schemaRefs: item.schemaRefs,
     tags: item.tags,
     createdAt: item.createdAt,
@@ -679,15 +738,29 @@ export function toMappingMetadata(item: MappingItem): MappingMetadata {
   };
 }
 
+export function normalizeSchemaOrigin(
+  value: SchemaOrigin | string | null | undefined,
+): CanonicalSchemaOrigin {
+  if (value === 'cdm') {
+    return 'cdm';
+  }
+
+  if (value === 'inferred') {
+    return 'inferred';
+  }
+
+  return 'uploaded';
+}
+
 export function toSchemaMetadata(item: SchemaMetadataItem): SchemaMetadata {
   return {
     schemaId: item.schemaId,
     name: item.name,
     format: item.format,
     fieldCount: item.fieldCount,
-    origin: item.origin,
+    origin: normalizeSchemaOrigin(item.origin),
     status: item.status,
-    scope: item.scope,
+    ...(item.scope !== undefined ? { scope: item.scope } : {}),
     description: item.description,
     inferred: item.inferred,
     syncStatus: normalizeSchemaSyncStatus(item.syncStatus),

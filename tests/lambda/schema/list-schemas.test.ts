@@ -30,7 +30,7 @@ describe('list-schemas handler', () => {
     getEnvStore().SCHEMAS_TABLE = 'Schemas';
 
     sharedMocks.scan.mockReset().mockResolvedValue([
-      { schemaId: 's1', name: 'Schema 1', syncStatus: 'local-changes' },
+      { schemaId: 's1', name: 'Schema 1', origin: 'local', syncStatus: 'local-changes' },
       { schemaId: 's2', name: 'Schema 2', syncStatus: 'synced' },
     ]);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
@@ -45,6 +45,7 @@ describe('list-schemas handler', () => {
     expect(result.statusCode).toBe(200);
     const parsed = JSON.parse(result.body) as Array<{ schemaId: string; syncStatus?: string }>;
     expect(parsed).toHaveLength(2);
+    expect((parsed[0] as { origin?: string }).origin).toBe('uploaded');
     expect(parsed[0]?.syncStatus).toBe('sync-failed');
     expect(parsed[1]?.syncStatus).toBe('synced');
   });

@@ -26,10 +26,9 @@ function makeItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibraryItem
     schemaId: 'schema-abc',
     name: 'Customer Schema',
     description: 'Holds customer data',
-    origin: 'local',
-    scope: 'project',
+    origin: 'uploaded',
     format: 'json-schema',
-    displayFormat: 'JSON Schema',
+    displayFormat: 'JSON',
     fieldCount: 12,
     syncStatus: 'local',
     projectCount: 2,
@@ -73,8 +72,8 @@ describe('SchemaLibraryCard', () => {
   });
 
   it('renders the display format', () => {
-    renderCard(makeItem({ displayFormat: 'JSON Schema' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('JSON Schema');
+    renderCard(makeItem({ displayFormat: 'JSON' }));
+    expect(screen.getByTestId('display-format')).toHaveTextContent('JSON');
   });
 
   it('renders XSD format', () => {
@@ -121,14 +120,14 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
   });
 
-  it('renders Published origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'published' }));
-    expect(screen.getByText('Published')).toBeInTheDocument();
+  it('renders Uploaded origin badge with correct text', () => {
+    renderCard(makeItem({ origin: 'uploaded' }));
+    expect(screen.getByText('Uploaded')).toBeInTheDocument();
   });
 
-  it('renders Local origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'local' }));
-    expect(screen.getByText('Local')).toBeInTheDocument();
+  it('renders Inferred origin badge with correct text', () => {
+    renderCard(makeItem({ origin: 'inferred' }));
+    expect(screen.getByText('Inferred')).toBeInTheDocument();
   });
 
   it('falls back to Unknown label for malformed origin values', () => {
@@ -147,32 +146,18 @@ describe('SchemaLibraryCard', () => {
     expect(badge?.className).toContain('text-purple-800');
   });
 
-  it('Published badge has blue styling', () => {
-    renderCard(makeItem({ origin: 'published' }));
-    const badge = screen.getByText('Published').closest('span');
+  it('Uploaded badge has blue styling', () => {
+    renderCard(makeItem({ origin: 'uploaded' }));
+    const badge = screen.getByText('Uploaded').closest('span');
     expect(badge?.className).toContain('bg-blue-100');
     expect(badge?.className).toContain('text-blue-800');
   });
 
-  it('Local badge has green styling', () => {
-    renderCard(makeItem({ origin: 'local' }));
-    const badge = screen.getByText('Local').closest('span');
-    expect(badge?.className).toContain('bg-green-100');
-    expect(badge?.className).toContain('text-green-800');
-  });
-
-  // -------------------------------------------------------------------------
-  // Scope badges
-  // -------------------------------------------------------------------------
-
-  it('renders Global scope badge', () => {
-    renderCard(makeItem({ scope: 'global' }));
-    expect(screen.getByText('Global')).toBeInTheDocument();
-  });
-
-  it('renders Project-Level scope badge', () => {
-    renderCard(makeItem({ scope: 'project' }));
-    expect(screen.getByText('Project-Level')).toBeInTheDocument();
+  it('Inferred badge has amber styling', () => {
+    renderCard(makeItem({ origin: 'inferred' }));
+    const badge = screen.getByText('Inferred').closest('span');
+    expect(badge?.className).toContain('bg-amber-100');
+    expect(badge?.className).toContain('text-amber-800');
   });
 
   // -------------------------------------------------------------------------

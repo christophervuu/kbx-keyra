@@ -12,12 +12,13 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
+import { normalizeSchemaOrigin, normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
 
 interface SchemaMetadata {
   readonly schemaId: string;
+  readonly origin?: 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
   readonly syncStatus: 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
   readonly format: SchemaFormat;
 }
@@ -90,6 +91,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const detail: SchemaDetail = {
       metadata: {
         ...metadata,
+        ...(metadata.origin !== undefined ? { origin: normalizeSchemaOrigin(metadata.origin) } : {}),
         syncStatus: normalizeSchemaSyncStatus(metadata.syncStatus),
       },
       content: parseContent(raw, metadata.format),

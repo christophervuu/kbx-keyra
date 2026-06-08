@@ -81,14 +81,13 @@ export type ParseInferredSchemaFn = (content: string, format: 'json' | 'xml') =>
 // ---------------------------------------------------------------------------
 
 export type SyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'local' | 'inferred';
-export type DisplayFormat = 'JSON Schema' | 'XSD' | 'Inferred';
+export type DisplayFormat = 'JSON' | 'XSD' | 'Inferred';
 
 export interface SchemaLibraryItem {
   schemaId: string;
   name: string;
   description?: string;
   origin: SchemaOrigin;
-  scope: 'global' | 'project';
   format: SchemaFormat;
   displayFormat: DisplayFormat;
   fieldCount: number;
@@ -103,7 +102,6 @@ export interface SchemaLibraryFilters {
   search: string;
   origins: SchemaOrigin[];
   formats: DisplayFormat[];
-  scopes: Array<'global' | 'project'>;
 }
 
 export type SortField = 'name' | 'fieldCount' | 'updatedAt' | 'origin';

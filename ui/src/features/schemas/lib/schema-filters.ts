@@ -15,7 +15,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Filters a list of SchemaLibraryItems based on search, origin, format and scope criteria.
+ * Filters a list of SchemaLibraryItems based on search, origin and format criteria.
  *
  * Logic:
  *  - Within each category: OR  (any match = pass for that category)
@@ -27,7 +27,7 @@ export function filterSchemas(
   items: SchemaLibraryItem[],
   filters: SchemaLibraryFilters,
 ): SchemaLibraryItem[] {
-  const { search, origins, formats, scopes } = filters;
+  const { search, origins, formats } = filters;
   const term = search.trim().toLowerCase();
 
   return items.filter((item) => {
@@ -44,9 +44,6 @@ export function filterSchemas(
     // Format filter (OR within, skip if empty)
     if (formats.length > 0 && !formats.includes(item.displayFormat)) return false;
 
-    // Scope filter (OR within, skip if empty)
-    if (scopes.length > 0 && !scopes.includes(item.scope)) return false;
-
     return true;
   });
 }
@@ -57,12 +54,14 @@ export function filterSchemas(
 
 const ORIGIN_ORDER: Record<SchemaOrigin, number> = {
   cdm: 0,
+  uploaded: 1,
+  inferred: 2,
   published: 1,
-  local: 2,
+  local: 1,
 };
 
 const FORMAT_ORDER: Record<DisplayFormat, number> = {
-  'JSON Schema': 0,
+  JSON: 0,
   XSD: 1,
   Inferred: 2,
 };

@@ -423,6 +423,28 @@ describe('deployment handlers', () => {
     expect(body.error.retryable).toBe(false);
   });
 
+  it('deploy handler does not treat legacy uploaded aliases as CDM schemas', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({ mappingId: 'map-1', sourceSchemaId: 'schema-source' })
+      .mockResolvedValueOnce({
+        schemaId: 'schema-source',
+        name: 'Legacy Uploaded Alias',
+        origin: 'local',
+        status: 'ready',
+        syncStatus: 'synced',
+        source: {
+          type: 'upload',
+        },
+      });
+
+    const { handler } = await importDeployHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(201);
+    expect(deploymentPersistenceMocks.create).toHaveBeenCalled();
+  });
+
   it('deploy handler blocks when referenced CDM source schema is unsynced', async () => {
     sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
     sharedMocks.getItem
