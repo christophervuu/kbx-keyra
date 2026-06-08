@@ -658,7 +658,7 @@ This pattern is the canonical single-expression engine usage for UI surfaces tha
 - `/projects/:projectId` → Project Overview
 - `/projects/:projectId/settings` → Project Settings
 - `/projects/:projectId/deployments` → Project Deployments
-- `/projects/:projectId/mappings/new` → Create Mapping
+- `/projects/:projectId/mappings/new` → Create Mapping (FS-088 single-page setup workspace)
 - `/projects/:projectId/mappings/:mappingId` → Mapping Editor
 - `/projects/:projectId/mappings/:mappingId/deploy` → Mapping Deployment
 - `/projects/:projectId/mappings/:mappingId/test-lab` → Test Lab (FS-021 T-06, FS-032)
@@ -2413,6 +2413,83 @@ Project flow impacts:
 - Project-linked schema surfaces show only linked schemas for relevance.
 - Add Schema and mapping schema selectors can access the shared library; linked schemas are prioritized/grouped where applicable.
 - Unlink is hard-blocked when active mappings in the same project reference the schema; dependency details are surfaced to the user.
+
+## Create Mapping Setup Workspace Architecture (FS-088)
+
+FS-088 replaces the legacy Create Mapping wizard with a dedicated single-page setup workspace at `/projects/:projectId/mappings/new`.
+
+### Section model and interaction flow
+
+The page is a single-screen setup flow with these sections, in order:
+
+1. `PageHeader` (`Create Mapping` + setup subtitle)
+2. `Mapping Details` card
+   - required `Mapping Name`
+   - optional multiline `Business Context`
+3. side-by-side `Source Schema` and `Target Schema` cards
+4. simple `Schema Summary` card
+5. `Start From` card (`Blank mapping` | `Auto-map suggestions`)
+6. footer action row (`Cancel` + mode-sensitive primary action)
+
+Validation gates submission until all required inputs are present:
+- mapping name
+- source schema
+- target schema
+- start mode
+
+### In-card add-schema reuse contract
+
+Create Mapping does not introduce a new schema-creation subsystem.
+
+- Source/Target cards open existing `SchemaUploadDialog` in context (`+ Add new source schema` / `+ Add new target schema`).
+- Flow remains in-page (no route navigation away from Create Mapping).
+- On successful add/link, the invoking card auto-selects the new schema and refreshes displayed details/summary.
+- Selected source/target schemas are best-effort linked to the project relevance set (`linkedSchemaIds`) via existing project update pathways.
+
+### Schema summary and required-count derivation
+
+Create Mapping summary intentionally remains minimal and shows only:
+- source field count
+- source required field count
+- target field count
+- target required field count
+
+Required-field count uses normalized schema-summary precedence:
+1. metadata `requiredFieldCount` when available
+2. required-leaf count from normalized parsed schema nodes
+3. fallback `—`
+
+Create Mapping must not implement raw JSON Schema/XSD required parsing logic directly.
+
+### Start-mode branching and create-time Auto-Map behavior
+
+`Start From` options are intentionally limited to:
+- `Blank mapping`
+- `Auto-map suggestions`
+
+Primary CTA label is mode-dependent:
+- blank -> `Create Mapping`
+- auto-map -> `Create & Generate Suggestions`
+
+Create-time branching contract:
+- **Blank mode:** create mapping via canonical `adapter.createMapping(...)`, then navigate to Mapping Editor.
+- **Auto-map mode:**
+  1. create mapping first (mapping remains valid even if subsequent auto-map step fails),
+  2. trigger callable auto-map path keyed by created `mappingId`,
+  3. persist pending suggestion context by `mappingId`,
+  4. navigate to Mapping Editor with optional non-blocking notice state.
+
+Failure semantics:
+- Auto-map generation failure is non-blocking to mapping creation.
+- Editor opens regardless, with explicit notice when generation was unavailable/failed.
+- No fake/generated-placeholder suggestions are fabricated.
+
+### AI review-only invariant at create time
+
+FS-088 does not change AI acceptance semantics:
+- create-time Auto-Map outputs are review artifacts only,
+- generated suggestions are not auto-committed into mapping rules,
+- explicit user review/acceptance in editor workspace remains required.
 
 ## Project Overview Workspace Architecture (FS-086)
 

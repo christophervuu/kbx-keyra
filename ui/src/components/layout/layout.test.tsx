@@ -89,6 +89,7 @@ function renderAppLayout(path: string, content: ReactNode) {
         <Route element={<AppLayout />}>
           <Route path="/" element={content} />
           <Route path="/schemas" element={content} />
+          <Route path="/projects/:projectId/mappings/new" element={content} />
           <Route path="/projects/:projectId/mappings/:mappingId" element={content} />
           <Route path="*" element={<div data-testid="page-not-found">Not Found</div>} />
         </Route>
@@ -131,6 +132,10 @@ function renderBreadcrumbsWithLabel(
           >
             <Route
               path="/projects/:projectId"
+              element={<PageWithLabel segmentValue={segmentValue} label={label} />}
+            />
+            <Route
+              path="/projects/:projectId/mappings/new"
               element={<PageWithLabel segmentValue={segmentValue} label={label} />}
             />
             <Route path="*" element={<div />} />
@@ -247,6 +252,18 @@ describe('Breadcrumbs', () => {
     // Last segment is plain text, not a link
     expect(screen.getByText('map-456')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'map-456' })).not.toBeInTheDocument();
+  });
+
+  it('renders create-mapping breadcrumbs as Home / {project-name} / Mappings / New', () => {
+    renderBreadcrumbsWithLabel('/projects/abc-123/mappings/new', 'abc-123', 'My Project');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'My Project' })).toHaveAttribute('href', '/projects/abc-123');
+    expect(screen.queryByText('Projects')).not.toBeInTheDocument();
+    expect(screen.getByText('Mappings')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
+    expect(screen.getByText('New')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'New' })).not.toBeInTheDocument();
   });
 
   it('renders breadcrumbs for mapping deployment hierarchy', () => {
@@ -442,6 +459,15 @@ describe('AppLayout', () => {
     expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('page-content')).toBeInTheDocument();
+  });
+
+  it('keeps create-mapping route in standard framed layout with breadcrumbs', () => {
+    renderAppLayout('/projects/p1/mappings/new', <div data-testid="page-content">Create Mapping</div>);
+
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
+    expect(screen.getByRole('main')).toBeInTheDocument();
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
 });

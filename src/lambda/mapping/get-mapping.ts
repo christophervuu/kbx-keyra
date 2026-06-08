@@ -17,6 +17,7 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
@@ -32,6 +33,7 @@ interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: { readonly schemaId: string; readonly type: 'github' | 'local' | 'published'; readonly commitSha?: string };

@@ -26,13 +26,13 @@ import {
   WorkspaceNoSourceDataCallout,
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
+  type TargetFieldStatus,
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
-import { useMappingEditor, useVersionHistory, useTargetStatus, useAutoMapWorkspace } from '@/features/mappings/hooks';
-import type { TargetFieldStatus } from '@/features/mappings/components';
-import { useExpressionBuilder } from '@/features/mappings/hooks';
+import { useAutoMapWorkspace, useExpressionBuilder, useMappingEditor, useTargetStatus, useVersionHistory } from '@/features/mappings/hooks';
+import { getPendingAutoMapSession } from '@/features/mappings/lib';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
 import type { SchemaTreeNode } from '@/lib/types/domain';
@@ -197,6 +197,35 @@ export default function MappingEditor() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isChangesOverlayOpen, setIsChangesOverlayOpen] = useState(false);
 
+  const navigationAutoMapCreateNotice = useMemo(() => {
+    const navState = location.state as Record<string, unknown> | null;
+    return navState && typeof navState.autoMapCreateNotice === 'string'
+      ? navState.autoMapCreateNotice
+      : null;
+  }, [location.state]);
+  const [dismissedAutoMapCreateNotice, setDismissedAutoMapCreateNotice] = useState<string | null>(null);
+  const autoMapCreateNotice =
+    navigationAutoMapCreateNotice !== null && navigationAutoMapCreateNotice !== dismissedAutoMapCreateNotice
+      ? navigationAutoMapCreateNotice
+      : null;
+
+  const pendingAutoMapSession = useMemo(() => getPendingAutoMapSession(mappingId), [mappingId]);
+  const initialPendingSectionPath =
+    pendingAutoMapSession.pendingCount > 0
+      ? (pendingAutoMapSession.primarySectionPath ?? '')
+      : null;
+
+  // ---------------------------------------------------------------------------
+  // View state (must be before handleAutoMapTrigger)
+  // ---------------------------------------------------------------------------
+  const [view, setView] = useState<EditorView>(() => (initialPendingSectionPath !== null ? 'automap' : 'target'));
+
+  // ---------------------------------------------------------------------------
+  // Auto-Map workspace mode state (FS-048 T-02)
+  // ---------------------------------------------------------------------------
+  /** The section path currently loaded in the Auto-Map workspace (preserved across exits). */
+  const [autoMapSectionPath, setAutoMapSectionPath] = useState<string | null>(initialPendingSectionPath);
+
   // ---------------------------------------------------------------------------
   // Auto-Map workspace hook (FS-048 T-10) — canonical review path
   // ---------------------------------------------------------------------------
@@ -212,16 +241,7 @@ export default function MappingEditor() {
     parsedTargetSchema: editor.parsedTargetSchema,
   });
 
-  // ---------------------------------------------------------------------------
-  // View state (must be before handleAutoMapTrigger)
-  // ---------------------------------------------------------------------------
-  const [view, setView] = useState<EditorView>('target');
-
-  // ---------------------------------------------------------------------------
-  // Auto-Map workspace mode state (FS-048 T-02)
-  // ---------------------------------------------------------------------------
-  /** The section path currently loaded in the Auto-Map workspace (preserved across exits). */
-  const [autoMapSectionPath, setAutoMapSectionPath] = useState<string | null>(null);
+  const hydratedPendingSessionForMappingIdRef = useRef<string | null>(null);
 
   /** Enter the Auto-Map workspace for a given section path. */
   const enterAutoMapWorkspace = useCallback((sectionPath: string) => {
@@ -256,6 +276,20 @@ export default function MappingEditor() {
     enterAutoMapWorkspace('');
     void autoMapWorkspace.triggerAutoMap('');
   }, [enterAutoMapWorkspace, autoMapWorkspace]);
+
+  // Create-time and re-entry-safe auto-map pending session hydration.
+  useEffect(() => {
+    if (initialPendingSectionPath === null) {
+      return;
+    }
+
+    if (hydratedPendingSessionForMappingIdRef.current === mappingId) {
+      return;
+    }
+
+    hydratedPendingSessionForMappingIdRef.current = mappingId;
+    autoMapWorkspace.triggerAutoMap(initialPendingSectionPath);
+  }, [mappingId, initialPendingSectionPath, autoMapWorkspace]);
 
   // ---------------------------------------------------------------------------
   // Restore handler
@@ -809,6 +843,26 @@ export default function MappingEditor() {
           onNavigate={(targetPath) => { setSelectedTargetPath(resolveSelectedTargetPath(targetPath)); }}
           onClose={() => { setIsChangesOverlayOpen(false); }}
         />
+      )}
+
+      {autoMapCreateNotice && (
+        <div
+          className="fixed bottom-6 right-6 z-50 max-w-md rounded-md border border-amber-700/60 bg-slate-900/95 px-4 py-3 text-sm text-amber-200 shadow-lg"
+          role="status"
+          data-testid="automap-create-notice"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p>{autoMapCreateNotice}</p>
+            <button
+              type="button"
+              onClick={() => setDismissedAutoMapCreateNotice(navigationAutoMapCreateNotice)}
+              className="text-xs text-amber-300 hover:text-amber-100"
+              aria-label="Dismiss auto-map notice"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Route-level unsaved-changes guard dialog */}

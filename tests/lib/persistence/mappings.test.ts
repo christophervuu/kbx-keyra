@@ -24,6 +24,7 @@ async function importMappingsModule() {
 function makeConfig(overrides: Partial<MappingConfig> = {}): MappingConfig {
   return {
     name: 'Mapping A',
+    businessContext: 'Map invoice payloads into shipment order domain fields.',
     version: 1,
     engineVersion: '1.0.0',
     sourceSchemaRef: {
@@ -45,6 +46,7 @@ function makeMappingItem(overrides: Partial<MappingItem> = {}): MappingItem {
     mappingId: 'mapping-1',
     projectId: 'project-1',
     name: 'Mapping 1',
+    businessContext: 'Map invoice payloads into shipment order domain fields.',
     version: 1,
     revision: 1,
     latestVersion: null,
@@ -95,6 +97,7 @@ describe('persistence mappings', () => {
     expect(result.latestVersion).toBeNull();
     expect(result.configHash).toMatch(/^[a-f0-9]{64}$/);
     expect(result.configS3Key).toBe('mappings/mapping-created-1/config.json');
+    expect(result.businessContext).toBe('Map invoice payloads into shipment order domain fields.');
 
     expect(s3SendMock).toHaveBeenCalledTimes(1);
     const s3Command = s3SendMock.mock.calls[0]?.[0] as {
@@ -110,6 +113,25 @@ describe('persistence mappings', () => {
     };
     expect(putCommand.input.TableName).toBe('keyra-mappings');
     expect(putCommand.input.Item).toEqual(result);
+  });
+
+  it('create omits businessContext when not provided', async () => {
+    randomUuidMock.mockReturnValue('mapping-created-2');
+    s3SendMock.mockResolvedValue({});
+    dynamoSendMock.mockResolvedValue({});
+    const mappings = await importMappingsModule();
+
+    const result = await mappings.create({
+      projectId: 'project-1',
+      name: 'Mapping B',
+      config: makeConfig({ businessContext: undefined }),
+    });
+
+    expect(result.businessContext).toBeUndefined();
+    const putCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: { Item: MappingItem };
+    };
+    expect(putCommand.input.Item.businessContext).toBeUndefined();
   });
 
   it('get returns item or null', async () => {

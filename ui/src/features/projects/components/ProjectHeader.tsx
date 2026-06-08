@@ -37,7 +37,6 @@ export interface ProjectHeaderProps {
   onUpdateName: (name: string) => Promise<void>;
   onUpdateDescription: (description: string) => Promise<void>;
   onCreateMapping: () => void;
-  onAddSchema?: () => void;
   onLinkedSchemasClick?: () => void;
   linkedSchemasExpanded?: boolean;
   linkedSchemasControlsId?: string;
@@ -240,7 +239,6 @@ export function ProjectHeader({
   onUpdateName,
   onUpdateDescription,
   onCreateMapping,
-  onAddSchema,
   onLinkedSchemasClick,
   linkedSchemasExpanded = false,
   linkedSchemasControlsId,
@@ -275,17 +273,6 @@ export function ProjectHeader({
             Create Mapping
           </button>
 
-          {onAddSchema && (
-            <button
-              type="button"
-              onClick={onAddSchema}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              data-testid="header-add-schema-btn"
-            >
-              <Plus size={14} aria-hidden="true" />
-              Add Schema
-            </button>
-          )}
 
           <OverflowMenu
             projectId={project.projectId}

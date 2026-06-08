@@ -247,6 +247,7 @@ describe('LocalStorageAdapter', () => {
     const created = await adapter.createMapping({
       projectId: project.projectId,
       name: 'Mapping A',
+      businessContext: 'Transform source invoice model to target shipment contract.',
       sourceSchemaRef: SOURCE_SCHEMA_REF,
       targetSchemaRef: TARGET_SCHEMA_REF,
       rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
@@ -257,6 +258,8 @@ describe('LocalStorageAdapter', () => {
 
     const config = await adapter.getMapping(created.mappingId);
     expect(config.name).toBe('Mapping A');
+    expect(config.businessContext).toBe('Transform source invoice model to target shipment contract.');
+    expect(created.businessContext).toBe('Transform source invoice model to target shipment contract.');
 
     const updatedConfig: MappingConfig = {
       ...config,
@@ -272,11 +275,32 @@ describe('LocalStorageAdapter', () => {
     const duplicate = await adapter.duplicateMapping(created.mappingId, 'Mapping C');
     expect(duplicate.mappingId).not.toBe(created.mappingId);
     expect(duplicate.name).toBe('Mapping C');
+    expect(duplicate.businessContext).toBe('Transform source invoice model to target shipment contract.');
 
     await adapter.deleteMapping(created.mappingId);
     await expect(adapter.getMapping(created.mappingId)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
+  });
+
+  it('createMapping omits businessContext when not provided', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'No Context Mapping',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+    });
+
+    const config = await adapter.getMapping(created.mappingId);
+    expect(created.businessContext).toBeUndefined();
+    expect(config.businessContext).toBeUndefined();
   });
 
   it.each([

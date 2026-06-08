@@ -5,9 +5,10 @@ import { Breadcrumbs } from './Breadcrumbs';
 import { NavBar } from './NavBar';
 
 export function AppLayout() {
+  const isCreateMappingRoute = useMatch('/projects/:projectId/mappings/new') !== null;
   const isMappingEditorRoute = useMatch('/projects/:projectId/mappings/:mappingId') !== null;
   const isTestLabRoute = useMatch('/projects/:projectId/mappings/:mappingId/test-lab') !== null;
-  const isFocusedWorkspace = isMappingEditorRoute || isTestLabRoute;
+  const isFocusedWorkspace = !isCreateMappingRoute && (isMappingEditorRoute || isTestLabRoute);
 
   return (
     <BreadcrumbProvider>

@@ -88,6 +88,15 @@ interface StoredMapping {
   config: MappingConfig;
 }
 
+function normalizeOptionalBusinessContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 interface StoredRevisionEntry {
   readonly revision: number;
   readonly savedAt: string;
@@ -496,11 +505,13 @@ export class LocalStorageAdapter implements ApiAdapter {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
     const mappingId = crypto.randomUUID();
     const timestamp = this.nowIso();
+    const businessContext = normalizeOptionalBusinessContext(input.businessContext);
 
     const config: MappingConfig = {
       id: mappingId,
       projectId: input.projectId,
       name: input.name,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       engineVersion: '2.0.0',
       ...(input.sourceSchemaRef !== undefined && { sourceSchemaRef: input.sourceSchemaRef }),
@@ -513,6 +524,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       mappingId,
       projectId: input.projectId,
       name: input.name,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       status: 'draft',
       sourceSchemaId: input.sourceSchemaRef?.schemaId ?? '',
@@ -537,6 +549,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const current = mappings[index];
     const timestamp = this.nowIso();
+    const businessContext = normalizeOptionalBusinessContext(config.businessContext);
 
     const nextConfig: MappingConfig = {
       ...config,
@@ -547,6 +560,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     const nextMetadata: MappingMetadata = {
       ...current.metadata,
       name: config.name,
+      ...(businessContext ? { businessContext } : {}),
       version: config.version,
       sourceSchemaId: config.sourceSchemaRef?.schemaId ?? current.metadata.sourceSchemaId,
       targetSchemaId: config.targetSchemaRef?.schemaId ?? current.metadata.targetSchemaId,
@@ -863,11 +877,14 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const nextId = crypto.randomUUID();
     const timestamp = this.nowIso();
+    const businessContext = normalizeOptionalBusinessContext(original.config.businessContext)
+      ?? normalizeOptionalBusinessContext(original.metadata.businessContext);
 
     const config: MappingConfig = {
       ...original.config,
       id: nextId,
       name: newName,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
     };
 
@@ -875,6 +892,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       ...original.metadata,
       mappingId: nextId,
       name: newName,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       ruleCount: config.rules.length,
       updatedAt: timestamp,

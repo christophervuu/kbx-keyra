@@ -69,6 +69,7 @@ export interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
@@ -139,6 +140,7 @@ export interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly status: MappingStatus;
   readonly sourceSchemaId?: string;
@@ -294,6 +296,7 @@ export interface UpdateProjectInput {
 export interface CreateMappingInput {
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly sourceSchemaRef?: SchemaRef;
   readonly targetSchemaRef?: SchemaRef;
   readonly config?: MappingConfigOptions;

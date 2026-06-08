@@ -36,16 +36,32 @@ function buildProjectHierarchyBreadcrumbs(
   params: Record<string, string | undefined>,
   labels: ReadonlyMap<string, string>,
 ): BreadcrumbSegment[] {
-  const crumbs: BreadcrumbSegment[] = [{ label: 'Home', path: '/' }];
-
-  // Structural segment must exist even without a /projects route.
-  crumbs.push({ label: 'Projects' });
+  const homeCrumb: BreadcrumbSegment = { label: 'Home', path: '/' };
 
   const projectId = params.projectId ?? segments[1];
-  if (!projectId) return crumbs;
+  if (!projectId) {
+    return [homeCrumb, { label: 'Projects' }];
+  }
 
   const projectLabel = formatSegment(projectId, params, labels);
   const projectPath = `/projects/${projectId}`;
+  const section = segments[2];
+
+  // Special-case create-mapping path:
+  // /projects/:projectId/mappings/new -> Home / {projectName} / Mappings / New
+  if (section === 'mappings' && segments[3] === 'new') {
+    return [
+      homeCrumb,
+      { label: projectLabel, path: projectPath },
+      { label: 'Mappings' },
+      { label: 'New' },
+    ];
+  }
+
+  const crumbs: BreadcrumbSegment[] = [homeCrumb];
+
+  // Structural segment remains for existing project/mapping hierarchies.
+  crumbs.push({ label: 'Projects' });
 
   // /projects/:projectId
   if (segments.length === 2) {
@@ -54,8 +70,6 @@ function buildProjectHierarchyBreadcrumbs(
   }
 
   crumbs.push({ label: projectLabel, path: projectPath });
-
-  const section = segments[2];
 
   // /projects/:projectId/deployments
   if (section === 'deployments') {

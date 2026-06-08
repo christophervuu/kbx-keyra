@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PersistedSuggestionItem } from '../types';
 import {
   clearAutoMapSuggestions,
+  getPendingAutoMapSession,
   hasPersistedSuggestions,
   listPersistedSections,
   loadAutoMapSuggestions,
@@ -188,5 +189,44 @@ describe('auto-map-persistence', () => {
     const sections = listPersistedSections('mapping-bad');
 
     expect(sections).toEqual([]);
+  });
+
+  it('returns mapping-level pending session metadata (suggested + stale only)', () => {
+    const mappingId = 'mapping-session';
+
+    saveAutoMapSuggestions(mappingId, 'Order.Header', [
+      makeItem({ targetPath: 'Order.Header.Currency', status: 'suggested' }),
+      makeItem({ targetPath: 'Order.Header.Total', status: 'accepted' }),
+    ], {
+      generatedAt: '2026-06-08T10:00:00.000Z',
+    });
+
+    saveAutoMapSuggestions(mappingId, 'Order.Lines', [
+      makeItem({ targetPath: 'Order.Lines[0].Sku', status: 'stale' }),
+      makeItem({ targetPath: 'Order.Lines[0].Qty', status: 'dismissed' }),
+    ], {
+      generatedAt: '2026-06-08T11:00:00.000Z',
+    });
+
+    const session = getPendingAutoMapSession(mappingId);
+
+    expect(session).toEqual({
+      pendingCount: 2,
+      primarySectionPath: 'Order.Lines',
+    });
+  });
+
+  it('returns empty pending session when no pending suggestions exist', () => {
+    const mappingId = 'mapping-no-pending';
+
+    saveAutoMapSuggestions(mappingId, 'Order.Header', [
+      makeItem({ status: 'accepted' }),
+      makeItem({ targetPath: 'Order.Header.Total', status: 'dismissed' }),
+    ]);
+
+    expect(getPendingAutoMapSession(mappingId)).toEqual({
+      pendingCount: 0,
+      primarySectionPath: null,
+    });
   });
 });

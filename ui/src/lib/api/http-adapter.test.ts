@@ -119,7 +119,11 @@ describe('HttpAdapter (CRUD)', () => {
   });
 
   it('createMapping maps to POST /mappings with body', async () => {
-    const input: CreateMappingInput = { projectId: 'p-1', name: 'Map A' };
+    const input: CreateMappingInput = {
+      projectId: 'p-1',
+      name: 'Map A',
+      businessContext: 'Transform invoice payload into shipment orchestration output.',
+    };
     vi.mocked(httpRequest).mockResolvedValueOnce({ mappingId: 'm-1', name: 'Map A' });
     const adapter = new HttpAdapter(API_URL);
 

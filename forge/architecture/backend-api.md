@@ -221,7 +221,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 #### `MAPPINGS_TABLE`
 - PK: `mappingId` (String)
 - GSI: `projectId-index` (PK=`projectId`)
-- Main fields: `projectId`, `name`, `revision`, `latestVersion`, `configHash`, legacy `version` alias, `status`, `sourceSchemaId`, `targetSchemaId`, `ruleCount`, `coverage`, `configS3Key`, timestamps
+- Main fields: `projectId`, `name`, optional `businessContext`, `revision`, `latestVersion`, `configHash`, legacy `version` alias, `status`, `sourceSchemaId`, `targetSchemaId`, `ruleCount`, `coverage`, `configS3Key`, timestamps
 
 #### `MAPPING_REVISIONS_TABLE`
 - PK: `mappingId` (String), SK: `revision` (Number)
@@ -257,6 +257,30 @@ Audit-confirmed unaffected backend/AWS ownership surfaces (FS-087 T-02/T-09):
 - Deployment snapshot/deploy guard behavior remains explicit schema-reference/provenance based (`sourceSchemaId`/`targetSchemaId` + optional `cdmSchemaTraceability`) and scope-independent.
 
 ### 7.2 Handler-to-table mapping
+
+### FS-088 create-mapping contract addendum (Create Mapping setup workspace)
+
+`POST /mappings` remains the canonical mapping-creation contract used by Create Mapping.
+
+Request contract notes (implemented):
+- required: `projectId`, `name`
+- optional: `businessContext`, `sourceSchemaRef`, `targetSchemaRef`, `config`, `rules`
+- `businessContext` is normalized as optional metadata (trimmed; omitted when empty/whitespace)
+
+Persistence/response behavior:
+- mapping metadata persists optional `businessContext` when provided
+- mapping metadata persists explicit `sourceSchemaId`/`targetSchemaId` projections from schema refs
+- response remains mapping metadata (`201`) using the canonical envelope semantics in this document
+
+Create-time auto-map orchestration boundary:
+- create-mapping handler does **not** trigger AI suggestion generation implicitly
+- create-time auto-map orchestration is a higher-layer flow (`create mapping` then explicit `/ai/auto-map` call keyed by `mappingId`)
+- if auto-map generation fails/unavailable post-create, mapping creation remains successful and valid
+
+AI safety invariant (FS-088 / FS-074 alignment):
+- create-time generated suggestions are review artifacts only
+- no implicit commit/accept of AI output is allowed in create flow
+
 
 | Handler | DynamoDB patterns |
 |---|---|

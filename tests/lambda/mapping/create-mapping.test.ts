@@ -62,17 +62,47 @@ describe('create-mapping handler', () => {
   });
 
   it('valid input returns 201 metadata with version 1', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      businessContext: 'Align invoice source payload to shipment processing shape.',
+      engineVersion: '1.0.0',
+      rules: [],
+    });
     const { handler } = await importHandler();
     const result = await handler({ body: '{}' });
 
     expect(result.statusCode).toBe(201);
-    const parsed = JSON.parse(result.body) as { version: number; ruleCount: number; status: string; mappingId: string };
+    const parsed = JSON.parse(result.body) as {
+      version: number;
+      ruleCount: number;
+      status: string;
+      mappingId: string;
+      businessContext?: string;
+    };
     expect(parsed.version).toBe(1);
     expect(parsed.ruleCount).toBe(0);
     expect(parsed.status).toBe('draft');
+    expect(parsed.businessContext).toBe('Align invoice source payload to shipment processing shape.');
     expect(parsed.mappingId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(sharedMocks.putObject).toHaveBeenCalledTimes(1);
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('omitted businessContext remains backward compatible', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      engineVersion: '1.0.0',
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    const parsed = JSON.parse(result.body) as { businessContext?: string };
+    expect(parsed.businessContext).toBeUndefined();
   });
 
   it('loads target schema content and passes it to validate for coverage derivation', async () => {

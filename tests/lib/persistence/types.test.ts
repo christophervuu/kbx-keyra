@@ -55,6 +55,7 @@ type DomainMappingMetadata = {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
@@ -159,6 +160,27 @@ describe('persistence types', () => {
     expectTypeOf<ReturnType<typeof toProjectDetail>>().toMatchTypeOf<DomainProjectDetail>();
     expectTypeOf<ReturnType<typeof toMappingMetadata>>().toEqualTypeOf<DomainMappingMetadata>();
     expectTypeOf<ReturnType<typeof toSchemaMetadata>>().toEqualTypeOf<DomainSchemaMetadata>();
+  });
+
+  it('toMappingMetadata preserves optional businessContext when present', () => {
+    const item: MappingItem = {
+      mappingId: 'mapping-1',
+      projectId: 'project-1',
+      name: 'Invoice Map',
+      businessContext: 'Transform invoice source records for shipment execution.',
+      revision: 2,
+      latestVersion: null,
+      configHash: 'abc123',
+      status: 'ready',
+      ruleCount: 3,
+      coverage: 75,
+      configS3Key: 'mappings/mapping-1/config.json',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const metadata = toMappingMetadata(item);
+    expect(metadata.businessContext).toBe('Transform invoice source records for shipment execution.');
   });
 
   // ---------------------------------------------------------------------------

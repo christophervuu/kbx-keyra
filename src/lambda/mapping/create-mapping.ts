@@ -43,6 +43,7 @@ interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
@@ -55,6 +56,7 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
@@ -212,6 +214,15 @@ function buildConfigS3Key(mappingId: string): string {
   return `mappings/${mappingId}/config.json`;
 }
 
+function normalizeOptionalBusinessContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const body = parseBody(event);
   const required = requireFields(body, ['projectId', 'name']);
@@ -223,10 +234,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   try {
     const mappingId = generateMappingId();
     const now = new Date().toISOString();
+    const businessContext = normalizeOptionalBusinessContext(body?.businessContext);
     const config: MappingConfig = {
       id: mappingId,
       projectId: String(body?.projectId ?? ''),
       name: String(body?.name ?? ''),
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       engineVersion: typeof body?.engineVersion === 'string' ? body.engineVersion : '1.0.0',
       sourceSchemaRef: (body?.sourceSchemaRef as SchemaRef | undefined) ?? undefined,
@@ -242,6 +255,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       mappingId,
       projectId: config.projectId ?? '',
       name: config.name,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       status: derivation.status,
       sourceSchemaId: config.sourceSchemaRef?.schemaId,

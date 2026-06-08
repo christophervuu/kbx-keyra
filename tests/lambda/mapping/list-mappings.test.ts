@@ -33,7 +33,17 @@ describe('list-mappings handler', () => {
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('proj-1');
     sharedMocks.query.mockReset().mockResolvedValue([
-      { mappingId: 'map-1', projectId: 'proj-1', name: 'M1', version: 1, status: 'draft', ruleCount: 0, coverage: 0, updatedAt: '2026-05-15T00:00:00.000Z' },
+      {
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        name: 'M1',
+        businessContext: 'Map invoice payload for first partner.',
+        version: 1,
+        status: 'draft',
+        ruleCount: 0,
+        coverage: 0,
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      },
       { mappingId: 'map-2', projectId: 'proj-1', name: 'M2', version: 2, status: 'ready', ruleCount: 2, coverage: 50, updatedAt: '2026-05-15T00:00:00.000Z' },
     ]);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
@@ -46,8 +56,10 @@ describe('list-mappings handler', () => {
     const result = await handler({ body: null, pathParameters: { projectId: 'proj-1' } });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as Array<{ projectId: string }>;
+    const parsed = JSON.parse(result.body) as Array<{ projectId: string; businessContext?: string }>;
     expect(parsed).toHaveLength(2);
     expect(parsed.every((item) => item.projectId === 'proj-1')).toBe(true);
+    expect(parsed[0]?.businessContext).toBe('Map invoice payload for first partner.');
+    expect(parsed[1]?.businessContext).toBeUndefined();
   });
 });

@@ -26,6 +26,7 @@ export interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
@@ -213,6 +214,7 @@ export interface MappingItem {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly revision: number;
   readonly latestVersion: number | null;
   readonly configHash: string;
@@ -579,6 +581,7 @@ export interface UpdateProjectInput {
 export interface CreateMappingInput {
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
   readonly status?: MappingStatus;
@@ -589,6 +592,7 @@ export interface CreateMappingInput {
 
 export interface UpdateMappingInput {
   readonly name?: string;
+  readonly businessContext?: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
   readonly status?: MappingStatus;
@@ -641,6 +645,7 @@ export interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly status: MappingStatus;
   readonly sourceSchemaId?: string;
@@ -728,6 +733,7 @@ export function toMappingMetadata(item: MappingItem): MappingMetadata {
     mappingId: item.mappingId,
     projectId: item.projectId,
     name: item.name,
+    ...(item.businessContext ? { businessContext: item.businessContext } : {}),
     version: revision,
     status: item.status,
     sourceSchemaId: item.sourceSchemaId,

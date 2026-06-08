@@ -9,7 +9,6 @@ import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
-import { HttpClientError } from '@/lib/api/http-client';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -308,7 +307,7 @@ describe('ProjectOverviewPage', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('linked schemas dialog empty state shows Add Schema CTA and opens schema upload dialog', async () => {
+  it('linked schemas dialog empty state remains informational and read-only', async () => {
     const user = userEvent.setup();
     const noSchemasAdapter = createMockAdapter({
       getProject: vi.fn().mockResolvedValue({
@@ -326,9 +325,8 @@ describe('ProjectOverviewPage', () => {
 
     await user.click(screen.getByTestId('linked-schemas-trigger'));
     expect(screen.getByTestId('linked-schemas-empty')).toBeInTheDocument();
-
-    await user.click(screen.getByTestId('linked-schemas-add-schema'));
-    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('linked-schemas-add-schema')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schema-upload-dialog')).not.toBeInTheDocument();
   });
 
   it('does not render default schema management section in overview', async () => {
@@ -427,68 +425,23 @@ describe('ProjectOverviewPage — layout checks', () => {
     });
 
     expect(screen.getByTestId('header-create-mapping-btn')).toBeInTheDocument();
-    expect(screen.getByTestId('header-add-schema-btn')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /add schema/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('header-add-schema-btn')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add schema/i })).not.toBeInTheDocument();
   });
 
-  it('header Add Schema button opens schema upload dialog', async () => {
+  it('linked schemas dialog is read-only (no unlink or add schema actions)', async () => {
     const user = userEvent.setup();
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByTestId('header-add-schema-btn')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId('header-add-schema-btn'));
-    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
-  });
-
-  it('linked schemas dialog can unlink a schema row', async () => {
-    const user = userEvent.setup();
-    const updateProject = vi.fn().mockResolvedValue(PROJECT_DETAIL);
-    const unlinkAdapter = createMockAdapter({ updateProject });
-    renderPage(unlinkAdapter);
-
-    await waitFor(() => {
       expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
     });
 
     await user.click(screen.getByTestId('linked-schemas-trigger'));
-    await user.click(screen.getByTestId('linked-schema-unlink-schema-1'));
 
-    await waitFor(() => {
-      expect(updateProject).toHaveBeenCalledWith('proj-1', { linkedSchemaIds: [] });
-    });
-  });
-
-  it('shows unlink blocked message when backend returns conflict with dependent mappings', async () => {
-    const user = userEvent.setup();
-    const conflict = new HttpClientError('Conflict', {
-      code: 'CONFLICT',
-      statusCode: 409,
-      retryable: false,
-      details: {
-        dependentMappings: [{ mappingId: 'mapping-1', name: 'Mapping One' }],
-      },
-    });
-    const unlinkAdapter = createMockAdapter({
-      updateProject: vi.fn().mockRejectedValue(conflict),
-    });
-
-    renderPage(unlinkAdapter);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId('linked-schemas-trigger'));
-    await user.click(screen.getByTestId('linked-schema-unlink-schema-1'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('schema-unlink-blocked-message')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('schema-unlink-blocked-message')).toHaveTextContent('Mapping One');
+    expect(screen.queryByTestId('linked-schema-unlink-schema-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('linked-schemas-add-schema')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schema-upload-dialog')).not.toBeInTheDocument();
   });
 
   it('AE-02: header shows compact summary line and hides tag UI', async () => {

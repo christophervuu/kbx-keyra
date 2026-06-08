@@ -37,8 +37,6 @@ interface LinkedSchemasDialogProps {
   onClose: () => void;
   schemas: SchemaCardData[];
   usageBySchemaId: Record<string, number>;
-  onAddSchema: () => void;
-  onUnlinkSchema?: (schemaId: string) => Promise<void>;
   labelledById?: string;
   descriptionId?: string;
   dialogId?: string;
@@ -49,8 +47,6 @@ export function LinkedSchemasDialog({
   onClose,
   schemas,
   usageBySchemaId,
-  onAddSchema,
-  onUnlinkSchema,
   labelledById = 'linked-schemas-dialog-title',
   descriptionId = 'linked-schemas-dialog-description',
   dialogId,
@@ -153,17 +149,6 @@ export function LinkedSchemasDialog({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <p className="truncate text-sm font-medium text-slate-100">{schema.name}</p>
-                      {onUnlinkSchema && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void onUnlinkSchema(schema.schemaId)}
-                          aria-label={`Unlink schema ${schema.name}`}
-                          data-testid={`linked-schema-unlink-${schema.schemaId}`}
-                        >
-                          Unlink
-                        </Button>
-                      )}
                     </div>
                     <p className="mt-1 text-xs text-slate-400">
                       {normalizeOriginLabel(schema.origin)} · {normalizeFormatLabel(schema.format, schema.isInferred)} ·{' '}
@@ -180,14 +165,6 @@ export function LinkedSchemasDialog({
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-slate-700 px-5 py-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onAddSchema}
-            data-testid="linked-schemas-add-schema"
-          >
-            Add Schema
-          </Button>
           <Button variant="ghost" size="sm" onClick={onClose} data-testid="linked-schemas-close">
             Close
           </Button>
