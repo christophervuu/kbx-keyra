@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+  normalizeSchemaReviewState,
   normalizeSchemaOwnership,
   normalizeProjectLinkedSchemaIds,
   normalizeSchemaOrigin,
@@ -85,8 +86,25 @@ type DomainSchemaMetadata = {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly reviewState?: 'not_required' | 'unreviewed' | 'partially_reviewed' | 'reviewed';
   readonly reviewedAt?: string;
   readonly reviewedBy?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly {
+    readonly sampleId: string;
+    readonly schemaId: string;
+    readonly name: string;
+    readonly dataFormat: 'json' | 'xml';
+    readonly contentRef: string;
+    readonly usedForInference: boolean;
+    readonly source: 'initial_upload' | 'added_sample';
+    readonly sizeBytes?: number;
+    readonly hash?: string;
+    readonly summary?: string;
+    readonly compatibility?: 'unknown' | 'compatible' | 'mismatch';
+    readonly createdAt: string;
+    readonly createdBy?: string;
+  }[];
   readonly disambiguator?: string;
   readonly syncStatus: 'synced' | 'update-available' | 'sync-failed';
   readonly source:
@@ -169,10 +187,19 @@ describe('persistence types', () => {
   it('normalizes schema status with inferred review semantics', () => {
     expect(normalizeSchemaStatus({ status: 'ingesting' })).toBe('processing');
     expect(normalizeSchemaStatus({ status: 'ready', inferred: true })).toBe('needs_review');
+    expect(normalizeSchemaStatus({ status: 'needs_review', inferred: true })).toBe('needs_review');
+    expect(normalizeSchemaStatus({ status: 'needs_review', inferred: false })).toBe('ready');
     expect(normalizeSchemaStatus({ status: 'ready', inferred: true, reviewedAt: '2026-06-08T00:00:00.000Z' })).toBe(
       'ready',
     );
     expect(normalizeSchemaStatus({ status: 'error', inferred: true })).toBe('error');
+  });
+
+  it('normalizes schema review state with inferred semantics', () => {
+    expect(normalizeSchemaReviewState({ inferred: false })).toBe('not_required');
+    expect(normalizeSchemaReviewState({ inferred: true })).toBe('unreviewed');
+    expect(normalizeSchemaReviewState({ inferred: true, reviewedAt: '2026-06-08T00:00:00.000Z' })).toBe('reviewed');
+    expect(normalizeSchemaReviewState({ reviewState: 'partially_reviewed', inferred: true })).toBe('partially_reviewed');
   });
 
   it('normalizes legacy schemaRefs to linkedSchemaIds', () => {
@@ -443,6 +470,7 @@ describe('persistence types', () => {
       scope: 'project',
       description: 'schema description',
       inferred: false,
+      reviewState: 'not_required',
       syncStatus: 'synced',
       source: {
         type: 'upload',

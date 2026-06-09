@@ -2300,20 +2300,21 @@ State management note:
 
 ## Schema Detail Page Architecture
 
-FS-015 establishes the feature-page architecture for `/schemas/:schemaId` under `ui/src/features/schemas/`.
+FS-015 established the original feature-page architecture for `/schemas/:schemaId` under `ui/src/features/schemas/`.
+FS-090 supersedes the Schema Detail information architecture and action model.
 
 ### Page composition pattern
 
 - Route-level wrapper (`ui/src/routes/pages/SchemaDetail.tsx`) is intentionally thin and only resolves route params.
 - Feature page (`SchemaDetailPage`) owns orchestration and section layout.
-- Stable section order:
-  1. inferred-schema banner (conditional)
-  2. metadata
-  3. git/source status
-  4. tree view (+ edit toolbar/banner)
-  5. usage
-  6. actions
-  7. modal/dialog overlays (View Raw + Replace File)
+- Stable section order now follows FS-090:
+  - **Desktop:**
+    - left/main column: header -> review panel (conditional) -> fields workspace
+    - right sidebar: sample payloads -> usage -> metadata -> actions
+  - **Narrow/stacked:** Header -> Review -> Sample Payloads -> Fields -> Usage -> Metadata
+- Breadcrumb terminal segment resolves to schema name (not raw schema ID).
+- Header emphasizes readiness + canonical metadata: status, data format (`JSON|XML`), field count, updated timestamp, and CDM badge placement.
+- `Uploaded`/`Inferred` are not format badges; source lineage is shown separately via schema-source metadata.
 
 This keeps routing concerns separate from feature logic and allows section-level evolution without route refactors.
 
@@ -2609,25 +2610,33 @@ CDM-linked cards in Project Overview:
 - Show canonical CDM provenance label `CDM (KBXT/KBX-Canonicals)` and sync-state badges driven by `metadata.syncStatus`.
 - Hide remove action for CDM entries to enforce read-only behavior at the project schema surface.
 
-### Action visibility rules (origin x compatibility-metadata x format)
+### Action visibility rules (ownership x readiness x mutability)
 
-Current implementation in `SchemaActions` and shared CDM action policy utilities (`cdm-action-policy`) uses metadata/surface-driven conditional rendering. FS-087 removes scope as a user-facing access concept; any retained scope fields are compatibility metadata only:
+Current implementation in `SchemaActions` is ownership-aware and follows FS-090 action-model cleanup.
 
-- CDM schemas in **Schema Detail**: Re-sync (active) and View Raw only; edit/replace/remove/promote/sync-to-GitHub actions are hidden
-- Non-CDM schemas:
-  - Edit when `format === 'json-schema'` and not already editing
-  - Auto-describe (placeholder)
-  - Sync to GitHub (placeholder)
-  - Replace file
-  - Remove (blocked if usage mappings exist)
-  - View Raw
-- Legacy compatibility note: previously project-scoped records surfaced Promote-to-Global affordance; FS-087 canonical UX removes scope-driven access semantics and associated promote action.
+Schema Detail actions:
+
+- **User-owned schemas (`ownership=user`, `readonly=false`)**
+  - top-level action: `Edit Schema`
+  - overflow menu: `View raw`, `Replace schema`, `Delete schema` (with usage/dependency guards)
+- **CDM/read-only schemas (`ownership=cdm` or `readonly=true`)**
+  - no edit/replace/delete actions
+  - read-only actions only (for example, `View raw`)
+
+Deprecated Schema Detail action vocabulary is removed:
+
+- no `Sync to GitHub`
+- no `Re-sync`
+- no `Publish`
+- no `Promote`
+
+Legacy compatibility note: scope-driven action semantics remain retired; `scope` is compatibility metadata only and must not drive action availability.
 
 FS-078 surface policy clarifications:
 
-- **Project Overview:** View, Re-sync, Unlink (project-link scoped)
-- **Schema Detail:** View Raw and Re-sync only (no Unlink)
-- **Schema Library:** navigation-first cards (no inline Re-sync action on cards)
+- **Project Overview:** View + linkage management actions in project context
+- **Schema Detail:** ownership-aware actions only (no sync/re-sync/publish/promote vocabulary)
+- **Schema Library:** navigation-first cards (no inline sync controls on cards)
 
 Promote/Remove flows use shared `ConfirmDialog` and adapter mutations (`updateSchema`, `deleteSchema`) with post-action page refresh/navigation.
 
@@ -2635,7 +2644,7 @@ CDM sync-state presentation contract:
 
 - `SchemaGitStatus` and shared schema presentation primitives render canonical CDM sync states from metadata (`syncStatus`) including `synced`, `update-available`, and `sync-failed`.
 - Schema detail load performs best-effort status-refresh read (`syncCdmSchema(..., { statusOnly: true })`) followed by metadata re-fetch for trustworthy passive status display.
-- Explicit Re-sync action remains manual-only and does not imply background auto-sync.
+- No schema-detail sync action is exposed in this phase; schema sync/publish semantics are out of scope for FS-090 Schema Detail.
 
 ### FS-078 canonical CDM UX consistency contract (Rev 2)
 
@@ -2646,8 +2655,8 @@ Cross-surface invariants for `origin === 'cdm'`:
   - `synced` -> `✓ Synced`
   - `update-available` -> `⚠ Update available`
   - `sync-failed` -> `⚠ Sync failed`
-- **Consistent Re-sync semantics:** where Re-sync is surfaced (Project Overview, Schema Detail), action label is `Re-sync` and success/failure feedback copy is standardized.
-- **Strict Schema Detail read-only posture for CDM:** no inline metadata edit, no tree edit mode, no replace-file flow, and no mutate-capable actions beyond explicit Re-sync.
+- **Schema Detail action semantics:** no sync/re-sync/publish/promote controls; actions are ownership/read-only gated.
+- **Strict Schema Detail read-only posture for CDM:** no inline metadata edit, no tree edit mode, no replace-schema flow, and no mutate-capable actions.
 - **Unlink scope constraint:** Unlink is available only in Project Overview (project association context), never in Schema Detail.
 
 UI consumption contract notes:

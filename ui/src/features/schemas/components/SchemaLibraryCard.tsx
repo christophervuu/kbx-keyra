@@ -25,7 +25,7 @@ const ORIGIN_CONFIG: Record<
   SchemaLibraryItem['origin'],
   { emoji: string; label: string; className: string }
 > = {
-  cdm: { emoji: '📚', label: getSchemaOriginLabel('cdm'), className: 'bg-purple-100 text-purple-800' },
+  cdm: { emoji: '', label: getSchemaOriginLabel('cdm'), className: 'border border-purple-700 bg-purple-900/40 text-purple-200' },
   uploaded: { emoji: '📤', label: 'Uploaded', className: 'bg-blue-100 text-blue-800' },
   inferred: { emoji: '✨', label: 'Inferred', className: 'bg-amber-100 text-amber-800' },
   published: { emoji: '📤', label: 'Uploaded', className: 'bg-blue-100 text-blue-800' },
@@ -44,9 +44,8 @@ function OriginBadge({ origin, ownership }: OriginBadgeProps) {
   };
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${config.className}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${config.className}`}
     >
-      <span aria-hidden="true">{config.emoji}</span>
       {config.label}
     </span>
   );
@@ -93,7 +92,7 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
     }
 
     if (item.status === 'needs_review') {
-      return 'No fields detected (needs review)';
+      return 'No fields detected yet';
     }
 
     return 'No fields detected';
@@ -158,12 +157,11 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
             <span aria-hidden="true">·</span>
             {item.syncStatus === 'inferred' ? (
               <span
-                className="inline-flex items-center gap-0.5 text-xs font-medium text-amber-600"
-                aria-label="Inferred"
-                data-testid="sync-status-inferred"
+                className="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-300"
+                aria-label="Ready"
+                data-testid="sync-status-ready"
               >
-                <span aria-hidden="true">⚠</span>
-                <span>Inferred</span>
+                <span>Ready</span>
               </span>
             ) : (
               <SchemaSyncStatusBadge

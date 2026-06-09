@@ -75,6 +75,9 @@ describe('httpRequest', () => {
       'http://localhost:3001/api/projects/p-1',
       expect.objectContaining({ method: 'GET' }),
     );
+
+    const [, requestInit] = fetchMock.mock.calls[0];
+    expect((requestInit as RequestInit).headers).toBeUndefined();
   });
 
   it('successful GET parses plain object JSON response', async () => {
@@ -143,6 +146,23 @@ describe('httpRequest', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+  });
+
+  it('DELETE without body does not send Content-Type header', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await httpRequest<void>({
+      baseUrl: 'http://localhost:3001/api',
+      path: '/projects/p-1',
+      method: 'DELETE',
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0];
+    expect((requestInit as RequestInit).headers).toBeUndefined();
   });
 
   it('success envelope with success=false throws extracted code/message', async () => {
@@ -281,7 +301,7 @@ describe('httpRequest', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('network failure on GET retries then throws retryable error', async () => {
+  it('network failure on GET retries then throws retryable error with CORS guidance', async () => {
     vi.useFakeTimers();
 
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('Failed to fetch'));
@@ -302,6 +322,7 @@ describe('httpRequest', () => {
       code: 'NETWORK_ERROR',
       retryable: true,
     });
+    expect(error.message).toContain('CORS');
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -321,7 +342,16 @@ describe('httpRequest', () => {
       retryable: true,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(
+      httpRequest({
+        baseUrl: 'http://localhost:3001/api',
+        path: '/projects',
+        method: 'POST',
+        body: { name: 'no-retry' },
+      }),
+    ).rejects.toThrow(/CORS/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('timeout on GET retries then throws retryable timeout error', async () => {

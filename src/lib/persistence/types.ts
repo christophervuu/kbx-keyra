@@ -47,6 +47,42 @@ export type SchemaSourceKind = 'json_schema' | 'xsd' | 'inferred_from_json' | 'i
 
 export type SchemaStatus = 'ready' | 'processing' | 'needs_review' | 'error' | 'ingesting';
 
+export type SchemaReviewState = 'not_required' | 'unreviewed' | 'partially_reviewed' | 'reviewed';
+
+export type SchemaReviewIssueCode =
+  | 'low_sample_evidence'
+  | 'type_ambiguity_conflict'
+  | 'optionality_uncertainty'
+  | 'empty_shape_unknown'
+  | 'field_name_quality'
+  | 'missing_description';
+
+export interface SchemaReviewIssueSummary {
+  readonly code: SchemaReviewIssueCode;
+  readonly count: number;
+  readonly blocking: boolean;
+}
+
+export type SchemaSampleSource = 'initial_upload' | 'added_sample';
+
+export type SchemaSampleCompatibility = 'unknown' | 'compatible' | 'mismatch';
+
+export interface SchemaSamplePayloadMetadata {
+  readonly sampleId: string;
+  readonly schemaId: string;
+  readonly name: string;
+  readonly dataFormat: SchemaDataFormat;
+  readonly contentRef: string;
+  readonly usedForInference: boolean;
+  readonly source: SchemaSampleSource;
+  readonly sizeBytes?: number;
+  readonly hash?: string;
+  readonly summary?: string;
+  readonly compatibility?: SchemaSampleCompatibility;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+}
+
 /**
  * Legacy-compatible persisted origin values.
  *
@@ -254,11 +290,16 @@ export interface SchemaMetadataItem {
   readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewIssues?: readonly SchemaReviewIssueSummary[];
+  readonly inferenceIssueCounts?: Readonly<Record<SchemaReviewIssueCode, number>>;
   readonly sourceKind?: SchemaSourceKind;
   readonly ownership?: SchemaOwnership;
   readonly readonly?: boolean;
   readonly reviewedAt?: ISODateString;
   readonly reviewedBy?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
   readonly disambiguator?: string;
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
@@ -628,11 +669,16 @@ export interface CreateSchemaMetadataInput {
   readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewIssues?: readonly SchemaReviewIssueSummary[];
+  readonly inferenceIssueCounts?: Readonly<Record<SchemaReviewIssueCode, number>>;
   readonly sourceKind?: SchemaSourceKind;
   readonly ownership?: SchemaOwnership;
   readonly readonly?: boolean;
   readonly reviewedAt?: ISODateString;
   readonly reviewedBy?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
   readonly disambiguator?: string;
   readonly syncStatus?: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
@@ -694,8 +740,13 @@ export interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewIssues?: readonly SchemaReviewIssueSummary[];
+  readonly inferenceIssueCounts?: Readonly<Record<SchemaReviewIssueCode, number>>;
   readonly reviewedAt?: ISODateString;
   readonly reviewedBy?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
   readonly disambiguator?: string;
   readonly syncStatus: CanonicalSchemaSyncStatus;
   readonly source: SchemaSourceInfo;
@@ -829,8 +880,12 @@ export function normalizeSchemaStatus(input: {
   inferred?: boolean | null;
   reviewedAt?: ISODateString | null;
 }): SchemaStatus {
-  if (input.status === 'processing' || input.status === 'needs_review') {
+  if (input.status === 'processing') {
     return input.status;
+  }
+
+  if (input.status === 'needs_review') {
+    return input.inferred && !input.reviewedAt ? 'needs_review' : 'ready';
   }
 
   if (input.status === 'ingesting') {
@@ -854,6 +909,27 @@ export function normalizeSchemaStatus(input: {
   }
 
   return 'ready';
+}
+
+export function normalizeSchemaReviewState(input: {
+  reviewState?: SchemaReviewState | string | null;
+  inferred?: boolean | null;
+  reviewedAt?: ISODateString | null;
+}): SchemaReviewState {
+  if (
+    input.reviewState === 'not_required'
+    || input.reviewState === 'unreviewed'
+    || input.reviewState === 'partially_reviewed'
+    || input.reviewState === 'reviewed'
+  ) {
+    return input.reviewState;
+  }
+
+  if (!input.inferred) {
+    return 'not_required';
+  }
+
+  return input.reviewedAt ? 'reviewed' : 'unreviewed';
 }
 
 export function toSchemaMetadata(item: SchemaMetadataItem): SchemaMetadata {
@@ -886,8 +962,17 @@ export function toSchemaMetadata(item: SchemaMetadataItem): SchemaMetadata {
     ...(item.scope !== undefined ? { scope: item.scope } : {}),
     description: item.description,
     inferred: item.inferred,
+    reviewState: normalizeSchemaReviewState({
+      reviewState: item.reviewState,
+      inferred: item.inferred,
+      reviewedAt: item.reviewedAt,
+    }),
+    ...(item.reviewIssues !== undefined ? { reviewIssues: item.reviewIssues } : {}),
+    ...(item.inferenceIssueCounts !== undefined ? { inferenceIssueCounts: item.inferenceIssueCounts } : {}),
     ...(item.reviewedAt !== undefined ? { reviewedAt: item.reviewedAt } : {}),
     ...(item.reviewedBy !== undefined ? { reviewedBy: item.reviewedBy } : {}),
+    ...(item.samplePayloadCount !== undefined ? { samplePayloadCount: item.samplePayloadCount } : {}),
+    ...(item.samplePayloads !== undefined ? { samplePayloads: item.samplePayloads } : {}),
     ...(item.disambiguator !== undefined ? { disambiguator: item.disambiguator } : {}),
     syncStatus: normalizeSchemaSyncStatus(item.syncStatus),
     source: item.source,

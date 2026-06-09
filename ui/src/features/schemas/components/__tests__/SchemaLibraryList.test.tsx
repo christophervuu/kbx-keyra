@@ -48,9 +48,10 @@ describe('SchemaLibraryList', () => {
     expect(screen.getByRole('columnheader', { name: 'Schema' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Format' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Fields' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Used by' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Updated' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '# of Fields' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Used by # of Projects' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Updated on' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Ownership' })).not.toBeInTheDocument();
   });
 
   it('shows CDM badge in name column for CDM rows only', () => {
@@ -62,6 +63,9 @@ describe('SchemaLibraryList', () => {
     const cdmBadge = screen.getByTestId('schema-list-cdm-badge');
     expect(cdmBadge).toBeInTheDocument();
     expect(within(cdmBadge).getByText('CDM')).toBeInTheDocument();
+    expect(cdmBadge.className).toContain('border-purple-700');
+    expect(cdmBadge.className).toContain('bg-purple-900/40');
+    expect(cdmBadge.className).toContain('text-purple-200');
     expect(screen.getAllByTestId('schema-library-list-row')).toHaveLength(2);
   });
 
@@ -72,7 +76,7 @@ describe('SchemaLibraryList', () => {
 
   it('renders contextual no-field summary in fields column', () => {
     renderList([makeItem({ fieldCount: 0, status: 'needs_review' })]);
-    expect(screen.getByText('No fields (review)')).toBeInTheDocument();
+    expect(screen.getByText('No fields yet')).toBeInTheDocument();
   });
 
   it('row click navigates to schema detail', async () => {

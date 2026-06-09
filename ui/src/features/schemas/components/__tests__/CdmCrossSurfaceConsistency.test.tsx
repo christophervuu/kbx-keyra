@@ -163,7 +163,7 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
     expect(screen.getByTestId(detailBadgeId)).toBeInTheDocument();
   });
 
-  it('AE-03/AE-04: enforces action policy by surface (project: View/Re-sync/Unlink, library: navigation-first, detail: View/Re-sync only)', () => {
+  it('AE-03/AE-04: enforces action policy by surface (project: View/Re-sync/Unlink, library: navigation-first, detail: overflow View raw only for CDM)', async () => {
     const projectView = render(
       <SchemaCard
         schema={makeProjectSchema()}
@@ -196,7 +196,6 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
           <SchemaActions
             schema={makeDetailSchema()}
             onEdit={vi.fn()}
-            onReplace={vi.fn()}
             onViewRaw={vi.fn()}
             usageMappings={[] as UsageMapping[]}
             isEditing={false}
@@ -205,11 +204,16 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
       </AdapterProvider>,
     );
 
-    expect(screen.getByTestId('action-resync')).toBeInTheDocument();
-    expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
     expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
+    expect(screen.getByTestId('action-overflow-trigger')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('action-overflow-trigger'));
+
+    expect(screen.getByTestId('action-overflow-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
     expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-resync')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /unlink/i })).not.toBeInTheDocument();
   });
@@ -243,13 +247,12 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
     expect(screen.getByTestId('git-status-indicator-sync-failed')).toBeInTheDocument();
   });
 
-  it('AE-07: Re-sync success/error feedback copy is consistent between Project Overview and Schema Detail', async () => {
+  it('AE-07: Re-sync success feedback remains on Project Overview (Schema Detail no longer has re-sync)', async () => {
     const user = userEvent.setup();
     const successMessage = 'Schema re-synced from CDM source.';
-    const standardError = 'Unable to re-sync right now. Please verify repository access and try again.';
 
     const onResync = vi.fn().mockResolvedValue({ message: successMessage });
-    render(
+    const projectView = render(
       <SchemaManagementSection
         projectId="project-1"
         schemas={[makeProjectSchema()]}
@@ -267,16 +270,14 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
       expect(screen.getByTestId('resync-success')).toHaveTextContent(successMessage);
     });
 
-    const adapter = createMockAdapter({
-      syncCdmSchema: vi.fn().mockRejectedValue(new Error('rate-limit')),
-    });
+    projectView.unmount();
+
     render(
-      <AdapterProvider adapter={adapter}>
+      <AdapterProvider adapter={createMockAdapter()}>
         <MemoryRouter>
           <SchemaActions
             schema={makeDetailSchema()}
             onEdit={vi.fn()}
-            onReplace={vi.fn()}
             onViewRaw={vi.fn()}
             usageMappings={[] as UsageMapping[]}
             isEditing={false}
@@ -285,9 +286,7 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
       </AdapterProvider>,
     );
 
-    await user.click(screen.getAllByTestId('action-resync')[1]);
-    await waitFor(() => {
-      expect(screen.getByTestId('resync-error')).toHaveTextContent(standardError);
-    });
+    expect(screen.queryByTestId('action-resync')).not.toBeInTheDocument();
+    expect(screen.getByTestId('action-overflow-trigger')).toBeInTheDocument();
   });
 });

@@ -30,6 +30,50 @@ export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 
 export type SchemaStatus = 'ready' | 'processing' | 'needs_review' | 'error' | 'ingesting';
 
+export type SchemaReviewState = 'not_required' | 'unreviewed' | 'partially_reviewed' | 'reviewed';
+
+export type SchemaReviewIssueCode =
+  | 'low_sample_evidence'
+  | 'type_ambiguity_conflict'
+  | 'optionality_uncertainty'
+  | 'empty_shape_unknown'
+  | 'field_name_quality'
+  | 'missing_description';
+
+export interface SchemaReviewIssueSummary {
+  readonly code: SchemaReviewIssueCode;
+  readonly count: number;
+  readonly blocking: boolean;
+}
+
+export type SchemaSampleSource = 'initial_upload' | 'added_sample';
+
+export type SchemaSampleCompatibility = 'unknown' | 'compatible' | 'mismatch';
+
+export interface SchemaSamplePayloadMetadata {
+  readonly sampleId: string;
+  readonly schemaId: string;
+  readonly name: string;
+  readonly dataFormat: SchemaDataFormat;
+  readonly contentRef: string;
+  readonly usedForInference: boolean;
+  readonly source: SchemaSampleSource;
+  readonly sizeBytes?: number;
+  readonly hash?: string;
+  readonly summary?: string;
+  readonly compatibility?: SchemaSampleCompatibility;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+}
+
+export interface SchemaSamplePayloadContent {
+  readonly sampleId: string;
+  readonly schemaId: string;
+  readonly dataFormat: SchemaDataFormat;
+  readonly raw: string;
+  readonly parsed: unknown | null;
+}
+
 /**
  * @deprecated FS-087 compatibility-only field.
  * Scope must not determine schema availability behavior.
@@ -192,8 +236,13 @@ export interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewIssues?: readonly SchemaReviewIssueSummary[];
+  readonly inferenceIssueCounts?: Readonly<Record<SchemaReviewIssueCode, number>>;
   readonly reviewedAt?: ISODateString;
   readonly reviewedBy?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
   readonly disambiguator?: string;
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
@@ -357,6 +406,34 @@ export interface UpdateSchemaInput {
   readonly disambiguator?: string;
 }
 
+export interface AddSchemaSampleInput {
+  readonly sampleName?: string;
+  readonly sampleContent: unknown;
+  readonly applySuggestedUpdates?: boolean;
+}
+
+export interface AddSchemaSampleDiff {
+  readonly additions: readonly string[];
+  readonly typeConflicts: ReadonlyArray<{
+    path: string;
+    existingType: string;
+    sampleType: string;
+  }>;
+  readonly requiredOptionalEvidence: ReadonlyArray<{
+    path: string;
+    appearsInCurrentSample: boolean;
+    totalSamplesAfterSave: number;
+  }>;
+}
+
+export interface AddSchemaSampleResult {
+  readonly sample: SchemaSamplePayloadMetadata;
+  readonly diff: AddSchemaSampleDiff;
+  readonly schemaUpdated: boolean;
+  readonly mode: 'apply_all' | 'save_only';
+  readonly metadata: SchemaMetadata;
+}
+
 export interface GitHubFile {
   readonly path: string;
   readonly name: string;
@@ -444,8 +521,12 @@ export function normalizeSchemaStatus(input: {
   inferred?: boolean | null;
   reviewedAt?: ISODateString | null;
 }): SchemaStatus {
-  if (input.status === 'processing' || input.status === 'needs_review') {
+  if (input.status === 'processing') {
     return input.status;
+  }
+
+  if (input.status === 'needs_review') {
+    return input.inferred && !input.reviewedAt ? 'needs_review' : 'ready';
   }
 
   if (input.status === 'ingesting') {
@@ -469,6 +550,27 @@ export function normalizeSchemaStatus(input: {
   }
 
   return 'ready';
+}
+
+export function normalizeSchemaReviewState(input: {
+  reviewState?: SchemaReviewState | string | null;
+  inferred?: boolean | null;
+  reviewedAt?: ISODateString | null;
+}): SchemaReviewState {
+  if (
+    input.reviewState === 'not_required'
+    || input.reviewState === 'unreviewed'
+    || input.reviewState === 'partially_reviewed'
+    || input.reviewState === 'reviewed'
+  ) {
+    return input.reviewState;
+  }
+
+  if (!input.inferred) {
+    return 'not_required';
+  }
+
+  return input.reviewedAt ? 'reviewed' : 'unreviewed';
 }
 
 export function normalizeProjectLinkedSchemaIds(input: {

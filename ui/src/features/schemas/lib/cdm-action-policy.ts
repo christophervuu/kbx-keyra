@@ -13,7 +13,7 @@ export type SchemaUiAction =
 
 const CDM_ALLOWED_ACTIONS: Record<SchemaActionSurface, readonly SchemaUiAction[]> = {
   'project-overview': ['view', 'resync', 'unlink'],
-  'schema-detail': ['view', 'resync'],
+  'schema-detail': ['view'],
   'schema-library': ['view'],
 };
 

@@ -87,7 +87,6 @@ const FORMAT_OPTIONS: Array<{ value: FilterDataFormat; label: string }> = [
 const STATUS_OPTIONS: Array<{ value: FilterStatus; label: string }> = [
   { value: 'ready', label: 'Ready' },
   { value: 'processing', label: 'Processing' },
-  { value: 'needs_review', label: 'Needs review' },
   { value: 'error', label: 'Error' },
 ];
 

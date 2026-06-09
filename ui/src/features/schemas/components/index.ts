@@ -13,6 +13,7 @@ export { SchemaTreeView } from './SchemaTreeView';
 export type { SchemaTreeViewHandle } from './SchemaTreeView';
 export { SchemaUsageSection } from './SchemaUsageSection';
 export type { SchemaUsageSectionProps } from './SchemaUsageSection';
+export { SchemaSamplePayloadsSection } from './SchemaSamplePayloadsSection';
 export { InferredSchemaBanner } from './InferredSchemaBanner';
 export type { InferredSchemaBannerProps } from './InferredSchemaBanner';
 export { ViewRawModal } from './ViewRawModal';

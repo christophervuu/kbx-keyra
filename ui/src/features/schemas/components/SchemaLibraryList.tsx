@@ -16,7 +16,7 @@ function formatFieldCount(item: SchemaLibraryItem): string {
   }
 
   if (item.status === 'processing') return 'No fields yet';
-  if (item.status === 'needs_review') return 'No fields (review)';
+  if (item.status === 'needs_review') return 'No fields yet';
   if (item.status === 'error') return 'No fields (error)';
   return 'No fields';
 }
@@ -30,12 +30,11 @@ export function SchemaLibraryList({ items }: SchemaLibraryListProps) {
         <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-wide text-slate-400">
           <tr>
             <th className="px-4 py-3">Schema</th>
-            <th className="px-4 py-3">Ownership</th>
-            <th className="px-4 py-3">Format</th>
             <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Fields</th>
-            <th className="px-4 py-3">Used by</th>
-            <th className="px-4 py-3">Updated</th>
+            <th className="px-4 py-3">Format</th>
+            <th className="px-4 py-3"># of Fields</th>
+            <th className="px-4 py-3">Used by # of Projects</th>
+            <th className="px-4 py-3">Updated on</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800 bg-slate-900/40">
@@ -58,10 +57,9 @@ export function SchemaLibraryList({ items }: SchemaLibraryListProps) {
                 <div className="flex items-center gap-2">
                   {item.ownership === 'cdm' ? (
                     <span
-                      className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800"
+                      className="inline-flex items-center rounded-full border border-purple-700 bg-purple-900/40 px-2 py-0.5 text-xs font-medium text-purple-200"
                       data-testid="schema-list-cdm-badge"
                     >
-                      <span aria-hidden="true">📚</span>
                       {getSchemaOriginLabel('cdm')}
                     </span>
                   ) : null}
@@ -73,11 +71,10 @@ export function SchemaLibraryList({ items }: SchemaLibraryListProps) {
                   </p>
                 ) : null}
               </td>
-              <td className="px-4 py-3">{item.ownership === 'cdm' ? 'CDM' : 'User'}</td>
-              <td className="px-4 py-3">{item.dataFormat}</td>
               <td className="px-4 py-3">
                 <SchemaStatusBadge status={item.status} />
               </td>
+              <td className="px-4 py-3">{item.dataFormat}</td>
               <td className="px-4 py-3">{formatFieldCount(item)}</td>
               <td className="px-4 py-3">{item.projectCount}</td>
               <td className="px-4 py-3">{new Date(item.updatedAt).toLocaleDateString()}</td>

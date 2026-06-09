@@ -1,4 +1,4 @@
-import { AlertTriangle, Eye, Trash2 } from 'lucide-react';
+import { Eye, Trash2 } from 'lucide-react';
 
 
 import type { SchemaCardData } from '../types';
@@ -32,13 +32,13 @@ function FormatBadge({ format }: { format: string }) {
  * Color-coded origin badge (AE-13):
  * - CDM → blue
  * - Uploaded → purple
- * - Inferred → amber
+ * - Inferred → uploaded presentation
  */
 function OriginBadge({ origin }: { origin: string }) {
   const config: Record<string, { cls: string; label: string }> = {
     cdm: { cls: 'bg-blue-100 text-blue-800', label: getSchemaOriginLabel('cdm') },
     uploaded: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
-    inferred: { cls: 'bg-amber-100 text-amber-800', label: 'Inferred' },
+    inferred: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
     published: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
     local: { cls: 'bg-purple-100 text-purple-800', label: 'Uploaded' },
   };
@@ -171,13 +171,6 @@ export function SchemaCard({
         </span>
       </div>
 
-      {/* Inferred warning */}
-      {schema.isInferred && (
-        <p className="flex items-center gap-1 text-xs text-amber-400">
-          <AlertTriangle size={12} aria-hidden="true" />
-          Inferred from sample data
-        </p>
-      )}
 
       {resyncFeedback && (
         <p

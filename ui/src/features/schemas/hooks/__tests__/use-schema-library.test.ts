@@ -174,6 +174,76 @@ describe('useSchemaLibrary', () => {
     expect(item.status).toBe('ready');
   });
 
+  it('uses totalFieldCount as fallback when fieldCount is zero', async () => {
+    const schemaWithLegacyCount = {
+      ...makeSchemaMeta({ schemaId: 'schema-legacy-count', fieldCount: 0 }),
+      totalFieldCount: 412,
+    } as SchemaMetadata & { totalFieldCount: number };
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([schemaWithLegacyCount]),
+      listProjects: vi.fn().mockResolvedValue([]),
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(result.current.items[0].fieldCount).toBe(412);
+  });
+
+  it('backfills fieldCount from schema detail content when list metadata is stale', async () => {
+    const schemaWithStaleCount = makeSchemaMeta({ schemaId: 'schema-stale', fieldCount: 0 });
+    const getSchema = vi.fn().mockResolvedValue({
+      metadata: schemaWithStaleCount,
+      content: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          age: { type: 'number' },
+        },
+      },
+    });
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([schemaWithStaleCount]),
+      listProjects: vi.fn().mockResolvedValue([]),
+      getSchema,
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(getSchema).toHaveBeenCalledWith('schema-stale');
+    expect(result.current.items[0].fieldCount).toBe(3);
+  });
+
+  it('does not backfill fieldCount for processing schemas', async () => {
+    const processingSchema = makeSchemaMeta({ schemaId: 'schema-processing', fieldCount: 0, status: 'processing' });
+    const getSchema = vi.fn();
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([processingSchema]),
+      listProjects: vi.fn().mockResolvedValue([]),
+      getSchema,
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(getSchema).not.toHaveBeenCalled();
+    expect(result.current.items[0].fieldCount).toBe(0);
+  });
+
   it('transitions to error state when adapter fails', async () => {
     const adapter = createMockAdapter({
       listSchemas: vi.fn().mockRejectedValue(new Error('Network failure')),

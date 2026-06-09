@@ -6,7 +6,14 @@ import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
 import type { AppError } from '@/lib/state/app-error';
 import { toAppError } from '@/lib/state/app-error';
-import type { ParsedSchema, SchemaDetail, UpdateSchemaInput } from '@/lib/types';
+import type {
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
+  ParsedSchema,
+  SchemaDetail,
+  SchemaSamplePayloadContent,
+  UpdateSchemaInput,
+} from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -24,6 +31,10 @@ export interface UseSchemaDetailResult {
   retry: () => void;
   clearMutationError: () => void;
   updateMetadata: (input: Partial<UpdateSchemaInput>) => Promise<void>;
+  markReviewed: () => Promise<void>;
+  addSample: (input: AddSchemaSampleInput) => Promise<AddSchemaSampleResult>;
+  deleteSample: (sampleId: string) => Promise<void>;
+  getSamplePayload: (sampleId: string) => Promise<SchemaSamplePayloadContent>;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +158,58 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
     [metadataMutation],
   );
 
+  const markReviewed = useCallback(async () => {
+    if (typeof adapter.markSchemaReviewed === 'function') {
+      const updated = await adapter.markSchemaReviewed(schemaId);
+      setSchema((prev) => (prev ? { ...prev, metadata: updated } : prev));
+      return;
+    }
+
+    await metadataMutation.run({
+      status: 'ready',
+      reviewedAt: new Date().toISOString(),
+    });
+  }, [adapter, schemaId, metadataMutation]);
+
+  const addSample = useCallback(async (input: AddSchemaSampleInput) => {
+    if (typeof adapter.addSchemaSample !== 'function') {
+      throw new Error('Adding schema samples is not available in this mode.');
+    }
+
+    const result = await adapter.addSchemaSample(schemaId, input);
+    setSchema((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        metadata: result.metadata,
+      };
+    });
+    return result;
+  }, [adapter, schemaId]);
+
+  const deleteSample = useCallback(async (sampleId: string) => {
+    if (typeof adapter.deleteSchemaSample !== 'function') {
+      throw new Error('Deleting schema samples is not available in this mode.');
+    }
+
+    const metadata = await adapter.deleteSchemaSample(schemaId, sampleId);
+    setSchema((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        metadata,
+      };
+    });
+  }, [adapter, schemaId]);
+
+  const getSamplePayload = useCallback(async (sampleId: string) => {
+    if (typeof adapter.getSchemaSamplePayload !== 'function') {
+      throw new Error('Loading schema sample payloads is not available in this mode.');
+    }
+
+    return adapter.getSchemaSamplePayload(schemaId, sampleId);
+  }, [adapter, schemaId]);
+
   return {
     schema,
     parsedSchema,
@@ -158,5 +221,9 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
     retry,
     clearMutationError: metadataMutation.clearError,
     updateMetadata,
+    markReviewed,
+    addSample,
+    deleteSample,
+    getSamplePayload,
   };
 }

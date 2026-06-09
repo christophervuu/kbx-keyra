@@ -685,7 +685,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
 
     await user.selectOptions(targetSelect, 'schema-needs-review');
     expect(targetSelect.value).toBe('schema-needs-review');
-    expect(screen.getByTestId('target-status')).toHaveTextContent('Needs review');
-    expect(screen.getByTestId('target-needs-review-warning')).toBeInTheDocument();
+    expect(screen.getByTestId('target-status')).toHaveTextContent('Ready');
+    expect(screen.queryByTestId('target-needs-review-warning')).not.toBeInTheDocument();
   });
 });

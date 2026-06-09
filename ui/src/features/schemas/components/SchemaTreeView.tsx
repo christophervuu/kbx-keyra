@@ -1,7 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AlertTriangle, FileQuestion, Loader2 } from 'lucide-react';
 import type { ForwardedRef } from 'react';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { getNodeDomId, useFlattenedTree, useTreeKeyboardNav, useTreeSearch } from '../hooks';
 import type { SchemaTreeViewProps } from '../types';
@@ -44,13 +44,25 @@ interface SchemaTreeViewComponentProps extends Partial<SchemaTreeViewProps> {
   onRetry?: () => void;
   /** Override schema as optional for loading/error states */
   schema?: ParsedSchema;
-  /** Max height of the tree container in pixels (default: 600) */
-  maxHeight?: number;
+  /** Max height of the tree container (px number or CSS size string). */
+  maxHeight?: number | string;
+  /** Min height of the tree container (px number or CSS size string). */
+  minHeight?: number | string;
+  /** Controlled search query from parent orchestration (optional) */
+  searchQuery?: string;
+  /** Called when internal search query changes */
+  onSearchQueryChange?: (query: string) => void;
+  /** Parent-supplied switch for showing only issue-likely fields */
+  showIssuesOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Helper: collect all expandable paths recursively
 // ---------------------------------------------------------------------------
+
+function toCssSize(value: number | string): string {
+  return typeof value === 'number' ? `${value}px` : value;
+}
 
 function collectAllExpandablePaths(nodes: SchemaTreeNode[]): Set<string> {
   const result = new Set<string>();
@@ -58,22 +70,6 @@ function collectAllExpandablePaths(nodes: SchemaTreeNode[]): Set<string> {
     for (const node of list) {
       if (node.childCount > 0) {
         result.add(node.path);
-        visit(node.children);
-      }
-    }
-  }
-  visit(nodes);
-  return result;
-}
-
-function collectPathsToDepth(nodes: SchemaTreeNode[], targetDepth: number): Set<string> {
-  const result = new Set<string>();
-  function visit(list: SchemaTreeNode[]) {
-    for (const node of list) {
-      if (node.childCount > 0) {
-        if (node.depth < targetDepth) {
-          result.add(node.path);
-        }
         visit(node.children);
       }
     }
@@ -93,6 +89,7 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
     error,
     onRetry,
     maxHeight = 600,
+    minHeight = 0,
     searchable = true,
     variant = 'source',
     mappingStatus,
@@ -100,6 +97,10 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
     selectedPath: controlledSelectedPath,
     editable = false,
     onNodeEdit,
+    sampleValueByPath,
+    searchQuery,
+    onSearchQueryChange,
+    showIssuesOnly,
   }: SchemaTreeViewComponentProps,
   ref: ForwardedRef<SchemaTreeViewHandle>,
 ) {
@@ -158,17 +159,33 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
     setExpandedPaths(new Set<string>());
   }, []);
 
-  const handleExpandToDepth = useCallback((depth: number) => {
-    if (!schema) return;
-    setExpandedPaths(collectPathsToDepth(schema.nodes, depth));
-  }, [schema]);
-
   // Search state
   const search = useTreeSearch(
     schema?.nodes ?? [],
     expandedPaths,
     setExpandedPaths,
   );
+
+  const searchValue = searchQuery ?? search.query;
+  const effectiveShowIssuesOnly = showIssuesOnly ?? false;
+
+  const setSearchValue = useCallback((value: string) => {
+    search.setQuery(value);
+    onSearchQueryChange?.(value);
+  }, [search.setQuery, onSearchQueryChange]);
+
+  const clearSearchValue = useCallback(() => {
+    search.clearSearch();
+    onSearchQueryChange?.('');
+  }, [search.clearSearch, onSearchQueryChange]);
+
+
+  // Keep internal search state synchronized when parent controls it.
+  useEffect(() => {
+    if (typeof searchQuery === 'string' && searchQuery !== search.query) {
+      search.setQuery(searchQuery);
+    }
+  }, [searchQuery, search.query, search.setQuery]);
 
   // Determine effective expanded paths (search overrides user expand state)
   const effectiveExpandedPaths = search.isSearchActive
@@ -179,10 +196,21 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
   const allFlatNodes = useFlattenedTree(schema?.nodes ?? [], effectiveExpandedPaths);
 
   // When search is active, filter flat nodes to only visible paths
+  const issueFilteredNodes = useMemo(() => {
+    if (!effectiveShowIssuesOnly) {
+      return allFlatNodes;
+    }
+
+    return allFlatNodes.filter((node) => {
+      const likelyIssue = node.inferred || !node.description || node.description.trim().length === 0;
+      return likelyIssue;
+    });
+  }, [allFlatNodes, effectiveShowIssuesOnly]);
+
   const flatNodes = useMemo(() => {
-    if (!search.isSearchActive) return allFlatNodes;
-    return allFlatNodes.filter((node) => search.filterResult.visiblePaths.has(node.path));
-  }, [allFlatNodes, search.isSearchActive, search.filterResult.visiblePaths]);
+    if (!search.isSearchActive) return issueFilteredNodes;
+    return issueFilteredNodes.filter((node) => search.filterResult.visiblePaths.has(node.path));
+  }, [issueFilteredNodes, search.isSearchActive, search.filterResult.visiblePaths]);
 
   // Scroll container ref
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -242,6 +270,18 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
     return map;
   }, [schema]);
 
+  const virtualRows = virtualizer.getVirtualItems();
+  const rowsToRender = virtualRows.length > 0
+    ? virtualRows
+    : flatNodes.map((_, index) => ({
+      index,
+      key: `fallback-${index}`,
+      size: ROW_HEIGHT,
+      start: index * ROW_HEIGHT,
+      end: (index + 1) * ROW_HEIGHT,
+      lane: 0,
+    }));
+
   // Render states
   if (loading) {
     return <LoadingState />;
@@ -257,26 +297,20 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
   }
 
   return (
-    <div className="flex flex-col">
-      {/* Inferred schema banner */}
-      {schema.inferred && <InferredBanner />}
-
-      {/* Search input */}
-      {searchable && (
-        <SchemaSearchInput
-          value={search.query}
-          onChange={search.setQuery}
-          onClear={search.clearSearch}
-          matchCount={search.filterResult.matchCount}
-          isSearchActive={search.isSearchActive}
-        />
-      )}
-
-      {/* Toolbar */}
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Search input + controls row */}
       <SchemaTreeToolbar
         onExpandAll={handleExpandAll}
         onCollapseAll={handleCollapseAll}
-        onExpandToDepth={handleExpandToDepth}
+        searchSlot={searchable ? (
+          <SchemaSearchInput
+            value={searchValue}
+            onChange={setSearchValue}
+            onClear={clearSearchValue}
+            matchCount={search.filterResult.matchCount}
+            isSearchActive={search.isSearchActive}
+          />
+        ) : undefined}
       />
 
       {/* Virtualized tree container */}
@@ -286,8 +320,8 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
         aria-label="Schema tree"
         aria-activedescendant={keyboardNav.activeDescendantId}
         tabIndex={0}
-        className="overflow-y-auto outline-none focus:ring-1 focus:ring-slate-600 rounded"
-        style={{ maxHeight: `${maxHeight}px` }}
+        className="flex-1 overflow-y-auto rounded outline-none"
+        style={{ maxHeight: toCssSize(maxHeight), minHeight: toCssSize(minHeight) }}
         onKeyDown={keyboardNav.handleKeyDown}
         onFocus={keyboardNav.handleFocus}
       >
@@ -298,7 +332,7 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
             position: 'relative',
           }}
         >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
+          {rowsToRender.map((virtualRow) => {
             const node = flatNodes[virtualRow.index];
             const isExpanded = effectiveExpandedPaths.has(node.path);
             const siblingInfo = siblingInfoMap.get(node.path);
@@ -328,9 +362,11 @@ export const SchemaTreeView = forwardRef(function SchemaTreeView(
                    id={getNodeDomId(node.path)}
                    posInSet={siblingInfo?.posInSet}
                    setSize={siblingInfo?.setSize}
-                   editable={editable}
-                   onNodeEdit={onNodeEdit}
-                 />
+                    editable={editable}
+                    onNodeEdit={onNodeEdit}
+                    showIssuesOnly={effectiveShowIssuesOnly}
+                    sampleValue={sampleValueByPath?.get(node.path)}
+                  />
               </div>
             );
           })}
@@ -392,15 +428,6 @@ function ErrorState({ message, onRetry }: ErrorStateProps) {
           Retry
         </Button>
       )}
-    </div>
-  );
-}
-
-function InferredBanner() {
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/30 border border-amber-800/30 rounded text-xs text-amber-300 mb-1">
-      <AlertTriangle size={14} aria-hidden="true" />
-      <span>Schema inferred from sample data</span>
     </div>
   );
 }

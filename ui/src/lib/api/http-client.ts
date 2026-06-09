@@ -109,13 +109,13 @@ async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
   const url = buildUrl(config.baseUrl, config.path);
   const requestInit: RequestInitLike = {
     method: config.method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
     signal: controller.signal,
   };
 
   if (config.method !== 'GET' && config.body !== undefined) {
+    requestInit.headers = {
+      'Content-Type': 'application/json',
+    };
     requestInit.body = JSON.stringify(config.body);
   }
 
@@ -141,11 +141,14 @@ async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
     }
 
     if (error instanceof TypeError) {
-      throw new HttpClientError('Network request failed.', {
-        code: 'NETWORK_ERROR',
-        retryable: true,
-        cause: error,
-      });
+      throw new HttpClientError(
+        'Network request failed. This may be a CORS or API authorization/config issue (for example: missing Access-Control-Allow-Origin on 4xx/5xx responses).',
+        {
+          code: 'NETWORK_ERROR',
+          retryable: true,
+          cause: error,
+        },
+      );
     }
 
     if (error instanceof Error) {
@@ -403,11 +406,14 @@ function normalizeHttpError(error: unknown): HttpClientError {
   }
 
   if (error instanceof TypeError) {
-    return new HttpClientError('Network request failed.', {
-      code: 'NETWORK_ERROR',
-      retryable: true,
-      cause: error,
-    });
+    return new HttpClientError(
+      'Network request failed. This may be a CORS or API authorization/config issue (for example: missing Access-Control-Allow-Origin on 4xx/5xx responses).',
+      {
+        code: 'NETWORK_ERROR',
+        retryable: true,
+        cause: error,
+      },
+    );
   }
 
   if (error instanceof Error) {

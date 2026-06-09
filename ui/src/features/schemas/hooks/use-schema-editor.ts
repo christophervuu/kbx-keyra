@@ -1,8 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 
-import { useAdapter } from '@/lib/api';
-import type { ParsedSchema, SchemaNodeType, SchemaTreeNode } from '@/lib/types';
-
+import { parseJsonSchema } from '../lib';
 import {
   addArrayField,
   addField,
@@ -14,8 +12,10 @@ import {
   updateDescription,
 } from '../lib/schema-editor-ops';
 import { countAllNodes, treeToJsonSchema } from '../lib/tree-to-json-schema';
-import { parseJsonSchema } from '../lib';
 import type { EditNodeCallbacks } from '../types';
+
+import { useAdapter } from '@/lib/api';
+import type { ParsedSchema, SchemaNodeType, SchemaTreeNode } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -44,6 +44,26 @@ export interface UseSchemaEditorResult {
   saveEdits: () => Promise<void>;
   /** Callback object to pass as `onNodeEdit` to SchemaTreeView */
   editCallbacks: EditNodeCallbacks;
+  /** Save changes for a single selected field */
+  saveFieldEdits: (path: string, updates: {
+    name: string;
+    description: string;
+    type: SchemaNodeType;
+    isRequired: boolean;
+  }) => Promise<void>;
+  /** Add a new root-level field and persist immediately */
+  addRootField: () => Promise<void>;
+}
+
+function findNodeByPath(nodes: SchemaTreeNode[], path: string): SchemaTreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    if (node.children.length > 0) {
+      const found = findNodeByPath(node.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +134,70 @@ export function useSchemaEditor(
     }
   }, [isEditing, editedNodes, originalContent, adapter, schemaId, onSaved]);
 
+  const persistNodes = useCallback(async (nodesToPersist: SchemaTreeNode[]) => {
+    const rawContent = treeToJsonSchema(
+      nodesToPersist,
+      originalContent ?? undefined,
+    );
+    const fieldCount = countAllNodes(nodesToPersist);
+
+    await adapter.updateSchema(schemaId, { content: rawContent, fieldCount });
+
+    let refreshed: ParsedSchema | null = null;
+    try {
+      refreshed = parseJsonSchema(rawContent);
+    } catch {
+      refreshed = null;
+    }
+
+    setIsEditing(false);
+    setEditedNodes([]);
+
+    if (refreshed) {
+      onSaved(refreshed);
+    }
+  }, [adapter, onSaved, originalContent, schemaId]);
+
+  const saveFieldEdits = useCallback(async (
+    path: string,
+    updates: { name: string; description: string; type: SchemaNodeType; isRequired: boolean },
+  ) => {
+    const baseNodes = (isEditing ? editedNodes : parsedSchema?.nodes) ?? [];
+    if (baseNodes.length === 0) return;
+
+    const currentNode = findNodeByPath(baseNodes, path);
+    if (!currentNode) return;
+
+    let nextNodes = baseNodes;
+
+    if (updates.type !== currentNode.type) {
+      nextNodes = changeType(nextNodes, path, updates.type);
+    }
+
+    if (updates.isRequired !== currentNode.isRequired) {
+      nextNodes = toggleRequired(nextNodes, path);
+    }
+
+    const currentDescription = (currentNode.description ?? '').trim();
+    const nextDescription = updates.description.trim();
+    if (currentDescription !== nextDescription) {
+      nextNodes = updateDescription(nextNodes, path, updates.description);
+    }
+
+    const nextName = updates.name.trim();
+    if (nextName && nextName !== currentNode.fieldName) {
+      nextNodes = renameField(nextNodes, path, nextName);
+    }
+
+    await persistNodes(nextNodes);
+  }, [editedNodes, isEditing, parsedSchema?.nodes, persistNodes]);
+
+  const addRootField = useCallback(async () => {
+    const baseNodes = (isEditing ? editedNodes : parsedSchema?.nodes) ?? [];
+    const nextNodes = addField(baseNodes, null, 'newField', 'string');
+    await persistNodes(nextNodes);
+  }, [editedNodes, isEditing, parsedSchema?.nodes, persistNodes]);
+
   // ---- Tree operation dispatchers ----
 
   const editCallbacks = useMemo<EditNodeCallbacks>(
@@ -146,7 +230,6 @@ export function useSchemaEditor(
       onAddArrayField: (parentPath) =>
         setEditedNodes((prev) => addArrayField(prev, parentPath, 'newArray')),
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -175,5 +258,7 @@ export function useSchemaEditor(
     cancelEditing,
     saveEdits,
     editCallbacks,
+    saveFieldEdits,
+    addRootField,
   };
 }

@@ -10,10 +10,6 @@ import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaDetail } from '@/lib/types';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
 function makeSchema(overrides: Partial<SchemaDetail['metadata']> = {}): SchemaDetail {
   return {
     metadata: {
@@ -34,14 +30,9 @@ function makeSchema(overrides: Partial<SchemaDetail['metadata']> = {}): SchemaDe
 }
 
 const NO_USAGE: UsageMapping[] = [];
-
 const WITH_USAGE: UsageMapping[] = [
   { mappingId: 'map-1', projectId: 'proj-1', name: 'Order Mapping', role: 'source' },
 ];
-
-// ---------------------------------------------------------------------------
-// Mock adapter factory
-// ---------------------------------------------------------------------------
 
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
@@ -49,6 +40,8 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getSchema: vi.fn(),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockResolvedValue({}),
+    markSchemaReviewed: vi.fn().mockResolvedValue({}),
+    addSchemaSample: vi.fn(),
     deleteSchema: vi.fn().mockResolvedValue(undefined),
     listMappings: vi.fn().mockResolvedValue([]),
     getMapping: vi.fn(),
@@ -70,12 +63,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getDeploymentDiff: vi.fn(),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
-    syncCdmSchema: vi.fn().mockResolvedValue({
-      schemaId: 'schema-1',
-      synced: true,
-      commitSha: 'sha-new',
-      message: 'Schema re-synced from CDM source.',
-    }),
+    syncCdmSchema: vi.fn(),
     listPublishedSchemas: vi.fn(),
     publishSchemaToGitHub: vi.fn(),
     linkPublishedSchema: vi.fn(),
@@ -91,190 +79,154 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   } as unknown as ApiAdapter;
 }
 
-// ---------------------------------------------------------------------------
-// Render helper
-// ---------------------------------------------------------------------------
-
 function renderActions(
   schema: SchemaDetail,
   adapter: ApiAdapter,
   props: Partial<{
     usageMappings: UsageMapping[];
     isEditing: boolean;
+    showEditButton: boolean;
     onEdit: () => void;
+    onViewRaw: () => void;
   }> = {},
 ) {
   const onEdit = props.onEdit ?? vi.fn();
-  const onReplace = vi.fn();
-  const onViewRaw = vi.fn();
+  const onViewRaw = props.onViewRaw ?? vi.fn();
 
-  return render(
+  render(
     <AdapterProvider adapter={adapter}>
       <MemoryRouter>
         <SchemaActions
           schema={schema}
           onEdit={onEdit}
-          onReplace={onReplace}
           onViewRaw={onViewRaw}
           usageMappings={props.usageMappings ?? NO_USAGE}
           isEditing={props.isEditing ?? false}
+          showEditButton={props.showEditButton}
         />
       </MemoryRouter>
     </AdapterProvider>,
   );
+
+  return { onEdit, onViewRaw };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+async function openOverflowMenu() {
+  await userEvent.click(screen.getByTestId('action-overflow-trigger'));
+  expect(screen.getByTestId('action-overflow-menu')).toBeInTheDocument();
+}
 
 describe('SchemaActions', () => {
-  describe('CDM schema', () => {
-    it('shows Re-sync action and View Raw, hides non-CDM buttons', () => {
-      const schema = makeSchema({ origin: 'cdm' });
-      renderActions(schema, createMockAdapter());
+  it('supports hiding top-level Edit Schema button while keeping overflow trigger', () => {
+    const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
+    renderActions(schema, createMockAdapter(), { showEditButton: false });
 
-      expect(screen.getByTestId('action-resync')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Re-sync' })).toBeInTheDocument();
-      expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
-      expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
-    });
-
-    it('calls syncCdmSchema on Re-sync click and shows status message', async () => {
-      const syncCdmSchema = vi.fn().mockResolvedValue({
-        schemaId: 'schema-1',
-        synced: true,
-        commitSha: 'sha-new',
-        message: 'Schema re-synced from CDM source.',
-      });
-      const schema = makeSchema({ origin: 'cdm' });
-      renderActions(schema, createMockAdapter({ syncCdmSchema }));
-
-      await userEvent.click(screen.getByTestId('action-resync'));
-
-      await waitFor(() => {
-        expect(syncCdmSchema).toHaveBeenCalledWith('schema-1');
-      });
-      expect(screen.getByTestId('resync-success')).toHaveTextContent('Schema re-synced from CDM source.');
-    });
-
-    it('shows actionable non-technical retry message when re-sync fails', async () => {
-      const syncCdmSchema = vi.fn().mockRejectedValue(new Error('rate-limit'));
-      const schema = makeSchema({ origin: 'cdm' });
-      renderActions(schema, createMockAdapter({ syncCdmSchema }));
-
-      await userEvent.click(screen.getByTestId('action-resync'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('resync-error')).toHaveTextContent(
-          'Unable to re-sync right now. Please verify repository access and try again.',
-        );
-      });
-      expect(screen.getByRole('button', { name: 'Retry re-sync' })).toBeInTheDocument();
-    });
+    expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
+    expect(screen.getByTestId('action-overflow-trigger')).toBeInTheDocument();
   });
 
-  describe('uploaded schema actions', () => {
-    it('shows Edit, Auto-describe, Sync, Replace, Remove, View Raw', () => {
-      const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
-      renderActions(schema, createMockAdapter());
+  it('renders user-schema action model: top-level Edit Schema + overflow trigger', () => {
+    const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
+    renderActions(schema, createMockAdapter());
 
-      expect(screen.getByTestId('action-edit')).toBeInTheDocument();
-      expect(screen.getByTestId('action-auto-describe')).toBeInTheDocument();
-      expect(screen.getByTestId('action-sync-github')).toBeInTheDocument();
-      expect(screen.getByTestId('action-replace')).toBeInTheDocument();
-      expect(screen.getByTestId('action-remove')).toBeInTheDocument();
-      expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
-    });
+    expect(screen.getByTestId('action-edit')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Schema' })).toBeInTheDocument();
+    expect(screen.getByTestId('action-overflow-trigger')).toBeInTheDocument();
 
-    it('hides Edit for non-json-schema format', () => {
-      const schema = makeSchema({ origin: 'uploaded', format: 'xsd' });
-      renderActions(schema, createMockAdapter());
-
-      expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
-      expect(screen.getByTestId('action-remove')).toBeInTheDocument();
-    });
+    expect(screen.queryByTestId('action-resync')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /publish/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /promote/i })).not.toBeInTheDocument();
   });
 
-  describe('Edit button', () => {
-    it('calls onEdit when clicked', async () => {
-      const onEdit = vi.fn();
-      const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
-      renderActions(schema, createMockAdapter(), { onEdit });
+  it('overflow for user schema contains View raw and Delete schema', async () => {
+    const schema = makeSchema({ origin: 'uploaded' });
+    renderActions(schema, createMockAdapter());
 
-      await userEvent.click(screen.getByTestId('action-edit'));
-      expect(onEdit).toHaveBeenCalledOnce();
-    });
+    await openOverflowMenu();
 
-    it('is hidden when isEditing is true', () => {
-      const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
-      renderActions(schema, createMockAdapter(), { isEditing: true });
-
-      expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
-    });
+    expect(screen.getByTestId('action-view-raw')).toHaveTextContent('View raw');
+    expect(screen.getByTestId('action-remove')).toHaveTextContent('Delete schema');
   });
 
-  describe('placeholder buttons', () => {
-    it('auto-describe shows tooltip text', () => {
-      const schema = makeSchema({ origin: 'uploaded' });
-      renderActions(schema, createMockAdapter());
+  it('CDM schema renders overflow only with View raw', async () => {
+    const schema = makeSchema({ origin: 'cdm', ownership: 'cdm', readonly: true });
+    renderActions(schema, createMockAdapter());
 
-      const btn = screen.getByTestId('action-auto-describe');
-      expect(btn).toBeDisabled();
-      expect(btn).toHaveAttribute('title', 'AI-generated field descriptions available in a future release');
-    });
+    expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
 
-    it('sync-github shows tooltip text', () => {
-      const schema = makeSchema({ origin: 'uploaded' });
-      renderActions(schema, createMockAdapter());
+    await openOverflowMenu();
 
-      const btn = screen.getByTestId('action-sync-github');
-      expect(btn).toBeDisabled();
-      expect(btn).toHaveAttribute('title', 'GitHub sync available when backend is connected');
-    });
-
-    it('CDM re-sync action is enabled', () => {
-      const schema = makeSchema({ origin: 'cdm' });
-      renderActions(schema, createMockAdapter());
-
-      expect(screen.getByTestId('action-resync')).toBeEnabled();
-    });
-
-    it('CDM schemas do not render disabled discoverability placeholders', () => {
-      const schema = makeSchema({ origin: 'cdm' });
-      renderActions(schema, createMockAdapter());
-
-      expect(screen.queryByTestId('action-auto-describe')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('action-sync-github')).not.toBeInTheDocument();
-    });
+    expect(screen.getByTestId('action-view-raw')).toBeInTheDocument();
+    expect(screen.queryByTestId('action-replace')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-remove')).not.toBeInTheDocument();
+    expect(screen.queryByText(/re-sync/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sync to github/i)).not.toBeInTheDocument();
   });
 
-  describe('Remove', () => {
-    it('shows blocked dialog when mappings reference the schema', async () => {
+  it('hides Edit Schema while currently editing', () => {
+    const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
+    renderActions(schema, createMockAdapter(), { isEditing: true });
+
+    expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
+    expect(screen.getByTestId('action-overflow-trigger')).toBeInTheDocument();
+  });
+
+  it('hides Edit Schema for non-json-schema formats', () => {
+    const schema = makeSchema({ origin: 'uploaded', format: 'xsd' });
+    renderActions(schema, createMockAdapter());
+
+    expect(screen.queryByTestId('action-edit')).not.toBeInTheDocument();
+  });
+
+  it('calls onEdit when Edit Schema is clicked', async () => {
+    const onEdit = vi.fn();
+    const schema = makeSchema({ origin: 'uploaded', format: 'json-schema' });
+    renderActions(schema, createMockAdapter(), { onEdit });
+
+    await userEvent.click(screen.getByTestId('action-edit'));
+    expect(onEdit).toHaveBeenCalledOnce();
+  });
+
+  it('calls onViewRaw from overflow', async () => {
+    const onViewRaw = vi.fn();
+    const schema = makeSchema({ origin: 'uploaded' });
+    renderActions(schema, createMockAdapter(), { onViewRaw });
+
+    await openOverflowMenu();
+    await userEvent.click(screen.getByTestId('action-view-raw'));
+
+    expect(onViewRaw).toHaveBeenCalledOnce();
+  });
+
+  describe('Delete schema', () => {
+    it('shows blocked dialog when mappings reference schema', async () => {
       const schema = makeSchema({ origin: 'uploaded' });
       renderActions(schema, createMockAdapter(), { usageMappings: WITH_USAGE });
 
+      await openOverflowMenu();
       await userEvent.click(screen.getByTestId('action-remove'));
+
       expect(screen.getByText(/Cannot remove this schema/i)).toBeInTheDocument();
       expect(screen.getByTestId('remove-blocked-mappings')).toHaveTextContent('Order Mapping');
     });
 
-    it('shows confirmation dialog when no mappings reference the schema', async () => {
+    it('shows confirmation dialog when schema has no usage', async () => {
       const schema = makeSchema({ origin: 'uploaded' });
       renderActions(schema, createMockAdapter(), { usageMappings: NO_USAGE });
 
+      await openOverflowMenu();
       await userEvent.click(screen.getByTestId('action-remove'));
-      expect(screen.getByText(/Are you sure you want to remove/i)).toBeInTheDocument();
+
+      expect(screen.getByText(/Remove schema\?/i)).toBeInTheDocument();
     });
 
-    it('calls deleteSchema on confirm and navigates away', async () => {
+    it('calls deleteSchema on confirm', async () => {
       const deleteSchema = vi.fn().mockResolvedValue(undefined);
       const schema = makeSchema({ origin: 'uploaded', schemaId: 'schema-1' });
       renderActions(schema, createMockAdapter({ deleteSchema }), { usageMappings: NO_USAGE });
 
+      await openOverflowMenu();
       await userEvent.click(screen.getByTestId('action-remove'));
       await userEvent.click(screen.getByTestId('confirm-dialog-confirm'));
 

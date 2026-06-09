@@ -72,7 +72,7 @@ describe('SchemaLibraryFiltersPanel', () => {
   const defaultProps = {
     ownerships: [] as Array<'cdm' | 'user'>,
     dataFormats: [] as Array<'JSON' | 'XML'>,
-    statuses: [] as Array<'ready' | 'processing' | 'needs_review' | 'error'>,
+    statuses: [] as Array<'ready' | 'processing' | 'error'>,
     onToggleOwnership: noop,
     onToggleDataFormat: noop,
     onToggleStatus: noop,
@@ -102,7 +102,7 @@ describe('SchemaLibraryFiltersPanel', () => {
     expect(statusGroup).toBeInTheDocument();
     expect(within(statusGroup).getByRole('button', { name: 'Ready' })).toBeInTheDocument();
     expect(within(statusGroup).getByRole('button', { name: 'Processing' })).toBeInTheDocument();
-    expect(within(statusGroup).getByRole('button', { name: 'Needs review' })).toBeInTheDocument();
+    expect(within(statusGroup).queryByRole('button', { name: 'Needs review' })).not.toBeInTheDocument();
     expect(within(statusGroup).getByRole('button', { name: 'Error' })).toBeInTheDocument();
   });
 
@@ -123,8 +123,8 @@ describe('SchemaLibraryFiltersPanel', () => {
   it('calls onToggleStatus when status button clicked', async () => {
     const onToggleStatus = vi.fn();
     render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleStatus={onToggleStatus} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Needs review' }));
-    expect(onToggleStatus).toHaveBeenCalledWith('needs_review');
+    await userEvent.click(screen.getByRole('button', { name: 'Error' }));
+    expect(onToggleStatus).toHaveBeenCalledWith('error');
   });
 
   it('active ownership button has aria-pressed=true', () => {
@@ -199,7 +199,7 @@ describe('ActiveFilterChips', () => {
   const emptyProps = {
     ownerships: [] as Array<'cdm' | 'user'>,
     dataFormats: [] as Array<'JSON' | 'XML'>,
-    statuses: [] as Array<'ready' | 'processing' | 'needs_review' | 'error'>,
+    statuses: [] as Array<'ready' | 'processing' | 'error'>,
     onRemoveOwnership: vi.fn(),
     onRemoveDataFormat: vi.fn(),
     onRemoveStatus: vi.fn(),
@@ -223,8 +223,8 @@ describe('ActiveFilterChips', () => {
   });
 
   it('renders chips for active status filters', () => {
-    render(<ActiveFilterChips {...emptyProps} statuses={['needs_review']} />);
-    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Needs review');
+    render(<ActiveFilterChips {...emptyProps} statuses={['needs_review' as 'ready' | 'processing' | 'error']} />);
+    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Ready');
   });
 
   it('× button on ownership chip calls onRemoveOwnership', async () => {

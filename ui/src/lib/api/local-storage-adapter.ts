@@ -11,12 +11,15 @@ import {
   normalizeProjectLinkedSchemaIds,
   normalizeSchemaOwnership,
   normalizeSchemaOrigin,
+  normalizeSchemaReviewState,
   normalizeSchemaSourceKind,
   normalizeSchemaStatus,
   schemaDataFormatFromSourceKind,
 } from '@/lib/types';
 import type {
   ActivityEntry,
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
   AutoMapInput,
   AutoMapResult,
   AutoMapSectionInput,
@@ -48,6 +51,7 @@ import type {
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
+  SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -109,8 +113,13 @@ function normalizeSchemaMetadataForRead(metadata: SchemaMetadata): SchemaMetadat
     }),
     ...(metadata.scope !== undefined ? { scope: metadata.scope } : {}),
     description: metadata.description ?? '',
-    inferred: metadata.inferred ?? false,
-    syncStatus: normalizeSchemaSyncStatusForStorage(metadata.syncStatus ?? 'sync-failed'),
+      inferred: metadata.inferred ?? false,
+      reviewState: normalizeSchemaReviewState({
+        reviewState: metadata.reviewState,
+        inferred: metadata.inferred,
+        reviewedAt: metadata.reviewedAt,
+      }),
+      syncStatus: normalizeSchemaSyncStatusForStorage(metadata.syncStatus ?? 'sync-failed'),
   };
 }
 
@@ -118,6 +127,7 @@ function normalizeSchemaMetadataForRead(metadata: SchemaMetadata): SchemaMetadat
 interface StoredSchema {
   metadata: SchemaMetadata;
   detail: SchemaDetail;
+  samplePayloadContentById?: Record<string, SchemaSamplePayloadContent>;
 }
 
 interface StoredMapping {
@@ -532,6 +542,11 @@ export class LocalStorageAdapter implements ApiAdapter {
       ...(input.reviewedAt !== undefined ? { reviewedAt: input.reviewedAt } : {}),
       ...(input.reviewedBy !== undefined ? { reviewedBy: input.reviewedBy } : {}),
       ...(input.disambiguator !== undefined ? { disambiguator: input.disambiguator } : {}),
+      reviewState: normalizeSchemaReviewState({
+        reviewState: currentMetadata.reviewState,
+        inferred: currentMetadata.inferred,
+        reviewedAt: input.reviewedAt ?? currentMetadata.reviewedAt,
+      }),
       sourceKind: normalizeSchemaSourceKind({
         sourceKind: currentMetadata.sourceKind,
         format: input.format ?? currentMetadata.format,
@@ -564,6 +579,149 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     this.writeArray(STORAGE_KEYS.schemas, schemas);
     return nextMetadata;
+  }
+
+  async markSchemaReviewed(id: string): Promise<SchemaMetadata> {
+    return this.updateSchema(id, {
+      status: 'ready',
+      reviewedAt: this.nowIso(),
+      reviewedBy: 'local-user',
+    });
+  }
+
+  async addSchemaSample(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult> {
+    const detail = await this.getSchema(id);
+    const metadata = normalizeSchemaMetadataForRead(detail.metadata);
+
+    const sampleId = crypto.randomUUID();
+    const now = this.nowIso();
+    const sample = {
+      sampleId,
+      schemaId: id,
+      name: input.sampleName?.trim() || `Sample ${(metadata.samplePayloadCount ?? metadata.samplePayloads?.length ?? 0) + 1}`,
+      dataFormat: metadata.dataFormat ?? 'json',
+      contentRef: `local://schemas/${id}/samples/${sampleId}`,
+      usedForInference: false,
+      source: 'added_sample' as const,
+      createdAt: now,
+      compatibility: 'unknown' as const,
+    };
+
+    const nextSamples = [...(metadata.samplePayloads ?? []), sample];
+    const nextMetadata = await this.updateSchema(id, {
+      status: input.applySuggestedUpdates ? 'needs_review' : metadata.status,
+      fieldCount: metadata.fieldCount,
+    });
+
+    const mergedMetadata = {
+      ...nextMetadata,
+      samplePayloads: nextSamples,
+      samplePayloadCount: nextSamples.length,
+    };
+
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index >= 0) {
+      const raw = metadata.dataFormat === 'xml'
+        ? (typeof input.sampleContent === 'string' ? input.sampleContent : String(input.sampleContent))
+        : JSON.stringify(input.sampleContent);
+      const parsed = metadata.dataFormat === 'xml'
+        ? null
+        : input.sampleContent;
+
+      const patched = {
+        ...schemas[index],
+        metadata: mergedMetadata,
+        detail: {
+          ...schemas[index].detail,
+          metadata: mergedMetadata,
+        },
+        samplePayloadContentById: {
+          ...(schemas[index].samplePayloadContentById ?? {}),
+          [sampleId]: {
+            sampleId,
+            schemaId: id,
+            dataFormat: sample.dataFormat,
+            raw,
+            parsed,
+          },
+        },
+      };
+      schemas[index] = patched;
+      this.writeArray(STORAGE_KEYS.schemas, schemas);
+    }
+
+    return {
+      sample,
+      diff: {
+        additions: [],
+        typeConflicts: [],
+        requiredOptionalEvidence: [],
+      },
+      schemaUpdated: input.applySuggestedUpdates === true,
+      mode: input.applySuggestedUpdates ? 'apply_all' : 'save_only',
+      metadata: mergedMetadata,
+    };
+  }
+
+  async deleteSchemaSample(id: string, sampleId: string): Promise<SchemaMetadata> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index < 0) {
+      throw this.notFound('Schema', id);
+    }
+
+    const current = schemas[index];
+    const existingSamples = current.metadata.samplePayloads ?? [];
+    const nextSamples = existingSamples.filter((sample) => sample.sampleId !== sampleId);
+
+    if (nextSamples.length === existingSamples.length) {
+      throw this.notFound('Schema sample', `${id}:${sampleId}`);
+    }
+
+    const nextMetadata: SchemaMetadata = {
+      ...normalizeSchemaMetadataForRead(current.metadata),
+      samplePayloads: nextSamples,
+      samplePayloadCount: nextSamples.length,
+      updatedAt: this.nowIso(),
+      updatedBy: 'local-user',
+    };
+
+    const nextContentById = { ...(current.samplePayloadContentById ?? {}) };
+    delete nextContentById[sampleId];
+
+    schemas[index] = {
+      ...current,
+      metadata: nextMetadata,
+      detail: {
+        ...current.detail,
+        metadata: nextMetadata,
+      },
+      samplePayloadContentById: nextContentById,
+    };
+
+    this.writeArray(STORAGE_KEYS.schemas, schemas);
+    return nextMetadata;
+  }
+
+  async getSchemaSamplePayload(id: string, sampleId: string): Promise<SchemaSamplePayloadContent> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const schema = schemas.find((item) => item.metadata.schemaId === id);
+    if (!schema) {
+      throw this.notFound('Schema', id);
+    }
+
+    const metadata = (schema.metadata.samplePayloads ?? []).find((sample) => sample.sampleId === sampleId);
+    if (!metadata) {
+      throw this.notFound('Schema sample', `${id}:${sampleId}`);
+    }
+
+    const cached = schema.samplePayloadContentById?.[sampleId];
+    if (cached) {
+      return cached;
+    }
+
+    throw this.notFound('Schema sample payload', `${id}:${sampleId}`);
   }
 
   async deleteSchema(id: string): Promise<void> {

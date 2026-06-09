@@ -45,6 +45,10 @@ src/
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
     schema/           Schema ingestion/query + CDM integration lambdas (FS-056, FS-076)
       create-schema.ts  POST /schemas handler (FS-057 T-05)
+      update-schema.ts  PUT /schemas/:id handler for schema metadata/content updates used by Schema Detail save flow
+      add-schema-sample.ts POST /schemas/:id/samples handler for sample persistence + diff preview + confirmation-gated schema mutation (FS-090 T-06)
+      get-schema-sample.ts GET /schemas/:id/samples/:sampleId handler for raw/parsed sample payload retrieval
+      delete-schema-sample.ts DELETE /schemas/:id/samples/:sampleId handler for persisted sample deletion (metadata + payload blob)
       get-schema.ts     GET /schemas/:id handler (FS-057 T-05)
       list-schemas.ts   GET /schemas handler (FS-057 T-05)
       list-cdm-schemas.ts GET /schemas/cdm handler for one-level CommonDataModels directory listing (FS-076 T-02)
@@ -251,6 +255,7 @@ ui/
           MappingStatusIcon.tsx    Mapping status icon (mapped/unmapped/warning) with aria-labels
           SchemaDetailPage.tsx     Schema Detail feature page: metadata display, inline editing (non-CDM), edit mode tree controls, save/cancel toolbar, loading/error/not-found states (FS-015 T-02/T-04/T-05)
           SchemaGitStatus.tsx      Git/repository status section: upload-source "local only" notice, GitHub source card with repo/branch/path/SHA/timestamp, synced/not-synced/local-changes indicator (FS-015 T-03)
+          SchemaSamplePayloadsSection.tsx  Sample Payloads section for Schema Detail: sample list with inference provenance badge and add-sample flow actions (apply all, save-only, deferred review-one-by-one path) wired to add-schema-sample API (FS-090 T-07)
           SchemaUsageSection.tsx   Usage section: lists referencing projects (links to Project Overview) and mappings (links to Mapping Editor) with role badges; empty state; loading skeleton (FS-015 T-06)
           SchemaSearchInput.tsx    Search input with clear button (debounced, result count)
           SchemaTreeNodeIcon.tsx   Type→icon mapping component (color-coded Lucide icons)
@@ -797,7 +802,11 @@ tests/
           invalid-missing-instruction/ Invalid request fixture missing instruction (400)
           invalid-empty-source-context/ Invalid request fixture with empty sourceContext (400)
     schema/           Schema lambda handler tests (FS-056)
+      add-schema-sample.test.ts Add-sample endpoint tests for format validation, diff response, save-only persistence, and explicit apply-all mutation gating (FS-090 T-06)
+      get-schema-sample.test.ts Sample payload read endpoint tests (raw+parsed return and 404 behavior)
+      delete-schema-sample.test.ts Sample payload delete endpoint tests (metadata+blob removal and 404 behavior)
       create-schema.test.ts CRUD create tests (ready vs ingesting + validation) (FS-057 T-05)
+      update-schema.test.ts PUT schema update tests (metadata/content update, validation, and service-error mapping)
       get-schema.test.ts CRUD get tests (content fetch + 404) (FS-057 T-05)
       list-schemas.test.ts CRUD list tests (multiple + empty) (FS-057 T-05)
       list-cdm-schemas.test.ts CDM browse tests (root guard + one-level navigation + read-only GitHub usage) (FS-076 T-02)

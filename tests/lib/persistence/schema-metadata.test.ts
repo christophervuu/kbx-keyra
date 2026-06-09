@@ -72,6 +72,7 @@ describe('persistence schema-metadata', () => {
     expect(result.status).toBe('ingesting');
     expect(result.origin).toBe('uploaded');
     expect(result.scope).toBeUndefined();
+    expect(result.reviewState).toBe('not_required');
     expect(result.syncStatus).toBe('not-synced');
     expect(result.createdAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(result.updatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
@@ -96,6 +97,34 @@ describe('persistence schema-metadata', () => {
 
     expect(result.status).toBe('ready');
     expect(result.syncStatus).toBe('synced');
+  });
+
+  it('create sets inferred schemas to unreviewed by default and stores sample payload metadata fields', async () => {
+    sendMock.mockResolvedValue({});
+    const mod = await importModule();
+
+    const result = await mod.create(
+      makeCreateInput({
+        inferred: true,
+        samplePayloadCount: 1,
+        samplePayloads: [
+          {
+            sampleId: 'sample-1',
+            schemaId: 'schema-created-1',
+            name: 'Initial upload',
+            dataFormat: 'json',
+            contentRef: 'schemas/schema-created-1/samples/sample-1/payload.json',
+            usedForInference: true,
+            source: 'initial_upload',
+            createdAt: '2026-06-08T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    expect(result.reviewState).toBe('unreviewed');
+    expect(result.samplePayloadCount).toBe(1);
+    expect(result.samplePayloads?.[0]?.usedForInference).toBe(true);
   });
 
   it('create projects sourceRepoId when github source includes repoId', async () => {
@@ -231,10 +260,110 @@ describe('persistence schema-metadata', () => {
   it('exports schemaMetadata object with expected operations', async () => {
     const mod = await importModule();
 
+    expect(mod.schemaMetadata.aggregateReviewIssues).toBe(mod.aggregateReviewIssues);
     expect(mod.schemaMetadata.create).toBe(mod.create);
     expect(mod.schemaMetadata.get).toBe(mod.get);
     expect(mod.schemaMetadata.list).toBe(mod.list);
+    expect(mod.schemaMetadata.markReviewed).toBe(mod.markReviewed);
     expect(mod.schemaMetadata.updateStatus).toBe(mod.updateStatus);
     expect(mod.schemaMetadata.delete).toBe(mod.delete);
+  });
+
+  it('aggregateReviewIssues produces deterministic non-blocking issue summary', async () => {
+    const mod = await importModule();
+
+    const summary = mod.aggregateReviewIssues({
+      inferred: true,
+      inferenceIssueCounts: {
+        low_sample_evidence: 2,
+        type_ambiguity_conflict: 1,
+        optionality_uncertainty: 3,
+        empty_shape_unknown: 0,
+        field_name_quality: 0,
+        missing_description: 4,
+      },
+    });
+
+    expect(summary.reviewState).toBe('unreviewed');
+    expect(summary.totalIssues).toBe(10);
+    expect(summary.blockingIssueCount).toBe(0);
+    expect(summary.hasBlockingIssues).toBe(false);
+    expect(summary.reviewIssues).toEqual([
+      { code: 'low_sample_evidence', count: 2, blocking: false },
+      { code: 'type_ambiguity_conflict', count: 1, blocking: false },
+      { code: 'optionality_uncertainty', count: 3, blocking: false },
+      { code: 'missing_description', count: 4, blocking: false },
+    ]);
+  });
+
+  it('markReviewed sets reviewState/reviewedAt and keeps status ready for non-error schemas', async () => {
+    const mod = await importModule();
+    sendMock.mockResolvedValueOnce({
+      Item: makeItem({
+        schemaId: 'schema-1',
+        inferred: true,
+        reviewState: 'unreviewed',
+        status: 'ready',
+        inferenceIssueCounts: {
+          low_sample_evidence: 1,
+          optionality_uncertainty: 2,
+        },
+      }),
+    });
+    sendMock.mockResolvedValueOnce({
+      Attributes: makeItem({
+        schemaId: 'schema-1',
+        inferred: true,
+        reviewState: 'reviewed',
+        status: 'ready',
+      }),
+    });
+
+    const result = await mod.markReviewed('schema-1');
+
+    expect(result.reviewState).toBe('reviewed');
+    expect(result.status).toBe('ready');
+
+    const updateCommand = sendMock.mock.calls[1]?.[0] as {
+      input: {
+        UpdateExpression: string;
+        ExpressionAttributeValues: Record<string, unknown>;
+      };
+    };
+
+    expect(updateCommand.input.UpdateExpression).toContain('#reviewState = :reviewState');
+    expect(updateCommand.input.UpdateExpression).toContain('#reviewedAt = :reviewedAt');
+    expect(updateCommand.input.ExpressionAttributeValues[':reviewState']).toBe('reviewed');
+    expect(updateCommand.input.ExpressionAttributeValues[':status']).toBe('ready');
+  });
+
+  it('markReviewed preserves error status for blocking error schemas', async () => {
+    const mod = await importModule();
+    sendMock.mockResolvedValueOnce({
+      Item: makeItem({
+        schemaId: 'schema-err',
+        inferred: true,
+        reviewState: 'unreviewed',
+        status: 'error',
+      }),
+    });
+    sendMock.mockResolvedValueOnce({
+      Attributes: makeItem({
+        schemaId: 'schema-err',
+        inferred: true,
+        reviewState: 'reviewed',
+        status: 'error',
+      }),
+    });
+
+    const result = await mod.markReviewed('schema-err');
+
+    expect(result.reviewState).toBe('reviewed');
+    expect(result.status).toBe('error');
+
+    const updateCommand = sendMock.mock.calls[1]?.[0] as {
+      input: { ExpressionAttributeValues: Record<string, unknown> };
+    };
+    expect(updateCommand.input.ExpressionAttributeValues[':status']).toBe('error');
   });
 });

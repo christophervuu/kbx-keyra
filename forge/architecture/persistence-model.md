@@ -90,11 +90,16 @@ GSI: `projectId-index` — PK=`projectId`, projects all attributes. Used by `lis
 | `ownership` | — | String | Canonical ownership `cdm` / `user` |
 | `readonly` | — | Boolean | Ownership-aligned mutability marker (CDM defaults true) |
 | `status` | — | String | Canonical readiness status `processing` / `ready` / `needs_review` / `error` (legacy `ingesting` normalizes to `processing`) |
+| `reviewState` | — | String | Persisted review workflow state `not_required` / `unreviewed` / `partially_reviewed` / `reviewed` |
 | `scope` | — | String | Compatibility-only metadata (`global` / `project`), non-authoritative for access |
 | `description` | — | String | Optional description |
 | `inferred` | — | Boolean | Whether schema was inferred from sample |
 | `reviewedAt` | — | String | Optional ISO 8601 inferred-review completion timestamp |
 | `reviewedBy` | — | String | Optional reviewer identity (auth-enabled environments) |
+| `reviewIssues` | — | List | Optional deterministic issue summaries `[{ code, count, blocking }]` for inferred review UI |
+| `inferenceIssueCounts` | — | Map | Optional deterministic issue count cache used to derive review summaries |
+| `samplePayloadCount` | — | Number | Total persisted sample payload metadata records for the schema |
+| `samplePayloads` | — | List | Sample payload metadata list (`sampleId`, `dataFormat`, `contentRef`, `usedForInference`, provenance, timestamps, compatibility) |
 | `isCdm` | — | Boolean | Optional convenience flag aligned with canonical ownership |
 | `syncStatus` | — | String | Canonical `synced` / `update-available` / `sync-failed` (legacy values normalize at read boundaries) |
 | `source` | — | Map | `{ type: 'upload' }` or `{ type: 'github', repo, branch, path, commitSha? }` |
@@ -163,6 +168,8 @@ Bucket: configured via `STORAGE_BUCKET` environment variable.
 | `schemas/{schemaId}/original.json` | Original JSON Schema file | `application/json` |
 | `schemas/{schemaId}/original.xsd` | Original XSD file | `application/xml` |
 | `schemas/{schemaId}/content.json` | Processed/normalized schema | `application/json` |
+| `schemas/{schemaId}/samples/{sampleId}/payload.json` | Persisted JSON sample payload blob | `application/json` |
+| `schemas/{schemaId}/samples/{sampleId}/payload.xml` | Persisted XML sample payload blob | `application/xml` |
 | `mappings/{mappingId}/config.json` | Current mapping config | `application/json` |
 | `mappings/{mappingId}/revisions/r{N}.json` | Revision N config snapshot | `application/json` |
 
@@ -213,6 +220,37 @@ Audit-confirmed unaffected ownership/index surfaces:
 - `SchemaMetadata` PK (`schemaId`) and `SchemaNodes` PK/SK (`schemaId`, `path`) require no migration for cross-project shared access.
 - Existing mapping `projectId-index` remains mapping-list access only and does not encode schema ownership.
 - S3 and OpenSearch schema storage/indexing remain schemaId-scoped and require no FS-087 key/index migration.
+
+## FS-090 inferred review + sample payload addendum
+
+FS-090 extends schema persistence with explicit inferred-review state and first-class sample payload lifecycle metadata.
+
+Canonical schema-review persistence requirements:
+
+- `reviewState` is persisted canonical state (not derivation-only cache).
+- `reviewedAt` is persisted when explicit mark-reviewed transition occurs.
+- Deterministic inferred issue summaries may be persisted as:
+  - `reviewIssues[]` summary rows (`code`, `count`, `blocking`)
+  - `inferenceIssueCounts` map for deterministic aggregation replay.
+
+Canonical sample payload persistence requirements:
+
+- Initial inferred upload is persisted as first sample metadata with `usedForInference=true`.
+- Added samples are persisted as metadata in `SchemaMetadata.samplePayloads[]` plus payload blob in S3.
+- Metadata fields include:
+  - `sampleId`, `schemaId`, `name`
+  - `dataFormat`
+  - `contentRef`
+  - `usedForInference`
+  - `source` (`initial_upload` | `added_sample`)
+  - optional `sizeBytes`, optional `hash`, optional `summary`
+  - optional `compatibility` (`unknown` | `compatible` | `mismatch`)
+  - `createdAt`, optional `createdBy`
+
+Mutation-gating persistence rule:
+
+- Sample persistence and schema-content mutation are separate operations.
+- Saving a sample does not mutate schema content/nodes unless explicit apply-all mutation path is requested.
 
 ## 4) Access Patterns
 

@@ -31,6 +31,8 @@ export interface SchemaTreeViewProps {
   readonly editable?: boolean;
   /** Edit operation callbacks — required when editable is true */
   readonly onNodeEdit?: EditNodeCallbacks;
+  /** Optional per-field sample value text displayed at row right side */
+  readonly sampleValueByPath?: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------

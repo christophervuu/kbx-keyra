@@ -37,6 +37,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getSchema: vi.fn().mockResolvedValue(SCHEMA_DETAIL),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockResolvedValue({ ...SCHEMA_DETAIL.metadata }),
+    markSchemaReviewed: vi.fn().mockResolvedValue({ ...SCHEMA_DETAIL.metadata, status: 'ready' }),
     deleteSchema: vi.fn(),
     getMapping: vi.fn(),
     createMapping: vi.fn(),

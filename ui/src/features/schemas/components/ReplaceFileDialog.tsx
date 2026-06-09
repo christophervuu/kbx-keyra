@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
+
+import { parseJsonSchema, parseXsd } from '../lib';
+import { countAllNodes } from '../lib/tree-to-json-schema';
 
 import { Button } from '@/components/Button';
 import { useAdapter } from '@/lib/api';
 import type { SchemaDetail, SchemaFormat } from '@/lib/types';
-
-import { parseJsonSchema, parseXsd } from '../lib';
-import { countAllNodes } from '../lib/tree-to-json-schema';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -36,7 +36,7 @@ function inferFormatFromExtension(filename: string): SchemaFormat | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Two-step dialog for replacing schema file content:
+ * Two-step dialog for replacing schema content:
  *   Step 1: Confirmation message
  *   Step 2: File picker → parse → save → callback
  *
@@ -116,7 +116,7 @@ export function ReplaceFileDialog({
     }
   }
 
-  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileInputChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file) {
       void handleFile(file);
@@ -131,7 +131,7 @@ export function ReplaceFileDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       role="presentation"
-      data-testid="replace-file-overlay"
+      data-testid="replace-schema-overlay"
     >
       {/* Backdrop */}
       <div
@@ -144,15 +144,15 @@ export function ReplaceFileDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="replace-dialog-title"
-        data-testid="replace-file-dialog"
+        aria-labelledby="replace-schema-dialog-title"
+        data-testid="replace-schema-dialog"
         className="relative z-10 w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-6 shadow-xl"
       >
         <h2
-          id="replace-dialog-title"
+          id="replace-schema-dialog-title"
           className="text-sm font-semibold text-slate-100"
         >
-          Replace schema file
+          Replace schema
         </h2>
 
         {step === 'confirm' ? (
@@ -171,10 +171,10 @@ export function ReplaceFileDialog({
               <Button
                 variant="primary"
                 size="sm"
-                data-testid="replace-confirm-button"
+                data-testid="replace-schema-confirm-button"
                 onClick={handleConfirm}
               >
-                Choose file
+                Choose schema file
               </Button>
             </div>
           </>
@@ -203,10 +203,10 @@ export function ReplaceFileDialog({
                 variant="primary"
                 size="sm"
                 loading={isSaving}
-                data-testid="replace-pick-button"
+                data-testid="replace-schema-pick-button"
                 onClick={() => fileInputRef.current?.click()}
               >
-                {isSaving ? 'Saving…' : 'Choose file'}
+                {isSaving ? 'Saving…' : 'Choose schema file'}
               </Button>
             </div>
           </>
@@ -218,7 +218,7 @@ export function ReplaceFileDialog({
           type="file"
           accept=".json,.xsd"
           className="hidden"
-          data-testid="replace-file-input"
+          data-testid="replace-schema-file-input"
           onChange={handleFileInputChange}
         />
       </div>

@@ -63,7 +63,8 @@ const STATUS_COLORS: Record<FilterStatus, string> = {
 };
 
 function statusLabel(status: FilterStatus): string {
-  return status === 'needs_review' ? 'Needs review' : status[0].toUpperCase() + status.slice(1);
+  const displayStatus = status === 'needs_review' ? 'ready' : status;
+  return displayStatus[0].toUpperCase() + displayStatus.slice(1);
 }
 
 // ---------------------------------------------------------------------------

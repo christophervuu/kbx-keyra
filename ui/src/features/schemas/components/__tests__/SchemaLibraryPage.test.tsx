@@ -442,11 +442,12 @@ describe('SchemaLibraryPage', () => {
 
     await waitFor(() => expect(screen.getAllByTestId('schema-library-card')).toHaveLength(2));
 
-    expect(screen.getByRole('button', { name: 'Needs review' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Needs review' }));
+    expect(screen.queryByRole('button', { name: 'Needs review' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ready' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Ready' }));
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('schema-library-card')).toHaveLength(1);
+      expect(screen.getAllByTestId('schema-library-card')).toHaveLength(2);
       expect(screen.getByText('Needs Review Schema')).toBeInTheDocument();
     });
   });

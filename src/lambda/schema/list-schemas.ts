@@ -6,7 +6,16 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { normalizeSchemaOrigin, normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
+import {
+  normalizeSchemaOrigin,
+  normalizeSchemaReviewState,
+  normalizeSchemaSourceKind,
+  normalizeSchemaStatus,
+  normalizeSchemaSyncStatus,
+  schemaDataFormatFromSourceKind,
+  type SchemaReviewState,
+  type SchemaSourceKind,
+} from '../../lib/persistence/types.js';
 import { buildCdmManifestMetadataItems } from '../../lib/schema/cdm/index.js';
 
 interface SchemaMetadata {
@@ -20,14 +29,19 @@ interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly dataFormat?: 'json' | 'xml';
   readonly syncStatus: 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
-  readonly source: Record<string, unknown>;
+  readonly source: unknown;
   readonly sourceRepoId?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly ownership?: 'cdm' | 'user';
   readonly readonly?: boolean;
-  readonly sourceKind?: 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
+  readonly sourceKind?: SchemaSourceKind;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewedAt?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly unknown[];
 }
 
 function mergeWithCdmManifest(entries: readonly SchemaMetadata[]): SchemaMetadata[] {
@@ -47,7 +61,13 @@ function mergeWithCdmManifest(entries: readonly SchemaMetadata[]): SchemaMetadat
 
     return {
       ...item,
-      sourceRepoId: typeof item.source.repoId === 'number' ? item.source.repoId : undefined,
+      sourceRepoId:
+        typeof item.source === 'object'
+        && item.source !== null
+        && 'repoId' in item.source
+        && typeof (item.source as { repoId?: unknown }).repoId === 'number'
+          ? (item.source as { repoId: number }).repoId
+          : undefined,
     };
   });
 
@@ -84,6 +104,28 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const normalizedSchemas = mergeWithCdmManifest(schemas).map((schema) => ({
       ...schema,
       origin: normalizeSchemaOrigin(schema.origin),
+      sourceKind: normalizeSchemaSourceKind({
+        sourceKind: schema.sourceKind,
+        format: schema.format,
+        inferred: schema.inferred,
+      }),
+      dataFormat: schemaDataFormatFromSourceKind(
+        normalizeSchemaSourceKind({
+          sourceKind: schema.sourceKind,
+          format: schema.format,
+          inferred: schema.inferred,
+        }),
+      ),
+      reviewState: normalizeSchemaReviewState({
+        reviewState: schema.reviewState,
+        inferred: schema.inferred,
+        reviewedAt: schema.reviewedAt,
+      }),
+      status: normalizeSchemaStatus({
+        status: schema.status,
+        inferred: schema.inferred,
+        reviewedAt: schema.reviewedAt,
+      }),
       syncStatus: normalizeSchemaSyncStatus(schema.syncStatus),
       ownership: schema.ownership ?? (normalizeSchemaOrigin(schema.origin) === 'cdm' ? 'cdm' : 'user'),
       readonly: schema.readonly ?? normalizeSchemaOrigin(schema.origin) === 'cdm',

@@ -32,7 +32,7 @@ Deployment/preview architecture contracts are covered via addenda in this docume
 
 ## 2) Route Table (Phase 1)
 
-Phase 1 exposes 24 routes in this architecture slice (including FS-076 CDM read-only integration). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
+Phase 1 exposes 26 routes in this architecture slice (including FS-076 CDM read-only integration and FS-090 inferred-review/sample contracts). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
 
 | Method | Path | Handler File | Lambda Name (logical) | Description |
 |---|---|---|---|---|
@@ -57,6 +57,8 @@ Phase 1 exposes 24 routes in this architecture slice (including FS-076 CDM read-
 | GET | `/schemas/cdm` | `src/lambda/schema/list-cdm-schemas.ts` | `ListCdmSchemasFunction` | List one directory level of CDM entries under fixed CommonDataModels root |
 | POST | `/schemas/cdm/link` | `src/lambda/schema/link-cdm-schema.ts` | `LinkCdmSchemaFunction` | Link CDM schema file to project with canonical source metadata; idempotent for duplicate same-project repo/branch/path |
 | GET | `/schemas/:id` | `src/lambda/schema/get-schema.ts` | `GetSchemaFunction` | Get schema detail |
+| POST | `/schemas/:id/mark-reviewed` | `src/lambda/schema/mark-reviewed.ts` | `MarkSchemaReviewedFunction` | Explicit inferred-schema review transition (`reviewState=reviewed`; `status=ready` unless blocking error status) |
+| POST | `/schemas/:id/samples` | `src/lambda/schema/add-schema-sample.ts` | `AddSchemaSampleFunction` | Persist sample payload, return deterministic diff, and optionally apply all suggested schema updates only when explicitly requested |
 | DELETE | `/schemas/:id` | `src/lambda/schema/delete-schema.ts` | `DeleteSchemaFunction` | Delete schema (conflict when referenced) |
 | POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (OpenSearch-first, max 50; gated PK-scoped degraded fallback) |
 | POST | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Explicit manual CDM re-sync (updates content/metadata only when upstream changed) |
@@ -229,7 +231,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 
 #### `SCHEMAS_TABLE`
 - PK: `schemaId` (String)
-- Main fields: `name`, `format`, canonical `dataFormat` (`json|xml`), canonical `sourceKind` (`json_schema|xsd|inferred_from_json|inferred_from_xml`), `fieldCount`, canonical `origin` (`cdm|uploaded|inferred`), canonical `ownership` (`cdm|user`), `readonly`, canonical `status` (`processing|ready|needs_review|error`), compatibility `scope?` (non-authoritative), `description`, `inferred`, canonical `syncStatus` (`synced|update-available|sync-failed`), `source`, timestamps
+- Main fields: `name`, `format`, canonical `dataFormat` (`json|xml`), canonical `sourceKind` (`json_schema|xsd|inferred_from_json|inferred_from_xml`), `fieldCount`, canonical `origin` (`cdm|uploaded|inferred`), canonical `ownership` (`cdm|user`), `readonly`, canonical `status` (`processing|ready|needs_review|error`), persisted `reviewState` (`not_required|unreviewed|partially_reviewed|reviewed`), optional `reviewedAt`, optional deterministic `reviewIssues`/`inferenceIssueCounts`, `samplePayloadCount`, `samplePayloads[]` metadata, compatibility `scope?` (non-authoritative), `description`, `inferred`, canonical `syncStatus` (`synced|update-available|sync-failed`), `source`, timestamps
 
 #### `SCHEMA_NODES_TABLE`
 - PK: `schemaId` (String), SK: `path` (String)
@@ -277,6 +279,50 @@ Create Mapping selector usability requirements from API surface:
 - Default schema-list responses include seeded CDM records (no prior link step required for visibility).
 - `error` schemas remain visible to callers but are treated as non-selectable in UI policy.
 - `needs_review` schemas remain visible/selectable for warning-first flows.
+
+### FS-090 inferred-review + sample payload API addendum
+
+FS-090 finalizes Schema Detail backend contracts for inferred-schema review and sample lifecycle operations.
+
+#### Mark-reviewed transition endpoint
+
+- `POST /schemas/:id/mark-reviewed`
+- Validates schema existence and applies explicit review transition.
+- Canonical transition semantics:
+  - persist `reviewState = reviewed`
+  - persist `reviewedAt` timestamp
+  - set `status = ready` unless schema is currently in blocking error state (`error` remains `error`)
+- Response includes normalized metadata and deterministic review summary payload for UI readiness panels.
+
+#### Add-sample endpoint
+
+- `POST /schemas/:id/samples`
+- Request supports:
+  - `sampleContent` (required)
+  - `sampleName` (optional)
+  - `applySuggestedUpdates` (boolean; optional)
+- Format compatibility guard:
+  - sample content must match schema `dataFormat` (`json` or `xml`)
+  - mismatch returns canonical `VALIDATION_ERROR` with no persistence mutation
+
+Deterministic response contract includes diff sections:
+
+- `additions`: candidate paths present in sample and absent from schema nodes
+- `typeConflicts`: path-level existing-vs-sample type conflicts
+- `requiredOptionalEvidence`: deterministic sample-presence evidence rows for review
+
+Mutation gating semantics:
+
+- **default/save-only path** (`applySuggestedUpdates` absent/false):
+  - persist sample metadata + sample blob
+  - do not mutate schema content/nodes
+- **apply-all path** (`applySuggestedUpdates=true`):
+  - persist sample metadata + blob
+  - apply all inferred schema additions in one operation
+  - rewrite schema content + schema nodes
+  - transition status to `needs_review` when not in error
+
+No automatic schema mutation is permitted without explicit apply-all confirmation.
 
 Audit-confirmed unaffected backend/AWS ownership surfaces (FS-087 T-02/T-09):
 
@@ -335,6 +381,8 @@ AI safety invariant (FS-088 / FS-074 alignment):
 | `schema/list-cdm-schemas` | root-guarded optional path validation + one-level GitHub read-only listing under CommonDataModels |
 | `schema/link-cdm-schema` | validate root-scoped CDM file path + project, fetch GitHub file/commit (read-only), persist/project CDM source metadata, and attach to project |
 | `schema/get-schema` | get schema metadata |
+| `schema/mark-reviewed` | get schema + update review state/status fields + return deterministic review summary |
+| `schema/add-schema-sample` | get schema + validate sample format + persist sample metadata/blob + optional schema content/node rewrite under explicit apply-all mode |
 | `schema/delete-schema` | get schema + guard references across canonical `linkedSchemaIds` + compatibility refs + mapping references + delete schema + delete schema nodes |
 | `schema/query-schema-nodes` | get schema + OpenSearch query via `searchSchemaNodes`; on explicit degraded gate, fallback to PK-scoped schemaId query + in-memory substring filter |
 | `schema/sync-cdm-schema` | read linked source metadata, perform GitHub read-only compare/fetch, persist sync status and optional content/commitSha updates |
@@ -351,6 +399,8 @@ Bucket is configured by `CONTENT_BUCKET`.
 | Mapping revision snapshot | `mappings/{mappingId}/revisions/r{revision}.json` | `application/json` |
 | Schema content | `schemas/{schemaId}/content.json` (json-schema) | `application/json` |
 | Schema content | `schemas/{schemaId}/content.xsd` (xsd) | `application/xml` |
+| Schema sample payload | `schemas/{schemaId}/samples/{sampleId}/payload.json` | `application/json` |
+| Schema sample payload | `schemas/{schemaId}/samples/{sampleId}/payload.xml` | `application/xml` |
 
 Notes:
 - Mapping metadata stores `configS3Key` to locate current config.

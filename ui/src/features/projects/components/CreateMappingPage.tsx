@@ -687,15 +687,6 @@ function SchemaDetailsCardContent({
         <SummaryItem label="Status" value={formatSchemaStatus(schema.status)} testId={`${testIdPrefix}-status`} />
       </dl>
 
-      {schema.status === 'needs_review' && (
-        <p
-          role="status"
-          className="mt-2 text-xs text-amber-300"
-          data-testid={`${testIdPrefix}-needs-review-warning`}
-        >
-          Needs review: this schema is selectable, but validate inferred fields before use.
-        </p>
-      )}
     </>
   );
 }
@@ -734,11 +725,8 @@ function formatSchemaFormat(format: SchemaMetadata['format'], dataFormat?: Schem
 }
 
 function formatSchemaStatus(status: SchemaMetadata['status']): string {
-  if (status === 'needs_review') {
-    return 'Needs review';
-  }
-
-  return status[0].toUpperCase() + status.slice(1);
+  const displayStatus = status === 'needs_review' ? 'ready' : status;
+  return displayStatus[0].toUpperCase() + displayStatus.slice(1);
 }
 
 function isSchemaSelectable(schema: SchemaMetadata): boolean {
@@ -757,10 +745,6 @@ function buildSchemaOptionLabel(schema: SchemaMetadata): string {
 function formatSchemaOrigin(origin: SchemaMetadata['origin']): string {
   if (origin === 'cdm') {
     return 'CDM';
-  }
-
-  if (origin === 'inferred') {
-    return 'Inferred';
   }
 
   return 'Uploaded';

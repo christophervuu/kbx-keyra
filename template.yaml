@@ -343,6 +343,26 @@ Resources:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"
 
+  KeyraApiGatewayResponseDefault4xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref KeyraApi
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
+  KeyraApiGatewayResponseDefault5xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref KeyraApi
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
   CreateProjectFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -1371,6 +1391,121 @@ Resources:
             RestApiId: !Ref KeyraApi
             Path: /schemas/{id}
             Method: get
+
+  UpdateSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-updateschema
+      CodeUri: .
+      Handler: src/lambda/schema/update-schema.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}
+            Method: put
+
+  AddSchemaSampleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-addschemasample
+      CodeUri: .
+      Handler: src/lambda/schema/add-schema-sample.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/samples
+            Method: post
+
+  GetSchemaSampleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getschemasample
+      CodeUri: .
+      Handler: src/lambda/schema/get-schema-sample.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/samples/{sampleId}
+            Method: get
+
+  DeleteSchemaSampleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-deleteschemasample
+      CodeUri: .
+      Handler: src/lambda/schema/delete-schema-sample.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/samples/{sampleId}
+            Method: delete
 
   DeleteSchemaFunction:
     Type: AWS::Serverless::Function

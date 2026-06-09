@@ -35,6 +35,30 @@ describe('InferredSchemaBanner', () => {
     expect(screen.getByTestId('mark-reviewed-button')).toBeInTheDocument();
   });
 
+  it('renders actionable review rows when review issues are provided', () => {
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        reviewIssues={[
+          { code: 'missing_description', count: 2, blocking: false },
+          { code: 'type_ambiguity_conflict', count: 1, blocking: false },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('review-issues-list')).toBeInTheDocument();
+    expect(screen.getByTestId('review-issue-missing_description')).toBeInTheDocument();
+    expect(screen.getByTestId('review-issue-type_ambiguity_conflict')).toBeInTheDocument();
+  });
+
+  it('renders compact reviewed summary state', () => {
+    render(<InferredSchemaBanner inferred={true} reviewed={true} />);
+
+    expect(screen.getByText(/schema marked as reviewed/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('mark-reviewed-button')).not.toBeInTheDocument();
+  });
+
   it('calls onMarkReviewed when button is clicked', async () => {
     const onMarkReviewed = vi.fn();
     render(
@@ -169,6 +193,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getSchema: vi.fn().mockResolvedValue(MOCK_DETAIL),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockResolvedValue(MOCK_DETAIL.metadata),
+    markSchemaReviewed: vi.fn().mockResolvedValue(MOCK_DETAIL.metadata),
     deleteSchema: vi.fn(),
     listMappings: vi.fn().mockResolvedValue([]),
     getMapping: vi.fn(),
@@ -237,7 +262,7 @@ describe('ReplaceFileDialog', () => {
         </MemoryRouter>
       </AdapterProvider>,
     );
-    expect(screen.queryByTestId('replace-file-dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('replace-schema-dialog')).not.toBeInTheDocument();
   });
 
   it('shows confirmation message in step 1', () => {
@@ -248,16 +273,16 @@ describe('ReplaceFileDialog', () => {
 
   it('advances to file pick step on confirm click', async () => {
     renderDialog(createMockAdapter());
-    await userEvent.click(screen.getByTestId('replace-confirm-button'));
-    expect(screen.getByTestId('replace-pick-button')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('replace-schema-confirm-button'));
+    expect(screen.getByTestId('replace-schema-pick-button')).toBeInTheDocument();
   });
 
   it('shows error when invalid JSON file is selected', async () => {
     renderDialog(createMockAdapter());
-    await userEvent.click(screen.getByTestId('replace-confirm-button'));
+    await userEvent.click(screen.getByTestId('replace-schema-confirm-button'));
 
     const file = makeUploadFile(INVALID_JSON, 'schema.json', 'application/json');
-    const input = screen.getByTestId('replace-file-input');
+    const input = screen.getByTestId('replace-schema-file-input');
     await userEvent.upload(input, file);
 
     const errorEl = await screen.findByTestId('replace-parse-error');
@@ -270,13 +295,13 @@ describe('ReplaceFileDialog', () => {
     const onReplaced = vi.fn();
 
     renderDialog(createMockAdapter({ updateSchema, getSchema }), onReplaced);
-    await userEvent.click(screen.getByTestId('replace-confirm-button'));
+    await userEvent.click(screen.getByTestId('replace-schema-confirm-button'));
 
     const file = makeUploadFile(VALID_JSON_SCHEMA, 'schema.json', 'application/json');
-    const input = screen.getByTestId('replace-file-input');
+    const input = screen.getByTestId('replace-schema-file-input');
     await userEvent.upload(input, file);
 
-    await screen.findByText(/replace schema file/i); // wait for async
+    await screen.findByText(/replace schema/i); // wait for async
 
     // Allow async ops to settle
     await new Promise((r) => setTimeout(r, 50));

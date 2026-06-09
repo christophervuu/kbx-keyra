@@ -16,6 +16,15 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { normalizeSchemaOrigin, type CanonicalSchemaOrigin, type SchemaOrigin } from '../../lib/persistence/types.js';
+import {
+  normalizeSchemaReviewState,
+  normalizeSchemaSourceKind,
+  schemaDataFormatFromSourceKind,
+  type SchemaDataFormat,
+  type SchemaReviewState,
+  type SchemaSamplePayloadMetadata,
+  type SchemaSourceKind,
+} from '../../lib/persistence/types.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
 type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
@@ -73,10 +82,39 @@ interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly dataFormat?: SchemaDataFormat;
+  readonly sourceKind?: SchemaSourceKind;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewedAt?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSource;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+function toDataFormat(format: SchemaFormat): SchemaDataFormat {
+  return format === 'xsd' ? 'xml' : 'json';
+}
+
+function inferSourceKind(format: SchemaFormat, inferred: boolean): SchemaSourceKind {
+  return normalizeSchemaSourceKind({ format, inferred });
+}
+
+function buildSamplePayloadRef(schemaId: string, sampleId: string, dataFormat: SchemaDataFormat): string {
+  return `schemas/${schemaId}/samples/${sampleId}/payload.${dataFormat === 'xml' ? 'xml' : 'json'}`;
+}
+
+function hashContent(content: string): string {
+  let hash = 2166136261;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
 }
 
 const INLINE_THRESHOLD = 500;
@@ -375,6 +413,7 @@ function contentKey(schemaId: string, format: SchemaFormat): string {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const body = parseBody(event);
+  const bodyRecord = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const required = requireFields(body, ['name', 'format', 'origin', 'content']);
   if (!required.ok) {
     const err = required.error;
@@ -398,6 +437,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   try {
     const schemaId = generateSchemaId();
+    const sampleId = generateSchemaId();
     const now = new Date().toISOString();
     const estimated = estimateFieldCount(content, format);
     const inline = estimated <= INLINE_THRESHOLD;
@@ -408,17 +448,48 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const projectId = typeof body?.projectId === 'string' && body.projectId.trim() !== '' ? body.projectId.trim() : undefined;
 
+    const inferred = typeof body?.inferred === 'boolean' ? body.inferred : false;
+    const reviewedAt = typeof bodyRecord.reviewedAt === 'string' ? bodyRecord.reviewedAt : undefined;
+    const reviewStateInput = typeof bodyRecord.reviewState === 'string' ? bodyRecord.reviewState : undefined;
+    const sourceKind = inferSourceKind(format, inferred);
+    const dataFormat = schemaDataFormatFromSourceKind(sourceKind);
+    const reviewState = normalizeSchemaReviewState({
+      reviewState: reviewStateInput,
+      inferred,
+      reviewedAt,
+    });
+
+    const initialSamplePayload: SchemaSamplePayloadMetadata | undefined = inferred
+      ? {
+          sampleId,
+          schemaId,
+          name: 'Initial upload',
+          dataFormat,
+          contentRef: buildSamplePayloadRef(schemaId, sampleId, dataFormat),
+          usedForInference: true,
+          source: 'initial_upload',
+          sizeBytes: content.length,
+          hash: hashContent(content),
+          createdAt: now,
+        }
+      : undefined;
+
     const metadata: SchemaMetadata = {
       schemaId,
       name: String(body?.name ?? ''),
       format,
+      dataFormat: toDataFormat(format),
+      sourceKind,
       fieldCount: inline ? nodes.length : 0,
       origin: normalizeSchemaOrigin(origin),
       status: inline ? 'ready' : 'ingesting',
       ...(body?.scope !== undefined ? { scope: asSchemaScope(body?.scope) } : {}),
       ...(typeof body?.description === 'string' ? { description: body.description } : {}),
       ...(typeof body?.updatedBy === 'string' ? { updatedBy: body.updatedBy } : {}),
-      inferred: typeof body?.inferred === 'boolean' ? body.inferred : false,
+      inferred,
+      reviewState,
+      ...(reviewedAt ? { reviewedAt } : {}),
+      ...(initialSamplePayload ? { samplePayloadCount: 1, samplePayloads: [initialSamplePayload] } : {}),
       syncStatus: asSchemaSyncStatus(body?.syncStatus),
       source: asSource(body?.source),
       createdAt: now,
@@ -431,6 +502,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       Body: content,
       ContentType: format === 'xsd' ? 'application/xml' : 'application/json',
     });
+
+    if (initialSamplePayload) {
+      await putObject({
+        Bucket: getContentBucketOrThrow(),
+        Key: initialSamplePayload.contentRef,
+        Body: content,
+        ContentType: dataFormat === 'xml' ? 'application/xml' : 'application/json',
+      });
+    }
 
     await putItem({
       TableName: getSchemasTableOrThrow(),

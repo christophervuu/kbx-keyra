@@ -1,5 +1,7 @@
 import type {
   ActivityEntry,
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
   AutoMapInput,
   AutoMapResult,
   AutoMapSectionInput,
@@ -29,6 +31,7 @@ import type {
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
+  SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -106,6 +109,10 @@ export interface ApiAdapter {
   getSchema(id: string): Promise<SchemaDetail>;
   createSchema(input: CreateSchemaInput): Promise<SchemaMetadata>;
   updateSchema(id: string, input: UpdateSchemaInput): Promise<SchemaMetadata>;
+  markSchemaReviewed?(id: string): Promise<SchemaMetadata>;
+  addSchemaSample?(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult>;
+  deleteSchemaSample?(id: string, sampleId: string): Promise<SchemaMetadata>;
+  getSchemaSamplePayload?(id: string, sampleId: string): Promise<SchemaSamplePayloadContent>;
   deleteSchema(id: string): Promise<void>;
 
   // Mappings

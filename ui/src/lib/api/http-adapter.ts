@@ -10,6 +10,8 @@ import type {
 
 import type {
   ActivityEntry,
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
   AutoMapInput,
   AutoMapResult,
   AutoMapSectionInput,
@@ -39,6 +41,7 @@ import type {
   ProjectMetadata,
   SchemaDetail,
   SchemaMetadata,
+  SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -129,6 +132,46 @@ export class HttpAdapter extends LocalStorageAdapter {
       path: `/schemas/${encodeURIComponent(id)}`,
       method: 'PUT',
       body: input,
+    });
+  }
+
+  override async markSchemaReviewed(id: string): Promise<SchemaMetadata> {
+    const response = await httpRequest<{
+      metadata: SchemaMetadata;
+    }>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/mark-reviewed`,
+      method: 'POST',
+      body: {},
+    });
+
+    return response.metadata;
+  }
+
+  override async addSchemaSample(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult> {
+    return httpRequest<AddSchemaSampleResult>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async deleteSchemaSample(id: string, sampleId: string): Promise<SchemaMetadata> {
+    const response = await httpRequest<{ metadata: SchemaMetadata }>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}`,
+      method: 'DELETE',
+    });
+
+    return response.metadata;
+  }
+
+  override async getSchemaSamplePayload(id: string, sampleId: string): Promise<SchemaSamplePayloadContent> {
+    return httpRequest<SchemaSamplePayloadContent>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}`,
+      method: 'GET',
     });
   }
 

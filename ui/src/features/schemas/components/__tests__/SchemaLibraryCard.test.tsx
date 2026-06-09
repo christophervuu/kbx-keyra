@@ -133,11 +133,12 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByText('Unknown')).toBeInTheDocument();
   });
 
-  it('CDM badge has purple styling', () => {
+  it('CDM badge has schema-detail purple styling', () => {
     renderCard(makeItem({ origin: 'cdm', ownership: 'cdm' }));
     const badge = screen.getByText('CDM').closest('span');
-    expect(badge?.className).toContain('bg-purple-100');
-    expect(badge?.className).toContain('text-purple-800');
+    expect(badge?.className).toContain('border-purple-700');
+    expect(badge?.className).toContain('bg-purple-900/40');
+    expect(badge?.className).toContain('text-purple-200');
   });
 
   it('Uploaded badge has blue styling', () => {
@@ -161,9 +162,9 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByTestId('schema-status-ready')).toBeInTheDocument();
   });
 
-  it('renders needs_review status badge', () => {
+  it('renders ready status badge when schema status is needs_review', () => {
     renderCard(makeItem({ status: 'needs_review' }));
-    expect(screen.getByTestId('schema-status-needs_review')).toBeInTheDocument();
+    expect(screen.getByTestId('schema-status-ready')).toBeInTheDocument();
   });
 
   it('renders processing status badge', () => {
@@ -194,9 +195,9 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
-  it('renders inferred indicator', () => {
+  it('renders ready indicator for inferred sync status', () => {
     renderCard(makeItem({ syncStatus: 'inferred' }));
-    expect(screen.getByTestId('sync-status-inferred')).toBeInTheDocument();
+    expect(screen.getByTestId('sync-status-ready')).toBeInTheDocument();
   });
 
   it('renders no sync indicator for local (upload-only)', () => {
@@ -216,7 +217,7 @@ describe('SchemaLibraryCard', () => {
 
   it('renders contextual zero-field copy for needs review status', () => {
     renderCard(makeItem({ fieldCount: 0, status: 'needs_review' }));
-    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected (needs review)');
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected yet');
   });
 
   it('renders contextual zero-field copy for error status', () => {

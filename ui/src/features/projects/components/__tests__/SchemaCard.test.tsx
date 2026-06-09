@@ -51,9 +51,9 @@ describe('SchemaCard', () => {
     expect(screen.getByText('12 fields')).toBeInTheDocument();
   });
 
-  it('renders inferred warning when isInferred is true', () => {
+  it('does not render inferred warning when isInferred is true', () => {
     renderCard({ isInferred: true });
-    expect(screen.getByText('Inferred from sample data')).toBeInTheDocument();
+    expect(screen.queryByText('Inferred from sample data')).not.toBeInTheDocument();
   });
 
   it('does not render inferred warning when isInferred is false', () => {
@@ -114,12 +114,12 @@ describe('SchemaCard', () => {
     expect(badge).toHaveClass('text-purple-800');
   });
 
-  it('AE-13: Inferred origin shows amber badge', () => {
+  it('AE-13: Inferred origin shows uploaded badge presentation', () => {
     renderCard({ origin: 'inferred' });
     const badge = screen.getByTestId('origin-badge-inferred');
-    expect(badge).toHaveTextContent('Inferred');
-    expect(badge).toHaveClass('bg-amber-100');
-    expect(badge).toHaveClass('text-amber-800');
+    expect(badge).toHaveTextContent('Uploaded');
+    expect(badge).toHaveClass('bg-purple-100');
+    expect(badge).toHaveClass('text-purple-800');
   });
 
   // AE-13: sync status indicators

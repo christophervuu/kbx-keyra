@@ -97,6 +97,9 @@ describe('create-schema handler', () => {
     expect(parsed.status).toBe('ready');
     expect(parsed.fieldCount).toBe(2);
     expect((parsed as { origin?: string }).origin).toBe('uploaded');
+    expect((parsed as { sourceKind?: string }).sourceKind).toBe('json_schema');
+    expect((parsed as { dataFormat?: string }).dataFormat).toBe('json');
+    expect((parsed as { reviewState?: string }).reviewState).toBe('not_required');
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(3); // metadata + 2 nodes
 
     const firstNodePut = sharedMocks.putItem.mock.calls[1]?.[0] as { Item?: Record<string, unknown> } | undefined;
@@ -120,6 +123,46 @@ describe('create-schema handler', () => {
     const parsed = JSON.parse(result.body) as { status: string; fieldCount: number };
     expect(parsed.status).toBe('ingesting');
     expect(parsed.fieldCount).toBe(0);
+    expect((parsed as { sourceKind?: string }).sourceKind).toBe('xsd');
+    expect((parsed as { dataFormat?: string }).dataFormat).toBe('xml');
+  });
+
+  it('inferred schema persists initial sample payload metadata with usedForInference=true', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'Inferred Invoice',
+      format: 'json-schema',
+      origin: 'inferred',
+      inferred: true,
+      content: {
+        type: 'object',
+        properties: {
+          invoiceId: { type: 'string' },
+        },
+      },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    const parsed = JSON.parse(result.body) as {
+      sourceKind?: string;
+      dataFormat?: string;
+      reviewState?: string;
+      samplePayloadCount?: number;
+      samplePayloads?: Array<{ usedForInference?: boolean; source?: string; contentRef?: string }>;
+    };
+
+    expect(parsed.sourceKind).toBe('inferred_from_json');
+    expect(parsed.dataFormat).toBe('json');
+    expect(parsed.reviewState).toBe('unreviewed');
+    expect(parsed.samplePayloadCount).toBe(1);
+    expect(parsed.samplePayloads?.[0]?.usedForInference).toBe(true);
+    expect(parsed.samplePayloads?.[0]?.source).toBe('initial_upload');
+    expect(parsed.samplePayloads?.[0]?.contentRef).toMatch(/schemas\/.+\/samples\/.+\/payload\.json$/);
+
+    // one schema content write + one sample payload write
+    expect(sharedMocks.putObject).toHaveBeenCalledTimes(2);
   });
 
   it('missing required fields returns 400 validation error', async () => {

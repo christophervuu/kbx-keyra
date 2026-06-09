@@ -42,7 +42,7 @@ export function SchemaUsageSection({ schemaId }: SchemaUsageSectionProps) {
     <section
       data-testid="schema-detail-usage"
       aria-label="Schema usage"
-      className="border-b border-slate-800 px-6 py-4"
+      className="rounded-lg border border-slate-800 bg-slate-900 p-4"
     >
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
         Usage

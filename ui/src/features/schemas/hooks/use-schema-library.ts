@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '../lib';
 import { filterSchemas, sortSchemas } from '../lib/schema-filters';
 import type {
   DisplayFormat,
@@ -193,6 +194,41 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
           }
         }
 
+        // Best-effort field-count backfill for schemas whose list metadata is stale.
+        // This keeps Schema Library counts aligned with Schema Detail for ready/reviewed schemas.
+        const parsedCountBySchemaId = new Map<string, number>();
+        const countBackfillCandidates = schemas.filter((schema) => {
+          const metadataFieldCount = schema.fieldCount > 0
+            ? schema.fieldCount
+            : (schema as { totalFieldCount?: number }).totalFieldCount ?? 0;
+          const normalizedStatus = deriveStatus(schema);
+          return metadataFieldCount <= 0 && normalizedStatus !== 'processing';
+        });
+
+        await Promise.all(
+          countBackfillCandidates.map(async (schema) => {
+            try {
+              const detail = await adapter.getSchema(schema.schemaId);
+              const content = detail.content;
+
+              const parsed = schema.inferred
+                ? parseInferredSchema(
+                  typeof content === 'string' ? content : JSON.stringify(content),
+                  schema.format === 'xsd' ? 'xml' : 'json',
+                )
+                : schema.format === 'xsd'
+                  ? parseXsd(typeof content === 'string' ? content : JSON.stringify(content))
+                  : parseJsonSchema(content);
+
+              if (parsed.totalFieldCount > 0) {
+                parsedCountBySchemaId.set(schema.schemaId, parsed.totalFieldCount);
+              }
+            } catch {
+              // Non-fatal: keep metadata fallback when parse/load fails.
+            }
+          }),
+        );
+
         // Enrich each schema into a SchemaLibraryItem
         const enriched: SchemaLibraryItem[] = schemas.map((schema) => {
           const usage = usageMap.get(schema.schemaId);
@@ -207,7 +243,10 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
             status: deriveStatus(schema),
             format: schema.format,
             displayFormat: deriveDisplayFormat(schema),
-            fieldCount: schema.fieldCount,
+            fieldCount: parsedCountBySchemaId.get(schema.schemaId)
+              ?? (schema.fieldCount > 0
+                ? schema.fieldCount
+                : (schema as { totalFieldCount?: number }).totalFieldCount ?? 0),
             syncStatus: deriveSyncStatus(schema),
             projectCount: usage?.count ?? 0,
             projectNames: usage?.names ?? [],

@@ -5,7 +5,7 @@ type CanonicalSyncStatus = 'synced' | 'update-available' | 'sync-failed';
 const ORIGIN_LABELS: Record<SchemaOrigin, string> = {
   cdm: 'CDM',
   uploaded: 'Uploaded',
-  inferred: 'Inferred',
+  inferred: 'Uploaded',
   published: 'Uploaded',
   local: 'Uploaded',
 };

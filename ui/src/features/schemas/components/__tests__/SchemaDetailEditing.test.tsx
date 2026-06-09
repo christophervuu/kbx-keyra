@@ -7,11 +7,11 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+import { SchemaDetailPage } from '../SchemaDetailPage';
+
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaDetail } from '@/lib/types/domain';
-
-import { SchemaDetailPage } from '../SchemaDetailPage';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -70,7 +70,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     listSchemas: vi.fn(),
     getSchema: vi.fn().mockResolvedValue(UPLOADED_SCHEMA),
     createSchema: vi.fn(),
-    updateSchema: vi.fn().mockImplementation((_id, _input) =>
+    updateSchema: vi.fn().mockImplementation(() =>
       Promise.resolve({ ...UPLOADED_SCHEMA.metadata }),
     ),
     deleteSchema: vi.fn(),

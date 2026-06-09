@@ -16,6 +16,8 @@ const mockAdapter: ApiAdapter = {
   listSchemas: vi.fn(),
   getSchema: vi.fn().mockReturnValue(new Promise(() => {})),
   createSchema: vi.fn(),
+  updateSchema: vi.fn(),
+  markSchemaReviewed: vi.fn(),
   deleteSchema: vi.fn(),
   listMappings: vi.fn(),
   getMapping: vi.fn().mockReturnValue(new Promise(() => {})),
