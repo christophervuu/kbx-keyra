@@ -3,7 +3,7 @@ import type { SchemaOrigin, SchemaSyncStatus } from '@/lib/types';
 type CanonicalSyncStatus = 'synced' | 'update-available' | 'sync-failed';
 
 const ORIGIN_LABELS: Record<SchemaOrigin, string> = {
-  cdm: 'CDM (KBXT/KBX-Canonicals)',
+  cdm: 'CDM',
   uploaded: 'Uploaded',
   inferred: 'Inferred',
   published: 'Uploaded',

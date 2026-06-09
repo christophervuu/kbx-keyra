@@ -13,6 +13,7 @@ import type {
   Environment,
   ExplainRuleInput,
   ExplainRuleResult,
+  CdmBulkSyncResult,
   GitHubFile,
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
@@ -187,6 +188,7 @@ export interface ApiAdapter {
   // GitHub: CDM Repo (read-only)
   listCdmSchemas(path?: string): Promise<GitHubFile[]>;
   linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata>;
+  syncAllCdmSchemas(): Promise<CdmBulkSyncResult>;
   syncCdmSchema(
     schemaId: string,
     options?: {

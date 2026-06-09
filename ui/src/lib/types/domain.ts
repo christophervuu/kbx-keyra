@@ -12,6 +12,12 @@ export type DeployStatus = 'deployed' | 'stale' | 'not-deployed' | 'deploying';
 
 export type SchemaFormat = 'json-schema' | 'xsd';
 
+export type SchemaOwnership = 'cdm' | 'user';
+
+export type SchemaDataFormat = 'json' | 'xml';
+
+export type SchemaSourceKind = 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
+
 /**
  * Legacy-compatible schema origin values accepted at read boundaries.
  * Canonical FS-087 values are `cdm | uploaded | inferred`.
@@ -21,6 +27,8 @@ export type SchemaOrigin = 'cdm' | 'uploaded' | 'inferred' | 'published' | 'loca
 export type CanonicalSchemaOrigin = 'cdm' | 'uploaded' | 'inferred';
 
 export type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
+
+export type SchemaStatus = 'ready' | 'processing' | 'needs_review' | 'error' | 'ingesting';
 
 /**
  * @deprecated FS-087 compatibility-only field.
@@ -169,9 +177,14 @@ export interface SchemaMetadata {
   readonly schemaId: string;
   readonly name: string;
   readonly format: SchemaFormat;
+  readonly dataFormat?: SchemaDataFormat;
+  readonly sourceKind?: SchemaSourceKind;
   readonly fieldCount: number;
+  readonly ownership?: SchemaOwnership;
+  readonly isCdm?: boolean;
+  readonly readonly?: boolean;
   readonly origin: CanonicalSchemaOrigin;
-  readonly status: SchemaIngestStatus;
+  readonly status: SchemaStatus;
   /**
    * @deprecated FS-087 compatibility-only field.
    */
@@ -179,6 +192,9 @@ export interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly reviewedAt?: ISODateString;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
   readonly createdAt: ISODateString;
@@ -307,6 +323,10 @@ export interface CreateSchemaInput {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly origin: SchemaOrigin;
+  readonly ownership?: SchemaOwnership;
+  readonly sourceKind?: SchemaSourceKind;
+  readonly readonly?: boolean;
+  readonly status?: SchemaStatus;
   readonly content: Readonly<Record<string, unknown>> | string;
   readonly source?: SchemaSourceInfo;
   /**
@@ -315,6 +335,9 @@ export interface CreateSchemaInput {
   readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
+  readonly reviewedAt?: ISODateString;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
   readonly syncStatus?: SchemaSyncStatus;
 }
 
@@ -328,6 +351,10 @@ export interface UpdateSchemaInput {
   readonly content?: Readonly<Record<string, unknown>> | string;
   readonly fieldCount?: number;
   readonly format?: SchemaFormat;
+  readonly status?: SchemaStatus;
+  readonly reviewedAt?: ISODateString;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
 }
 
 export interface GitHubFile {
@@ -348,6 +375,22 @@ export interface LinkCdmSchemaInput {
   readonly name?: string;
 }
 
+export interface CdmBulkSyncError {
+  readonly path: string;
+  readonly reason: string;
+}
+
+export interface CdmBulkSyncResult {
+  readonly rootPath: string;
+  readonly scannedFiles: number;
+  readonly imported: number;
+  readonly skipped: number;
+  readonly failed: number;
+  readonly excludedSchemaIds: readonly string[];
+  readonly errors: readonly CdmBulkSyncError[];
+  readonly message: string;
+}
+
 export function normalizeSchemaOrigin(origin: SchemaOrigin | string | null | undefined): CanonicalSchemaOrigin {
   if (origin === 'cdm') {
     return 'cdm';
@@ -358,6 +401,74 @@ export function normalizeSchemaOrigin(origin: SchemaOrigin | string | null | und
   }
 
   return 'uploaded';
+}
+
+export function normalizeSchemaOwnership(input: {
+  ownership?: SchemaOwnership;
+  origin?: SchemaOrigin | CanonicalSchemaOrigin | string | null;
+}): SchemaOwnership {
+  if (input.ownership === 'cdm' || input.ownership === 'user') {
+    return input.ownership;
+  }
+
+  return normalizeSchemaOrigin(input.origin) === 'cdm' ? 'cdm' : 'user';
+}
+
+export function normalizeSchemaSourceKind(input: {
+  sourceKind?: SchemaSourceKind | string | null;
+  format?: SchemaFormat | string | null;
+  inferred?: boolean | null;
+}): SchemaSourceKind {
+  if (
+    input.sourceKind === 'json_schema'
+    || input.sourceKind === 'xsd'
+    || input.sourceKind === 'inferred_from_json'
+    || input.sourceKind === 'inferred_from_xml'
+  ) {
+    return input.sourceKind;
+  }
+
+  if (input.format === 'xsd') {
+    return input.inferred ? 'inferred_from_xml' : 'xsd';
+  }
+
+  return input.inferred ? 'inferred_from_json' : 'json_schema';
+}
+
+export function schemaDataFormatFromSourceKind(sourceKind: SchemaSourceKind): SchemaDataFormat {
+  return sourceKind === 'xsd' || sourceKind === 'inferred_from_xml' ? 'xml' : 'json';
+}
+
+export function normalizeSchemaStatus(input: {
+  status?: SchemaStatus | SchemaIngestStatus | string | null;
+  inferred?: boolean | null;
+  reviewedAt?: ISODateString | null;
+}): SchemaStatus {
+  if (input.status === 'processing' || input.status === 'needs_review') {
+    return input.status;
+  }
+
+  if (input.status === 'ingesting') {
+    return 'processing';
+  }
+
+  if (input.status === 'error') {
+    return 'error';
+  }
+
+  if (input.status === 'ready') {
+    if (input.inferred && !input.reviewedAt) {
+      return 'needs_review';
+    }
+
+    return 'ready';
+  }
+
+  if (input.inferred && !input.reviewedAt) {
+    return 'needs_review';
+  }
+
+  return 'ready';
 }
 
 export function normalizeProjectLinkedSchemaIds(input: {

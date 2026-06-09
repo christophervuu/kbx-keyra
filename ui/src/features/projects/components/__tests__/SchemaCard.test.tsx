@@ -101,7 +101,7 @@ describe('SchemaCard', () => {
     renderCard({ origin: 'cdm' });
     const badge = screen.getByTestId('origin-badge-cdm');
     expect(badge).toBeInTheDocument();
-    expect(badge).toHaveTextContent('CDM (KBXT/KBX-Canonicals)');
+    expect(badge).toHaveTextContent('CDM');
     expect(badge).toHaveClass('bg-blue-100');
     expect(badge).toHaveClass('text-blue-800');
   });

@@ -1,7 +1,10 @@
 import type {
+  SchemaDataFormat,
   MappingNodeStatus,
   ParsedSchema,
   SchemaFormat,
+  SchemaOwnership,
+  SchemaStatus,
   SchemaNodeType,
   SchemaOrigin,
   SchemaTreeNode,
@@ -82,12 +85,20 @@ export type ParseInferredSchemaFn = (content: string, format: 'json' | 'xml') =>
 
 export type SyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'local' | 'inferred';
 export type DisplayFormat = 'JSON' | 'XSD' | 'Inferred';
+export type FilterDataFormat = Uppercase<SchemaDataFormat>;
+export type FilterOwnership = SchemaOwnership;
+export type FilterStatus = Extract<SchemaStatus, 'ready' | 'processing' | 'needs_review' | 'error'>;
+export type SchemaLibraryViewMode = 'card' | 'list';
 
 export interface SchemaLibraryItem {
   schemaId: string;
   name: string;
   description?: string;
+  disambiguator?: string;
   origin: SchemaOrigin;
+  ownership: FilterOwnership;
+  dataFormat: FilterDataFormat;
+  status: FilterStatus;
   format: SchemaFormat;
   displayFormat: DisplayFormat;
   fieldCount: number;
@@ -100,11 +111,19 @@ export interface SchemaLibraryItem {
 
 export interface SchemaLibraryFilters {
   search: string;
-  origins: SchemaOrigin[];
-  formats: DisplayFormat[];
+  ownerships: FilterOwnership[];
+  dataFormats: FilterDataFormat[];
+  statuses: FilterStatus[];
 }
 
-export type SortField = 'name' | 'fieldCount' | 'updatedAt' | 'origin';
+export type SortField =
+  | 'name'
+  | 'status'
+  | 'dataFormat'
+  | 'fieldCount'
+  | 'projectCount'
+  | 'updatedAt'
+  | 'ownership';
 export type SortDirection = 'asc' | 'desc';
 
 export interface SchemaLibrarySort {

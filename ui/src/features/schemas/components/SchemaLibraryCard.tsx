@@ -4,6 +4,7 @@ import type { KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import type { SchemaLibraryItem, SyncStatus } from '../types';
+import { SchemaStatusBadge } from './SchemaStatusBadge';
 
 import {
   SchemaSyncStatusBadge,
@@ -17,6 +18,7 @@ import { PATHS } from '@/routes/paths';
 
 interface OriginBadgeProps {
   origin: SchemaLibraryItem['origin'];
+  ownership: SchemaLibraryItem['ownership'];
 }
 
 const ORIGIN_CONFIG: Record<
@@ -30,7 +32,11 @@ const ORIGIN_CONFIG: Record<
   local: { emoji: '📤', label: 'Uploaded', className: 'bg-blue-100 text-blue-800' },
 };
 
-function OriginBadge({ origin }: OriginBadgeProps) {
+function OriginBadge({ origin, ownership }: OriginBadgeProps) {
+  if (ownership !== 'cdm') {
+    return null;
+  }
+
   const config = ORIGIN_CONFIG[origin] ?? {
     emoji: '❓',
     label: 'Unknown',
@@ -73,6 +79,26 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
 
   const fieldLabel = item.fieldCount === 1 ? '1 field' : `${item.fieldCount} fields`;
 
+  function getFieldSummary(): string {
+    if (item.fieldCount > 0) {
+      return fieldLabel;
+    }
+
+    if (item.status === 'error') {
+      return 'No fields detected (error)';
+    }
+
+    if (item.status === 'processing') {
+      return 'No fields detected yet';
+    }
+
+    if (item.status === 'needs_review') {
+      return 'No fields detected (needs review)';
+    }
+
+    return 'No fields detected';
+  }
+
   const tooltipContent =
     item.projectCount > 0 && item.projectNames.length > 0
       ? item.projectNames.slice(0, 5).join(', ')
@@ -99,12 +125,22 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
       className="flex cursor-pointer flex-col gap-3 rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-sm transition-shadow hover:border-blue-500 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
       data-testid="schema-library-card"
     >
-      {/* Name */}
-      <h3 className="truncate text-base font-semibold text-slate-100">{item.name}</h3>
+      {/* Name + CDM badge */}
+      <div className="flex items-center gap-2">
+        <OriginBadge origin={item.origin} ownership={item.ownership} />
+        <h3 className="truncate text-base font-semibold text-slate-100">{item.name}</h3>
+      </div>
 
-      {/* Badges */}
-      <div className="flex flex-wrap items-center gap-2">
-        <OriginBadge origin={item.origin} />
+      {/* Disambiguator */}
+      {item.disambiguator ? (
+        <p className="text-xs text-slate-400" data-testid="schema-disambiguator">
+          {item.disambiguator}
+        </p>
+      ) : null}
+
+      {/* Status */}
+      <div>
+        <SchemaStatusBadge status={item.status} />
       </div>
 
       {/* Description */}
@@ -114,9 +150,9 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
 
       {/* Metadata row */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-        <span data-testid="field-count">{fieldLabel}</span>
+        <span data-testid="data-format">{item.dataFormat}</span>
         <span aria-hidden="true">·</span>
-        <span data-testid="display-format">{item.displayFormat}</span>
+        <span data-testid="field-count">{getFieldSummary()}</span>
         {SYNC_STATUS_CONFIG[item.syncStatus] !== null && (
           <>
             <span aria-hidden="true">·</span>
@@ -141,13 +177,16 @@ export function SchemaLibraryCard({ item }: SchemaLibraryCardProps) {
       </div>
 
       {/* Footer */}
-      <div className="mt-auto border-t border-slate-800 pt-3">
+      <div className="mt-auto space-y-1 border-t border-slate-800 pt-3 text-xs">
         <span
-          className="text-xs text-slate-500"
+          className="block text-slate-500"
           data-testid="project-count"
           title={tooltipContent}
         >
           {item.projectCount > 0 ? `Used by ${projectLabel}` : 'Not used by any project'}
+        </span>
+        <span className="block text-slate-500" data-testid="updated-at">
+          Updated {new Date(item.updatedAt).toLocaleDateString()}
         </span>
       </div>
     </div>

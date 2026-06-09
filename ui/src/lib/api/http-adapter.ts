@@ -14,6 +14,7 @@ import type {
   AutoMapResult,
   AutoMapSectionInput,
   AutoMapSectionResult,
+  CdmBulkSyncResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -508,6 +509,15 @@ export class HttpAdapter extends LocalStorageAdapter {
         ...(typeof input.branch === 'string' && input.branch.trim() !== '' ? { branch: input.branch.trim() } : {}),
         ...(typeof input.name === 'string' && input.name.trim() !== '' ? { name: input.name.trim() } : {}),
       },
+    });
+  }
+
+  override async syncAllCdmSchemas(): Promise<CdmBulkSyncResult> {
+    return httpRequest<CdmBulkSyncResult>({
+      baseUrl: this.apiUrl,
+      path: '/schemas/cdm/sync',
+      method: 'POST',
+      body: {},
     });
   }
 

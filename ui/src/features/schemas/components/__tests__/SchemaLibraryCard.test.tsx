@@ -27,6 +27,9 @@ function makeItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibraryItem
     name: 'Customer Schema',
     description: 'Holds customer data',
     origin: 'uploaded',
+    ownership: 'user',
+    dataFormat: 'JSON',
+    status: 'ready',
     format: 'json-schema',
     displayFormat: 'JSON',
     fieldCount: 12,
@@ -71,19 +74,14 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByTestId('field-count')).toHaveTextContent('1 field');
   });
 
-  it('renders the display format', () => {
-    renderCard(makeItem({ displayFormat: 'JSON' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('JSON');
+  it('renders JSON data format', () => {
+    renderCard(makeItem({ dataFormat: 'JSON' }));
+    expect(screen.getByTestId('data-format')).toHaveTextContent('JSON');
   });
 
-  it('renders XSD format', () => {
-    renderCard(makeItem({ displayFormat: 'XSD', format: 'xsd' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('XSD');
-  });
-
-  it('renders Inferred format', () => {
-    renderCard(makeItem({ displayFormat: 'Inferred' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('Inferred');
+  it('renders XML data format', () => {
+    renderCard(makeItem({ dataFormat: 'XML', format: 'xsd' }));
+    expect(screen.getByTestId('data-format')).toHaveTextContent('XML');
   });
 
   it('renders project count', () => {
@@ -115,54 +113,68 @@ describe('SchemaLibraryCard', () => {
   // Origin badges
   // -------------------------------------------------------------------------
 
-  it('renders CDM origin badge with canonical text', () => {
-    renderCard(makeItem({ origin: 'cdm' }));
-    expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
+  it('renders CDM badge only for CDM ownership', () => {
+    renderCard(makeItem({ origin: 'cdm', ownership: 'cdm' }));
+    expect(screen.getByText('CDM')).toBeInTheDocument();
   });
 
-  it('renders Uploaded origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'uploaded' }));
-    expect(screen.getByText('Uploaded')).toBeInTheDocument();
-  });
-
-  it('renders Inferred origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'inferred' }));
-    expect(screen.getByText('Inferred')).toBeInTheDocument();
+  it('does not render origin badge for user-owned schemas', () => {
+    renderCard(makeItem({ origin: 'uploaded', ownership: 'user' }));
+    expect(screen.queryByText('Uploaded')).not.toBeInTheDocument();
   });
 
   it('falls back to Unknown label for malformed origin values', () => {
     renderCard(
       makeItem({
         origin: 'legacy-origin' as unknown as SchemaLibraryItem['origin'],
+        ownership: 'cdm',
       }),
     );
     expect(screen.getByText('Unknown')).toBeInTheDocument();
   });
 
   it('CDM badge has purple styling', () => {
-    renderCard(makeItem({ origin: 'cdm' }));
-    const badge = screen.getByText('CDM (KBXT/KBX-Canonicals)').closest('span');
+    renderCard(makeItem({ origin: 'cdm', ownership: 'cdm' }));
+    const badge = screen.getByText('CDM').closest('span');
     expect(badge?.className).toContain('bg-purple-100');
     expect(badge?.className).toContain('text-purple-800');
   });
 
   it('Uploaded badge has blue styling', () => {
-    renderCard(makeItem({ origin: 'uploaded' }));
+    renderCard(makeItem({ origin: 'uploaded', ownership: 'cdm' }));
     const badge = screen.getByText('Uploaded').closest('span');
     expect(badge?.className).toContain('bg-blue-100');
     expect(badge?.className).toContain('text-blue-800');
   });
 
-  it('Inferred badge has amber styling', () => {
-    renderCard(makeItem({ origin: 'inferred' }));
-    const badge = screen.getByText('Inferred').closest('span');
-    expect(badge?.className).toContain('bg-amber-100');
-    expect(badge?.className).toContain('text-amber-800');
+  it('renders disambiguator when present', () => {
+    renderCard(makeItem({ disambiguator: 'KBXT · v1 · a1b2' }));
+    expect(screen.getByTestId('schema-disambiguator')).toHaveTextContent('KBXT · v1 · a1b2');
   });
 
   // -------------------------------------------------------------------------
-  // Sync status
+  // Status + sync metadata
   // -------------------------------------------------------------------------
+
+  it('renders ready status badge', () => {
+    renderCard(makeItem({ status: 'ready' }));
+    expect(screen.getByTestId('schema-status-ready')).toBeInTheDocument();
+  });
+
+  it('renders needs_review status badge', () => {
+    renderCard(makeItem({ status: 'needs_review' }));
+    expect(screen.getByTestId('schema-status-needs_review')).toBeInTheDocument();
+  });
+
+  it('renders processing status badge', () => {
+    renderCard(makeItem({ status: 'processing' }));
+    expect(screen.getByTestId('schema-status-processing')).toBeInTheDocument();
+  });
+
+  it('renders error status badge', () => {
+    renderCard(makeItem({ status: 'error' }));
+    expect(screen.getByTestId('schema-status-error')).toBeInTheDocument();
+  });
 
   it('renders synced indicator', () => {
     renderCard(makeItem({ syncStatus: 'synced' }));
@@ -190,6 +202,31 @@ describe('SchemaLibraryCard', () => {
   it('renders no sync indicator for local (upload-only)', () => {
     renderCard(makeItem({ syncStatus: 'local' }));
     expect(screen.queryByTestId('sync-status-local')).not.toBeInTheDocument();
+  });
+
+  it('renders contextual zero-field copy for ready status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'ready' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected');
+  });
+
+  it('renders contextual zero-field copy for processing status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'processing' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected yet');
+  });
+
+  it('renders contextual zero-field copy for needs review status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'needs_review' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected (needs review)');
+  });
+
+  it('renders contextual zero-field copy for error status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'error' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected (error)');
+  });
+
+  it('renders updated date row', () => {
+    renderCard(makeItem({ updatedAt: '2026-05-10T00:00:00Z' }));
+    expect(screen.getByTestId('updated-at')).toHaveTextContent('Updated');
   });
 
   // -------------------------------------------------------------------------

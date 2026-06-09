@@ -101,6 +101,40 @@ const SCHEMA_DETAIL_NEW: SchemaDetail = {
   content: {},
 };
 
+const SCHEMA_DETAIL_NEEDS_REVIEW: SchemaDetail = {
+  metadata: {
+    schemaId: 'schema-needs-review',
+    name: 'Schema Needs Review',
+    format: 'json-schema',
+    dataFormat: 'json',
+    fieldCount: 3,
+    origin: 'inferred',
+    status: 'needs_review',
+    inferred: true,
+    sourceKind: 'inferred_from_json',
+    source: { type: 'upload' },
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+  content: {},
+};
+
+const SCHEMA_DETAIL_ERROR: SchemaDetail = {
+  metadata: {
+    schemaId: 'schema-error',
+    name: 'Schema Error',
+    format: 'xsd',
+    dataFormat: 'xml',
+    fieldCount: 0,
+    origin: 'uploaded',
+    status: 'error',
+    source: { type: 'upload' },
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+  content: {},
+};
+
 const CREATED_MAPPING: MappingMetadata = {
   mappingId: 'new-mapping-1',
   projectId: 'proj-1',
@@ -347,7 +381,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('target-schema-name')).toHaveTextContent('Schema Beta');
     expect(screen.getByTestId('target-total-fields')).toHaveTextContent('2');
     expect(screen.getByTestId('target-required-fields')).toHaveTextContent('—');
-    expect(screen.getByTestId('target-format')).toHaveTextContent('XSD');
+    expect(screen.getByTestId('target-format')).toHaveTextContent('XML');
     expect(screen.getByTestId('target-origin')).toHaveTextContent('CDM');
 
     expect(screen.queryByText(/readiness/i)).not.toBeInTheDocument();
@@ -600,5 +634,58 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('editor-auto-map-notice')).toHaveTextContent(
       'Mapping created. Auto-Map suggestions are not available in this mode.',
     );
+  });
+
+  it('AE-09: selector options include CDM badge/status/format/field count metadata by default', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument();
+    });
+
+    const sourceSelect = screen.getByTestId('schema-select-source-schema');
+    const sourceOptions = Array.from(sourceSelect.querySelectorAll('option')).map((option) => option.textContent ?? '');
+
+    expect(
+      sourceOptions.some((text) =>
+        text.includes('Schema Beta')
+        && text.includes('CDM')
+        && text.includes('Ready')
+        && text.includes('XML')
+        && text.includes('2 fields')),
+    ).toBe(true);
+  });
+
+  it('AE-09a: error schemas are visible but non-selectable; needs_review schemas are warning-selectable', async () => {
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([
+        SCHEMA_DETAIL_A.metadata,
+        SCHEMA_DETAIL_B.metadata,
+        SCHEMA_DETAIL_NEEDS_REVIEW.metadata,
+        SCHEMA_DETAIL_ERROR.metadata,
+      ]),
+      getSchema: vi.fn().mockImplementation(async (id: string) => {
+        if (id === 'schema-b') return SCHEMA_DETAIL_B;
+        if (id === 'schema-needs-review') return SCHEMA_DETAIL_NEEDS_REVIEW;
+        if (id === 'schema-error') return SCHEMA_DETAIL_ERROR;
+        return SCHEMA_DETAIL_A;
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-select-target-schema')).toBeInTheDocument();
+    });
+
+    const targetSelect = screen.getByTestId('schema-select-target-schema') as HTMLSelectElement;
+    const errorOption = targetSelect.querySelector('option[value="schema-error"]') as HTMLOptionElement | null;
+    expect(errorOption).not.toBeNull();
+    expect(errorOption?.disabled).toBe(true);
+
+    await user.selectOptions(targetSelect, 'schema-needs-review');
+    expect(targetSelect.value).toBe('schema-needs-review');
+    expect(screen.getByTestId('target-status')).toHaveTextContent('Needs review');
+    expect(screen.getByTestId('target-needs-review-warning')).toBeInTheDocument();
   });
 });

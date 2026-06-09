@@ -9,7 +9,7 @@ import {
 
 describe('SchemaPresentationPrimitives', () => {
   it('returns canonical CDM origin label', () => {
-    expect(getSchemaOriginLabel('cdm')).toBe('CDM (KBXT/KBX-Canonicals)');
+    expect(getSchemaOriginLabel('cdm')).toBe('CDM');
   });
 
   it('returns canonical uploaded origin label for uploaded and legacy aliases', () => {

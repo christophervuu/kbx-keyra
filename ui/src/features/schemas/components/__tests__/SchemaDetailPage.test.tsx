@@ -51,6 +51,8 @@ const UPLOADED_SCHEMA: SchemaDetail = {
     updatedBy: 'local-user',
     inferred: false,
     syncStatus: 'sync-failed',
+    sourceKind: 'json_schema',
+    dataFormat: 'json',
     source: { type: 'upload' },
     createdAt: '2026-03-01T00:00:00Z',
     updatedAt: '2026-03-10T00:00:00Z',
@@ -61,6 +63,27 @@ const UPLOADED_SCHEMA: SchemaDetail = {
       name: { type: 'string' },
     },
   },
+};
+
+const INFERRED_XML_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'schema-inferred-xml-1',
+    name: 'Inferred XML Schema',
+    format: 'xsd',
+    dataFormat: 'xml',
+    sourceKind: 'inferred_from_xml',
+    fieldCount: 0,
+    origin: 'inferred',
+    status: 'needs_review',
+    description: 'Generated from sample XML payload',
+    updatedBy: 'local-user',
+    inferred: true,
+    syncStatus: 'sync-failed',
+    source: { type: 'upload' },
+    createdAt: '2026-04-01T00:00:00Z',
+    updatedAt: '2026-04-02T00:00:00Z',
+  },
+  content: '<person><name>Alice</name></person>',
 };
 
 // ---------------------------------------------------------------------------
@@ -163,13 +186,14 @@ describe('SchemaDetailPage', () => {
     });
 
     // CDM badge
-    expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
+    expect(screen.getByText('CDM')).toBeInTheDocument();
     // Scope badge removed from UI
     expect(screen.queryByText('Global')).not.toBeInTheDocument();
     // Field count
     expect(screen.getByText(/12 fields/i)).toBeInTheDocument();
-    // Format
-    expect(screen.getByText('JSON')).toBeInTheDocument();
+    // Data format and source kind are explicitly separated
+    expect(screen.getByTestId('schema-detail-data-format')).toHaveTextContent('JSON');
+    expect(screen.getByTestId('schema-detail-source-kind')).toHaveTextContent('JSON Schema');
     // Description (read-only plain text)
     expect(screen.getByText('CDM customer object')).toBeInTheDocument();
     expect(screen.getByTestId('cdm-read-only-note')).toHaveTextContent(
@@ -196,6 +220,21 @@ describe('SchemaDetailPage', () => {
     // Name is rendered as an editable button
     const nameButton = screen.getByRole('button', { name: /edit schema name/i });
     expect(nameButton).toBeInTheDocument();
+    expect(screen.getByTestId('schema-detail-data-format')).toHaveTextContent('JSON');
+    expect(screen.getByTestId('schema-detail-source-kind')).toHaveTextContent('JSON Schema');
+  });
+
+  it('renders XSD-backed inferred schema metadata with explicit XML and inferred source kind', async () => {
+    adapter = createMockAdapter({ getSchema: vi.fn().mockResolvedValue(INFERRED_XML_SCHEMA) });
+    renderPage(adapter, 'schema-inferred-xml-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-detail-metadata')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('schema-detail-data-format')).toHaveTextContent('XML');
+    expect(screen.getByTestId('schema-detail-source-kind')).toHaveTextContent('Inferred from XML');
+    expect(screen.getByTestId('schema-status-needs_review')).toBeInTheDocument();
   });
 
   it('renders Unknown origin badge for malformed origin values', async () => {
@@ -407,5 +446,41 @@ describe('SchemaDetailPage', () => {
     });
 
     expect(screen.queryByTestId('edit-schema-button')).not.toBeInTheDocument();
+  });
+
+  it('shows persistent inferred callout and allows marking as reviewed', async () => {
+    const updateSchema = vi.fn().mockImplementation(async (_id, input) => ({
+      ...INFERRED_XML_SCHEMA.metadata,
+      ...input,
+      sourceKind: 'inferred_from_xml',
+      status: 'ready',
+    }));
+    adapter = createMockAdapter({
+      getSchema: vi.fn().mockResolvedValue(INFERRED_XML_SCHEMA),
+      updateSchema,
+    });
+
+    const user = userEvent.setup();
+    renderPage(adapter, 'schema-inferred-xml-1');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inferred-schema-banner')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('mark-reviewed-button')).toBeInTheDocument();
+    await user.click(screen.getByTestId('mark-reviewed-button'));
+
+    await waitFor(() => {
+      expect(updateSchema).toHaveBeenCalledWith(
+        'schema-inferred-xml-1',
+        expect.objectContaining({
+          status: 'ready',
+          reviewedAt: expect.any(String),
+        }),
+      );
+    });
+
+    // sourceKind must remain inferred lineage after review transition
+    expect(screen.getByTestId('schema-detail-source-kind')).toHaveTextContent('Inferred from XML');
   });
 });

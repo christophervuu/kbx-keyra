@@ -2,12 +2,12 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { AdapterProvider } from '@/lib/api';
+import { SchemaUploadDialog } from '../SchemaUploadDialog';
+
 import * as ingestionPollingHook from '@/features/schemas/hooks/use-ingestion-polling';
+import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaMetadata, SchemaRef } from '@/lib/types/domain';
-
-import { SchemaUploadDialog } from '../SchemaUploadDialog';
 
 // ---------------------------------------------------------------------------
 // FileReader mock helpers
@@ -78,6 +78,13 @@ const VALID_JSON_SCHEMA = JSON.stringify({
 });
 
 const SAMPLE_JSON = JSON.stringify({ name: 'Alice', age: 30 });
+
+const XSD_SCHEMA = `<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="person" type="xs:string" />
+</xs:schema>`;
+
+const SAMPLE_XML = `<person><name>Alice</name><age>30</age></person>`;
 
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
@@ -273,6 +280,13 @@ describe('SchemaUploadDialog', () => {
     expect(screen.queryByTestId('scope-global')).not.toBeInTheDocument();
     expect(screen.queryByTestId('scope-project-level')).not.toBeInTheDocument();
   });
+
+  it('does not render legacy Link CDM/Published/Sync terminology in modal', () => {
+    renderDialog(createMockAdapter());
+    expect(screen.queryByText(/link cdm/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/published/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sync/i)).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -400,6 +414,42 @@ describe('SchemaUploadDialog — paste mode', () => {
     expect(screen.getByTestId('upload-button')).toBeDisabled();
   });
 
+  it('supports pasting XSD content in paste mode', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: XSD_SCHEMA } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('format-badge')).toHaveTextContent('XSD');
+    });
+
+    expect(screen.queryByTestId('paste-error')).not.toBeInTheDocument();
+    expect((screen.getByTestId('schema-name-input') as HTMLInputElement).value).toBe('Pasted XSD Schema');
+  });
+
+  it('supports pasting sample XML content in paste mode', async () => {
+    const user = userEvent.setup();
+    renderDialog(createMockAdapter());
+
+    await user.click(screen.getByTestId('mode-tab-paste'));
+
+    const textarea = screen.getByTestId('paste-input');
+    fireEvent.change(textarea, { target: { value: SAMPLE_XML } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('format-badge')).toHaveTextContent('Sample XML');
+    });
+
+    expect(screen.getByTestId('inferred-warning')).toBeInTheDocument();
+    expect((screen.getByTestId('schema-name-input') as HTMLInputElement).value).toBe('Pasted Sample XML');
+  });
+
   it('AE-01: format badge appears after debounce on change — no blur required', async () => {
     vi.useFakeTimers();
     renderDialog(createMockAdapter());
@@ -479,7 +529,6 @@ describe('SchemaUploadDialog — paste mode', () => {
   });
 
   it('AE-04: manual edit to Schema Name is preserved when pasting JSON with a different title', async () => {
-    const user = userEvent.setup();
     renderDialog(createMockAdapter());
 
     fireEvent.click(screen.getByTestId('mode-tab-paste'));
@@ -620,11 +669,94 @@ describe('SchemaUploadDialog — paste mode', () => {
       expect(createSchema).toHaveBeenCalledWith(
         expect.objectContaining({
           format: 'json-schema',
+          origin: 'inferred',
+          ownership: 'user',
+          readonly: false,
+          sourceKind: 'inferred_from_json',
+          status: 'needs_review',
           inferred: true,
           content: SAMPLE_JSON,
         }),
       );
     });
+  });
+
+  it('metadata mapping is correct for JSON Schema, XSD, sample JSON, and sample XML', async () => {
+    const createSchema = vi.fn().mockResolvedValue(CREATED_SCHEMA);
+    const adapter = createMockAdapter({ createSchema });
+    const user = userEvent.setup();
+    renderDialog(adapter);
+
+    const createFromPaste = async (content: string, name: string) => {
+      await user.click(screen.getByTestId('mode-tab-paste'));
+      const textarea = screen.getByTestId('paste-input');
+      fireEvent.change(textarea, { target: { value: content } });
+      fireEvent.blur(textarea);
+      await waitFor(() => {
+        expect(screen.getByTestId('schema-name-input')).toBeInTheDocument();
+      });
+      const nameInput = screen.getByTestId('schema-name-input');
+      await user.clear(nameInput);
+      await user.type(nameInput, name);
+      await user.click(screen.getByTestId('upload-button'));
+      await waitFor(() => expect(createSchema).toHaveBeenCalled());
+    };
+
+    createSchema.mockClear();
+    await createFromPaste(VALID_JSON_SCHEMA, 'json-schema-case');
+    expect(createSchema).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: 'json-schema',
+        origin: 'uploaded',
+        ownership: 'user',
+        readonly: false,
+        sourceKind: 'json_schema',
+        status: 'ready',
+        inferred: false,
+      }),
+    );
+
+    createSchema.mockClear();
+    await createFromPaste(XSD_SCHEMA, 'xsd-case');
+    expect(createSchema).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: 'xsd',
+        origin: 'uploaded',
+        ownership: 'user',
+        readonly: false,
+        sourceKind: 'xsd',
+        status: 'ready',
+        inferred: false,
+      }),
+    );
+
+    createSchema.mockClear();
+    await createFromPaste(SAMPLE_JSON, 'sample-json-case');
+    expect(createSchema).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: 'json-schema',
+        origin: 'inferred',
+        ownership: 'user',
+        readonly: false,
+        sourceKind: 'inferred_from_json',
+        status: 'needs_review',
+        inferred: true,
+      }),
+    );
+
+    createSchema.mockClear();
+    await createFromPaste(SAMPLE_XML, 'sample-xml-case');
+    expect(createSchema).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: 'xsd',
+        origin: 'inferred',
+        ownership: 'user',
+        readonly: false,
+        sourceKind: 'inferred_from_xml',
+        status: 'needs_review',
+        inferred: true,
+      }),
+    );
   });
 });
 

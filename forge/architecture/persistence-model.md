@@ -83,12 +83,19 @@ GSI: `projectId-index` — PK=`projectId`, projects all attributes. Used by `lis
 | `schemaId` | PK | String (UUID) | Unique schema identifier |
 | `name` | — | String | Display name |
 | `format` | — | String | `json-schema` / `xsd` |
+| `dataFormat` | — | String | Canonical data format `json` / `xml` (separate from source derivation kind) |
+| `sourceKind` | — | String | Canonical source kind `json_schema` / `xsd` / `inferred_from_json` / `inferred_from_xml` |
 | `fieldCount` | — | Number | Total leaf fields |
 | `origin` | — | String | Canonical `cdm` / `uploaded` / `inferred` (legacy `published|local` normalize to `uploaded`) |
-| `status` | — | String | `ingesting` / `ready` / `error` |
+| `ownership` | — | String | Canonical ownership `cdm` / `user` |
+| `readonly` | — | Boolean | Ownership-aligned mutability marker (CDM defaults true) |
+| `status` | — | String | Canonical readiness status `processing` / `ready` / `needs_review` / `error` (legacy `ingesting` normalizes to `processing`) |
 | `scope` | — | String | Compatibility-only metadata (`global` / `project`), non-authoritative for access |
 | `description` | — | String | Optional description |
 | `inferred` | — | Boolean | Whether schema was inferred from sample |
+| `reviewedAt` | — | String | Optional ISO 8601 inferred-review completion timestamp |
+| `reviewedBy` | — | String | Optional reviewer identity (auth-enabled environments) |
+| `isCdm` | — | Boolean | Optional convenience flag aligned with canonical ownership |
 | `syncStatus` | — | String | Canonical `synced` / `update-available` / `sync-failed` (legacy values normalize at read boundaries) |
 | `source` | — | Map | `{ type: 'upload' }` or `{ type: 'github', repo, branch, path, commitSha? }` |
 | `createdAt` | — | String | ISO 8601 |
@@ -177,6 +184,29 @@ Canonical storage semantics after FS-087:
 - Legacy schema fields remain permissible in persisted records only for compatibility:
   - `origin: local|published` normalize to canonical `uploaded` at read boundaries.
   - `scope` is non-authoritative metadata and must not drive access behavior.
+
+## FS-089 schema metadata addendum
+
+FS-089 formalizes schema metadata separation and readiness semantics used across Schema Library, Add Schema, Schema Detail, and Create Mapping selectors.
+
+Canonical storage/read-model expectations:
+
+- `dataFormat` and `sourceKind` are independent metadata facets:
+  - `dataFormat` supports user-facing `JSON/XML` labeling.
+  - `sourceKind` retains derivation/source lineage semantics.
+- `ownership` and `readonly` are explicit fields; CDM defaults are `ownership=cdm` and `readonly=true`.
+- inferred lineage readiness is explicit via `status=needs_review` and review transition metadata (`reviewedAt`, optional `reviewedBy`).
+
+Input-kind persistence expectations:
+
+- JSON Schema -> `dataFormat=json`, `sourceKind=json_schema`, `status=ready`.
+- XSD -> `dataFormat=xml`, `sourceKind=xsd`, `status=ready`.
+- sample JSON -> `dataFormat=json`, `sourceKind=inferred_from_json`, `status=needs_review`.
+- sample XML -> `dataFormat=xml`, `sourceKind=inferred_from_xml`, `status=needs_review`.
+
+Compatibility posture remains unchanged:
+
+- legacy `scope` and origin aliases remain tolerated for transition, but canonical behavior is driven by ownership/readiness/source-kind fields.
 
 Audit-confirmed unaffected ownership/index surfaces:
 

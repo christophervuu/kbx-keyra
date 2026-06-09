@@ -1,4 +1,11 @@
 export {
+  CDM_MANIFEST,
+  CDM_MANIFEST_VERSION,
+  buildCdmManifestMetadataItems,
+} from './cdm-manifest.js';
+export type { CdmManifestEntry } from './cdm-manifest.js';
+
+export {
   normalizeDependencyPath,
   isAllowedDependencyPath,
   extractRelativeRefs,

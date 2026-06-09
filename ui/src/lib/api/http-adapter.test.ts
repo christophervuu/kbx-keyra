@@ -614,6 +614,29 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('syncAllCdmSchemas maps to POST /schemas/cdm/sync', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      rootPath: 'JSONSchemas-bundled/CommonDataModels',
+      scannedFiles: 14,
+      imported: 14,
+      skipped: 0,
+      failed: 0,
+      excludedSchemaIds: [],
+      errors: [],
+      message: 'CDM sync completed.',
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.syncAllCdmSchemas();
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm/sync',
+      method: 'POST',
+      body: {},
+    });
+  });
+
   it('syncCdmSchema maps to POST /schemas/:id/sync-cdm', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1', synced: true });
     const adapter = new HttpAdapter(API_URL);

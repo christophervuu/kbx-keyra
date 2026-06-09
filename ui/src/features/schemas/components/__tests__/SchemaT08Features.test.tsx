@@ -1,74 +1,68 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 import { InferredSchemaBanner } from '../InferredSchemaBanner';
+import { ReplaceFileDialog } from '../ReplaceFileDialog';
+import { ViewRawModal } from '../ViewRawModal';
 
-function createStorageMock() {
-  const store = new Map<string, string>();
-  return {
-    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-    setItem: (key: string, value: string) => {
-      store.set(key, value);
-    },
-    removeItem: (key: string) => {
-      store.delete(key);
-    },
-    clear: () => {
-      store.clear();
-    },
-  };
-}
-
-const SCHEMA_ID = 'schema-test-1';
-const STORAGE_KEY = `keyra:schema-banner-dismissed:${SCHEMA_ID}`;
+import { AdapterProvider } from '@/lib/api';
+import type { ApiAdapter } from '@/lib/api';
+import type { SchemaDetail } from '@/lib/types';
 
 describe('InferredSchemaBanner', () => {
-  beforeEach(() => {
-    vi.stubGlobal('localStorage', createStorageMock());
-  });
-
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  afterEach(() => {
-    localStorage.clear();
-  });
-
   it('renders nothing when inferred is false', () => {
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={false} />);
+    render(<InferredSchemaBanner inferred={false} />);
     expect(screen.queryByTestId('inferred-schema-banner')).not.toBeInTheDocument();
   });
 
-  it('renders the banner when inferred is true and not dismissed', () => {
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={true} />);
+  it('renders the banner when inferred is true', () => {
+    render(<InferredSchemaBanner inferred={true} />);
     expect(screen.getByTestId('inferred-schema-banner')).toBeInTheDocument();
     expect(screen.getByText(/inferred from sample data/i)).toBeInTheDocument();
   });
 
-  it('renders nothing when already dismissed in localStorage', () => {
-    localStorage.setItem(STORAGE_KEY, 'true');
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={true} />);
-    expect(screen.queryByTestId('inferred-schema-banner')).not.toBeInTheDocument();
+  it('shows Mark as Reviewed button only for needs_review', () => {
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        onMarkReviewed={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('mark-reviewed-button')).toBeInTheDocument();
   });
 
-  it('hides banner on dismiss and writes to localStorage', async () => {
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={true} />);
-    expect(screen.getByTestId('inferred-schema-banner')).toBeInTheDocument();
+  it('calls onMarkReviewed when button is clicked', async () => {
+    const onMarkReviewed = vi.fn();
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        onMarkReviewed={onMarkReviewed}
+      />,
+    );
 
-    await userEvent.click(screen.getByTestId('inferred-banner-dismiss'));
+    await userEvent.click(screen.getByTestId('mark-reviewed-button'));
 
-    expect(screen.queryByTestId('inferred-schema-banner')).not.toBeInTheDocument();
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
+    expect(onMarkReviewed).toHaveBeenCalledOnce();
+  });
+
+  it('renders mark reviewed error when provided', () => {
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        onMarkReviewed={vi.fn()}
+        markReviewedError="Unable to mark as reviewed"
+      />,
+    );
+
+    expect(screen.getByTestId('mark-reviewed-error')).toHaveTextContent('Unable to mark as reviewed');
   });
 });
-
-// ---------------------------------------------------------------------------
-// ViewRawModal
-// ---------------------------------------------------------------------------
-
-import { ViewRawModal } from '../ViewRawModal';
 
 describe('ViewRawModal', () => {
   const onClose = vi.fn();
@@ -133,17 +127,6 @@ describe('ViewRawModal', () => {
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// ReplaceFileDialog
-// ---------------------------------------------------------------------------
-
-import { MemoryRouter } from 'react-router-dom';
-import { AdapterProvider } from '@/lib/api';
-import type { ApiAdapter } from '@/lib/api';
-import type { SchemaDetail } from '@/lib/types';
-
-import { ReplaceFileDialog } from '../ReplaceFileDialog';
 
 const VALID_JSON_SCHEMA = JSON.stringify({
   type: 'object',

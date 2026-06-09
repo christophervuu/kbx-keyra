@@ -37,6 +37,9 @@ function makeLibraryItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibr
     name: 'CDM Customer',
     description: 'Canonical CDM fixture',
     origin: 'cdm',
+    ownership: 'cdm',
+    dataFormat: 'JSON',
+    status: 'ready',
     format: 'json-schema',
     displayFormat: 'JSON',
     fieldCount: 12,
@@ -100,7 +103,7 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
     const { unmount } = render(
       <SchemaCard schema={project} usageCount={1} onView={vi.fn()} onRemove={vi.fn()} />,
     );
-    expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
+    expect(screen.getByText('CDM')).toBeInTheDocument();
     unmount();
 
     render(
@@ -108,7 +111,7 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
         <SchemaLibraryCard item={makeLibraryItem()} />
       </MemoryRouter>,
     );
-    expect(screen.getByText('CDM (KBXT/KBX-Canonicals)')).toBeInTheDocument();
+    expect(screen.getByText('CDM')).toBeInTheDocument();
 
     const adapter = createMockAdapter({ getSchema: vi.fn().mockResolvedValue(detail) });
     render(
@@ -122,7 +125,7 @@ describe('FS-078 cross-surface CDM consistency (T-06)', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getAllByText('CDM (KBXT/KBX-Canonicals)').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('CDM').length).toBeGreaterThan(0);
     });
   });
 

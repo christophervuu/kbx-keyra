@@ -1,10 +1,8 @@
 // Pure filter and sort utilities for the Schema Library (FS-016 T-01).
 // These functions are side-effect free and independently unit testable.
 
-import type { SchemaOrigin } from '@/lib/types';
-
 import type {
-  DisplayFormat,
+  FilterDataFormat,
   SchemaLibraryFilters,
   SchemaLibraryItem,
   SchemaLibrarySort,
@@ -15,7 +13,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Filters a list of SchemaLibraryItems based on search, origin and format criteria.
+ * Filters a list of SchemaLibraryItems based on search, ownership, data format, and status criteria.
  *
  * Logic:
  *  - Within each category: OR  (any match = pass for that category)
@@ -27,7 +25,7 @@ export function filterSchemas(
   items: SchemaLibraryItem[],
   filters: SchemaLibraryFilters,
 ): SchemaLibraryItem[] {
-  const { search, origins, formats } = filters;
+  const { search, ownerships, dataFormats, statuses } = filters;
   const term = search.trim().toLowerCase();
 
   return items.filter((item) => {
@@ -38,11 +36,14 @@ export function filterSchemas(
       if (!nameMatch && !descMatch) return false;
     }
 
-    // Origin filter (OR within, skip if empty)
-    if (origins.length > 0 && !origins.includes(item.origin)) return false;
+    // Ownership filter (OR within, skip if empty)
+    if (ownerships.length > 0 && !ownerships.includes(item.ownership)) return false;
 
-    // Format filter (OR within, skip if empty)
-    if (formats.length > 0 && !formats.includes(item.displayFormat)) return false;
+    // Data format filter (OR within, skip if empty)
+    if (dataFormats.length > 0 && !dataFormats.includes(item.dataFormat)) return false;
+
+    // Status filter (OR within, skip if empty)
+    if (statuses.length > 0 && !statuses.includes(item.status)) return false;
 
     return true;
   });
@@ -52,18 +53,21 @@ export function filterSchemas(
 // sortSchemas
 // ---------------------------------------------------------------------------
 
-const ORIGIN_ORDER: Record<SchemaOrigin, number> = {
+const OWNERSHIP_ORDER: Record<SchemaLibraryItem['ownership'], number> = {
   cdm: 0,
-  uploaded: 1,
-  inferred: 2,
-  published: 1,
-  local: 1,
+  user: 1,
 };
 
-const FORMAT_ORDER: Record<DisplayFormat, number> = {
+const STATUS_ORDER: Record<SchemaLibraryItem['status'], number> = {
+  ready: 0,
+  needs_review: 1,
+  processing: 2,
+  error: 3,
+};
+
+const FORMAT_ORDER: Record<FilterDataFormat, number> = {
   JSON: 0,
-  XSD: 1,
-  Inferred: 2,
+  XML: 1,
 };
 
 /**
@@ -86,12 +90,27 @@ export function sortSchemas(
       case 'fieldCount':
         cmp = a.fieldCount - b.fieldCount;
         break;
+      case 'projectCount':
+        cmp = a.projectCount - b.projectCount;
+        break;
+      case 'dataFormat': {
+        const aOrder = FORMAT_ORDER[a.dataFormat] ?? 99;
+        const bOrder = FORMAT_ORDER[b.dataFormat] ?? 99;
+        cmp = aOrder - bOrder;
+        break;
+      }
+      case 'status': {
+        const aOrder = STATUS_ORDER[a.status] ?? 99;
+        const bOrder = STATUS_ORDER[b.status] ?? 99;
+        cmp = aOrder - bOrder;
+        break;
+      }
       case 'updatedAt':
         cmp = a.updatedAt < b.updatedAt ? -1 : a.updatedAt > b.updatedAt ? 1 : 0;
         break;
-      case 'origin': {
-        const aOrder = ORIGIN_ORDER[a.origin] ?? 99;
-        const bOrder = ORIGIN_ORDER[b.origin] ?? 99;
+      case 'ownership': {
+        const aOrder = OWNERSHIP_ORDER[a.ownership] ?? 99;
+        const bOrder = OWNERSHIP_ORDER[b.ownership] ?? 99;
         cmp = aOrder - bOrder;
         break;
       }

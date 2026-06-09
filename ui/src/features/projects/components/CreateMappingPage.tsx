@@ -633,8 +633,12 @@ function SchemaSelector({
           {linkedSchemas.length > 0 && (
             <optgroup label="Linked schemas">
               {linkedSchemas.map((schema) => (
-                <option key={schema.schemaId} value={schema.schemaId}>
-                  {schema.name}
+                <option
+                  key={schema.schemaId}
+                  value={schema.schemaId}
+                  disabled={!isSchemaSelectable(schema)}
+                >
+                  {buildSchemaOptionLabel(schema)}
                 </option>
               ))}
             </optgroup>
@@ -643,8 +647,12 @@ function SchemaSelector({
           {otherSchemas.length > 0 && (
             <optgroup label="Other available schemas">
               {otherSchemas.map((schema) => (
-                <option key={schema.schemaId} value={schema.schemaId}>
-                  {schema.name}
+                <option
+                  key={schema.schemaId}
+                  value={schema.schemaId}
+                  disabled={!isSchemaSelectable(schema)}
+                >
+                  {buildSchemaOptionLabel(schema)}
                 </option>
               ))}
             </optgroup>
@@ -669,13 +677,26 @@ function SchemaDetailsCardContent({
   }
 
   return (
-    <dl className="mt-4 space-y-2 text-sm">
-      <SummaryItem label="Schema name" value={schema.name} testId={`${testIdPrefix}-schema-name`} />
-      <SummaryItem label="Total fields" value={schema.fieldCount} testId={`${testIdPrefix}-total-fields`} />
-      <SummaryItem label="Required fields" value={formatMetricValue(requiredFieldCount)} testId={`${testIdPrefix}-required-fields`} />
-      <SummaryItem label="Format" value={formatSchemaFormat(schema.format)} testId={`${testIdPrefix}-format`} />
-      <SummaryItem label="Origin" value={formatSchemaOrigin(schema.origin)} testId={`${testIdPrefix}-origin`} />
-    </dl>
+    <>
+      <dl className="mt-4 space-y-2 text-sm">
+        <SummaryItem label="Schema name" value={schema.name} testId={`${testIdPrefix}-schema-name`} />
+        <SummaryItem label="Total fields" value={schema.fieldCount} testId={`${testIdPrefix}-total-fields`} />
+        <SummaryItem label="Required fields" value={formatMetricValue(requiredFieldCount)} testId={`${testIdPrefix}-required-fields`} />
+        <SummaryItem label="Format" value={formatSchemaFormat(schema.format, schema.dataFormat)} testId={`${testIdPrefix}-format`} />
+        <SummaryItem label="Origin" value={formatSchemaOrigin(schema.origin)} testId={`${testIdPrefix}-origin`} />
+        <SummaryItem label="Status" value={formatSchemaStatus(schema.status)} testId={`${testIdPrefix}-status`} />
+      </dl>
+
+      {schema.status === 'needs_review' && (
+        <p
+          role="status"
+          className="mt-2 text-xs text-amber-300"
+          data-testid={`${testIdPrefix}-needs-review-warning`}
+        >
+          Needs review: this schema is selectable, but validate inferred fields before use.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -696,16 +717,41 @@ function SummaryItem({
   );
 }
 
-function formatSchemaFormat(format: SchemaMetadata['format']): string {
-  if (format === 'json-schema') {
+function formatSchemaFormat(format: SchemaMetadata['format'], dataFormat?: SchemaMetadata['dataFormat']): string {
+  if (dataFormat === 'xml') {
+    return 'XML';
+  }
+
+  if (dataFormat === 'json') {
     return 'JSON';
   }
 
   if (format === 'xsd') {
-    return 'XSD';
+    return 'XML';
   }
 
   return String(format).toUpperCase();
+}
+
+function formatSchemaStatus(status: SchemaMetadata['status']): string {
+  if (status === 'needs_review') {
+    return 'Needs review';
+  }
+
+  return status[0].toUpperCase() + status.slice(1);
+}
+
+function isSchemaSelectable(schema: SchemaMetadata): boolean {
+  return schema.status !== 'error';
+}
+
+function buildSchemaOptionLabel(schema: SchemaMetadata): string {
+  const ownership = schema.origin === 'cdm' ? 'CDM' : 'User';
+  const status = formatSchemaStatus(schema.status);
+  const format = formatSchemaFormat(schema.format, schema.dataFormat);
+  const fields = `${schema.fieldCount} field${schema.fieldCount === 1 ? '' : 's'}`;
+
+  return `${schema.name} • ${ownership} • ${status} • ${format} • ${fields}`;
 }
 
 function formatSchemaOrigin(origin: SchemaMetadata['origin']): string {

@@ -7,6 +7,7 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { normalizeSchemaOrigin, normalizeSchemaSyncStatus } from '../../lib/persistence/types.js';
+import { buildCdmManifestMetadataItems } from '../../lib/schema/cdm/index.js';
 
 interface SchemaMetadata {
   readonly schemaId: string;
@@ -24,6 +25,36 @@ interface SchemaMetadata {
   readonly sourceRepoId?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly ownership?: 'cdm' | 'user';
+  readonly readonly?: boolean;
+  readonly sourceKind?: 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
+}
+
+function mergeWithCdmManifest(entries: readonly SchemaMetadata[]): SchemaMetadata[] {
+  const persistedById = new Map(entries.map((entry) => [entry.schemaId, entry]));
+  const seeded = buildCdmManifestMetadataItems().map((item) => {
+    const existing = persistedById.get(item.schemaId);
+
+    if (existing) {
+      return {
+        ...existing,
+        origin: 'cdm' as const,
+        ownership: 'cdm' as const,
+        readonly: true,
+        sourceKind: item.sourceKind,
+      };
+    }
+
+    return {
+      ...item,
+      sourceRepoId: typeof item.source.repoId === 'number' ? item.source.repoId : undefined,
+    };
+  });
+
+  const seededIds = new Set(seeded.map((entry) => entry.schemaId));
+  const nonSeeded = entries.filter((entry) => !seededIds.has(entry.schemaId));
+
+  return [...seeded, ...nonSeeded];
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -50,10 +81,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       TableName: getSchemasTableOrThrow(),
     });
 
-    const normalizedSchemas = schemas.map((schema) => ({
+    const normalizedSchemas = mergeWithCdmManifest(schemas).map((schema) => ({
       ...schema,
       origin: normalizeSchemaOrigin(schema.origin),
       syncStatus: normalizeSchemaSyncStatus(schema.syncStatus),
+      ownership: schema.ownership ?? (normalizeSchemaOrigin(schema.origin) === 'cdm' ? 'cdm' : 'user'),
+      readonly: schema.readonly ?? normalizeSchemaOrigin(schema.origin) === 'cdm',
     }));
 
     return jsonResponse(200, normalizedSchemas);

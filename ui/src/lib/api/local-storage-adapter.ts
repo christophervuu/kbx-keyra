@@ -1,3 +1,4 @@
+import { getSeededCdmSchemaDetail, listSeededCdmMetadataFixtures } from './cdm-fixtures';
 import type { ApiAdapter } from './types';
 import type {
   CurrentDeployment,
@@ -8,7 +9,11 @@ import type {
 
 import {
   normalizeProjectLinkedSchemaIds,
+  normalizeSchemaOwnership,
   normalizeSchemaOrigin,
+  normalizeSchemaSourceKind,
+  normalizeSchemaStatus,
+  schemaDataFormatFromSourceKind,
 } from '@/lib/types';
 import type {
   ActivityEntry,
@@ -16,6 +21,7 @@ import type {
   AutoMapResult,
   AutoMapSectionInput,
   AutoMapSectionResult,
+  CdmBulkSyncResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -77,6 +83,37 @@ function normalizeSchemaSyncStatusForStorage(value: unknown): SchemaMetadata['sy
   return 'sync-failed';
 }
 
+function normalizeSchemaMetadataForRead(metadata: SchemaMetadata): SchemaMetadata {
+  const sourceKind = normalizeSchemaSourceKind({
+    sourceKind: metadata.sourceKind,
+    format: metadata.format,
+    inferred: metadata.inferred,
+  });
+  const ownership = normalizeSchemaOwnership({
+    ownership: metadata.ownership,
+    origin: metadata.origin,
+  });
+
+  return {
+    ...metadata,
+    origin: normalizeSchemaOrigin(metadata.origin),
+    ownership,
+    isCdm: metadata.isCdm ?? ownership === 'cdm',
+    readonly: metadata.readonly ?? ownership === 'cdm',
+    sourceKind,
+    dataFormat: metadata.dataFormat ?? schemaDataFormatFromSourceKind(sourceKind),
+    status: normalizeSchemaStatus({
+      status: metadata.status,
+      inferred: metadata.inferred,
+      reviewedAt: metadata.reviewedAt,
+    }),
+    ...(metadata.scope !== undefined ? { scope: metadata.scope } : {}),
+    description: metadata.description ?? '',
+    inferred: metadata.inferred ?? false,
+    syncStatus: normalizeSchemaSyncStatusForStorage(metadata.syncStatus ?? 'sync-failed'),
+  };
+}
+
 
 interface StoredSchema {
   metadata: SchemaMetadata;
@@ -95,6 +132,29 @@ function normalizeOptionalBusinessContext(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function mergeWithSeededCdmMetadata(items: readonly SchemaMetadata[]): SchemaMetadata[] {
+  const byId = new Map(items.map((item) => [item.schemaId, item]));
+  const seeded = listSeededCdmMetadataFixtures().map((fixture) => {
+    const existing = byId.get(fixture.schemaId);
+    if (existing) {
+      return {
+        ...existing,
+        origin: 'cdm' as const,
+        ownership: 'cdm' as const,
+        isCdm: true,
+        readonly: true,
+      };
+    }
+
+    return fixture;
+  });
+
+  const seededIds = new Set(seeded.map((entry) => entry.schemaId));
+  const nonSeeded = items.filter((item) => !seededIds.has(item.schemaId));
+
+  return [...seeded, ...nonSeeded];
 }
 
 interface StoredRevisionEntry {
@@ -361,31 +421,26 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   // Schemas
   async listSchemas(): Promise<SchemaMetadata[]> {
-    return this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => ({
-      ...item.metadata,
-      origin: normalizeSchemaOrigin(item.metadata.origin),
-      ...(item.metadata.scope !== undefined ? { scope: item.metadata.scope } : {}),
-      description: item.metadata.description ?? '',
-      inferred: item.metadata.inferred ?? false,
-      syncStatus: normalizeSchemaSyncStatusForStorage(item.metadata.syncStatus ?? 'sync-failed'),
-    }));
+    const stored = this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => normalizeSchemaMetadataForRead(item.metadata));
+    return mergeWithSeededCdmMetadata(stored).map((item) => normalizeSchemaMetadataForRead(item));
   }
 
   async getSchema(id: string): Promise<SchemaDetail> {
     const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
     const found = schemas.find((item) => item.metadata.schemaId === id);
     if (!found) {
+      const seeded = getSeededCdmSchemaDetail(id);
+      if (seeded) {
+        return {
+          ...seeded,
+          metadata: normalizeSchemaMetadataForRead(seeded.metadata),
+        };
+      }
+
       throw this.notFound('Schema', id);
     }
 
-    const metadata: SchemaMetadata = {
-      ...found.metadata,
-      origin: normalizeSchemaOrigin(found.metadata.origin),
-      ...(found.metadata.scope !== undefined ? { scope: found.metadata.scope } : {}),
-      description: found.metadata.description ?? '',
-      inferred: found.metadata.inferred ?? false,
-      syncStatus: normalizeSchemaSyncStatusForStorage(found.metadata.syncStatus ?? 'sync-failed'),
-    };
+    const metadata = normalizeSchemaMetadataForRead(found.metadata);
 
     return {
       ...found.detail,
@@ -404,11 +459,28 @@ export class LocalStorageAdapter implements ApiAdapter {
       format: input.format,
       fieldCount: 0,
       origin: normalizeSchemaOrigin(input.origin),
-      status: 'ready',
+      ownership: normalizeSchemaOwnership({
+        ownership: input.ownership,
+        origin: input.origin,
+      }),
+      isCdm: normalizeSchemaOwnership({ ownership: input.ownership, origin: input.origin }) === 'cdm',
+      readonly: input.readonly,
+      sourceKind: normalizeSchemaSourceKind({ sourceKind: input.sourceKind, format: input.format, inferred: input.inferred }),
+      status: normalizeSchemaStatus({
+        status: input.status ?? 'ready',
+        inferred: input.inferred,
+        reviewedAt: input.reviewedAt,
+      }),
+      dataFormat: schemaDataFormatFromSourceKind(
+        normalizeSchemaSourceKind({ sourceKind: input.sourceKind, format: input.format, inferred: input.inferred }),
+      ),
       ...(input.scope !== undefined ? { scope: input.scope } : {}),
       description: input.description ?? '',
       updatedBy: 'local-user',
       inferred: input.inferred ?? false,
+      reviewedAt: input.reviewedAt,
+      reviewedBy: input.reviewedBy,
+      disambiguator: input.disambiguator,
       syncStatus: normalizeSchemaSyncStatusForStorage(input.syncStatus ?? 'sync-failed'),
       source: input.source ?? { type: 'upload' },
       createdAt: timestamp,
@@ -435,13 +507,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const current = schemas[index];
     const timestamp = this.nowIso();
-    const currentMetadata = {
-      ...current.metadata,
-      origin: normalizeSchemaOrigin(current.metadata.origin),
-      description: current.metadata.description ?? '',
-      inferred: current.metadata.inferred ?? false,
-      syncStatus: normalizeSchemaSyncStatusForStorage(current.metadata.syncStatus ?? 'sync-failed'),
-    };
+    const currentMetadata = normalizeSchemaMetadataForRead(current.metadata);
 
     const didUpdateContent = input.content !== undefined;
     const nextSyncStatus =
@@ -456,6 +522,28 @@ export class LocalStorageAdapter implements ApiAdapter {
       ...(input.scope !== undefined ? { scope: input.scope } : {}),
       ...(input.format !== undefined ? { format: input.format } : {}),
       ...(input.fieldCount !== undefined ? { fieldCount: input.fieldCount } : {}),
+      ...(input.status !== undefined ? {
+        status: normalizeSchemaStatus({
+          status: input.status,
+          inferred: currentMetadata.inferred,
+          reviewedAt: input.reviewedAt ?? currentMetadata.reviewedAt,
+        }),
+      } : {}),
+      ...(input.reviewedAt !== undefined ? { reviewedAt: input.reviewedAt } : {}),
+      ...(input.reviewedBy !== undefined ? { reviewedBy: input.reviewedBy } : {}),
+      ...(input.disambiguator !== undefined ? { disambiguator: input.disambiguator } : {}),
+      sourceKind: normalizeSchemaSourceKind({
+        sourceKind: currentMetadata.sourceKind,
+        format: input.format ?? currentMetadata.format,
+        inferred: currentMetadata.inferred,
+      }),
+      dataFormat: schemaDataFormatFromSourceKind(
+        normalizeSchemaSourceKind({
+          sourceKind: currentMetadata.sourceKind,
+          format: input.format ?? currentMetadata.format,
+          inferred: currentMetadata.inferred,
+        }),
+      ),
       syncStatus: nextSyncStatus,
       updatedAt: timestamp,
       updatedBy: 'local-user',
@@ -1294,6 +1382,10 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   async linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata> {
     void input;
+    throw this.offlineModeError();
+  }
+
+  async syncAllCdmSchemas(): Promise<CdmBulkSyncResult> {
     throw this.offlineModeError();
   }
 

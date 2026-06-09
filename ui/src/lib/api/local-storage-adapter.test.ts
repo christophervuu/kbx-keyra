@@ -126,7 +126,11 @@ describe('LocalStorageAdapter', () => {
     expect(metadata.syncStatus).toBe('synced');
 
     const schemas = await adapter.listSchemas();
-    expect(schemas).toHaveLength(1);
+    expect(schemas.length).toBeGreaterThan(1);
+    expect(schemas.some((schema) => schema.schemaId === metadata.schemaId)).toBe(true);
+    const seededCdm = schemas.filter((schema) => schema.origin === 'cdm');
+    expect(seededCdm.length).toBeGreaterThan(0);
+    expect(seededCdm.every((schema) => schema.ownership === 'cdm' && schema.readonly === true)).toBe(true);
 
     const detail = await adapter.getSchema(metadata.schemaId);
     expect(detail.metadata.schemaId).toBe(metadata.schemaId);
@@ -345,6 +349,7 @@ describe('LocalStorageAdapter', () => {
     ],
     ['validateMappings', (adapter: LocalStorageAdapter) => adapter.validateMappings({ mappingId: 'm' })],
     ['listCdmSchemas', (adapter: LocalStorageAdapter) => adapter.listCdmSchemas()],
+    ['syncAllCdmSchemas', (adapter: LocalStorageAdapter) => adapter.syncAllCdmSchemas()],
     [
       'previewOnServer',
       (adapter: LocalStorageAdapter) =>
@@ -366,7 +371,8 @@ describe('LocalStorageAdapter', () => {
     const schemas = await adapter.listSchemas();
 
     expect(projects).toEqual([]);
-    expect(schemas).toEqual([]);
+    expect(schemas.length).toBeGreaterThan(0);
+    expect(schemas.every((schema) => schema.origin === 'cdm')).toBe(true);
   });
 
   it('normalizes missing schema origin to uploaded when listing schemas', async () => {
@@ -399,8 +405,32 @@ describe('LocalStorageAdapter', () => {
     const adapter = new LocalStorageAdapter();
     const schemas = await adapter.listSchemas();
 
-    expect(schemas).toHaveLength(1);
-    expect(schemas[0].origin).toBe('uploaded');
+    const legacy = schemas.find((schema) => schema.schemaId === 'schema-legacy-missing-origin');
+    expect(legacy?.origin).toBe('uploaded');
+  });
+
+  it('lists seeded CDM metadata by default with no stored schemas', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const schemas = await adapter.listSchemas();
+
+    expect(schemas.length).toBeGreaterThan(0);
+    const cdmSchemas = schemas.filter((schema) => schema.origin === 'cdm');
+    expect(cdmSchemas.length).toBeGreaterThan(0);
+    expect(cdmSchemas.every((schema) => schema.ownership === 'cdm' && schema.readonly === true)).toBe(true);
+  });
+
+  it('getSchema resolves seeded CDM schema without persisted local record', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const schemas = await adapter.listSchemas();
+    const cdmSchema = schemas.find((schema) => schema.origin === 'cdm');
+    expect(cdmSchema).toBeDefined();
+
+    const detail = await adapter.getSchema(cdmSchema!.schemaId);
+    expect(detail.metadata.origin).toBe('cdm');
+    expect(detail.metadata.readonly).toBe(true);
+    expect(detail.metadata.ownership).toBe('cdm');
   });
 
   it('normalizes invalid schema origin to uploaded when loading schema detail', async () => {

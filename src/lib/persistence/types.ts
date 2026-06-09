@@ -39,6 +39,14 @@ export type MappingStatus = 'draft' | 'ready' | 'has-errors';
 
 export type SchemaFormat = 'json-schema' | 'xsd';
 
+export type SchemaOwnership = 'cdm' | 'user';
+
+export type SchemaDataFormat = 'json' | 'xml';
+
+export type SchemaSourceKind = 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
+
+export type SchemaStatus = 'ready' | 'processing' | 'needs_review' | 'error' | 'ingesting';
+
 /**
  * Legacy-compatible persisted origin values.
  *
@@ -246,6 +254,12 @@ export interface SchemaMetadataItem {
   readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
+  readonly sourceKind?: SchemaSourceKind;
+  readonly ownership?: SchemaOwnership;
+  readonly readonly?: boolean;
+  readonly reviewedAt?: ISODateString;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
   readonly sourceRepoId?: number;
@@ -614,6 +628,12 @@ export interface CreateSchemaMetadataInput {
   readonly scope?: SchemaScope;
   readonly description?: string;
   readonly inferred?: boolean;
+  readonly sourceKind?: SchemaSourceKind;
+  readonly ownership?: SchemaOwnership;
+  readonly readonly?: boolean;
+  readonly reviewedAt?: ISODateString;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
   readonly syncStatus?: SchemaSyncStatus;
   readonly source: SchemaSourceInfo;
 }
@@ -659,9 +679,14 @@ export interface SchemaMetadata {
   readonly schemaId: string;
   readonly name: string;
   readonly format: SchemaFormat;
+  readonly dataFormat?: SchemaDataFormat;
+  readonly sourceKind?: SchemaSourceKind;
   readonly fieldCount: number;
+  readonly ownership?: SchemaOwnership;
+  readonly isCdm?: boolean;
+  readonly readonly?: boolean;
   readonly origin: CanonicalSchemaOrigin;
-  readonly status: SchemaIngestStatus;
+  readonly status: SchemaStatus;
   /**
    * @deprecated FS-087 compatibility-only field.
    */
@@ -669,6 +694,9 @@ export interface SchemaMetadata {
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly reviewedAt?: ISODateString;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
   readonly syncStatus: CanonicalSchemaSyncStatus;
   readonly source: SchemaSourceInfo;
   readonly createdAt: ISODateString;
@@ -758,17 +786,109 @@ export function normalizeSchemaOrigin(
   return 'uploaded';
 }
 
+export function normalizeSchemaOwnership(
+  input: {
+    ownership?: SchemaOwnership;
+    origin?: SchemaOrigin | CanonicalSchemaOrigin | string | null;
+  },
+): SchemaOwnership {
+  if (input.ownership === 'cdm' || input.ownership === 'user') {
+    return input.ownership;
+  }
+
+  return normalizeSchemaOrigin(input.origin) === 'cdm' ? 'cdm' : 'user';
+}
+
+export function normalizeSchemaSourceKind(input: {
+  sourceKind?: SchemaSourceKind | string | null;
+  format?: SchemaFormat | string | null;
+  inferred?: boolean | null;
+}): SchemaSourceKind {
+  if (
+    input.sourceKind === 'json_schema'
+    || input.sourceKind === 'xsd'
+    || input.sourceKind === 'inferred_from_json'
+    || input.sourceKind === 'inferred_from_xml'
+  ) {
+    return input.sourceKind;
+  }
+
+  if (input.format === 'xsd') {
+    return input.inferred ? 'inferred_from_xml' : 'xsd';
+  }
+
+  return input.inferred ? 'inferred_from_json' : 'json_schema';
+}
+
+export function schemaDataFormatFromSourceKind(sourceKind: SchemaSourceKind): SchemaDataFormat {
+  return sourceKind === 'xsd' || sourceKind === 'inferred_from_xml' ? 'xml' : 'json';
+}
+
+export function normalizeSchemaStatus(input: {
+  status?: SchemaIngestStatus | SchemaStatus | string | null;
+  inferred?: boolean | null;
+  reviewedAt?: ISODateString | null;
+}): SchemaStatus {
+  if (input.status === 'processing' || input.status === 'needs_review') {
+    return input.status;
+  }
+
+  if (input.status === 'ingesting') {
+    return 'processing';
+  }
+
+  if (input.status === 'error') {
+    return 'error';
+  }
+
+  if (input.status === 'ready') {
+    if (input.inferred && !input.reviewedAt) {
+      return 'needs_review';
+    }
+
+    return 'ready';
+  }
+
+  if (input.inferred && !input.reviewedAt) {
+    return 'needs_review';
+  }
+
+  return 'ready';
+}
+
 export function toSchemaMetadata(item: SchemaMetadataItem): SchemaMetadata {
+  const sourceKind = normalizeSchemaSourceKind({
+    sourceKind: item.sourceKind,
+    format: item.format,
+    inferred: item.inferred,
+  });
+  const ownership = normalizeSchemaOwnership({
+    ownership: item.ownership,
+    origin: item.origin,
+  });
+
   return {
     schemaId: item.schemaId,
     name: item.name,
     format: item.format,
+    dataFormat: schemaDataFormatFromSourceKind(sourceKind),
+    sourceKind,
     fieldCount: item.fieldCount,
+    ownership,
+    isCdm: ownership === 'cdm',
+    readonly: item.readonly ?? ownership === 'cdm',
     origin: normalizeSchemaOrigin(item.origin),
-    status: item.status,
+    status: normalizeSchemaStatus({
+      status: item.status,
+      inferred: item.inferred,
+      reviewedAt: item.reviewedAt,
+    }),
     ...(item.scope !== undefined ? { scope: item.scope } : {}),
     description: item.description,
     inferred: item.inferred,
+    ...(item.reviewedAt !== undefined ? { reviewedAt: item.reviewedAt } : {}),
+    ...(item.reviewedBy !== undefined ? { reviewedBy: item.reviewedBy } : {}),
+    ...(item.disambiguator !== undefined ? { disambiguator: item.disambiguator } : {}),
     syncStatus: normalizeSchemaSyncStatus(item.syncStatus),
     source: item.source,
     createdAt: item.createdAt,

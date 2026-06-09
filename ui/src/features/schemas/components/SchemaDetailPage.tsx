@@ -6,6 +6,7 @@ import { ReplaceFileDialog } from './ReplaceFileDialog';
 import { SchemaActions } from './SchemaActions';
 import { SchemaGitStatus } from './SchemaGitStatus';
 import { getSchemaOriginLabel } from './SchemaPresentationPrimitives';
+import { SchemaStatusBadge } from './SchemaStatusBadge';
 import { SchemaTreeView } from './SchemaTreeView';
 import { SchemaUsageSection } from './SchemaUsageSection';
 import { ViewRawModal } from './ViewRawModal';
@@ -68,6 +69,27 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function sourceKindLabel(metadata: SchemaMetadata): string {
+  const sourceKind = metadata.sourceKind;
+
+  if (sourceKind === 'json_schema') return 'JSON Schema';
+  if (sourceKind === 'xsd') return 'XSD';
+  if (sourceKind === 'inferred_from_json') return 'Inferred from JSON';
+  if (sourceKind === 'inferred_from_xml') return 'Inferred from XML';
+
+  if (metadata.format === 'xsd') {
+    return metadata.inferred ? 'Inferred from XML' : 'XSD';
+  }
+
+  return metadata.inferred ? 'Inferred from JSON' : 'JSON Schema';
+}
+
+function dataFormatLabel(metadata: SchemaMetadata): string {
+  if (metadata.dataFormat === 'xml') return 'XML';
+  if (metadata.dataFormat === 'json') return 'JSON';
+  return metadata.format === 'xsd' ? 'XML' : 'JSON';
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +182,8 @@ interface MetadataSectionProps {
 
 function MetadataSection({ metadata, onUpdateName, onUpdateDescription }: MetadataSectionProps) {
   const isEditable = metadata.origin !== 'cdm';
-  const formatLabel = metadata.format === 'json-schema' ? 'JSON' : 'XSD';
+  const formatLabel = dataFormatLabel(metadata);
+  const sourceLabel = sourceKindLabel(metadata);
 
   return (
     <section
@@ -185,7 +208,7 @@ function MetadataSection({ metadata, onUpdateName, onUpdateDescription }: Metada
       {/* Badges */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <OriginBadge origin={metadata.origin} />
-        <span className="text-xs text-slate-500">{formatLabel}</span>
+        <SchemaStatusBadge status={metadata.status} />
         <span className="text-xs text-slate-500">{metadata.fieldCount} fields</span>
       </div>
 
@@ -207,8 +230,20 @@ function MetadataSection({ metadata, onUpdateName, onUpdateDescription }: Metada
         )}
       </div>
 
-      {/* Date / author metadata */}
+      {/* Date / source metadata */}
       <dl className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm sm:grid-cols-3">
+        <div>
+          <dt className="text-slate-500">Data format</dt>
+          <dd className="text-slate-300" data-testid="schema-detail-data-format">{formatLabel}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Schema source</dt>
+          <dd className="text-slate-300" data-testid="schema-detail-source-kind">{sourceLabel}</dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Status</dt>
+          <dd className="text-slate-300">{metadata.status === 'needs_review' ? 'Needs review' : metadata.status}</dd>
+        </div>
         <div>
           <dt className="text-slate-500">Created</dt>
           <dd className="text-slate-300">{formatDate(metadata.createdAt)}</dd>
@@ -221,6 +256,12 @@ function MetadataSection({ metadata, onUpdateName, onUpdateDescription }: Metada
           <div>
             <dt className="text-slate-500">Updated by</dt>
             <dd className="text-slate-300">{metadata.updatedBy}</dd>
+          </div>
+        )}
+        {metadata.reviewedAt && (
+          <div>
+            <dt className="text-slate-500">Reviewed</dt>
+            <dd className="text-slate-300">{formatDate(metadata.reviewedAt)}</dd>
           </div>
         )}
       </dl>
@@ -262,6 +303,8 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
   const { mappings: usageMappings } = useSchemaUsage(schemaId);
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isMarkingReviewed, setIsMarkingReviewed] = useState(false);
+  const [markReviewedError, setMarkReviewedError] = useState<string | null>(null);
   const [showViewRaw, setShowViewRaw] = useState(false);
   const [showReplace, setShowReplace] = useState(false);
 
@@ -271,6 +314,21 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
       await saveEdits();
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleMarkReviewed() {
+    setMarkReviewedError(null);
+    setIsMarkingReviewed(true);
+    try {
+      await updateMetadata({
+        status: 'ready',
+        reviewedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      setMarkReviewedError(err instanceof Error ? err.message : 'Unable to mark schema as reviewed.');
+    } finally {
+      setIsMarkingReviewed(false);
     }
   }
 
@@ -310,7 +368,13 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
   return (
     <div data-testid="page-schema-detail" className="flex flex-col">
       {/* Inferred schema banner */}
-      <InferredSchemaBanner schemaId={schemaId} inferred={parsedSchema?.inferred ?? false} />
+      <InferredSchemaBanner
+        inferred={parsedSchema?.inferred ?? false}
+        needsReview={metadata.status === 'needs_review'}
+        onMarkReviewed={metadata.status === 'needs_review' ? handleMarkReviewed : undefined}
+        isMarkingReviewed={isMarkingReviewed}
+        markReviewedError={markReviewedError}
+      />
 
       {/* Section: Metadata */}
       <MetadataSection

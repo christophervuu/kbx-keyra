@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
 
-import { useIngestionPolling } from '@/features/schemas/hooks/use-ingestion-polling';
-
-import { useAdapter } from '@/lib/api';
-import { Button } from '@/components/Button';
-import type { SchemaRef } from '@/lib/types/domain';
 import { detectSchemaFormat } from '../lib/detect-schema-format';
 import type { DetectedFormat } from '../lib/detect-schema-format';
-import { parseJsonSchema, parseXsd, parseInferredSchema } from '@/features/schemas';
+
+import { Button } from '@/components/Button';
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
+import { useIngestionPolling } from '@/features/schemas/hooks/use-ingestion-polling';
+import { useAdapter } from '@/lib/api';
+import type { SchemaRef } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,8 +35,49 @@ function isInferred(fmt: DetectedFormat): boolean {
 function defaultPasteName(fmt: DetectedFormat): string {
   switch (fmt) {
     case 'json-schema': return 'Pasted JSON Schema';
+    case 'xsd': return 'Pasted XSD Schema';
     case 'sample-json': return 'Pasted Sample JSON';
+    case 'sample-xml': return 'Pasted Sample XML';
     default: return 'Pasted Schema';
+  }
+}
+
+function toCreateSchemaMetadata(fmt: DetectedFormat): {
+  format: 'json-schema' | 'xsd';
+  sourceKind: 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
+  status: 'ready' | 'needs_review';
+  origin: 'uploaded' | 'inferred';
+} {
+  switch (fmt) {
+    case 'json-schema':
+      return {
+        format: 'json-schema',
+        sourceKind: 'json_schema',
+        status: 'ready',
+        origin: 'uploaded',
+      };
+    case 'xsd':
+      return {
+        format: 'xsd',
+        sourceKind: 'xsd',
+        status: 'ready',
+        origin: 'uploaded',
+      };
+    case 'sample-xml':
+      return {
+        format: 'xsd',
+        sourceKind: 'inferred_from_xml',
+        status: 'needs_review',
+        origin: 'inferred',
+      };
+    case 'sample-json':
+    default:
+      return {
+        format: 'json-schema',
+        sourceKind: 'inferred_from_json',
+        status: 'needs_review',
+        origin: 'inferred',
+      };
   }
 }
 
@@ -102,6 +143,7 @@ function parseContentInfo(
         detection.format === 'sample-json'
           ? JSON.stringify(detection.parsedContent)
           : text,
+        detection.format === 'sample-json' ? 'json' : 'xml',
       );
       fieldCount = parsed.nodes.length;
     }
@@ -221,6 +263,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         clearTimeout(pasteDebounceRef.current);
         pasteDebounceRef.current = null;
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- dialog close must clear stale draft state before next open
       setInputMode('file');
       setFileInfo(null);
       setFileError(null);
@@ -283,7 +326,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   // File selection
   // -------------------------------------------------------------------------
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     setFileInfo(null);
     setFileError(null);
@@ -338,8 +381,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       } else {
         setPasteError(result.error);
       }
-    } else if (result.info.format === 'xsd' || result.info.format === 'sample-xml') {
-      setPasteError('Could not determine format. Paste valid JSON Schema or sample JSON data.');
     } else {
       setPasteInfo(result.info);
       if (!nameManuallyEdited) {
@@ -364,7 +405,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     }
   }
 
-  function handlePasteTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+  function handlePasteTextChange(e: ChangeEvent<HTMLTextAreaElement>) {
     const text = e.target.value;
     setPasteText(text);
     // Clear previous analysis when content changes
@@ -420,14 +461,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     setUploading(true);
 
     try {
-      const adapterFormat =
-        activeInfo.format === 'json-schema'
-          ? 'json-schema'
-          : activeInfo.format === 'xsd'
-            ? 'xsd'
-            : activeInfo.format === 'sample-xml'
-              ? 'xsd'
-              : 'json-schema'; // inferred sample data retains engine-compatible format
+      const mapped = toCreateSchemaMetadata(activeInfo.format);
 
       const content =
         activeInfo.format === 'xsd' || activeInfo.format === 'sample-xml'
@@ -438,8 +472,12 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
 
       const created = await adapter.createSchema({
         name: schemaName.trim(),
-        format: adapterFormat,
-        origin: activeInfo.isInferredFlag ? 'inferred' : 'uploaded',
+        format: mapped.format,
+        origin: mapped.origin,
+        ownership: 'user',
+        readonly: false,
+        sourceKind: mapped.sourceKind,
+        status: mapped.status,
         content: content,
         inferred: activeInfo.isInferredFlag,
         source: { type: 'upload' },
@@ -598,7 +636,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
                 value={pasteText}
                 onChange={handlePasteTextChange}
                 onBlur={handlePasteBlur}
-                placeholder="Paste JSON Schema or sample JSON data..."
+                placeholder="Paste JSON Schema, XSD, sample JSON, or sample XML..."
                 rows={6}
                 className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-xs text-slate-300 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 data-testid="paste-input"

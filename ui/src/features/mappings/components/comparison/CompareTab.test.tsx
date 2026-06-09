@@ -37,6 +37,7 @@ const mockAdapter: ApiAdapter = {
   getDeploymentDiff: vi.fn(),
   listCdmSchemas: vi.fn(),
   linkCdmSchema: vi.fn(),
+  syncAllCdmSchemas: vi.fn(),
   syncCdmSchema: vi.fn(),
   listPublishedSchemas: vi.fn(),
   publishSchemaToGitHub: vi.fn(),

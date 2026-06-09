@@ -4,6 +4,7 @@ import { dynamoClient } from './clients.js';
 import { TABLE_NAMES } from './config.js';
 import type { CreateSchemaMetadataInput, SchemaIngestStatus, SchemaMetadataItem } from './types.js';
 import { normalizeSchemaOrigin } from './types.js';
+import { normalizeSchemaOwnership, normalizeSchemaSourceKind } from './types.js';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -30,6 +31,19 @@ export async function create(input: CreateSchemaMetadataInput): Promise<SchemaMe
     ...(input.scope !== undefined ? { scope: input.scope } : {}),
     description: input.description,
     inferred: input.inferred,
+    sourceKind: normalizeSchemaSourceKind({
+      sourceKind: input.sourceKind,
+      format: input.format,
+      inferred: input.inferred,
+    }),
+    ownership: normalizeSchemaOwnership({
+      ownership: input.ownership,
+      origin: input.origin,
+    }),
+    readonly: input.readonly,
+    reviewedAt: input.reviewedAt,
+    reviewedBy: input.reviewedBy,
+    disambiguator: input.disambiguator,
     syncStatus: input.syncStatus ?? 'not-synced',
     source: input.source,
     sourceRepoId: projectedSourceRepoId,

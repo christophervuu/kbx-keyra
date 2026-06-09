@@ -13,6 +13,9 @@ export {
   storeProcessedContent,
 } from './s3/index.js';
 export {
+  CDM_MANIFEST,
+  CDM_MANIFEST_VERSION,
+  buildCdmManifestMetadataItems,
   extractRelativeRefs,
   isAllowedDependencyPath,
   normalizeDependencyPath,
@@ -61,6 +64,7 @@ export type {
 } from './types.js';
 export type { ParseResult } from './parser/index.js';
 export type {
+  CdmManifestEntry,
   CdmDependencyError,
   CdmDependencyErrorCode,
   CdmDependencyResult,

@@ -7,16 +7,25 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { filterSchemas, sortSchemas } from '../lib/schema-filters';
 import type {
   DisplayFormat,
+  FilterDataFormat,
+  FilterOwnership,
+  FilterStatus,
   SchemaLibraryFilters,
   SchemaLibraryItem,
   SchemaLibrarySort,
+  SchemaLibraryViewMode,
   SortDirection,
   SortField,
   SyncStatus,
 } from '../types';
 
 import { useAdapter } from '@/lib/api';
-import type { SchemaMetadata, SchemaOrigin } from '@/lib/types/domain';
+import {
+  normalizeSchemaOwnership,
+  normalizeSchemaStatus,
+  schemaDataFormatFromSourceKind,
+  type SchemaMetadata,
+} from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Derivation helpers
@@ -37,14 +46,63 @@ function deriveDisplayFormat(schema: SchemaMetadata): DisplayFormat {
   return 'JSON';
 }
 
+function deriveDataFormat(schema: SchemaMetadata): FilterDataFormat {
+  if (schema.dataFormat != null) {
+    return schema.dataFormat.toUpperCase() as FilterDataFormat;
+  }
+
+  const sourceKind = schema.sourceKind
+    ?? (schema.inferred ? (schema.format === 'xsd' ? 'inferred_from_xml' : 'inferred_from_json') : undefined)
+    ?? (schema.format === 'xsd' ? 'xsd' : 'json_schema');
+
+  return schemaDataFormatFromSourceKind(sourceKind).toUpperCase() as FilterDataFormat;
+}
+
+function deriveOwnership(schema: SchemaMetadata): FilterOwnership {
+  return normalizeSchemaOwnership({
+    ownership: schema.ownership,
+    origin: schema.origin,
+  });
+}
+
+function deriveStatus(schema: SchemaMetadata): FilterStatus {
+  const normalized = normalizeSchemaStatus({
+    status: schema.status,
+    inferred: schema.inferred,
+    reviewedAt: schema.reviewedAt,
+  });
+
+  if (normalized === 'processing' || normalized === 'needs_review' || normalized === 'error') {
+    return normalized;
+  }
+
+  return 'ready';
+}
+
+const VIEW_MODE_STORAGE_KEY = 'keyra.schemas.viewMode';
+
+function readStoredViewMode(): SchemaLibraryViewMode {
+  try {
+    const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (stored === 'card' || stored === 'list') {
+      return stored;
+    }
+  } catch {
+    // ignore localStorage unavailability
+  }
+
+  return 'card';
+}
+
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
 
 const DEFAULT_FILTERS: SchemaLibraryFilters = {
   search: '',
-  origins: [],
-  formats: [],
+  ownerships: [],
+  dataFormats: [],
+  statuses: [],
 };
 
 const DEFAULT_SORT: SchemaLibrarySort = {
@@ -67,10 +125,13 @@ export interface UseSchemaLibraryResult {
   filters: SchemaLibraryFilters;
   sort: SchemaLibrarySort;
   setSearch: (term: string) => void;
-  toggleOriginFilter: (origin: SchemaOrigin) => void;
-  toggleFormatFilter: (format: DisplayFormat) => void;
+  toggleOwnershipFilter: (ownership: FilterOwnership) => void;
+  toggleDataFormatFilter: (format: FilterDataFormat) => void;
+  toggleStatusFilter: (status: FilterStatus) => void;
   /** If direction is omitted and the same field is already selected, toggles direction. */
   setSort: (field: SortField, direction?: SortDirection) => void;
+  viewMode: SchemaLibraryViewMode;
+  setViewMode: (mode: SchemaLibraryViewMode) => void;
   clearFilters: () => void;
   retry: () => void;
 }
@@ -87,6 +148,7 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
   const [items, setItems] = useState<SchemaLibraryItem[]>([]);
   const [filters, setFilters] = useState<SchemaLibraryFilters>(DEFAULT_FILTERS);
   const [sort, setSort_] = useState<SchemaLibrarySort>(DEFAULT_SORT);
+  const [viewMode, setViewModeState] = useState<SchemaLibraryViewMode>(readStoredViewMode);
   const [fetchKey, setFetchKey] = useState(0);
 
   // ---------------------------------------------------------------------------
@@ -138,7 +200,11 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
             schemaId: schema.schemaId,
             name: schema.name,
             description: schema.description,
+            disambiguator: schema.disambiguator,
             origin: schema.origin,
+            ownership: deriveOwnership(schema),
+            dataFormat: deriveDataFormat(schema),
+            status: deriveStatus(schema),
             format: schema.format,
             displayFormat: deriveDisplayFormat(schema),
             fieldCount: schema.fieldCount,
@@ -182,21 +248,30 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     setFilters((f) => ({ ...f, search: term }));
   }, []);
 
-  const toggleOriginFilter = useCallback((origin: SchemaOrigin) => {
+  const toggleOwnershipFilter = useCallback((ownership: FilterOwnership) => {
     setFilters((f) => ({
       ...f,
-      origins: f.origins.includes(origin)
-        ? f.origins.filter((o) => o !== origin)
-        : [...f.origins, origin],
+      ownerships: f.ownerships.includes(ownership)
+        ? f.ownerships.filter((o) => o !== ownership)
+        : [...f.ownerships, ownership],
     }));
   }, []);
 
-  const toggleFormatFilter = useCallback((format: DisplayFormat) => {
+  const toggleDataFormatFilter = useCallback((format: FilterDataFormat) => {
     setFilters((f) => ({
       ...f,
-      formats: f.formats.includes(format)
-        ? f.formats.filter((fmt) => fmt !== format)
-        : [...f.formats, format],
+      dataFormats: f.dataFormats.includes(format)
+        ? f.dataFormats.filter((fmt) => fmt !== format)
+        : [...f.dataFormats, format],
+    }));
+  }, []);
+
+  const toggleStatusFilter = useCallback((status: FilterStatus) => {
+    setFilters((f) => ({
+      ...f,
+      statuses: f.statuses.includes(status)
+        ? f.statuses.filter((value) => value !== status)
+        : [...f.statuses, status],
     }));
   }, []);
 
@@ -217,6 +292,16 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
+  const setViewMode = useCallback((mode: SchemaLibraryViewMode) => {
+    setViewModeState(mode);
+
+    try {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+    } catch {
+      // ignore localStorage write failures
+    }
+  }, []);
+
   const retry = useCallback(() => {
     setFetchKey((k) => k + 1);
   }, []);
@@ -230,9 +315,12 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     filters,
     sort,
     setSearch,
-    toggleOriginFilter,
-    toggleFormatFilter,
+    toggleOwnershipFilter,
+    toggleDataFormatFilter,
+    toggleStatusFilter,
     setSort,
+    viewMode,
+    setViewMode,
     clearFilters,
     retry,
   };

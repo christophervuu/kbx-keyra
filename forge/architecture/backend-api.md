@@ -229,7 +229,7 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 
 #### `SCHEMAS_TABLE`
 - PK: `schemaId` (String)
-- Main fields: `name`, `format`, `fieldCount`, canonical `origin` (`cdm|uploaded|inferred`), `status`, compatibility `scope?` (non-authoritative), `description`, `inferred`, canonical `syncStatus` (`synced|update-available|sync-failed`), `source`, timestamps
+- Main fields: `name`, `format`, canonical `dataFormat` (`json|xml`), canonical `sourceKind` (`json_schema|xsd|inferred_from_json|inferred_from_xml`), `fieldCount`, canonical `origin` (`cdm|uploaded|inferred`), canonical `ownership` (`cdm|user`), `readonly`, canonical `status` (`processing|ready|needs_review|error`), compatibility `scope?` (non-authoritative), `description`, `inferred`, canonical `syncStatus` (`synced|update-available|sync-failed`), `source`, timestamps
 
 #### `SCHEMA_NODES_TABLE`
 - PK: `schemaId` (String), SK: `path` (String)
@@ -248,6 +248,35 @@ Canonical FS-087 model across schema/project handlers:
 - Legacy `schemaRefs` is retained as compatibility/read-time bridge and must not be treated as the long-term authoritative access model.
 - Canonical schema origins are `cdm | uploaded | inferred`; legacy aliases (`local`, `published`) are normalized to `uploaded` at read boundaries.
 - Legacy `scope` may remain in records as compatibility metadata, but must not drive access filtering or ownership logic.
+
+### FS-089 schema metadata + selector contract addendum
+
+FS-089 tightens backend API semantics consumed by Schema Library, Add Schema, Schema Detail, and Create Mapping selectors.
+
+Canonical read-model requirements for schema payloads (`GET /schemas`, `GET /schemas/:id`, project-embedded schema records):
+
+- `ownership` (`cdm|user`) and `readonly` are explicit.
+- `dataFormat` is explicitly derived (`json|xml`) and remains independent from source derivation semantics.
+- `sourceKind` remains explicit (`json_schema|xsd|inferred_from_json|inferred_from_xml`).
+- `status` uses readiness semantics (`processing|ready|needs_review|error`).
+
+Compatibility requirements:
+
+- legacy `origin: local|published` continues to normalize to canonical `uploaded`.
+- legacy `scope` remains compatibility-only and non-authoritative.
+- legacy ingest status aliases (for example `ingesting`) normalize to canonical readiness status (`processing`) at API boundaries.
+
+Create-schema classification requirements (`POST /schemas`):
+
+- JSON Schema and XSD payloads persist as user-owned editable schemas with `status=ready`.
+- Inferred sample payloads (JSON/XML) persist with inferred `sourceKind` and `status=needs_review`.
+- Add-schema API paths remain user-created upload/paste semantics; CDM linkage/sync semantics stay on dedicated CDM routes.
+
+Create Mapping selector usability requirements from API surface:
+
+- Default schema-list responses include seeded CDM records (no prior link step required for visibility).
+- `error` schemas remain visible to callers but are treated as non-selectable in UI policy.
+- `needs_review` schemas remain visible/selectable for warning-first flows.
 
 Audit-confirmed unaffected backend/AWS ownership surfaces (FS-087 T-02/T-09):
 

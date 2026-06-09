@@ -5,6 +5,7 @@ export { handler as ingestSchemaHandler } from './ingest-schema.js';
 export { handler as listSchemasHandler } from './list-schemas.js';
 export { handler as listCdmSchemasHandler } from './list-cdm-schemas.js';
 export { handler as linkCdmSchemaHandler } from './link-cdm-schema.js';
+export { handler as syncAllCdmSchemasHandler } from './sync-all-cdm-schemas.js';
 export { handler as syncCdmSchemaHandler } from './sync-cdm-schema.js';
 export { handler as querySchemaNodesHandler } from './query-schema-nodes.js';
 export { handler as processBatchHandler } from './process-batch.js';

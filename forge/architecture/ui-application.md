@@ -87,7 +87,7 @@ ui/src/
         SchemaGitStatus.tsx   Git/source status section (upload vs GitHub source metadata)
         SchemaUsageSection.tsx Usage section (projects + mappings that reference schema)
         SchemaActions.tsx     Context-dependent actions + confirm-dialog flows
-        InferredSchemaBanner.tsx Dismissible inferred-schema warning (localStorage-backed UI preference)
+        InferredSchemaBanner.tsx Persistent inferred-schema warning with explicit `Mark as Reviewed` action for `needs_review` inferred schemas
         ViewRawModal.tsx      Read-only raw schema modal with lightweight syntax highlighting + copy
         ReplaceFileDialog.tsx Replace-file flow: confirm -> pick -> parse -> persist -> refresh
         SchemaTreeView.tsx    Virtualized schema tree renderer (editable + read-only modes)
@@ -2412,7 +2412,60 @@ Project flow impacts:
 
 - Project-linked schema surfaces show only linked schemas for relevance.
 - Add Schema and mapping schema selectors can access the shared library; linked schemas are prioritized/grouped where applicable.
+- Create Mapping schema selectors include seeded CDM records by default (no prior link/add step required for visibility).
 - Unlink is hard-blocked when active mappings in the same project reference the schema; dependency details are surfaced to the user.
+
+## FS-089 Simplified schema model and selector contracts
+
+FS-089 finalizes the current schema UX baseline across Schema Library, Add Schema, Schema Detail, and Create Mapping.
+
+Canonical metadata model in UI read paths:
+
+- `ownership: cdm | user`
+- `dataFormat: json | xml` (user-facing labels: `JSON` / `XML`)
+- `sourceKind: json_schema | xsd | inferred_from_json | inferred_from_xml`
+- `status: ready | processing | needs_review | error`
+- `readonly` and `isCdm` as ownership/action-policy companions
+
+Schema Library contract updates:
+
+- Library controls are limited to ownership/data format/status filters plus explicit direction sort labels.
+- Card/list metadata primary format label must use `JSON` / `XML` (never `Inferred` as a format label).
+- Card/list actions remain ownership-aware: CDM records are navigation/read-only in library surfaces.
+- View mode persistence uses `keyra.schemas.viewMode`.
+
+Add Schema contract updates:
+
+- Add Schema modal supports only user-created flows:
+  - `Upload File`
+  - `Paste Content`
+- Link/publish/sync actions and terminology are not part of Add Schema.
+- Input-kind classification contract:
+  - JSON Schema -> `sourceKind=json_schema`, `status=ready`
+  - XSD -> `sourceKind=xsd`, `status=ready`
+  - sample JSON -> `sourceKind=inferred_from_json`, `status=needs_review`
+  - sample XML -> `sourceKind=inferred_from_xml`, `status=needs_review`
+
+Schema Detail contract updates:
+
+- CDM detail remains read-only (no edit/replace/delete).
+- Metadata explicitly separates:
+  - `Data format` (`JSON`/`XML`)
+  - `Schema source` (`JSON Schema` / `XSD` / inferred variants)
+- Inferred callout is persistent for inferred schemas.
+- Explicit review transition is supported via `Mark as Reviewed` (`needs_review -> ready`) while inferred source lineage remains unchanged.
+
+Create Mapping selector contract updates:
+
+- Selectors must show CDM schemas immediately from default list data.
+- Selector option and selected-summary semantics include status + format + field-count clarity.
+- Status gating:
+  - `needs_review` remains selectable with warning
+  - `error` remains visible but non-selectable
+
+Legacy vocabulary posture:
+
+- `Global/Local/Project-level/Published` and schema sync/publish vocabulary are compatibility-only legacy concepts and are not active Schema Library model language.
 
 ## Create Mapping Setup Workspace Architecture (FS-088)
 

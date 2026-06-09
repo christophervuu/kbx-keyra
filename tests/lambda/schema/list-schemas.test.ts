@@ -43,11 +43,23 @@ describe('list-schemas handler', () => {
     const result = await handler({ body: null });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as Array<{ schemaId: string; syncStatus?: string }>;
-    expect(parsed).toHaveLength(2);
-    expect((parsed[0] as { origin?: string }).origin).toBe('uploaded');
-    expect(parsed[0]?.syncStatus).toBe('sync-failed');
-    expect(parsed[1]?.syncStatus).toBe('synced');
+    const parsed = JSON.parse(result.body) as Array<{
+      schemaId: string;
+      origin?: string;
+      ownership?: string;
+      readonly?: boolean;
+      syncStatus?: string;
+    }>;
+
+    const local = parsed.find((entry) => entry.schemaId === 's1');
+    const uploaded = parsed.find((entry) => entry.schemaId === 's2');
+    const seededCdm = parsed.filter((entry) => entry.origin === 'cdm');
+
+    expect(local?.origin).toBe('uploaded');
+    expect(local?.syncStatus).toBe('sync-failed');
+    expect(uploaded?.syncStatus).toBe('synced');
+    expect(seededCdm.length).toBeGreaterThan(0);
+    expect(seededCdm.every((entry) => entry.ownership === 'cdm' && entry.readonly === true)).toBe(true);
   });
 
   it('returns empty array when no schemas', async () => {
@@ -57,6 +69,8 @@ describe('list-schemas handler', () => {
     const result = await handler({ body: null });
 
     expect(result.statusCode).toBe(200);
-    expect(JSON.parse(result.body)).toEqual([]);
+    const parsed = JSON.parse(result.body) as Array<{ origin?: string; ownership?: string; readonly?: boolean }>;
+    expect(parsed.length).toBeGreaterThan(0);
+    expect(parsed.every((entry) => entry.origin === 'cdm' && entry.ownership === 'cdm' && entry.readonly === true)).toBe(true);
   });
 });

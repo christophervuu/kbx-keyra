@@ -1,9 +1,13 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+  normalizeSchemaOwnership,
   normalizeProjectLinkedSchemaIds,
   normalizeSchemaOrigin,
+  normalizeSchemaSourceKind,
+  normalizeSchemaStatus,
   normalizeSchemaSyncStatus,
+  schemaDataFormatFromSourceKind,
   toMappingMetadata,
   toProjectDetail,
   toProjectMetadata,
@@ -69,13 +73,21 @@ type DomainSchemaMetadata = {
   readonly schemaId: string;
   readonly name: string;
   readonly format: 'json-schema' | 'xsd';
+  readonly dataFormat?: 'json' | 'xml';
+  readonly sourceKind?: 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
   readonly fieldCount: number;
+  readonly ownership?: 'cdm' | 'user';
+  readonly isCdm?: boolean;
+  readonly readonly?: boolean;
   readonly origin: 'cdm' | 'uploaded' | 'inferred';
-  readonly status: 'ingesting' | 'ready' | 'error';
+  readonly status: 'ready' | 'processing' | 'needs_review' | 'error' | 'ingesting';
   readonly scope?: 'global' | 'project';
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly reviewedAt?: string;
+  readonly reviewedBy?: string;
+  readonly disambiguator?: string;
   readonly syncStatus: 'synced' | 'update-available' | 'sync-failed';
   readonly source:
     | { readonly type: 'upload' }
@@ -133,6 +145,34 @@ describe('persistence types', () => {
     expect(normalizeSchemaOrigin('published')).toBe('uploaded');
     expect(normalizeSchemaOrigin('unknown-value')).toBe('uploaded');
     expect(normalizeSchemaOrigin(undefined)).toBe('uploaded');
+  });
+
+  it('normalizes schema ownership from explicit field or origin fallback', () => {
+    expect(normalizeSchemaOwnership({ ownership: 'cdm', origin: 'uploaded' })).toBe('cdm');
+    expect(normalizeSchemaOwnership({ ownership: 'user', origin: 'cdm' })).toBe('user');
+    expect(normalizeSchemaOwnership({ origin: 'cdm' })).toBe('cdm');
+    expect(normalizeSchemaOwnership({ origin: 'local' })).toBe('user');
+  });
+
+  it('normalizes source kind and derives data format', () => {
+    expect(normalizeSchemaSourceKind({ sourceKind: 'json_schema' })).toBe('json_schema');
+    expect(normalizeSchemaSourceKind({ format: 'json-schema', inferred: true })).toBe('inferred_from_json');
+    expect(normalizeSchemaSourceKind({ format: 'xsd', inferred: false })).toBe('xsd');
+    expect(normalizeSchemaSourceKind({ format: 'xsd', inferred: true })).toBe('inferred_from_xml');
+
+    expect(schemaDataFormatFromSourceKind('json_schema')).toBe('json');
+    expect(schemaDataFormatFromSourceKind('inferred_from_json')).toBe('json');
+    expect(schemaDataFormatFromSourceKind('xsd')).toBe('xml');
+    expect(schemaDataFormatFromSourceKind('inferred_from_xml')).toBe('xml');
+  });
+
+  it('normalizes schema status with inferred review semantics', () => {
+    expect(normalizeSchemaStatus({ status: 'ingesting' })).toBe('processing');
+    expect(normalizeSchemaStatus({ status: 'ready', inferred: true })).toBe('needs_review');
+    expect(normalizeSchemaStatus({ status: 'ready', inferred: true, reviewedAt: '2026-06-08T00:00:00.000Z' })).toBe(
+      'ready',
+    );
+    expect(normalizeSchemaStatus({ status: 'error', inferred: true })).toBe('error');
   });
 
   it('normalizes legacy schemaRefs to linkedSchemaIds', () => {
@@ -392,7 +432,12 @@ describe('persistence types', () => {
       schemaId: 'schema-1',
       name: 'Schema 1',
       format: 'json-schema',
+      dataFormat: 'json',
+      sourceKind: 'json_schema',
       fieldCount: 12,
+      ownership: 'user',
+      isCdm: false,
+      readonly: false,
       origin: 'uploaded',
       status: 'ready',
       scope: 'project',
