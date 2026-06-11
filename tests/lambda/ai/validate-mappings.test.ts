@@ -244,11 +244,18 @@ describe('aiValidateMappings handler', () => {
 
     expect(invokeAIMock).toHaveBeenCalledTimes(1);
     const invokeArgs = invokeAIMock.mock.calls[0]?.[1] as Record<string, string>;
+    const invokeOptions = invokeAIMock.mock.calls[0]?.[2] as {
+      telemetry?: { requestId?: string; correlationId?: string };
+    };
     expect(invokeArgs.mappingId).toBe('mapping-1');
     expect(invokeArgs.sampleDataProvided).toBe('true');
     expect(invokeArgs.sampleDataContentType).toBe('application/json');
     expect(invokeArgs.sourceSchemaContext).toContain('Source schema context');
     expect(invokeArgs.targetSchemaContext).toContain('Target schema context');
+    expect(invokeOptions.telemetry).toEqual({
+      requestId: 'req-123',
+      correlationId: undefined,
+    });
   });
 
   it('rejects batch payload for V1 single-mapping policy', async () => {

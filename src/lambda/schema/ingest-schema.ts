@@ -1,10 +1,8 @@
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 
 import {
-  bulkIndexSchemaNodes,
   batchWriteSchemaNodes,
   createSchemaMetadata,
-  ensureIndexExists,
   getInlineFieldThreshold,
   getSchemaMetadata,
   parseJsonSchema,
@@ -52,6 +50,38 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const INGESTION_STATE_MACHINE_ARN = getEnvValue('INGESTION_STATE_MACHINE_ARN');
+
+function computeEmbeddingTelemetry(nodes: readonly {
+  readonly embeddingText?: string;
+  readonly embedding?: readonly number[];
+}[]): {
+  nodeCount: number;
+  nodesWithEmbeddingText: number;
+  nodesWithEmbeddingVector: number;
+  approxEmbeddingBytes: number;
+} {
+  let nodesWithEmbeddingText = 0;
+  let nodesWithEmbeddingVector = 0;
+  let approxEmbeddingBytes = 0;
+
+  for (const node of nodes) {
+    if (typeof node.embeddingText === 'string' && node.embeddingText.trim() !== '') {
+      nodesWithEmbeddingText += 1;
+    }
+
+    if (Array.isArray(node.embedding) && node.embedding.length > 0) {
+      nodesWithEmbeddingVector += 1;
+      approxEmbeddingBytes += node.embedding.length * 8;
+    }
+  }
+
+  return {
+    nodeCount: nodes.length,
+    nodesWithEmbeddingText,
+    nodesWithEmbeddingVector,
+    approxEmbeddingBytes,
+  };
+}
 
 function generateSchemaId(): string {
   const cryptoRef = globalThis.crypto as { randomUUID?: () => string } | undefined;
@@ -204,6 +234,14 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const threshold = getInlineFieldThreshold();
     const isInline = parseResult.fieldCount < threshold;
+    const embeddingTelemetry = computeEmbeddingTelemetry(parseResult.nodes);
+
+    console.info('[schema-ingestion] retrieval fields prepared', {
+      schemaId,
+      fieldCount: parseResult.fieldCount,
+      isInline,
+      ...embeddingTelemetry,
+    });
 
     if (!isInline) {
       const stateMachineArn = getStateMachineArnOrThrow();
@@ -238,14 +276,6 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    let searchIndexWarning = false;
-    try {
-      await ensureIndexExists();
-      await bulkIndexSchemaNodes(parseResult.nodes);
-    } catch {
-      searchIndexWarning = true;
-    }
-
     await storeProcessedContent(schemaId, {
       nodes: parseResult.nodes,
       fieldCount: parseResult.fieldCount,
@@ -275,12 +305,6 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       schemaId,
       status: 'ready',
       metadata: responseMetadata,
-      ...(searchIndexWarning
-        ? {
-            warnings: ['OpenSearch indexing failed; schema is persisted and ready'],
-            searchIndexWarning: true,
-          }
-        : {}),
     });
   } catch (error) {
     await markSchemaError(schemaId);

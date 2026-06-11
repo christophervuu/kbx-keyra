@@ -25,7 +25,7 @@ Out of scope:
 - Templates table (future spec)
 - MappingMemory table (future AI/RAG spec)
 - PromptRegistry table (already implemented in `src/lib/ai/prompt-registry.ts`)
-- OpenSearch Serverless (covered by FS-056 architecture)
+- OpenSearch serving/indexing architecture (decommissioned for runtime retrieval in FS-091; retained only as historical context where referenced)
 - IaC / CloudFormation / CDK definitions
 
 Note: Deployments table is now in scope and documented in `forge/architecture/deployments.md`.
@@ -125,11 +125,25 @@ No GSIs. List operation uses Scan (acceptable for Phase 1 scale).
 | `parentPath` | — | String | Path of parent node |
 | `childCount` | — | Number | Direct children count |
 | `subtreeFieldCount` | — | Number | Total leaf fields in subtree |
-| `embeddingText` | — | String | Natural-language description for embedding |
+| `embeddingText` | — | String | Natural-language description used for retrieval context and lexical enrichment |
+| `embedding` | — | List<Number> (optional) | Optional per-node vector used for bounded in-Lambda rerank (FS-091 phase decision) |
+| `fieldNameNormalized` | — | String (optional) | Normalized lexical retrieval signal |
+| `pathTokens` | — | List<String> (optional) | Tokenized path/field lexical retrieval signal |
 
 GSIs:
 - `fieldName-index` — PK=`fieldName`, SK=`schemaId#path`
 - `parentPath-index` — PK=`schemaId`, SK=`parentPath`
+
+FS-091 retrieval control decisions:
+
+- Canonical serving mode is `RAG_RETRIEVER=dynamodb`.
+- Environment default caps are:
+  - DEV: `lexicalCap=120`, `rerankCap=80`, `topK=12`, `contextExpansionCap=24`
+  - QA: `lexicalCap=150`, `rerankCap=100`, `topK=15`, `contextExpansionCap=30`
+  - PROD: `lexicalCap=180`, `rerankCap=120`, `topK=18`, `contextExpansionCap=36`
+- Guardrail relationship: `rerankCap <= lexicalCap`, `topK << rerankCap`, bounded context expansion.
+- Tuning scope decision (FS-091 Rev 2): global defaults with environment-level overrides only (no per-project/per-schema tuning presets).
+- Shadow parity cutover gates: average `Jaccard@10 >= 0.70`, average `NDCG@10 delta >= -0.10`.
 
 ---
 
@@ -219,7 +233,7 @@ Audit-confirmed unaffected ownership/index surfaces:
 
 - `SchemaMetadata` PK (`schemaId`) and `SchemaNodes` PK/SK (`schemaId`, `path`) require no migration for cross-project shared access.
 - Existing mapping `projectId-index` remains mapping-list access only and does not encode schema ownership.
-- S3 and OpenSearch schema storage/indexing remain schemaId-scoped and require no FS-087 key/index migration.
+- S3 schema storage and Dynamo retrieval records remain schemaId-scoped and require no FS-087 key/index migration.
 
 ## FS-090 inferred review + sample payload addendum
 
@@ -390,7 +404,7 @@ For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_END
 - `BatchWriteItem` limit: 25 items per call. Module handles chunking.
 - `BatchWriteItem` unprocessed items: retry with exponential backoff (3 attempts).
 - Scan-based list operations: acceptable for Phase 1 scale (< 100 projects, < 500 schemas). Must be revisited if scale increases.
-- Schema query (`queryContains`): uses DynamoDB Query + FilterExpression. Maximum 50 results. Future: OpenSearch for full-text and vector search.
+- Schema query serving path is DynamoDB-only post-FS-091: lexical candidate generation + optional bounded in-Lambda rerank + deterministic caps (max API result 50).
 - All timestamps: ISO 8601 strings.
 - All IDs: UUID v4.
 - No multi-tenant isolation at table level for Phase 1.
@@ -403,7 +417,7 @@ For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_END
 - Backend API handlers: FS-057
 - Revision/version model update: FS-063
 - **Deployment subsystem**: `forge/architecture/deployments.md` (Deployments + DeploymentCurrent tables, snapshot S3 layout, staleness computation)
-- Schema ingestion pipeline: FS-056
+- Schema ingestion/retrieval pipeline: FS-056 baseline + FS-091 Dynamo-only retrieval cutover
 - HttpAdapter (client): FS-055
 - Phase 1 readiness baseline: `forge/architecture/phase-1-readiness.md`
 - Project structure: `forge/architecture/project-structure.md`

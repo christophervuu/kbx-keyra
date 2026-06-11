@@ -6,7 +6,6 @@ const { sendMock } = vi.hoisted(() => ({
 
 const schemaMocks = vi.hoisted(() => ({
   batchWriteSchemaNodes: vi.fn(),
-  bulkIndexSchemaNodes: vi.fn(),
 }));
 
 vi.mock('@aws-sdk/client-s3', () => {
@@ -56,11 +55,13 @@ describe('process-batch handler', () => {
     vi.resetModules();
     sendMock.mockReset();
     schemaMocks.batchWriteSchemaNodes.mockReset();
-    schemaMocks.bulkIndexSchemaNodes.mockReset();
     setSchemaBucket('keyra-schema-bucket');
+    vi.spyOn(console, 'info').mockImplementation(() => {
+      // noop
+    });
   });
 
-  it('reads batch from S3 and calls DynamoDB + OpenSearch', async () => {
+  it('reads batch from S3 and writes DynamoDB nodes', async () => {
     sendMock.mockResolvedValue({
       Body: {
         transformToString: vi.fn().mockResolvedValue(
@@ -82,7 +83,6 @@ describe('process-batch handler', () => {
       },
     });
     schemaMocks.batchWriteSchemaNodes.mockResolvedValue({ written: 1, failed: 0 });
-    schemaMocks.bulkIndexSchemaNodes.mockResolvedValue({ indexed: 1, failed: 0 });
 
     const mod = await importModule();
     const result = await mod.handler({
@@ -93,11 +93,9 @@ describe('process-batch handler', () => {
     });
 
     expect(schemaMocks.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
-    expect(schemaMocks.bulkIndexSchemaNodes).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       batchIndex: 0,
       nodesWritten: 1,
-      nodesIndexed: 1,
     });
   });
 
@@ -119,30 +117,53 @@ describe('process-batch handler', () => {
 
     expect(result.batchIndex).toBe(1);
     expect(result.nodesWritten).toBe(0);
-    expect(result.nodesIndexed).toBe(0);
     expect(result.errors?.[0]).toContain('Dynamo unavailable');
   });
 
-  it('returns partial success info when OpenSearch fails', async () => {
+  it('emits retrieval field telemetry for batch embedding payloads', async () => {
+    const infoSpy = vi.spyOn(console, 'info');
     sendMock.mockResolvedValue({
       Body: {
-        transformToString: vi.fn().mockResolvedValue('[]'),
+        transformToString: vi.fn().mockResolvedValue(
+          JSON.stringify([
+            {
+              schemaId: 'schema-1',
+              path: 'Order.Id',
+              fieldName: 'Id',
+              type: 'string',
+              depth: 0,
+              isArray: false,
+              isRequired: true,
+              childCount: 0,
+              subtreeFieldCount: 1,
+              embeddingText: 'Order.Id | Id (string)',
+              embedding: [0.1, 0.2, 0.3],
+            },
+          ]),
+        ),
       },
     });
-    schemaMocks.batchWriteSchemaNodes.mockResolvedValue({ written: 5, failed: 0 });
-    schemaMocks.bulkIndexSchemaNodes.mockRejectedValue(new Error('OpenSearch unavailable'));
+    schemaMocks.batchWriteSchemaNodes.mockResolvedValue({ written: 1, failed: 0 });
 
     const mod = await importModule();
     const result = await mod.handler({
-      batchIndex: 2,
+      batchIndex: 3,
       schemaId: 'schema-1',
-      s3Key: 'schemas/schema-1/batches/batch-2.json',
-      nodeCount: 5,
+      s3Key: 'schemas/schema-1/batches/batch-3.json',
+      nodeCount: 1,
     });
 
-    expect(result.batchIndex).toBe(2);
-    expect(result.nodesWritten).toBe(5);
-    expect(result.nodesIndexed).toBe(0);
-    expect(result.errors?.[0]).toContain('OpenSearch unavailable');
+    expect(result.nodesWritten).toBe(1);
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[schema-process-batch] retrieval fields batch telemetry',
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        batchIndex: 3,
+        nodeCount: 1,
+        nodesWithEmbeddingText: 1,
+        nodesWithEmbeddingVector: 1,
+        approxEmbeddingBytes: 24,
+      }),
+    );
   });
 });

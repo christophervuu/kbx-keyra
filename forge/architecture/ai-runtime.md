@@ -110,7 +110,7 @@ FS-065 reconciled AI showcase-era integration paths onto a single canonical prod
 ### Replace
 
 - AI method placeholders using `NOT_IMPLEMENTED` were replaced by explicit feature gating semantics where methods are intentionally deferred (`FEATURE_NOT_ENABLED`, non-retryable).
-- Schema query dependency behavior moved from DynamoDB substring-first to OpenSearch-first retrieval.
+- Schema query dependency behavior moved from transitional fallbacks to the DynamoDB-only retriever contract codified in FS-091 (OpenSearch decommissioned in serving paths).
 
 ### Retire / Non-canonical
 
@@ -600,7 +600,7 @@ FS-075 codifies the runtime-facing verification boundary for Phase 2 acceptance:
   - request includes `mode: 'section' | 'whole'`
   - section mode scopes generation to a target section path; whole mode scopes generation to full target coverage for the mapping
 - Backend owns context retrieval. Client-provided full-schema context blobs are non-canonical.
-- Retrieval path is OpenSearch-first over ingested schema nodes (`fieldName` / `path` / `description`) with weighted hybrid lexical scoring and heuristic boosts.
+- Retrieval path is DynamoDB-only over ingested schema nodes using lexical candidate generation (`fieldName`/`path`/`embeddingText` signals), deterministic caps, and optional bounded in-Lambda embedding rerank.
 - No direct full-schema prompting path exists as a fallback.
 - Large-schema strategy is chunked generation with bounded parallelism:
   - default chunk target: 50–100 target fields per chunk
@@ -691,12 +691,15 @@ console.log(result);
 
 Some AI UX flows depend on schema search/query context. The canonical backend contract for schema-node retrieval is:
 
-- Primary path: **OpenSearch-first** query via `searchSchemaNodes(...)`.
-- Temporary degraded fallback: PK-scoped DynamoDB fallback is allowed only when `SCHEMA_QUERY_DEGRADED_FALLBACK` is explicitly enabled.
-- Fallback use must be instrumented; current handler log marker is:
-  - `[schema-query] degraded fallback activated`
-
-This fallback is transitional and is not a second canonical retrieval architecture.
+- Primary and only serving path: **DynamoDB retriever** via `searchSchemaNodes(...)` runtime abstraction.
+- Runtime mode policy after FS-091 cutover: `RAG_RETRIEVER=dynamodb`.
+- Decommission posture: `opensearch` and `shadow` serving modes are removed and fail closed.
+- Retrieval control policy is deterministic and bounded by environment defaults:
+  - DEV: `lexicalCap=120`, `rerankCap=80`, `topK=12`, `contextExpansionCap=24`
+  - QA: `lexicalCap=150`, `rerankCap=100`, `topK=15`, `contextExpansionCap=30`
+  - PROD: `lexicalCap=180`, `rerankCap=120`, `topK=18`, `contextExpansionCap=36`
+- Tuning scope decision (FS-091 Rev 2): global defaults with environment overrides only (no per-project/per-schema tuning presets in this phase).
+- Canonical cutover parity metrics used for rollout evidence: average `Jaccard@10 >= 0.70` and average `NDCG@10 delta >= -0.10`.
 
 ---
 
@@ -718,7 +721,7 @@ This fallback is transitional and is not a second canonical retrieval architectu
 
 ## Future Considerations
 
-- **Retrieval evolution**: Auto-Map retrieval is canonical and OpenSearch-first. Future work may tune ranking heuristics or add additional retrieval signals while preserving the same handler/runtime boundaries.
+- **Retrieval evolution**: Auto-Map retrieval is canonical and DynamoDB-only in serving paths. Future work may tune ranking heuristics, retrieval signals, or storage split (hybrid S3 embedding fallback trigger) while preserving the same handler/runtime boundaries.
 - **Step Functions scaling**: Auto-Map over-budget workloads may be delegated to Step Functions; `invokeAI()` remains the per-chunk execution unit.
 - **Prompt authoring UI**: A future admin interface may write to the PromptRegistry table. The runtime only reads from it.
 - **Batch field descriptions**: `describe-fields` may need chunking logic for large schemas. This is Lambda-specific logic, not shared runtime logic.

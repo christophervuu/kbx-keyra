@@ -23,9 +23,7 @@ import type { SchemaSyncResult } from '../../lib/persistence/types.js';
 import { logSyncActivity } from '../../lib/persistence/index.js';
 import {
   batchWriteSchemaNodes,
-  bulkIndexSchemaNodes,
   computeSchemaDiff,
-  ensureIndexExists,
   getAllSchemaNodes,
   getInlineFieldThreshold,
   parseJsonSchema,
@@ -482,13 +480,6 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
               previousCommitSha: currentCommit,
               commitSha: currentCommit,
             } satisfies SchemaSyncResult);
-          }
-
-          try {
-            await ensureIndexExists();
-            await bulkIndexSchemaNodes(parseResult.nodes);
-          } catch {
-            // OpenSearch indexing failure is non-fatal — schema is persisted and queryable via DynamoDB.
           }
 
           await storeProcessedContent(schemaId, {

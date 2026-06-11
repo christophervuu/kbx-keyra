@@ -1,4 +1,9 @@
 import {
+  classifySchemaSizeSegment,
+  emitRetrievalTelemetry,
+  readCorrelationId,
+} from '../../lib/ai/telemetry.js';
+import {
   ERROR_CODES,
   getItem,
   getObject,
@@ -23,6 +28,7 @@ interface MappingMetadataRecord {
 interface SchemaMetadataRecord {
   readonly schemaId: string;
   readonly format: 'json-schema' | 'xsd';
+  readonly fieldCount?: number;
 }
 
 interface SchemaNodeRecord {
@@ -224,6 +230,7 @@ function validateGeneratedExpression(params: {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+  const correlationId = readCorrelationId(event.headers);
   const requestBody = parseBody(event);
 
   if (!requestBody) {
@@ -295,6 +302,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(err.code, `Target ${err.message}`, err.statusCode, err.retryable, requestId);
     }
 
+    const retrievalStartedAt = Date.now();
     const sourceNodes = await query<SchemaNodeRecord>({
       TableName: getSchemaNodesTableOrThrow(),
       KeyConditionExpression: '#schemaId = :schemaId',
@@ -307,6 +315,23 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     const sourceContext = buildSourceContext(sourceNodes);
+    emitRetrievalTelemetry('retrieval.completed', {
+      handler: 'ai.suggest-expression',
+      request_id: requestId,
+      correlation_id: correlationId,
+      schema_id: mapping.sourceSchemaId,
+      retriever_mode: 'dynamodb',
+      schema_field_count: typeof sourceSchemaMeta.fieldCount === 'number'
+        ? Math.floor(sourceSchemaMeta.fieldCount)
+        : undefined,
+      schema_size_segment: classifySchemaSizeSegment(sourceSchemaMeta.fieldCount),
+      query_length: instruction.length,
+      candidate_count: sourceNodes.length,
+      result_count: sourceContext.includedNodeCount,
+      retrieval_ms: Date.now() - retrievalStartedAt,
+      include_context_expansion: false,
+    });
+
     if (sourceContext.includedNodeCount === 0) {
       return errorResponse(
         ERROR_CODES.VALIDATION_ERROR,
@@ -337,6 +362,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       targetType,
       targetDescription,
       sourceFields: sourceContext.sourceFields,
+    }, {
+      telemetry: {
+        requestId,
+        correlationId,
+      },
     });
 
     if (result.success) {

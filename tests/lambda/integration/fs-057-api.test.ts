@@ -327,7 +327,6 @@ describe.skipIf(!RUN_INTEGRATION)('FS-057 integration (DynamoDB Local + mocked S
     env.DYNAMODB_ENDPOINT = ENDPOINT;
     env.CONTENT_BUCKET = CONTENT_BUCKET;
     env.STORAGE_BUCKET = CONTENT_BUCKET;
-    env.OPENSEARCH_ENDPOINT = 'http://localhost:9200';
 
     await createTables();
 

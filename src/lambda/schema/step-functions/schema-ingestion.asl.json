@@ -58,7 +58,6 @@
             "ResultSelector": {
               "batchIndex.$": "$.Payload.batchIndex",
               "nodesWritten.$": "$.Payload.nodesWritten",
-              "nodesIndexed.$": "$.Payload.nodesIndexed",
               "errors.$": "$.Payload.errors"
             },
             "End": true
@@ -92,7 +91,6 @@
         "schemaId.$": "$.Payload.schemaId",
         "fieldCount.$": "$.Payload.fieldCount",
         "written.$": "$.Payload.written",
-        "indexed.$": "$.Payload.indexed",
         "failed.$": "$.Payload.failed"
       },
       "ResultPath": "$.aggregate",

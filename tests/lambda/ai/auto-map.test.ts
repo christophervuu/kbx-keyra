@@ -4,7 +4,8 @@ import type { APIGatewayProxyEvent } from '../../../src/lambda/shared/index.js';
 
 const invokeAIMock = vi.hoisted(() => vi.fn());
 const parseMock = vi.hoisted(() => vi.fn());
-const searchSchemaNodesMock = vi.hoisted(() => vi.fn());
+const schemaRetrieverSearchMock = vi.hoisted(() => vi.fn());
+const getSchemaMetadataMock = vi.hoisted(() => vi.fn());
 const getItemMock = vi.hoisted(() => vi.fn());
 const sfnSendMock = vi.hoisted(() => vi.fn());
 
@@ -42,7 +43,10 @@ vi.mock('../../../src/engine/registry/function-registry.js', () => {
 
 vi.mock('../../../src/lib/schema/index.js', () => {
   return {
-    searchSchemaNodes: searchSchemaNodesMock,
+    getSchemaMetadata: getSchemaMetadataMock,
+    getSchemaRetriever: () => ({
+      searchSchemaNodes: schemaRetrieverSearchMock,
+    }),
   };
 });
 
@@ -93,8 +97,9 @@ describe('aiAutoMap handler', () => {
     delete process.env.AUTO_MAP_STEP_FUNCTIONS_CHUNK_THRESHOLD;
     invokeAIMock.mockReset();
     parseMock.mockReset();
-    searchSchemaNodesMock.mockReset();
+    schemaRetrieverSearchMock.mockReset();
     getItemMock.mockReset();
+    getSchemaMetadataMock.mockReset().mockResolvedValue({ fieldCount: 320 });
     sfnSendMock.mockReset();
     vi.resetModules();
   });
@@ -196,6 +201,11 @@ describe('aiAutoMap handler', () => {
       mode: 'whole',
       chunkId: 'chunk-1',
       chunkCount: '1',
+    }, {
+      telemetry: {
+        requestId: expect.any(String),
+        correlationId: undefined,
+      },
     });
   });
 
@@ -205,7 +215,7 @@ describe('aiAutoMap handler', () => {
       sourceSchemaId: 'schema-source-1',
     });
 
-    searchSchemaNodesMock
+    schemaRetrieverSearchMock
       .mockResolvedValueOnce([
         {
           path: 'Invoice.DocumentType',
@@ -263,7 +273,13 @@ describe('aiAutoMap handler', () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(searchSchemaNodesMock).toHaveBeenCalled();
+    expect(schemaRetrieverSearchMock).toHaveBeenCalled();
+    expect(schemaRetrieverSearchMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaId: 'schema-source-1',
+        includeContextExpansion: true,
+      }),
+    );
 
     const invokeVars = invokeAIMock.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(invokeVars.mode).toBe('section');
@@ -284,7 +300,7 @@ describe('aiAutoMap handler', () => {
       mappingId: 'm-1',
       sourceSchemaId: 'schema-source-1',
     });
-    searchSchemaNodesMock.mockResolvedValue([]);
+    schemaRetrieverSearchMock.mockResolvedValue([]);
 
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
 

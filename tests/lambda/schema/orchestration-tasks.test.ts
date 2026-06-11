@@ -84,6 +84,9 @@ describe('schema orchestration tasks', () => {
     setSchemaBucket('keyra-schema-bucket');
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    vi.spyOn(console, 'info').mockImplementation(() => {
+      // noop
+    });
   });
 
   it('parseSchemaTask chunks 23,000 nodes into 46 batches and writes manifests', async () => {
@@ -118,8 +121,8 @@ describe('schema orchestration tasks', () => {
       schemaId: 'schema-1',
       fieldCount: 1000,
       batchResults: [
-        { batchIndex: 0, nodesWritten: 500, nodesIndexed: 490 },
-        { batchIndex: 1, nodesWritten: 500, nodesIndexed: 500, errors: ['partial failure'] },
+        { batchIndex: 0, nodesWritten: 500 },
+        { batchIndex: 1, nodesWritten: 500, errors: ['partial failure'] },
       ],
     });
 
@@ -127,7 +130,6 @@ describe('schema orchestration tasks', () => {
       schemaId: 'schema-1',
       fieldCount: 1000,
       written: 1000,
-      indexed: 990,
       failed: 1,
     });
     expect(schemaMocks.storeProcessedContent).toHaveBeenCalledTimes(1);
@@ -149,6 +151,54 @@ describe('schema orchestration tasks', () => {
       'error',
       expect.objectContaining({
         name: expect.stringContaining('error:'),
+      }),
+    );
+  });
+
+  it('parseSchemaTask emits retrieval field telemetry for parsed nodes', async () => {
+    const infoSpy = vi.spyOn(console, 'info');
+    sendMock.mockResolvedValue({
+      Body: {
+        transformToString: vi.fn().mockResolvedValue('{"type":"object","properties":{}}'),
+      },
+    });
+    schemaMocks.parseJsonSchema.mockReturnValue({
+      nodes: [
+        {
+          schemaId: 'schema-1',
+          path: 'Order.Id',
+          fieldName: 'Id',
+          type: 'string',
+          depth: 0,
+          isArray: false,
+          isRequired: true,
+          childCount: 0,
+          subtreeFieldCount: 1,
+          embeddingText: 'Order.Id | Id (string)',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      fieldCount: 1,
+    });
+
+    const mod = await importModule();
+    const result = await mod.parseSchemaTask({
+      schemaId: 'schema-1',
+      s3Key: 'schemas/schema-1/original.json',
+      format: 'json-schema',
+    });
+
+    expect(result.fieldCount).toBe(1);
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[schema-orchestration] parsed retrieval fields telemetry',
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        format: 'json-schema',
+        fieldCount: 1,
+        nodeCount: 1,
+        nodesWithEmbeddingText: 1,
+        nodesWithEmbeddingVector: 1,
+        approxEmbeddingBytes: 24,
       }),
     );
   });

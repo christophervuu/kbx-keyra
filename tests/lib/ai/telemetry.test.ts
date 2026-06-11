@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createTelemetrySession } from '../../../src/lib/ai/index.js';
+import {
+  classifySchemaSizeSegment,
+  createTelemetrySession,
+  emitRetrievalTelemetry,
+  readCorrelationId,
+} from '../../../src/lib/ai/index.js';
 
 describe('ai telemetry session', () => {
   it('emits start, success, and failure events with stable contract fields', () => {
@@ -68,5 +73,39 @@ describe('ai telemetry session', () => {
 
     expect(start?.invocationId).toBe(success?.invocationId);
     expect(success?.invocationId).toBe(failure?.invocationId);
+  });
+
+  it('classifies schema-size segments deterministically', () => {
+    expect(classifySchemaSizeSegment(undefined)).toBe('unknown');
+    expect(classifySchemaSizeSegment(0)).toBe('unknown');
+    expect(classifySchemaSizeSegment(12)).toBe('small');
+    expect(classifySchemaSizeSegment(500)).toBe('small');
+    expect(classifySchemaSizeSegment(501)).toBe('medium');
+    expect(classifySchemaSizeSegment(5000)).toBe('medium');
+    expect(classifySchemaSizeSegment(5001)).toBe('large');
+  });
+
+  it('reads correlation id from common header variants', () => {
+    expect(readCorrelationId(undefined)).toBeUndefined();
+    expect(readCorrelationId({ 'x-correlation-id': 'corr-1' })).toBe('corr-1');
+    expect(readCorrelationId({ 'X-Correlation-Id': 'corr-2' })).toBe('corr-2');
+    expect(readCorrelationId({ 'x-correlationId': 'corr-3' })).toBe('corr-3');
+    expect(readCorrelationId({ 'X-CorrelationId': 'corr-4' })).toBe('corr-4');
+  });
+
+  it('keeps retrieval telemetry sink failures non-fatal', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('telemetry sink unavailable');
+    });
+
+    expect(() => {
+      emitRetrievalTelemetry('retrieval.completed', {
+        handler: 'test.handler',
+        retriever_mode: 'dynamodb',
+        schema_size_segment: 'unknown',
+      });
+    }).not.toThrow();
+
+    infoSpy.mockRestore();
   });
 });

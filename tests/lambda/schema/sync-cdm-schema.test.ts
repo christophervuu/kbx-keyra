@@ -39,8 +39,6 @@ const schemaMock = vi.hoisted(() => ({
   updateSyncMetadata: vi.fn().mockResolvedValue(undefined),
   updateSchemaStatus: vi.fn().mockResolvedValue(undefined),
   batchWriteSchemaNodes: vi.fn().mockResolvedValue({ written: 1, failed: 0 }),
-  ensureIndexExists: vi.fn().mockResolvedValue(undefined),
-  bulkIndexSchemaNodes: vi.fn().mockResolvedValue({ indexed: 1, failed: 0 }),
   storeProcessedContent: vi.fn().mockResolvedValue('processed-key'),
   storeOriginalSchema: vi.fn().mockResolvedValue('original-key'),
   getInlineFieldThreshold: vi.fn().mockReturnValue(500),
@@ -160,8 +158,6 @@ describe('sync-cdm-schema handler', () => {
     schemaMock.updateSyncMetadata.mockReset().mockResolvedValue(undefined);
     schemaMock.updateSchemaStatus.mockReset().mockResolvedValue(undefined);
     schemaMock.batchWriteSchemaNodes.mockReset().mockResolvedValue({ written: 1, failed: 0 });
-    schemaMock.ensureIndexExists.mockReset().mockResolvedValue(undefined);
-    schemaMock.bulkIndexSchemaNodes.mockReset().mockResolvedValue({ indexed: 1, failed: 0 });
     schemaMock.storeProcessedContent.mockReset().mockResolvedValue('processed-key');
     schemaMock.storeOriginalSchema.mockReset().mockResolvedValue('original-key');
     schemaMock.getInlineFieldThreshold.mockReset().mockReturnValue(500);
@@ -192,8 +188,6 @@ describe('sync-cdm-schema handler', () => {
 
     // AE-01: Full re-ingestion pipeline is invoked
     expect(schemaMock.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
-    expect(schemaMock.ensureIndexExists).toHaveBeenCalledTimes(1);
-    expect(schemaMock.bulkIndexSchemaNodes).toHaveBeenCalledTimes(1);
     expect(schemaMock.storeProcessedContent).toHaveBeenCalledTimes(1);
     expect(schemaMock.updateSchemaStatus).toHaveBeenCalledTimes(1);
 
@@ -628,7 +622,7 @@ describe('sync-cdm-schema handler', () => {
   // AE-07 — AI retrieval uses refreshed schema nodes after success
   // -----------------------------------------------------------------------
 
-  it('successful re-sync writes refreshed nodes to DynamoDB + OpenSearch (AE-07)', async () => {
+  it('successful re-sync writes refreshed nodes to DynamoDB (AE-07)', async () => {
     const content = JSON.stringify({
       type: 'object',
       properties: {
@@ -655,16 +649,11 @@ describe('sync-cdm-schema handler', () => {
 
     expect(result.statusCode).toBe(200);
 
-    // AE-07: Parsed nodes are written to DynamoDB and indexed in OpenSearch
+    // AE-07: Parsed nodes are written to DynamoDB.
     expect(schemaMock.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
     const writtenNodes = schemaMock.batchWriteSchemaNodes.mock.calls[0]![0] as Array<{ path: string }>;
     const paths = writtenNodes.map((n: { path: string }) => n.path).sort();
     expect(paths).toEqual(['amount', 'id']);
-
-    expect(schemaMock.bulkIndexSchemaNodes).toHaveBeenCalledTimes(1);
-    const indexedNodes = schemaMock.bulkIndexSchemaNodes.mock.calls[0]![0] as Array<{ path: string }>;
-    const indexedPaths = indexedNodes.map((n: { path: string }) => n.path).sort();
-    expect(indexedPaths).toEqual(['amount', 'id']);
 
     // Processed content is persisted for future diff baseline
     expect(schemaMock.storeProcessedContent).toHaveBeenCalledWith(

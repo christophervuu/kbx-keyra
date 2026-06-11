@@ -64,7 +64,12 @@ export {
   type KnownAIFeature,
 } from './routing.js';
 export {
+  classifySchemaSizeSegment,
   createTelemetrySession,
+  emitRetrievalTelemetry,
+  readCorrelationId,
   type AIInvocationTelemetrySession,
+  type RetrievalTelemetryPayload,
+  type SchemaSizeSegment,
 } from './telemetry.js';
 export { invokeAI } from './invoke-ai.js';

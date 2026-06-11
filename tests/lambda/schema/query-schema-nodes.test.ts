@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const sharedMocks = vi.hoisted(() => ({
   parsePathParam: vi.fn(),
   parseBody: vi.fn(),
-  getItem: vi.fn(),
   query: vi.fn(),
+  generateRequestId: vi.fn(),
   jsonResponse: vi.fn(),
   errorResponse: vi.fn(),
   notFound: vi.fn(),
@@ -13,6 +13,10 @@ const sharedMocks = vi.hoisted(() => ({
 }));
 
 const schemaLibMocks = vi.hoisted(() => ({
+  getSchemaMetadata: vi.fn(),
+  getParentChain: vi.fn(),
+  getSchemaRetrieverMode: vi.fn(),
+  getSchemaRetriever: vi.fn(),
   searchSchemaNodes: vi.fn(),
 }));
 
@@ -36,6 +40,7 @@ function getEnvStore(): EnvStore {
 
 describe('query-schema-nodes handler', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.resetModules();
     const env = getEnvStore();
     env.SCHEMAS_TABLE = 'Schemas';
@@ -44,7 +49,10 @@ describe('query-schema-nodes handler', () => {
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('schema-1');
     sharedMocks.parseBody.mockReset().mockReturnValue({ query: 'address' });
-    sharedMocks.getItem.mockReset().mockResolvedValue({ schemaId: 'schema-1' });
+    sharedMocks.generateRequestId.mockReset().mockReturnValue('req-query-1');
+    schemaLibMocks.getSchemaMetadata.mockReset().mockResolvedValue({ schemaId: 'schema-1' });
+    schemaLibMocks.getParentChain.mockReset().mockResolvedValue(['Order', 'Order.Address']);
+    schemaLibMocks.getSchemaRetrieverMode.mockReset().mockReturnValue('dynamodb');
     sharedMocks.query.mockReset().mockResolvedValue([
       { schemaId: 'schema-1', path: 'Order.Address.Street', fieldName: 'Street', type: 'string', description: 'Street line 1' },
       { schemaId: 'schema-1', path: 'Order.Amount', fieldName: 'Amount', type: 'number' },
@@ -70,10 +78,16 @@ describe('query-schema-nodes handler', () => {
         score: 9,
       },
     ]);
+    schemaLibMocks.getSchemaRetriever.mockReset().mockReturnValue({
+      searchSchemaNodes: schemaLibMocks.searchSchemaNodes,
+    });
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
     sharedMocks.notFound.mockReset().mockReturnValue({ code: 'RESOURCE_NOT_FOUND', message: "Schema with id 'schema-1' not found", statusCode: 404, retryable: false });
     sharedMocks.internalError.mockReset().mockReturnValue({ code: 'INTERNAL_ERROR', message: 'err', statusCode: 500, retryable: true });
+    vi.spyOn(console, 'info').mockImplementation(() => {
+      // noop
+    });
   });
 
   it('valid query with matches returns 200 and SchemaSearchResult array (AE-08)', async () => {
@@ -83,7 +97,16 @@ describe('query-schema-nodes handler', () => {
     expect(result.statusCode).toBe(200);
     const parsed = JSON.parse(result.body) as Array<{ path: string; fieldName: string; type: string; description?: string; score: number }>;
     expect(parsed).toHaveLength(2);
-    expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith('schema-1', 'address', undefined, 50);
+    expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith({
+      schemaId: 'schema-1',
+      query: 'address',
+      requestId: 'req-query-1',
+      correlationId: undefined,
+      filters: undefined,
+      limit: 50,
+      includeContextExpansion: false,
+      onShadowTelemetry: expect.any(Function),
+    });
     expect(parsed[0]).toEqual({
       path: 'Order.Address.Street',
       fieldName: 'Street',
@@ -116,7 +139,7 @@ describe('query-schema-nodes handler', () => {
   });
 
   it('schema not found returns 404', async () => {
-    sharedMocks.getItem.mockResolvedValueOnce(null);
+    schemaLibMocks.getSchemaMetadata.mockResolvedValueOnce(null);
 
     const { handler } = await importHandler();
     const result = await handler({ body: '{}', pathParameters: { id: 'missing-schema' } });
@@ -164,41 +187,82 @@ describe('query-schema-nodes handler', () => {
     expect(parsed[49]?.path).toBe('Order.Address.Line50');
   });
 
-  it('uses gated degraded fallback when OpenSearch query fails', async () => {
-    const env = getEnvStore();
-    env.SCHEMA_QUERY_DEGRADED_FALLBACK = 'true';
-    schemaLibMocks.searchSchemaNodes.mockRejectedValueOnce(new Error('os down'));
+  it('forwards a valid request limit to retriever', async () => {
+    sharedMocks.parseBody.mockReturnValue({ query: 'address', limit: 17 });
 
     const { handler } = await importHandler();
     const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } });
 
     expect(result.statusCode).toBe(200);
-    expect(sharedMocks.query).toHaveBeenCalledWith({
-      TableName: 'SchemaNodes',
-      KeyConditionExpression: '#schemaId = :schemaId',
-      ExpressionAttributeNames: {
-        '#schemaId': 'schemaId',
-      },
-      ExpressionAttributeValues: {
-        ':schemaId': 'schema-1',
-      },
-    });
-
-    const parsed = JSON.parse(result.body) as Array<{ path: string; score: number; embeddingText: string }>;
-    expect(parsed[0]).toMatchObject({
-      path: 'Order.Address.Street',
-      score: 0,
-      embeddingText: 'Order.Address.Street | Street (string)',
-    });
+    expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        query: 'address',
+        requestId: 'req-query-1',
+        limit: 17,
+        includeContextExpansion: false,
+      }),
+    );
   });
 
-  it('returns 500 when OpenSearch fails and degraded fallback gate is disabled', async () => {
-    schemaLibMocks.searchSchemaNodes.mockRejectedValueOnce(new Error('os down'));
+  it('returns 500 when retriever fails', async () => {
+    schemaLibMocks.searchSchemaNodes.mockRejectedValueOnce(new Error('retriever down'));
 
     const { handler } = await importHandler();
     const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } });
 
     expect(result.statusCode).toBe(500);
     expect(sharedMocks.query).not.toHaveBeenCalled();
+  });
+
+  it('includeParentChain enriches results via getParentChain', async () => {
+    sharedMocks.parseBody.mockReturnValue({ query: 'address', includeParentChain: true });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(schemaLibMocks.getParentChain).toHaveBeenCalledWith('schema-1', 'Order.Address.Street');
+
+    const parsed = JSON.parse(result.body) as Array<{ parentChain?: string[] }>;
+    expect(parsed[0]?.parentChain).toEqual(['Order', 'Order.Address']);
+  });
+
+  it('forwards context expansion flag when includeContextExpansion is requested', async () => {
+    sharedMocks.parseBody.mockReturnValue({ query: 'address', includeContextExpansion: true });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        query: 'address',
+        includeContextExpansion: true,
+      }),
+    );
+  });
+
+  it('emits retrieval-stage telemetry fields for dynamodb path', async () => {
+    const infoSpy = vi.spyOn(console, 'info');
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'schema-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[schema-query] retrieval completed',
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        retrieverMode: 'dynamodb',
+        queryLength: 'address'.length,
+        includeParentChain: false,
+        includeContextExpansion: false,
+        requestedLimit: 50,
+        resultCount: 2,
+        durationMs: expect.any(Number),
+      }),
+    );
   });
 });

@@ -1,10 +1,15 @@
 import { parse } from '../../engine/dsl/index.js';
 import { registerAllFunctions } from '../../engine/functions/index.js';
 import { defaultRegistry } from '../../engine/registry/function-registry.js';
-import { searchSchemaNodes } from '../../lib/schema/index.js';
+import { getSchemaMetadata, getSchemaRetriever } from '../../lib/schema/index.js';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import type { Diagnostic } from '../../engine/types/index.js';
 import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
+import {
+  classifySchemaSizeSegment,
+  emitRetrievalTelemetry,
+  readCorrelationId,
+} from '../../lib/ai/telemetry.js';
 import {
   ERROR_CODES,
   errorResponse,
@@ -406,6 +411,19 @@ async function resolveSourceSchemaId(params: {
   return mapping.sourceSchemaId;
 }
 
+async function resolveSchemaFieldCount(schemaId: string): Promise<number | undefined> {
+  try {
+    const metadata = await getSchemaMetadata(schemaId) as { fieldCount?: number } | null;
+    if (!metadata || typeof metadata.fieldCount !== 'number' || !Number.isFinite(metadata.fieldCount)) {
+      return undefined;
+    }
+
+    return Math.floor(metadata.fieldCount);
+  } catch {
+    return undefined;
+  }
+}
+
 function validateExpression(expression: string): { valid: boolean; diagnostics: string[] } {
   try {
     const parseResult = parse(expression, {
@@ -690,6 +708,7 @@ function deduplicateRulesByTarget(
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+  const correlationId = readCorrelationId(event.headers);
 
   console.info(`${AUTO_MAP_LOG_PREFIX} request received`, {
     httpMethod: event.httpMethod ?? 'UNKNOWN',
@@ -767,6 +786,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   let retrievalSelectedCount = 0;
   let sourceSchemaId: string | undefined;
   let noContextReason: string | undefined;
+  const retrievalStartedAt = Date.now();
+  let shadowTopkJaccardAt10: number | undefined;
+  let shadowNdcgDeltaAt10: number | undefined;
+  let shadowTimingDeltaMs: number | undefined;
+  let shadowSecondaryFailed: boolean | undefined;
+  let shadowSecondaryError: string | undefined;
+  let shadowSampled: boolean | undefined;
 
   if (typeof sourceContextFromBody === 'string' && sourceContextFromBody.trim() !== '') {
     sourceContext = sourceContextFromBody;
@@ -793,12 +819,22 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (retrievalTerms.length > 0) {
       const searchResultsByTerm = await Promise.all(
         retrievalTerms.map(async (term) => {
-          const results = await searchSchemaNodes(
-            resolvedSourceSchemaId,
-            term,
-            undefined,
-            MAX_RESULTS_PER_TERM,
-          );
+          const results = await getSchemaRetriever().searchSchemaNodes({
+            schemaId: resolvedSourceSchemaId,
+            query: term,
+            limit: MAX_RESULTS_PER_TERM,
+            includeContextExpansion: true,
+            requestId,
+            correlationId,
+            onShadowTelemetry: (payload) => {
+              shadowSampled = payload.sampled;
+              shadowTopkJaccardAt10 = payload.jaccardAt10;
+              shadowNdcgDeltaAt10 = payload.ndcgDeltaAt10;
+              shadowTimingDeltaMs = payload.timingDeltaMs;
+              shadowSecondaryFailed = payload.secondaryFailed;
+              shadowSecondaryError = payload.secondaryError;
+            },
+          });
 
           retrievalCandidatesCount += results.length;
           return { term, results };
@@ -847,6 +883,33 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       noContextReason = 'No relevant source context found for target scope';
     }
   }
+
+  const schemaFieldCount = sourceSchemaId
+    ? await resolveSchemaFieldCount(sourceSchemaId)
+    : undefined;
+  const schemaSizeSegment = classifySchemaSizeSegment(schemaFieldCount);
+
+  emitRetrievalTelemetry('retrieval.completed', {
+    handler: 'ai.auto-map',
+    request_id: requestId,
+    correlation_id: correlationId,
+    schema_id: sourceSchemaId,
+    retriever_mode: 'dynamodb',
+    schema_field_count: schemaFieldCount,
+    schema_size_segment: schemaSizeSegment,
+    query_length: targetSection.length,
+    requested_limit: MAX_RESULTS_PER_TERM,
+    candidate_count: retrievalCandidatesCount,
+    result_count: retrievalSelectedCount,
+    retrieval_ms: Date.now() - retrievalStartedAt,
+    include_context_expansion: true,
+    sampled: shadowSampled,
+    shadow_topk_jaccard_at_10: shadowTopkJaccardAt10,
+    shadow_ndcg_delta_at_10: shadowNdcgDeltaAt10,
+    shadow_timing_delta_ms: shadowTimingDeltaMs,
+    secondary_failed: shadowSecondaryFailed,
+    secondary_error: shadowSecondaryError,
+  });
 
   const targetLines = parseTargetSectionLines(targetSection);
   const targetTypeByPath = parseTargetTypeMap(targetSection);
@@ -969,6 +1032,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           mode,
           chunkId,
           chunkCount: String(targetChunks.length),
+        }, {
+          telemetry: {
+            requestId,
+            correlationId,
+          },
         });
 
         return {

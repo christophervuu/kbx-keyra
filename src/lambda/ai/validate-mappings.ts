@@ -12,6 +12,11 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { invokeAI, normalizeAIError, PROMPT_IDS } from '../../lib/ai/index.js';
+import {
+  classifySchemaSizeSegment,
+  emitRetrievalTelemetry,
+  readCorrelationId,
+} from '../../lib/ai/telemetry.js';
 
 type ValidationIssueCategory = 'correctness' | 'completeness' | 'maintainability' | 'risk';
 type ValidationIssueSeverity = 'info' | 'warning' | 'error';
@@ -350,6 +355,7 @@ function isBatchPayload(requestBody: Record<string, unknown>): boolean {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+  const correlationId = readCorrelationId(event.headers);
   const requestBody = parseBody(event);
 
   if (!requestBody) {
@@ -403,6 +409,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     }
 
+    const retrievalStartedAt = Date.now();
     const [mappingConfigRaw, sourceNodes, targetNodes] = await Promise.all([
       getObject({
         Bucket: getContentBucketOrThrow(),
@@ -435,6 +442,20 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const sourceSchemaContext = buildSchemaContext(sourceNodes, 'Source schema context:');
     const targetSchemaContext = buildSchemaContext(targetNodes, 'Target schema context:');
 
+    emitRetrievalTelemetry('retrieval.completed', {
+      handler: 'ai.validate-mappings',
+      request_id: requestId,
+      correlation_id: correlationId,
+      schema_id: mapping.sourceSchemaId,
+      retriever_mode: 'dynamodb',
+      schema_size_segment: classifySchemaSizeSegment(undefined),
+      query_length: parsed.mappingId.length,
+      candidate_count: sourceNodes.length,
+      result_count: sourceNodes.length,
+      retrieval_ms: Date.now() - retrievalStartedAt,
+      include_context_expansion: false,
+    });
+
     const result = await invokeAI<ValidateMappingsReport>(PROMPT_IDS.AI_VALIDATION, {
       mappingId: parsed.mappingId,
       mappingConfig: mappingConfigRaw,
@@ -452,6 +473,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         : '',
       sampleDataContentType: parsed.sampleData?.contentType ?? '',
       sampleDataProvided: parsed.sampleData ? 'true' : 'false',
+    }, {
+      telemetry: {
+        requestId,
+        correlationId,
+      },
     });
 
     if (result.success) {

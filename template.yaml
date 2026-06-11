@@ -70,11 +70,6 @@ Parameters:
     Default: kbx-keyra-dev-local
     Description: Legacy scaffold parameter from T-01 (superseded by StorageBucket resource naming).
 
-  OpenSearchEndpoint:
-    Type: String
-    Default: https://example-opensearch.local
-    Description: OpenSearch endpoint for schema-node indexing and query.
-
   PromptRegistryTableName:
     Type: String
     Default: integrations-keyra-promptregistry
@@ -132,7 +127,6 @@ Globals:
         SCHEMAS_TABLE: !Ref SchemaMetadataTable
         CONTENT_BUCKET: !Ref StorageBucket
         SCHEMA_BUCKET: !Ref StorageBucket
-        OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
 
 Resources:
   ProjectsTable:
@@ -1007,11 +1001,6 @@ Resources:
             BucketName: !Ref StorageBucket
         - S3ReadPolicy:
             BucketName: !Ref DslAssetBucketName
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -1055,11 +1044,6 @@ Resources:
             BucketName: !Ref StorageBucket
         - S3ReadPolicy:
             BucketName: !Ref DslAssetBucketName
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -1101,11 +1085,6 @@ Resources:
             BucketName: !Ref StorageBucket
         - S3ReadPolicy:
             BucketName: !Ref DslAssetBucketName
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -1145,10 +1124,6 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Ref DslAssetBucketName
         - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
             - Effect: Allow
               Action:
                 - states:StartExecution
@@ -1553,19 +1528,11 @@ Resources:
       CodeUri: .
       Handler: src/lambda/schema/query-schema-nodes.handler
       MemorySize: 512
-      Environment:
-        Variables:
-          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref SchemaMetadataTable
         - DynamoDBReadPolicy:
             TableName: !Ref SchemaNodesTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -1605,10 +1572,6 @@ Resources:
               Action:
                 - states:StartExecution
               Resource: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:kbx-keyra-schema-ingestion'
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -1640,11 +1603,6 @@ Resources:
             TableName: !Ref SchemaNodesTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
 
   OrchestrationTasksFunction:
     Type: AWS::Serverless::Function
@@ -1671,48 +1629,6 @@ Resources:
             TableName: !Ref SchemaNodesTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
-
-  SchemaNodesEncryptionPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: kbx-keyra-sn-enc
-      Type: encryption
-      Description: Encryption policy for schema nodes collection.
-      Policy: >-
-        {"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"]}],"AWSOwnedKey":true}
-
-  SchemaNodesNetworkPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: kbx-keyra-sn-net
-      Type: network
-      Description: Network policy allowing public access for Phase 1.
-      Policy: >-
-        [{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"]},{"ResourceType":"dashboard","Resource":["collection/integrations-keyra-schema-nodes"]}],"AllowFromPublic":true}]
-
-  SchemaNodesCollection:
-    Type: AWS::OpenSearchServerless::Collection
-    DependsOn:
-      - SchemaNodesEncryptionPolicy
-      - SchemaNodesNetworkPolicy
-    Properties:
-      Name: integrations-keyra-schema-nodes
-      Type: SEARCH
-      Description: Schema node index for keyword and structural queries.
-
-  SchemaNodesAccessPolicy:
-    Type: AWS::OpenSearchServerless::AccessPolicy
-    Properties:
-      Name: kbx-keyra-sn-acc
-      Type: data
-      Description: Data access policy for schema query/index Lambda roles.
-      Policy: !Sub
-        - >-
-          [{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"],"Permission":["aoss:CreateCollectionItems","aoss:UpdateCollectionItems","aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/integrations-keyra-schema-nodes/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument"]}],"Principal":["${QuerySchemaNodesFunctionRoleArn}","${IngestSchemaFunctionRoleArn}","${ProcessBatchFunctionRoleArn}","${OrchestrationTasksFunctionRoleArn}"]}]
-        - QuerySchemaNodesFunctionRoleArn: !GetAtt QuerySchemaNodesFunctionRole.Arn
-          IngestSchemaFunctionRoleArn: !GetAtt IngestSchemaFunctionRole.Arn
-          ProcessBatchFunctionRoleArn: !GetAtt ProcessBatchFunctionRole.Arn
-          OrchestrationTasksFunctionRoleArn: !GetAtt OrchestrationTasksFunctionRole.Arn
 
   SchemaIngestionStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -2027,10 +1943,6 @@ Outputs:
   DeploymentCurrentTableArn:
     Description: DeploymentCurrent table ARN.
     Value: !GetAtt DeploymentCurrentTable.Arn
-
-  OpenSearchCollectionEndpoint:
-    Description: OpenSearch Serverless collection endpoint.
-    Value: !GetAtt SchemaNodesCollection.CollectionEndpoint
 
   RuntimeApiUrl:
     Description: Runtime bootstrap internal HttpApi URL.

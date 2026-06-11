@@ -39,6 +39,8 @@ describe('parseJsonSchema', () => {
       expect(node.childCount).toBe(0);
       expect(node.subtreeFieldCount).toBe(1);
       expect(node.embeddingText.length).toBeGreaterThan(0);
+      expect(Array.isArray(node.embedding)).toBe(true);
+      expect(node.embedding?.length).toBeGreaterThan(0);
     }
 
     expect(result.nodes.find((node) => node.path === 'id')?.isRequired).toBe(true);

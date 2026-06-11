@@ -336,10 +336,17 @@ describe('aiSmartFix handler', () => {
       ruleVersion: string;
       ruleHash: string;
     };
+    const invokeOptions = invokeAIMock.mock.calls[0]?.[2] as {
+      telemetry?: { requestId?: string; correlationId?: string };
+    };
 
     expect(invokeArgs.diagnosticsScope).toBe('all');
     expect(invokeArgs.ruleVersion).toBe('12');
     expect(invokeArgs.ruleHash).toBe(CURRENT_RULE_HASH);
+    expect(invokeOptions.telemetry).toEqual({
+      requestId: 'req-123',
+      correlationId: undefined,
+    });
     expect(invokeArgs.diagnosticsContext).toContain('KEYRA-E005');
     expect(invokeArgs.diagnosticsContext.indexOf('KEYRA-E005')).toBeLessThan(
       invokeArgs.diagnosticsContext.indexOf('KEYRA-W001'),

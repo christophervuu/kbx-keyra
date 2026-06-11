@@ -60,7 +60,7 @@ Phase 1 exposes 26 routes in this architecture slice (including FS-076 CDM read-
 | POST | `/schemas/:id/mark-reviewed` | `src/lambda/schema/mark-reviewed.ts` | `MarkSchemaReviewedFunction` | Explicit inferred-schema review transition (`reviewState=reviewed`; `status=ready` unless blocking error status) |
 | POST | `/schemas/:id/samples` | `src/lambda/schema/add-schema-sample.ts` | `AddSchemaSampleFunction` | Persist sample payload, return deterministic diff, and optionally apply all suggested schema updates only when explicitly requested |
 | DELETE | `/schemas/:id` | `src/lambda/schema/delete-schema.ts` | `DeleteSchemaFunction` | Delete schema (conflict when referenced) |
-| POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (OpenSearch-first, max 50; gated PK-scoped degraded fallback) |
+| POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (DynamoDB lexical retrieval + optional bounded rerank/context expansion; max 50) |
 | POST | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Explicit manual CDM re-sync (updates content/metadata only when upstream changed) |
 | GET | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Lightweight CDM status-refresh read (`update-available` without content mutation) |
 
@@ -280,6 +280,29 @@ Create Mapping selector usability requirements from API surface:
 - `error` schemas remain visible to callers but are treated as non-selectable in UI policy.
 - `needs_review` schemas remain visible/selectable for warning-first flows.
 
+### FS-091 retrieval decommission addendum
+
+FS-091 codifies Dynamo-only schema retrieval after OpenSearch decommission.
+
+Canonical backend retrieval contract:
+
+- `POST /schemas/:id/query` uses runtime schema retriever abstraction with DynamoDB serving mode only.
+- Retrieval stages are deterministic and bounded:
+  - lexical candidate generation with hard cap (`lexicalCap`)
+  - optional bounded in-Lambda rerank (`rerankCap`)
+  - bounded context expansion (`contextExpansionCap`)
+- Runtime mode policy is fail-closed:
+  - canonical and only supported serving mode: `RAG_RETRIEVER=dynamodb`
+  - historical `opensearch` / `shadow` modes are decommissioned and rejected in serving paths
+- Tuning scope decision (FS-091 Rev 2): global defaults with environment-level overrides only (no per-project/per-schema tuning presets).
+- API error envelope and route contract remain stable (400/404/500 semantics preserved).
+
+Cutover quality/latency evidence model:
+
+- Canonical parity metric: Top-K Jaccard overlap @10 average `>= 0.70`
+- Safety metric: NDCG@10 delta average `>= -0.10`
+- Acceptance-rate safety gate: drop `<= 0.10`
+
 ### FS-090 inferred-review + sample payload API addendum
 
 FS-090 finalizes Schema Detail backend contracts for inferred-schema review and sample lifecycle operations.
@@ -328,7 +351,7 @@ Audit-confirmed unaffected backend/AWS ownership surfaces (FS-087 T-02/T-09):
 
 - DynamoDB schema-entity ownership remains `schemaId`-centric (no `projectId` ownership key requirement).
 - S3 schema keying remains `schemas/{schemaId}/...` and scope-independent.
-- OpenSearch schema query/index filter remains `schemaId`-term based; no scope/project ownership filter.
+- Schema query retrieval remains `schemaId`-scoped in DynamoDB (no scope/project ownership filter).
 - Deployment snapshot/deploy guard behavior remains explicit schema-reference/provenance based (`sourceSchemaId`/`targetSchemaId` + optional `cdmSchemaTraceability`) and scope-independent.
 
 ### 7.2 Handler-to-table mapping
@@ -384,7 +407,7 @@ AI safety invariant (FS-088 / FS-074 alignment):
 | `schema/mark-reviewed` | get schema + update review state/status fields + return deterministic review summary |
 | `schema/add-schema-sample` | get schema + validate sample format + persist sample metadata/blob + optional schema content/node rewrite under explicit apply-all mode |
 | `schema/delete-schema` | get schema + guard references across canonical `linkedSchemaIds` + compatibility refs + mapping references + delete schema + delete schema nodes |
-| `schema/query-schema-nodes` | get schema + OpenSearch query via `searchSchemaNodes`; on explicit degraded gate, fallback to PK-scoped schemaId query + in-memory substring filter |
+| `schema/query-schema-nodes` | get schema + DynamoDB retriever query via `searchSchemaNodes` (lexical candidate generation, optional bounded rerank, optional context expansion) |
 | `schema/sync-cdm-schema` | read linked source metadata, perform GitHub read-only compare/fetch, persist sync status and optional content/commitSha updates |
 
 ---
@@ -430,7 +453,7 @@ Notes:
 |---|---|
 | `AWS_REGION` | Lambda runtime region |
 | `DYNAMODB_ENDPOINT` / `AWS_ENDPOINT_URL_DYNAMODB` | local DynamoDB override for integration/local runs |
-| `SCHEMA_QUERY_DEGRADED_FALLBACK` | optional explicit degraded-mode gate for schema query Dynamo fallback when OpenSearch path fails |
+| `RAG_RETRIEVER` | schema retriever serving mode. Post-FS-091 cutover canonical value: `dynamodb` (non-dynamodb values are rejected). |
 
 The naming above reflects the currently implemented lambda surface. Infrastructure/persistence docs may define broader environment contracts for future modules.
 

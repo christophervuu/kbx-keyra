@@ -12,7 +12,7 @@ This is a living document. Update it when the project structure changes. Do not 
 src/        Backend and shared source code
 ui/         Frontend source code (React / TypeScript / Vite)
 tests/      Test files
-scripts/    Local tooling/runner scripts (includes UI backend-only guardrail and no-browser-secret policy checks, FS-075 deterministic Phase 2 gate runner, FS-075 prompt eval runner for PR/release threshold modes, and FS-082 runtime bootstrap verification runbook)
+scripts/    Local tooling/runner scripts (includes UI backend-only guardrail and no-browser-secret policy checks, FS-075 deterministic Phase 2 gate runner, FS-075 prompt eval runner for PR/release threshold modes, FS-091 cutover-readiness report runner, and FS-082 runtime bootstrap verification runbook)
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
 .github/    CI workflow definitions (includes FS-075 Phase 2 acceptance gate workflow)
@@ -153,6 +153,9 @@ src/
     schema/           Schema ingestion shared contracts and utilities (FS-056 T-01)
       index.ts          Schema module barrel exports
       types.ts          Schema ingestion/query interfaces and unions
+      retriever.ts      Runtime schema retriever abstraction (`RAG_RETRIEVER`: dynamodb only after FS-091 T-08 cutover)
+      retrieval-parity.ts Shared Top-K parity metric helpers (Jaccard@K, NDCG@K delta) and gate evaluation utilities (FS-091 T-07)
+      cutover-readiness.ts Retrieval latency/quality gate evaluation helpers for FS-091 cutover decisions (p95 tier targets + acceptance-rate safety checks)
       constants.ts      Ingestion threshold and batch sizing constants
       embedding-text.ts Canonical embedding text generation utility
       parser/           Pure schema parsing module (JSON Schema + XSD) (FS-056 T-02)
@@ -174,11 +177,6 @@ src/
       s3/               S3 schema content storage module (FS-056 T-03)
         index.ts          S3 storage barrel exports
         schema-storage.ts Original/processed schema S3 put/get helpers + domain errors
-      opensearch/       OpenSearch indexing module (FS-056 T-05)
-        index.ts          OpenSearch barrel exports
-        mapping.ts        Schema nodes index mapping definition
-        indexer.ts        Index ensure/bulk index/delete-by-query operations
-        query.ts          OpenSearch schema-node BM25 query module with filters
   # [planned — not yet implemented in this repository]
   # types/            Shared types across backend
 ```
@@ -814,9 +812,9 @@ tests/
       sync-all-cdm-schemas.test.ts CDM bulk sync tests (recursive traversal, summary payload, and missing-token service-unavailable guard)
       sync-cdm-schema.test.ts CDM sync tests: full re-ingestion pipeline (AE-01), changed/unchanged/status-refresh/failure, diffSummary shape, node-write failure, ingestion exception, missing state machine ARN (FS-076 T-04 + FS-077 T-06)
       delete-schema.test.ts CRUD delete tests (204 + 409 references + 404) (FS-057 T-05)
-      ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, parse errors, and OpenSearch warning behavior
+      ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, and parse errors
       query-schema-nodes.test.ts Query endpoint tests for validation, schema existence, and 50-result cap (FS-057 T-06)
-      process-batch.test.ts Tests for per-batch S3 read + Dynamo/OpenSearch write behavior
+      process-batch.test.ts Tests for per-batch S3 read + Dynamo write behavior
       orchestration-tasks.test.ts Tests for parse chunking, aggregation totals, and error metadata updates
     project/          Project lambda handler tests (FS-057 T-02)
       create-project.test.ts Create project validation/201 response tests
@@ -872,6 +870,9 @@ tests/
           dsl-reference.md  DSL reference fixture content
     schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
       types.test.ts    Type contract tests and inline threshold env parsing tests
+      retriever.test.ts Runtime schema retriever mode parsing/routing/shadow non-fatal behavior tests (FS-091 T-01)
+      retrieval-parity.test.ts Unit tests for parity metrics and FS-091 Jaccard/NDCG gate evaluation
+      cutover-readiness.test.ts Unit tests for p95 tier latency gates, acceptance-rate safety gate, and overall go/no-go evaluation
       embedding-text.test.ts Embedding text formatting tests (AE-11, AE-12)
       parser/          Schema parser tests (FS-056 T-02)
         parse-json-schema.test.ts JSON Schema parser unit and performance tests
@@ -886,9 +887,6 @@ tests/
         node-reader.test.ts SchemaNodes parent-path reader tests
       s3/              Schema S3 storage tests (FS-056 T-03)
         schema-storage.test.ts S3 key/content-type/error behavior with mocked client
-      opensearch/      Schema OpenSearch module tests (FS-056 T-05)
-        indexer.test.ts OpenSearch indexer mapping/bulk/delete behavior tests
-        query.test.ts   OpenSearch query construction/filter/limit tests
     persistence/      Persistence module tests (FS-058 T-01)
       types.test.ts    Type-compatibility and converter-shape tests
       clients.test.ts  AWS client initialization tests (region + endpoint overrides)
@@ -909,6 +907,7 @@ tests/
       staleness.test.ts Staleness computation tests (revision/version current+stale, not-deployed, latestVersion edge case)
   scripts/            Repository script/config policy tests
     check-ui-ai-guardrails.test.ts Static policy test for path-based UI AI guardrail scanner
+    run-fs091-cutover-readiness.test.ts FS-091 cutover readiness report runner contract test (go/no-go + rollback trigger outputs)
     ui-eslint-ai-guardrails.test.ts Static policy test for UI ESLint restricted-import guardrail declarations
   integration/        Integration and performance test suites (Vitest)
     lambda/            Backend API integration tests against DynamoDB Local (FS-057 T-07)

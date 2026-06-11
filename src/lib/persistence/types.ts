@@ -332,6 +332,7 @@ export interface SchemaNodeItem {
   readonly childCount: number;
   readonly subtreeFieldCount: number;
   readonly embeddingText: string;
+  readonly embedding?: readonly number[];
 }
 
 /**

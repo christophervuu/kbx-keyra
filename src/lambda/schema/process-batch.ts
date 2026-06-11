@@ -1,6 +1,6 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
-import { batchWriteSchemaNodes, bulkIndexSchemaNodes, type SchemaNode } from '../../lib/schema/index.js';
+import { batchWriteSchemaNodes, type SchemaNode } from '../../lib/schema/index.js';
 
 interface S3BodyLike {
   transformToString?: () => Promise<string>;
@@ -24,7 +24,6 @@ export interface ProcessBatchEvent {
 export interface ProcessBatchResult {
   readonly batchIndex: number;
   readonly nodesWritten: number;
-  readonly nodesIndexed: number;
   readonly errors?: readonly string[];
 }
 
@@ -36,6 +35,38 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const SCHEMA_BUCKET = getEnvValue('SCHEMA_BUCKET');
+
+function computeEmbeddingTelemetry(nodes: readonly {
+  readonly embeddingText?: string;
+  readonly embedding?: readonly number[];
+}[]): {
+  nodeCount: number;
+  nodesWithEmbeddingText: number;
+  nodesWithEmbeddingVector: number;
+  approxEmbeddingBytes: number;
+} {
+  let nodesWithEmbeddingText = 0;
+  let nodesWithEmbeddingVector = 0;
+  let approxEmbeddingBytes = 0;
+
+  for (const node of nodes) {
+    if (typeof node.embeddingText === 'string' && node.embeddingText.trim() !== '') {
+      nodesWithEmbeddingText += 1;
+    }
+
+    if (Array.isArray(node.embedding) && node.embedding.length > 0) {
+      nodesWithEmbeddingVector += 1;
+      approxEmbeddingBytes += node.embedding.length * 8;
+    }
+  }
+
+  return {
+    nodeCount: nodes.length,
+    nodesWithEmbeddingText,
+    nodesWithEmbeddingVector,
+    approxEmbeddingBytes,
+  };
+}
 
 function getSchemaBucketOrThrow(): string {
   const bucket = SCHEMA_BUCKET?.trim();
@@ -95,18 +126,22 @@ async function readBatchNodes(s3Key: string): Promise<SchemaNode[]> {
 export async function handler(event: ProcessBatchEvent): Promise<ProcessBatchResult> {
   let batchRef: BatchReference;
   try {
-    batchRef = resolveBatchReference(event);
+      batchRef = resolveBatchReference(event);
   } catch (error) {
     return {
       batchIndex: typeof event.batchIndex === 'number' ? event.batchIndex : -1,
       nodesWritten: 0,
-      nodesIndexed: 0,
       errors: [error instanceof Error ? error.message : 'Invalid event payload'],
     };
   }
 
   try {
     const nodes = await readBatchNodes(batchRef.s3Key);
+    console.info('[schema-process-batch] retrieval fields batch telemetry', {
+      schemaId: batchRef.schemaId,
+      batchIndex: batchRef.batchIndex,
+      ...computeEmbeddingTelemetry(nodes),
+    });
 
     try {
       const writeResult = await batchWriteSchemaNodes(nodes);
@@ -114,37 +149,18 @@ export async function handler(event: ProcessBatchEvent): Promise<ProcessBatchRes
         return {
           batchIndex: batchRef.batchIndex,
           nodesWritten: writeResult.written,
-          nodesIndexed: 0,
           errors: [`DynamoDB write failed for ${writeResult.failed} nodes`],
         };
       }
 
-      try {
-        const indexResult = await bulkIndexSchemaNodes(nodes);
-        const errors: string[] = [];
-        if (indexResult.failed > 0) {
-          errors.push(`OpenSearch indexing failed for ${indexResult.failed} nodes`);
-        }
-
-        return {
-          batchIndex: batchRef.batchIndex,
-          nodesWritten: writeResult.written,
-          nodesIndexed: indexResult.indexed,
-          ...(errors.length > 0 ? { errors } : {}),
-        };
-      } catch (error) {
-        return {
-          batchIndex: batchRef.batchIndex,
-          nodesWritten: writeResult.written,
-          nodesIndexed: 0,
-          errors: [error instanceof Error ? error.message : 'OpenSearch indexing failed'],
-        };
-      }
+      return {
+        batchIndex: batchRef.batchIndex,
+        nodesWritten: writeResult.written,
+      };
     } catch (error) {
       return {
         batchIndex: batchRef.batchIndex,
         nodesWritten: 0,
-        nodesIndexed: 0,
         errors: [error instanceof Error ? error.message : 'DynamoDB write failed'],
       };
     }
@@ -152,7 +168,6 @@ export async function handler(event: ProcessBatchEvent): Promise<ProcessBatchRes
     return {
       batchIndex: batchRef.batchIndex,
       nodesWritten: 0,
-      nodesIndexed: 0,
       errors: [error instanceof Error ? error.message : 'Failed to process batch'],
     };
   }

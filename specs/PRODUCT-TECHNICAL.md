@@ -53,7 +53,7 @@ The application provides:
 - A **two-repo GitHub integration** for schema version control — one repo for company-wide CDM (Canonical Data Model) schemas (read-only) and one for user-uploaded schemas (read-write).
 - An **environment-based deployment workflow** (DEV → QA → PROD) with immutable snapshots, version history, and rollback capability. Deployed mapping configurations are consumed at runtime by a generic Lambda function orchestrated through AWS Step Functions — no code changes required to update transformation logic.
 
-The frontend is a React/TypeScript/Vite application deployed on AWS Amplify. The backend is a serverless AWS stack (API Gateway, Lambda, DynamoDB, S3, OpenSearch Serverless, Step Functions) that handles persistence, AI orchestration, schema indexing, and deployment management.
+The frontend is a React/TypeScript/Vite application deployed on AWS Amplify. The backend is a serverless AWS stack (API Gateway, Lambda, DynamoDB, S3, Step Functions) that handles persistence, AI orchestration, schema ingestion/retrieval, and deployment management.
 
 ---
 
@@ -1151,7 +1151,7 @@ KeyRa integrates with two GitHub repositories for schema version control:
 | Managed by | CDM/DCA team — external to KeyRa. |
 | KeyRa's access | **Read-only.** KeyRa links to files, syncs them, and indexes them. KeyRa never writes to this repo. |
 | Folder structure | Managed by the CDM team. No convention enforced by KeyRa. |
-| Schema lifecycle | CDM team updates schema → pushes to repo → KeyRa detects change (manual re-sync or future webhook) → re-ingests into DynamoDB/OpenSearch. |
+| Schema lifecycle | CDM team updates schema → pushes to repo → KeyRa detects change (manual re-sync or future webhook) → re-ingests retrieval-ready nodes into DynamoDB. |
 | UI surface | "Link CDM Schema" button on Project Overview → file browser scoped to this repo. "Re-sync" button on linked schemas. |
 
 #### Repo 2: Non-CDM Schemas — `KBXT/KeyRa-Schemas`
@@ -1210,7 +1210,7 @@ For GitHub-linked schemas (both CDM and non-CDM):
 1. BA clicks "Re-sync" on a schema card, or sync is triggered by a webhook (future).
 2. Lambda fetches the current file from GitHub.
 3. Compares commit SHA. If unchanged, returns "No changes."
-4. If changed: re-ingests the schema (re-parses into tree nodes, re-generates embeddings, updates DynamoDB + OpenSearch).
+4. If changed: re-ingests the schema (re-parses into tree nodes, re-generates retrieval signals/embeddings, updates DynamoDB).
 5. Returns a diff summary: fields added, removed, modified.
 6. UI updates the sync status and shows the diff summary.
 
@@ -1468,31 +1468,48 @@ All AI features use **GitHub Models** (`https://models.github.ai/inference`) via
 
 All AI features that operate on schemas use the RAG pipeline — regardless of schema size. This is a single code path with no branching logic. For small schemas, the retriever returns all chunks (top-K ≥ total nodes), making it equivalent to a direct prompt with the full schema.
 
-#### Schema Ingestion (Indexing)
+#### Schema Ingestion (Retrieval Preparation)
 
-When a schema is uploaded or synced, it is processed into a tree of `SchemaNode` records:
+When a schema is uploaded or synced, it is processed into retrieval-ready `SchemaNode` records:
 
 1. **Parse** the schema (JSON Schema or XSD) into a tree.
 2. **Chunk** by object boundaries: each object with properties becomes a node. Array items become child nodes. Leaf fields are included in their parent node.
 3. **Generate embedding text** for each node: a natural-language description including the node's path, field names, types, and descriptions (including AI-generated descriptions from Section 6.7 if available).
 4. **Embed** using `text-embedding-3-small` via GitHub Models.
-5. **Store** nodes in DynamoDB (tree structure) and OpenSearch Serverless (vector + keyword index).
+5. **Store** nodes in DynamoDB with lexical retrieval signals (`fieldNameNormalized`, `pathTokens`, `type`, `depth`) plus optional per-node embedding vectors for bounded rerank.
 
-#### Retrieval at Mapping Time
+#### Retrieval at Mapping Time (DynamoDB-Only)
 
-1. For each target section to map, **embed the query** (target field description or section name).
-2. **Hybrid search** in OpenSearch: combine vector similarity (k-NN) with keyword matching (BM25). Reciprocal rank fusion merges results.
-3. **Enrich with structural context** from DynamoDB: parent chain, siblings, children of each result.
-4. **Assemble focused prompt** with only the retrieved source chunks + target section.
-5. **Generate** mapping rules via Tier 2 LLM — seeing the most relevant fields, not the entire schema.
+1. For each target section to map, normalize the query text and optional query embedding.
+2. **Lexical candidate generation** from DynamoDB retrieval signals with deterministic cap (`lexicalCap`).
+3. **Optional in-Lambda rerank** over capped candidates when embeddings are available (`rerankCap`).
+4. **Enrich with structural context** from DynamoDB: bounded parent/sibling/children expansion (`contextExpansionCap`).
+5. **Assemble focused prompt** with deterministic top-K + bounded context and generate mapping rules via Tier 2 LLM.
+
+#### Runtime Modes, Cutover, and Rollback Posture
+
+- `RAG_RETRIEVER=dynamodb` is the canonical and only supported serving mode after FS-091 cutover.
+- Historical cutover validation used offline parity/latency gates (Jaccard@10 and NDCG@10 delta) captured in FS-091 benchmark artifacts.
+- `opensearch` and `shadow` are decommissioned runtime modes; production rollback posture is to tune Dynamo caps/guards and use benchmark evidence, not to re-enable OpenSearch in serving paths.
+
+#### Cost & Scaling Assumptions (FS-091)
+
+| Dimension | Baseline (pre-cutover assumption) | Post-cutover model | Review cadence |
+|---|---|---|---|
+| Retrieval infrastructure fixed cost | OpenSearch Serverless always-on baseline (~$10-25/month, low usage) | OpenSearch removed from runtime stack; fixed OpenSearch retrieval cost = $0 in serving path | Monthly cost review |
+| Retrieval variable cost | OpenSearch query + index operations | DynamoDB read/write + Lambda compute for lexical retrieval and bounded rerank | Monthly cost review |
+| Quality guardrail | Baseline suggestion acceptance rate | Post-cutover acceptance-rate drop must remain <= 10% | Two-week post-cutover then monthly |
+| Latency guardrail | Historical OpenSearch-era reference | Dynamo p95 targets: small <300ms, medium <800ms, large <1500ms | Two-week post-cutover then monthly |
+
+Reconsider dedicated search infrastructure only if sustained thresholds are exceeded (for example: repeated p95 misses by schema tier, acceptance-rate drop >10%, or Dynamo/Lambda retrieval spend exceeding projected run-rate bands for multiple reviews).
 
 #### Why RAG for All Sizes
 
 | Schema Size | RAG Behavior | Benefit |
 |-------------|-------------|---------|
-| Small (< 100 fields) | Top-K returns all chunks. Effectively full-schema prompt. | Same code path. No branching. Embedding text enriches the prompt with descriptions. |
+| Small (< 100 fields) | Top-K may return all chunks. Effectively full-schema prompt. | Same code path. No branching. Embedding text enriches prompt context. |
 | Medium (100–500 fields) | Top-K returns most chunks. Some low-relevance sections omitted. | Reduces noise. Keeps prompt focused. |
-| Large (500–23k fields) | Top-K returns only the most relevant sections. | Fits within context window. Maintains accuracy. |
+| Large (500–23k fields) | Top-K returns only the most relevant sections. | Fits within context window and latency targets. |
 
 ### 13.5 DSL-Aware Prompting
 
@@ -1585,9 +1602,9 @@ Storage: DynamoDB table (`PromptRegistry`) or a versioned JSON file in S3. For P
                     │                                       │
                     ▼                                       ▼
    ┌──────────────────────┐              ┌──────────────────────┐
-   │  OpenSearch          │              │  GitHub API          │
-   │  Serverless          │              │  (CDM + non-CDM      │
-   │  (vector + keyword)  │              │   repos)             │
+   │  DynamoDB Retrieval  │              │  GitHub API          │
+   │  Signals + Rerank    │              │  (CDM + non-CDM      │
+   │  (in Lambda runtime) │              │   repos)             │
    └──────────────────────┘              └──────────────────────┘
 
    ┌──────────────────────────────────────────────────────────┐
@@ -1598,17 +1615,16 @@ Storage: DynamoDB table (`PromptRegistry`) or a versioned JSON file in S3. For P
 
 ### 14.2 Service Responsibilities
 
-| Service                   | Role                                                                                                                                                                                                           |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AWS Amplify**           | Hosts the React/TS/Vite frontend. Static site deployment.                                                                                                                                                      |
-| **API Gateway**           | Single entry point. Routes requests to Lambdas. Request validation, throttling, CORS. Future: Cognito authorizer for auth.                                                                                     |
-| **Lambda**                | Business logic. One function per concern. Handles: schema CRUD, mapping CRUD, project CRUD, AI orchestration, deployment management, GitHub API calls.                                                         |
-| **DynamoDB**              | Primary data store. Tree structure for schema nodes, project/mapping metadata, deployment records, mapping memory (for RAG reuse). On-demand pricing.                                                          |
-| **S3**                    | Bulk storage for objects exceeding DynamoDB's 400KB limit: full schema content, deployment snapshots, project export bundles, large test case data.                                                            |
-| **OpenSearch Serverless** | Search index for schema nodes. Supports k-NN vector search and BM25 keyword search. Used by the AI pipeline for RAG retrieval. Rebuilt from DynamoDB if needed.                                                |
-| **Step Functions**        | Orchestrates long-running operations that exceed Lambda's 29s API Gateway timeout: large schema ingestion (23k fields → parse → embed → store) and full auto-map on large schemas (parallel chunk processing). |
-| **GitHub Models**         | LLM inference and embeddings. Called by Lambdas only. Provides Tier 1 (gpt-4.1-mini), Tier 2 (gpt-4.1), and embeddings (text-embedding-3-small).                                                               |
-| **GitHub API**            | Accessed by Lambdas to read/write schema files in `KBXT/CDM-Schemas` (read-only) and `KBXT/KeyRa-Schemas` (read-write). Authentication via GitHub App token or PAT stored in Secrets Manager.                  |
+| Service | Role |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AWS Amplify** | Hosts the React/TS/Vite frontend. Static site deployment. |
+| **API Gateway** | Single entry point. Routes requests to Lambdas. Request validation, throttling, CORS. Future: Cognito authorizer for auth. |
+| **Lambda** | Business logic. One function per concern. Handles: schema CRUD, mapping CRUD, project CRUD, AI orchestration, deployment management, GitHub API calls, and bounded retrieval rerank logic. |
+| **DynamoDB** | Primary data store. Tree structure for schema nodes and retrieval signals, project/mapping metadata, deployment records, mapping memory (for RAG reuse). On-demand pricing. |
+| **S3** | Bulk storage for objects exceeding DynamoDB's 400KB limit: full schema content, deployment snapshots, project export bundles, large test case data. |
+| **Step Functions** | Orchestrates long-running operations that exceed Lambda's 29s API Gateway timeout: large schema ingestion (23k fields → parse → retrieval-ready write) and full auto-map on large schemas (parallel chunk processing). |
+| **GitHub Models** | LLM inference and embeddings. Called by Lambdas only. Provides Tier 1 (gpt-4.1-mini), Tier 2 (gpt-4.1), and embeddings (text-embedding-3-small). |
+| **GitHub API** | Accessed by Lambdas to read/write schema files in `KBXT/CDM-Schemas` (read-only) and `KBXT/KeyRa-Schemas` (read-write). Authentication via GitHub App token or PAT stored in Secrets Manager. |
 
 ### 14.3 Lambda Functions
 
@@ -1616,10 +1632,10 @@ Storage: DynamoDB table (`PromptRegistry`) or a versioned JSON file in S3. For P
 
 | Lambda             | Trigger                   | Responsibility                                                                                                                                                                                        |
 | ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ingestSchema`     | `POST /schemas`           | Receives schema content. Parses into tree nodes. For small schemas (< 500 fields): processes inline, writes to DynamoDB + OpenSearch. For large schemas: starts Step Function, returns execution ARN. |
-| `getSchema`        | `GET /schemas/:id`        | Returns schema metadata + content from DynamoDB/S3.                                                                                                                                                   |
-| `deleteSchema`     | `DELETE /schemas/:id`     | Removes schema nodes from DynamoDB + OpenSearch. Removes content from S3.                                                                                                                             |
-| `querySchemaNodes` | `POST /schemas/:id/query` | Hybrid search: vector + keyword via OpenSearch. Enriches results with structural context from DynamoDB (parent chain, siblings).                                                                      |
+| `ingestSchema`     | `POST /schemas`           | Receives schema content. Parses into tree nodes. For small schemas (< 500 fields): processes inline and writes retrieval-ready nodes to DynamoDB. For large schemas: starts Step Function, returns execution ARN. |
+| `getSchema`        | `GET /schemas/:id`        | Returns schema metadata + content from DynamoDB/S3. |
+| `deleteSchema`     | `DELETE /schemas/:id`     | Removes schema nodes from DynamoDB and removes content from S3. |
+| `querySchemaNodes` | `POST /schemas/:id/query` | DynamoDB lexical retrieval with optional bounded embedding rerank and structural context enrichment from DynamoDB. |
 
 #### AI Lambdas
 
@@ -1828,21 +1844,31 @@ Stores versioned prompt templates for all AI features. AI Lambdas read from this
 | `snapshots/{snapshotId}.json` | Immutable deployment snapshot | Never modified after creation |
 | `exports/{projectId}/{timestamp}.keyra` | Project export bundles | Generated on demand |
 
-### 15.3 OpenSearch Serverless
+### 15.3 DynamoDB Retrieval Signals (Post-FS-091)
 
-One collection: `keyra-schema-nodes`
+Schema retrieval is now DynamoDB-only in serving paths.
+
+Primary retrieval fields on `SchemaNodes` items:
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `schemaId` | Keyword | Filter by schema |
-| `path` | Text + Keyword | Keyword search on full path |
-| `fieldName` | Text + Keyword | Keyword search on field name |
-| `embeddingText` | Text | BM25 full-text search |
-| `embedding` | knn_vector (1536) | Vector similarity search |
-| `type` | Keyword | Filter by data type |
-| `depth` | Integer | Filter by nesting level |
-| `parentPath` | Keyword | Structural queries |
-| `isArray` | Boolean | Filter arrays |
+| `schemaId` | String (PK) | Scope retrieval to one schema |
+| `path` | String (SK) | Stable node identity and deterministic tie-break |
+| `fieldName` | String | Human-readable field label |
+| `fieldNameNormalized` | String | Lexical matching signal |
+| `pathTokens` | String[] | Tokenized path/field lexical matching |
+| `embeddingText` | String | RAG context text and lexical enrichment |
+| `embedding` | Number[] (optional) | Optional in-Lambda cosine rerank over capped candidate set |
+| `type` | String | Filter/type boost |
+| `depth` | Number | Depth filter/boost |
+| `parentPath` | String | Structural enrichment |
+| `isArray` | Boolean | Array-specific filtering/boost |
+
+Serving-mode contract:
+
+- Canonical mode: `RAG_RETRIEVER=dynamodb`
+- Candidate-stage guards: `lexicalCap`, `rerankCap`, `topK`, `contextExpansionCap`
+- Shadow/OpenSearch runtime modes are decommissioned after cutover (FS-091 T-08).
 
 ---
 
@@ -1854,7 +1880,7 @@ POST   /schemas                        Create/upload schema
 GET    /schemas                        List all schemas
 GET    /schemas/:id                    Get schema detail
 DELETE /schemas/:id                    Delete schema
-POST   /schemas/:id/query             Search schema nodes (hybrid)
+POST   /schemas/:id/query             Search schema nodes (DynamoDB lexical + optional bounded rerank)
 
 ── Mappings ────────────────────────────────────────────
 POST   /mappings                       Create mapping
@@ -2000,7 +2026,7 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 - AI validation.
 - All features surface as reviewable suggestions.
 
-**Backend needed:** GitHub Models integration (via Lambda), OpenSearch Serverless (for RAG on large schemas), Step Functions (for large schema auto-map).
+**Backend needed:** GitHub Models integration (via Lambda), DynamoDB retrieval signals + bounded in-Lambda rerank, Step Functions (for large schema ingestion/auto-map orchestration).
 
 **Acceptance criteria:**
 - Given a source and target schema with 100 fields each, when BA clicks Auto-Map, then at least 60% of suggested rules are accepted without modification.
@@ -2063,7 +2089,7 @@ POST   /mappings/:id/preview           Execute sample data against a deployed sn
 | **AI generates invalid DSL**       | Broken suggestions frustrate BAs                                                                                | Medium     | Validate every AI-generated expression with the engine's `validate()` before showing to BA. Show inline error if invalid.                                                                                                                                                                                                                                                                                                                                              |
 | **Large schema ingestion timeout** | 23k-field schemas fail to process                                                                               | Medium     | Step Functions handles ingestion in parallel batches. No single Lambda call processes > 500 nodes.                                                                                                                                                                                                                                                                                                                                                                     |
 | **GitHub API rate limits**         | Schema sync/publish fails during heavy use                                                                      | Low        | Cache file listings (5 min for CDM, 1 min for non-CDM). Batch operations. Use GitHub App token (higher rate limits than PATs).                                                                                                                                                                                                                                                                                                                                         |
-| **OpenSearch Serverless cost**     | Minimum ~$10-25/mo even at low usage                                                                            | Certain    | Phase 0-1 operate without OpenSearch. Phase 2+ introduces it only when AI/RAG features ship. Brute-force cosine similarity in Lambda is a fallback for low volume.                                                                                                                                                                                                                                                                                                     |
+| **Retrieval infrastructure cost drift** | DynamoDB/Lambda retrieval cost could grow with query volume and larger schemas | Medium | FS-091 removes OpenSearch always-on baseline cost and uses DynamoDB-only retrieval. Track two-week post-cutover quality/latency plus monthly spend review. Reconsider dedicated search infrastructure only if sustained thresholds are exceeded (for example: p95 latency misses by tier for 2 consecutive reviews, acceptance-rate drop >10%, or Dynamo retrieval spend trends above projected run-rate bands). |
 | **DSL spec instability**           | Frequent DSL changes break saved mappings                                                                       | Medium     | Version the DSL spec. Engine supports forward-compatible parsing. Saved configs include `engineVersion`. Migration path for breaking changes.                                                                                                                                                                                                                                                                                                                          |
 | **BA over-trusts AI suggestions**  | Incorrect mappings reach production                                                                             | Medium     | Never auto-commit. Require explicit "Accept" per rule. Require preview-pass before deploy. Show confidence indicators where possible.                                                                                                                                                                                                                                                                                                                                  |
 | **Non-deterministic AI output**    | Same inputs produce different suggestions                                                                       | Medium     | `temperature: 0` for all LLM calls. Pin model versions. Use structured output mode.                                                                                                                                                                                                                                                                                                                                                                                    |

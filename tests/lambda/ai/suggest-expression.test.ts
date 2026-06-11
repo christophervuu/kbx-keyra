@@ -256,6 +256,11 @@ describe('aiSuggestExpression handler', () => {
       targetType: 'string',
       targetDescription: 'ISO currency code for the document',
       sourceFields: '- InvoiceCurrency (string)\n- TotalAmount (number)',
+    }, {
+      telemetry: {
+        requestId: 'req-123',
+        correlationId: undefined,
+      },
     });
   });
 

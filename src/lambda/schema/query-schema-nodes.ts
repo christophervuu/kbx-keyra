@@ -1,72 +1,35 @@
 import {
   ERROR_CODES,
   errorResponse,
-  getItem,
+  generateRequestId,
   internalError,
   jsonResponse,
   notFound,
   parseBody,
   parsePathParam,
-  query,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { searchSchemaNodes } from '../../lib/schema/index.js';
+import {
+  classifySchemaSizeSegment,
+  emitRetrievalTelemetry,
+  readCorrelationId,
+} from '../../lib/ai/telemetry.js';
+import {
+  getParentChain,
+  getSchemaMetadata,
+  getSchemaRetrieverMode,
+  getSchemaRetriever,
+  type SchemaSearchResult,
+} from '../../lib/schema/index.js';
 
 interface SchemaMetadata {
   readonly schemaId: string;
-}
-
-interface SchemaNodeRecord {
-  readonly schemaId: string;
-  readonly path: string;
-  readonly fieldName: string;
-  readonly type: string;
-  readonly depth?: number;
-  readonly isArray?: boolean;
-  readonly embeddingText?: string;
-  readonly description?: string;
-}
-
-interface SchemaSearchResult {
-  readonly path: string;
-  readonly fieldName: string;
-  readonly type: string;
-  readonly depth: number;
-  readonly isArray: boolean;
-  readonly score: number;
-  readonly embeddingText: string;
-  readonly description?: string;
+  readonly fieldCount?: number;
 }
 
 const MAX_RESULTS = 50;
-const DEGRADED_FALLBACK_ENV = 'SCHEMA_QUERY_DEGRADED_FALLBACK';
-
-function getEnvValue(key: string): string | undefined {
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  return env?.[key];
-}
-
-const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
-const SCHEMA_NODES_TABLE = getEnvValue('SCHEMA_NODES_TABLE');
-
-function getSchemasTableOrThrow(): string {
-  const table = SCHEMAS_TABLE?.trim();
-  if (!table) {
-    throw new Error('Missing required environment variable: SCHEMAS_TABLE');
-  }
-
-  return table;
-}
-
-function getSchemaNodesTableOrThrow(): string {
-  const table = SCHEMA_NODES_TABLE?.trim();
-  if (!table) {
-    throw new Error('Missing required environment variable: SCHEMA_NODES_TABLE');
-  }
-
-  return table;
-}
+const DEFAULT_RESULTS = 50;
 
 function normalizeQuery(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -77,97 +40,135 @@ function normalizeQuery(value: unknown): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-function normalizeQueryForFallback(queryValue: string): string {
-  return queryValue.toLowerCase();
+function normalizeIncludeParentChain(value: unknown): boolean {
+  return value === true;
 }
 
-function isDegradedFallbackEnabled(): boolean {
-  const raw = getEnvValue(DEGRADED_FALLBACK_ENV);
-  if (!raw) {
-    return false;
+function normalizeIncludeContextExpansion(value: unknown): boolean {
+  return value === true;
+}
+
+function normalizeLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_RESULTS;
   }
 
-  const normalized = raw.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'enabled';
-}
+  const floored = Math.floor(value);
+  if (floored <= 0) {
+    return DEFAULT_RESULTS;
+  }
 
-function matchesQuery(node: SchemaNodeRecord, normalizedQuery: string): boolean {
-  return node.path.toLowerCase().includes(normalizedQuery) || node.fieldName.toLowerCase().includes(normalizedQuery);
-}
-
-function toSearchResult(node: SchemaNodeRecord): SchemaSearchResult {
-  return {
-    path: node.path,
-    fieldName: node.fieldName,
-    type: node.type,
-    depth: typeof node.depth === 'number' ? node.depth : 0,
-    isArray: node.isArray === true,
-    score: 0,
-    embeddingText: typeof node.embeddingText === 'string' ? node.embeddingText : `${node.path} | ${node.fieldName} (${node.type})`,
-    ...(typeof node.description === 'string' ? { description: node.description } : {}),
-  };
+  return Math.min(floored, MAX_RESULTS);
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const requestId = generateRequestId();
+  const correlationId = readCorrelationId(event.headers);
   const schemaId = parsePathParam(event, 'id');
   if (!schemaId) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false, requestId);
   }
 
   const body = parseBody(event);
   const queryValue = normalizeQuery(body?.query);
   if (!queryValue) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: query', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: query', 400, false, requestId);
   }
 
+  const startedAt = Date.now();
+
   try {
-    const schema = await getItem<SchemaMetadata>({
-      TableName: getSchemasTableOrThrow(),
-      Key: { schemaId },
-    });
+    const schema = await getSchemaMetadata(schemaId) as SchemaMetadata | null;
 
     if (!schema) {
       const err = notFound('Schema', schemaId);
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable);
+      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
-    try {
-      const openSearchResults = await searchSchemaNodes(schemaId, queryValue, undefined, MAX_RESULTS);
-      return jsonResponse(200, openSearchResults.slice(0, MAX_RESULTS));
-    } catch (error) {
-      if (!isDegradedFallbackEnabled()) {
-        throw error;
-      }
+    const includeParentChain = normalizeIncludeParentChain(body?.includeParentChain);
+    const includeContextExpansion = normalizeIncludeContextExpansion(body?.includeContextExpansion);
+    const limit = normalizeLimit(body?.limit);
+    const retrieverMode = getSchemaRetrieverMode();
+    let shadowTopkJaccardAt10: number | undefined;
+    let shadowNdcgDeltaAt10: number | undefined;
+    let shadowTimingDeltaMs: number | undefined;
+    let shadowSecondaryFailed: boolean | undefined;
+    let shadowSecondaryError: string | undefined;
+    let shadowSampled: boolean | undefined;
 
-      const normalizedFallbackQuery = normalizeQueryForFallback(queryValue);
-      const nodes = await query<SchemaNodeRecord>({
-        TableName: getSchemaNodesTableOrThrow(),
-        KeyConditionExpression: '#schemaId = :schemaId',
-        ExpressionAttributeNames: {
-          '#schemaId': 'schemaId',
-        },
-        ExpressionAttributeValues: {
-          ':schemaId': schemaId,
-        },
-      });
+    const results = await getSchemaRetriever().searchSchemaNodes({
+      schemaId,
+      query: queryValue,
+      requestId,
+      correlationId,
+      filters: typeof body?.filters === 'object' && body.filters !== null ? body.filters as {
+        readonly type?: readonly string[];
+        readonly isArray?: boolean;
+        readonly depth?: number;
+      } : undefined,
+      limit,
+      includeContextExpansion,
+      onShadowTelemetry: (payload) => {
+        shadowSampled = payload.sampled;
+        shadowTopkJaccardAt10 = payload.jaccardAt10;
+        shadowNdcgDeltaAt10 = payload.ndcgDeltaAt10;
+        shadowTimingDeltaMs = payload.timingDeltaMs;
+        shadowSecondaryFailed = payload.secondaryFailed;
+        shadowSecondaryError = payload.secondaryError;
+      },
+    });
 
-      const results = nodes
-        .filter((node) => matchesQuery(node, normalizedFallbackQuery))
-        .slice(0, MAX_RESULTS)
-        .map(toSearchResult);
+    console.info('[schema-query] retrieval completed', {
+      schemaId,
+      retrieverMode,
+      queryLength: queryValue.length,
+      includeParentChain,
+      includeContextExpansion,
+      requestedLimit: limit,
+      resultCount: results.length,
+      durationMs: Date.now() - startedAt,
+    });
 
-      console.warn('[schema-query] degraded fallback activated', {
-        gate: DEGRADED_FALLBACK_ENV,
-        schemaId,
-        queryLength: queryValue.length,
-        fallbackResultCount: results.length,
-        reason: error instanceof Error ? error.message : 'unknown-opensearch-error',
-      });
+    emitRetrievalTelemetry('retrieval.completed', {
+      handler: 'schema.query-schema-nodes',
+      request_id: requestId,
+      correlation_id: correlationId,
+      schema_id: schemaId,
+      retriever_mode: retrieverMode,
+      schema_field_count: typeof schema.fieldCount === 'number' ? Math.floor(schema.fieldCount) : undefined,
+      schema_size_segment: classifySchemaSizeSegment(schema.fieldCount),
+      query_length: queryValue.length,
+      requested_limit: limit,
+      candidate_count: results.length,
+      result_count: results.length,
+      retrieval_ms: Date.now() - startedAt,
+      include_parent_chain: includeParentChain,
+      include_context_expansion: includeContextExpansion,
+      sampled: shadowSampled,
+      shadow_topk_jaccard_at_10: shadowTopkJaccardAt10,
+      shadow_ndcg_delta_at_10: shadowNdcgDeltaAt10,
+      shadow_timing_delta_ms: shadowTimingDeltaMs,
+      secondary_failed: shadowSecondaryFailed,
+      secondary_error: shadowSecondaryError,
+    });
 
-      return jsonResponse(200, results);
+    if (!includeParentChain) {
+      return jsonResponse(200, results.slice(0, limit) as SchemaSearchResult[]);
     }
+
+    const enriched = await Promise.all(
+      results.slice(0, limit).map(async (result) => {
+        const parentChain = await getParentChain(schemaId, result.path);
+        return {
+          ...result,
+          parentChain,
+        };
+      }),
+    );
+
+    return jsonResponse(200, enriched as SchemaSearchResult[]);
   } catch {
-    const err = internalError('Schema query failed while OpenSearch was unavailable');
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable);
+    const err = internalError('Schema query failed while retrieving schema nodes');
+    return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
   }
 }

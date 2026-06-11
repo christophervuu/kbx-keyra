@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const schemaLibMocks = vi.hoisted(() => ({
   getSchemaMetadata: vi.fn(),
+  getSchemaRetrieverMode: vi.fn(),
+  getSchemaRetriever: vi.fn(),
   searchSchemaNodes: vi.fn(),
   getParentChain: vi.fn(),
 }));
@@ -27,6 +29,7 @@ describe('schema ingestion integration - query endpoint', () => {
   beforeEach(() => {
     vi.resetModules();
     schemaLibMocks.getSchemaMetadata.mockReset().mockResolvedValue({ schemaId: 'schema-1' });
+    schemaLibMocks.getSchemaRetrieverMode.mockReset().mockReturnValue('dynamodb');
     schemaLibMocks.searchSchemaNodes.mockReset().mockResolvedValue([
       {
         path: 'Order.Billing.Address.PostalCode',
@@ -47,6 +50,9 @@ describe('schema ingestion integration - query endpoint', () => {
         score: 9.5,
       },
     ]);
+    schemaLibMocks.getSchemaRetriever.mockReset().mockReturnValue({
+      searchSchemaNodes: schemaLibMocks.searchSchemaNodes,
+    });
     schemaLibMocks.getParentChain.mockReset().mockResolvedValue(['Order', 'Order.Billing', 'Order.Billing.Address']);
   });
 
@@ -67,10 +73,40 @@ describe('schema ingestion integration - query endpoint', () => {
     await handler(createEvent({ query: 'amount', filters: { type: ['number'] } }));
 
     expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith(
-      'schema-1',
-      'amount',
-      { type: ['number'] },
-      20,
+      {
+        schemaId: 'schema-1',
+        query: 'amount',
+        filters: { type: ['number'] },
+        limit: 50,
+        includeContextExpansion: false,
+      },
+    );
+  });
+
+  it('forwards limit to retriever request', async () => {
+    const { handler } = await importHandler();
+    await handler(createEvent({ query: 'amount', limit: 17 }));
+
+    expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        query: 'amount',
+        limit: 17,
+        includeContextExpansion: false,
+      }),
+    );
+  });
+
+  it('forwards includeContextExpansion to retriever request when enabled', async () => {
+    const { handler } = await importHandler();
+    await handler(createEvent({ query: 'postal code', includeContextExpansion: true }));
+
+    expect(schemaLibMocks.searchSchemaNodes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaId: 'schema-1',
+        query: 'postal code',
+        includeContextExpansion: true,
+      }),
     );
   });
 

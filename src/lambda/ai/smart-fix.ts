@@ -1,4 +1,9 @@
 import {
+  classifySchemaSizeSegment,
+  emitRetrievalTelemetry,
+  readCorrelationId,
+} from '../../lib/ai/telemetry.js';
+import {
   ERROR_CODES,
   conflict,
   errorResponse,
@@ -46,6 +51,7 @@ interface MappingMetadataRecord {
 interface SchemaMetadataRecord {
   readonly schemaId: string;
   readonly format: 'json-schema' | 'xsd';
+  readonly fieldCount?: number;
 }
 
 interface SchemaNodeRecord {
@@ -562,6 +568,7 @@ function resolveExplanation(data: SmartFixAIOutput): string {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+  const correlationId = readCorrelationId(event.headers);
   const requestBody = parseBody(event);
 
   if (!requestBody) {
@@ -701,6 +708,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(err.code, `Target ${err.message}`, err.statusCode, err.retryable, requestId);
     }
 
+    const retrievalStartedAt = Date.now();
     const [sourceNodes, targetNodes] = await Promise.all([
       query<SchemaNodeRecord>({
         TableName: getSchemaNodesTableOrThrow(),
@@ -728,6 +736,23 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       diagnostics: selectedDiagnostics,
       sourceNodes,
       targetNodes,
+    });
+
+    emitRetrievalTelemetry('retrieval.completed', {
+      handler: 'ai.smart-fix',
+      request_id: requestId,
+      correlation_id: correlationId,
+      schema_id: mapping.sourceSchemaId,
+      retriever_mode: 'dynamodb',
+      schema_field_count: typeof sourceSchemaMeta.fieldCount === 'number'
+        ? Math.floor(sourceSchemaMeta.fieldCount)
+        : undefined,
+      schema_size_segment: classifySchemaSizeSegment(sourceSchemaMeta.fieldCount),
+      query_length: parsed.failingExpression.length,
+      candidate_count: sourceNodes.length,
+      result_count: context.includedSourceNodeCount,
+      retrieval_ms: Date.now() - retrievalStartedAt,
+      include_context_expansion: false,
     });
 
     if (context.includedDiagnosticCount === 0) {
@@ -766,6 +791,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       targetContext: context.targetContext,
       ruleVersion: String(mapping.version),
       ruleHash: computedRuleHash,
+    }, {
+      telemetry: {
+        requestId,
+        correlationId,
+      },
     });
 
     if (result.success) {

@@ -173,6 +173,8 @@ describe('parseXsd', () => {
     expect(docType?.subtreeFieldCount).toBe(1);
     for (const node of result.nodes) {
       expect(node.embeddingText.length).toBeGreaterThan(0);
+      expect(Array.isArray(node.embedding)).toBe(true);
+      expect(node.embedding?.length).toBeGreaterThan(0);
     }
   });
 });
