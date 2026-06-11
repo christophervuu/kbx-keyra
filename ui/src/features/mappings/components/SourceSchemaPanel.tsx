@@ -10,13 +10,15 @@
  * Click-to-stage: fires `onStageField(path)` when a leaf is clicked.
  */
 
-import { Search, X } from 'lucide-react';
-import { memo, useState } from 'react';
-import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Search, X } from 'lucide-react';
+import { memo, useContext, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 
+import { PreviewContext } from '../context/preview-context';
 import { useDragSource } from '../hooks/use-drag-source';
-import { useTreeSearch } from '@/features/schemas/hooks/use-tree-search';
+import { resolveFieldTestValue } from '../lib/source-field-display';
 
+import { useTreeSearch } from '@/features/schemas/hooks/use-tree-search';
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -205,7 +207,8 @@ function renderNode({
   onStageField,
   visiblePaths,
   matchingPaths,
-}: RenderNodeProps): React.ReactNode[] {
+}: RenderNodeProps): ReactNode[] {
+  const rows: ReactNode[] = [];
   // When search is active, only render nodes in the visible set
   if (visiblePaths !== null && !visiblePaths.has(node.path)) {
     return [];
@@ -215,7 +218,7 @@ function renderNode({
   const isExpanded = expandedPaths.has(node.path);
   const isHighlighted = matchingPaths.has(node.path);
 
-  const rows: React.ReactNode[] = [
+  rows.push(
     isContainer ? (
       <ContainerNodeRow
         key={node.path}
@@ -232,7 +235,7 @@ function renderNode({
         isHighlighted={isHighlighted}
       />
     ),
-  ];
+  );
 
   if (isContainer && isExpanded && node.children.length > 0) {
     for (const child of node.children) {
@@ -266,9 +269,12 @@ export function SourceSchemaPanel({
   className = '',
 }: SourceSchemaPanelProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [selectedSourcePath, setSelectedSourcePath] = useState<string | null>(null);
 
-  const allNodes: SchemaTreeNode[] = parsedSourceSchema?.nodes ?? [];
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
+  const allNodes = useMemo<SchemaTreeNode[]>(() => parsedSourceSchema?.nodes ?? [], [parsedSourceSchema]);
   const {
     query,
     setQuery,
@@ -286,6 +292,24 @@ export function SourceSchemaPanel({
       return next;
     });
   };
+
+  const handleStageField = (path: string) => {
+    setSelectedSourcePath(path);
+    onStageField(path);
+  };
+
+  const nodeByPath = useMemo(() => {
+    const map = new Map<string, SchemaTreeNode>();
+    for (const node of allNodes) {
+      map.set(node.path, node);
+    }
+    return map;
+  }, [allNodes]);
+
+  const selectedNode = selectedSourcePath ? nodeByPath.get(selectedSourcePath) ?? null : null;
+  const selectedSampleValue = selectedSourcePath
+    ? resolveFieldTestValue(sourceData, selectedSourcePath)
+    : undefined;
 
   if (!parsedSourceSchema || parsedSourceSchema.nodes.length === 0) {
     return (
@@ -389,11 +413,46 @@ export function SourceSchemaPanel({
               node,
               expandedPaths: effectiveExpandedPaths,
               onToggle: handleToggle,
-              onStageField,
+              onStageField: handleStageField,
               visiblePaths,
               matchingPaths,
             }),
           )
+        )}
+      </div>
+
+      {/* Selected source details */}
+      <div className="shrink-0 border-t border-slate-800 px-2 py-2" data-testid="source-selected-details">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Selected source</p>
+        {selectedNode ? (
+          <div className="mt-1.5 space-y-1.5 rounded border border-slate-700 bg-slate-900/60 p-2">
+            <p className="truncate font-mono text-[11px] text-slate-200" data-testid="source-selected-path" title={selectedNode.path}>
+              {selectedNode.path}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[selectedNode.type] ?? 'bg-slate-700/80 text-slate-300'}`}
+                data-testid="source-selected-type"
+              >
+                {TYPE_ABBREV[selectedNode.type] ?? selectedNode.type}
+              </span>
+              <span className="text-[10px] text-slate-400" data-testid="source-selected-required">
+                {selectedNode.isRequired ? 'Required' : 'Optional'}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500">Sample value</p>
+            <p
+              className="truncate rounded bg-slate-950/80 px-1.5 py-1 font-mono text-[11px] text-slate-300"
+              data-testid="source-selected-sample-value"
+              title={selectedSampleValue ?? 'No sample value'}
+            >
+              {selectedSampleValue ?? 'No sample value'}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-1 text-[11px] text-slate-500" data-testid="source-selected-empty">
+            Select a source field to view details.
+          </p>
         )}
       </div>
     </div>

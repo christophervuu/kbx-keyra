@@ -110,11 +110,18 @@ export interface MappingRule {
   readonly description?: string;
 }
 
+export interface MappingEditorPreferences {
+  /** Mapping-level default selected sample payload id. */
+  readonly defaultSelectedSampleId?: string;
+}
+
 export interface MappingConfigOptions {
   readonly unmappedTargets?: 'omit' | 'null' | 'error';
   readonly nullSubtrees?: readonly string[];
   readonly constants?: Readonly<Record<string, unknown>>;
   readonly externalSources?: readonly string[];
+  /** Additive editor-only preferences persisted with mapping config. */
+  readonly editorPreferences?: MappingEditorPreferences;
 }
 
 export interface MappingConfig {
@@ -689,6 +696,14 @@ export interface Diagnostic {
 export interface AutoMapInput {
   readonly projectId: string;
   readonly mappingId: string;
+  readonly mode?: 'section' | 'whole';
+  readonly sectionPath?: string;
+  readonly targetSection?: string;
+  readonly sourceContext?: string;
+  readonly sourceSchemaId?: string;
+  readonly businessContext?: string;
+  /** Deterministic visible/filter scope for target-field-first auto-map runs. */
+  readonly visibleTargetPaths?: readonly string[];
 }
 
 export interface AutoMapResult {
@@ -705,6 +720,10 @@ export interface AutoMapSectionInput {
   readonly sectionPath?: string;
   readonly targetSection?: string;
   readonly sourceContext?: string;
+  readonly sourceSchemaId?: string;
+  readonly businessContext?: string;
+  /** Deterministic visible/filter scope for target-field-first auto-map runs. */
+  readonly visibleTargetPaths?: readonly string[];
 }
 
 export interface AutoMapSuggestion {
@@ -716,6 +735,14 @@ export interface AutoMapSuggestion {
     readonly valid: boolean;
     readonly diagnostics: readonly Diagnostic[];
   };
+  /** Stable suggestion identifier for row-level review actions. */
+  readonly suggestionId?: string;
+  /** Lifecycle state exposed by backend-generated suggestion payloads. */
+  readonly lifecycleStatus?: AiSuggestionLifecycleStatus;
+  /** Canonical review status for UI action controls. */
+  readonly reviewStatus?: SuggestionReviewStatus;
+  /** Explicit apply/action eligibility for accept/edit/dismiss UX. */
+  readonly actionEligibility?: SuggestionActionEligibility;
 }
 
 export interface AutoMapSectionResult {
@@ -735,6 +762,11 @@ export interface AutoMapSectionResult {
   };
   readonly dedupMeta?: {
     readonly duplicatesCollapsed?: number;
+  };
+  readonly scopeMeta?: {
+    readonly visibleTargetPaths?: readonly string[];
+    readonly mode?: 'section' | 'whole';
+    readonly sectionPath?: string;
   };
 }
 
@@ -782,6 +814,27 @@ export interface AutoMapReviewSummary {
   readonly highConfidence: number;
   readonly mediumConfidence: number;
   readonly lowConfidence: number;
+}
+
+export type MappingEditorRowStatus =
+  | 'unmapped'
+  | 'mapped'
+  | 'warning'
+  | 'error'
+  | 'ai-suggestion'
+  | 'accepted-ai-suggestion'
+  | 'intentionally-unmapped';
+
+export interface MappingEditorRowContract {
+  readonly targetPath: string;
+  readonly targetType: string;
+  readonly required: boolean;
+  readonly status: MappingEditorRowStatus;
+  readonly sourceSummary?: string;
+  readonly mappingMethodLabel?: string;
+  readonly notesPreview?: string;
+  readonly sampleOutput?: string;
+  readonly suggestion?: AutoMapSuggestion;
 }
 
 export interface SuggestExpressionInput {

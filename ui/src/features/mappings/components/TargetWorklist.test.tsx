@@ -44,6 +44,14 @@ const NESTED_NODES: SchemaTreeNode[] = (() => {
   return [nameNode, ...nameChildren, makeNode('age', 'age', 'number', 0)];
 })();
 
+const makeArrayTree = (arrayPath: string, childCount: number): SchemaTreeNode[] => {
+  const children = Array.from({ length: childCount }, (_, index) =>
+    makeNode(`${arrayPath}.field${index + 1}`, `field${index + 1}`, 'string', 1, index % 3 === 0),
+  );
+  const parent = makeNode(arrayPath, arrayPath.split('.').at(-1) ?? 'items', 'array', 0, false, children);
+  return [parent, ...children];
+};
+
 const makeRule = (target: string): MappingRule => ({
   target,
   type: 'string',
@@ -100,6 +108,17 @@ describe('TargetWorklist', () => {
     expect(screen.getAllByTestId('status-icon-unmapped')).toHaveLength(2);
   });
 
+  it('shows AI status icon for suggested auto-map rows', () => {
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        autoMapSuggestionStatusByPath={{ firstName: 'suggested' }}
+      />,
+    );
+    expect(screen.getByTestId('status-icon-ai')).toBeInTheDocument();
+  });
+
   it('shows warning status from validation diagnostics', () => {
     const rules = [makeRule('firstName')];
     const validation = makeValidation([
@@ -129,6 +148,46 @@ describe('TargetWorklist', () => {
     );
     fireEvent.click(screen.getByTestId('target-field-row-firstName'));
     expect(onSelectNode).toHaveBeenCalledWith('firstName', 'string');
+  });
+
+  it('renders muted sample output preview when provided', () => {
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        sampleOutputByTargetPath={{ firstName: 'Alice' }}
+      />,
+    );
+    expect(screen.getAllByTestId('sample-output-preview').length).toBeGreaterThan(0);
+  });
+
+  it('calls onClearSelection when Clear active row is clicked', () => {
+    const onClearSelection = vi.fn();
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        selectedPath="firstName"
+        onClearSelection={onClearSelection}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('target-clear-selection'));
+    expect(onClearSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits visible scope metadata for auto-map affordance', () => {
+    const onVisibleScopeChange = vi.fn();
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        onVisibleScopeChange={onVisibleScopeChange}
+      />,
+    );
+    expect(onVisibleScopeChange).toHaveBeenCalled();
+    const lastCall = onVisibleScopeChange.mock.calls.at(-1)?.[0];
+    expect(lastCall.count).toBe(3);
+    expect(lastCall.visibleTargetPaths).toEqual(expect.arrayContaining(['firstName', 'lastName', 'age']));
   });
 
   it('highlights the selected field', () => {
@@ -165,6 +224,87 @@ describe('TargetWorklist', () => {
 
     fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
     expect(screen.getAllByTestId('status-icon-mapped')).toHaveLength(3);
+  });
+
+  it('shows prioritized child subset for medium arrays (26–75 children)', () => {
+    const nodes = makeArrayTree('lineItems', 30);
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodes} />);
+
+    fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
+
+    expect(screen.getByTestId('array-summary-lineItems')).toHaveTextContent('Showing 25 prioritized of 30 child fields');
+    expect(screen.getByTestId('array-summary-lineItems')).toHaveTextContent('Items: —');
+    const renderedChildren = screen.getAllByTestId(/^target-field-row-lineItems\.field\d+$/);
+    expect(renderedChildren).toHaveLength(25);
+    expect(screen.getByTestId('target-field-row-lineItems.field1')).toBeInTheDocument();
+  });
+
+  it('shows summary-first expansion for large arrays (>75 children)', () => {
+    const nodes = makeArrayTree('lineItems', 80);
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodes} />);
+
+    fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
+
+    const summary = screen.getByTestId('array-summary-lineItems');
+    expect(summary).toHaveTextContent('80 child fields available');
+    expect(summary).toHaveTextContent('Open Array Builder');
+    expect(screen.queryByTestId('target-field-row-lineItems.field1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('array-view-all-lineItems')).toBeInTheDocument();
+    expect(screen.getByTestId('array-view-prioritized-lineItems')).toBeInTheDocument();
+  });
+
+  it('supports View all child fields action for large arrays', () => {
+    const nodes = makeArrayTree('lineItems', 80);
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodes} />);
+
+    fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
+    fireEvent.click(screen.getByTestId('array-view-all-lineItems'));
+
+    expect(screen.getByTestId('target-field-row-lineItems.field1')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-lineItems.field80')).toBeInTheDocument();
+  });
+
+  it('routes Open Array Builder action to array parent selection', () => {
+    const onSelectNode = vi.fn();
+    const nodes = makeArrayTree('lineItems', 80);
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={nodes}
+        onSelectNode={onSelectNode}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
+    fireEvent.click(screen.getByTestId('array-open-builder-lineItems'));
+
+    expect(onSelectNode).toHaveBeenCalledWith('lineItems', 'array');
+  });
+
+  it('shows array parent source summary, method label, and sample item count', () => {
+    const nodes = makeArrayTree('lineItems', 30);
+    const rules: MappingRule[] = [
+      {
+        target: 'lineItems',
+        type: 'array',
+        expression: 'map(source("order.items"), item())',
+      },
+    ];
+
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={nodes}
+        rules={rules}
+        sampleArrayItemCountByTargetPath={{ lineItems: 12 }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('expand-toggle-lineItems'));
+    const summary = screen.getByTestId('array-summary-lineItems');
+    expect(summary).toHaveTextContent('Method: Map list');
+    expect(summary).toHaveTextContent('Source list: order.items');
+    expect(summary).toHaveTextContent('Items: 12');
   });
 
   it('renders target panel header title', () => {

@@ -277,7 +277,7 @@ describe('ScalarFieldBuilder', () => {
 
   it('renders question-first Step 1 prompt in builder mode', () => {
     renderBuilder();
-    expect(screen.getByTestId('scalar-entry-question')).toHaveTextContent('Where does this value come from?');
+    expect(screen.getByTestId('scalar-entry-question')).toHaveTextContent('Value source');
     expect(screen.queryByText('Step 1')).not.toBeInTheDocument();
     expect(screen.queryByText('Step 2')).not.toBeInTheDocument();
   });
@@ -287,8 +287,9 @@ describe('ScalarFieldBuilder', () => {
 
     expect(screen.getByTestId('scalar-entry-mode-source')).toHaveTextContent('Source field');
     expect(screen.getByTestId('scalar-entry-mode-static')).toHaveTextContent('Static value');
-    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External');
-    expect(screen.getByTestId('scalar-entry-mode-external')).toBeDisabled();
+    expect(screen.getByTestId('scalar-entry-mode-constant')).toHaveTextContent('Constant');
+    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External source');
+    expect(screen.getByTestId('scalar-entry-mode-unmapped')).toHaveTextContent('Leave unmapped');
     expect(screen.queryByTestId('scalar-source-field-section')).not.toBeInTheDocument();
   });
 
@@ -334,6 +335,60 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('scalar-logic-lane')).toBeInTheDocument();
     expect(screen.getByTestId('scalar-logic-heading')).toHaveTextContent('Logic');
     expect(screen.getByTestId('add-logic-option-transform')).toBeInTheDocument();
+  });
+
+  it('renders constant value source controls and emits constant DSL', async () => {
+    const user = userEvent.setup();
+    const updateDraft = vi.fn();
+    renderBuilder({ updateDraft });
+
+    await user.click(screen.getByTestId('scalar-entry-mode-constant'));
+    const input = screen.getByTestId('scalar-constant-input');
+    await user.type(input, 'TAX_RATE');
+
+    expect(screen.getByTestId('scalar-constant-section')).toBeInTheDocument();
+    expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'constant("TAX_RATE")');
+  });
+
+  it('renders external value source controls and emits external DSL', async () => {
+    const user = userEvent.setup();
+    const updateDraft = vi.fn();
+    renderBuilder({ updateDraft });
+
+    await user.click(screen.getByTestId('scalar-entry-mode-external'));
+    const input = screen.getByTestId('scalar-external-input');
+    await user.type(input, 'lookupTable');
+
+    expect(screen.getByTestId('scalar-external-section')).toBeInTheDocument();
+    expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'external("lookupTable")');
+  });
+
+  it('supports leave unmapped value source and shows BA-friendly validation copy', async () => {
+    const user = userEvent.setup();
+    renderBuilder({ selectedTargetRequired: true });
+
+    await user.click(screen.getByTestId('scalar-entry-mode-unmapped'));
+
+    expect(screen.getByTestId('scalar-unmapped-section')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-validation-message')).toHaveTextContent('Required field intentionally unmapped');
+  });
+
+  it('keeps advanced mode DSL hidden by default and reveals it when enabled', async () => {
+    const user = userEvent.setup();
+    renderBuilder({ currentExpression: 'source("firstName")' });
+
+    expect(screen.getByTestId('advanced-mode-hidden')).toBeInTheDocument();
+    expect(screen.queryByTestId('advanced-mode-dsl-panel')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('advanced-mode-toggle'));
+    expect(screen.getByTestId('advanced-mode-dsl-panel')).toBeInTheDocument();
+  });
+
+  it('renders builder guidance sections for output, notes, and value source label', () => {
+    renderBuilder();
+    expect(screen.getByTestId('builder-target-output')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-notes-input')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-value-source-label')).toBeInTheDocument();
   });
 
   it('switches to editor mode when Editor toggle is clicked', () => {
@@ -488,7 +543,7 @@ describe('ScalarFieldBuilder', () => {
       currentStatus: 'mapped',
     });
     // RawDslEditor should contain the expression text
-    const textarea = screen.getByRole('textbox');
+    const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
     expect(textarea).toHaveValue('{"id": "x"}');
   });
 
@@ -627,7 +682,7 @@ describe('ScalarFieldBuilder', () => {
         revertDraft,
         getDraftExpression,
       });
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'source("x")' } });
       expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("x")');
     });
@@ -644,7 +699,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}', // forces editor mode
         onExpressionChange,
       });
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'source("x")' } });
       expect(onExpressionChange).toHaveBeenCalledWith('source("x")');
     });
@@ -765,7 +820,7 @@ describe('ScalarFieldBuilder', () => {
         getDraftExpression,
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'source("email")' } });
       // Now reset — trivial expression, no confirmation
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
@@ -777,7 +832,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
       expect(screen.getByTestId('reset-draft-confirm-prompt')).toBeInTheDocument();
@@ -788,7 +843,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
       fireEvent.click(screen.getByTestId('reset-draft-confirm'));
@@ -800,13 +855,13 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
       fireEvent.click(screen.getByTestId('reset-draft-cancel'));
       expect(screen.queryByTestId('reset-draft-confirm-prompt')).not.toBeInTheDocument();
       // Expression textarea should still have the value
-      expect(screen.getByRole('textbox')).toHaveValue('upper(source("email"))');
+      expect(screen.getByRole('textbox', { name: 'DSL expression editor' })).toHaveValue('upper(source("email"))');
     });
   });
 

@@ -37,6 +37,9 @@ interface MappingConfigOptions {
   readonly nullSubtrees?: readonly string[];
   readonly constants?: Readonly<Record<string, unknown>>;
   readonly externalSources?: readonly string[];
+  readonly editorPreferences?: {
+    readonly defaultSelectedSampleId?: string;
+  };
 }
 
 interface MappingConfig {

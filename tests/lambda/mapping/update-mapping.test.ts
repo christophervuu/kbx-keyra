@@ -107,6 +107,36 @@ describe('update-mapping handler', () => {
     expect(parsed.coverage).toBe(50);
   });
 
+  it('persists optional businessContext and additive editorPreferences on update payload', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      businessContext: 'Map invoice totals and currency into order payload.',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      config: {
+        editorPreferences: {
+          defaultSelectedSampleId: 'sample-2',
+        },
+      },
+      rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"editorPreferences":{"defaultSelectedSampleId":"sample-2"}'),
+    }));
+
+    expect(sharedMocks.updateItem).toHaveBeenCalledWith(expect.objectContaining({
+      ExpressionAttributeValues: expect.objectContaining({
+        ':businessContext': 'Map invoice totals and currency into order payload.',
+      }),
+    }));
+  });
+
   it('loads target schema content and passes it to validate for coverage derivation', async () => {
     sharedMocks.parseBody.mockReturnValue({
       projectId: 'proj-1',

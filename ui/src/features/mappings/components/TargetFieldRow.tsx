@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, Sparkles, XCircle } from 'lucide-react';
 import { memo } from 'react';
 import type { CSSProperties } from 'react';
 
@@ -15,7 +15,13 @@ export type TargetFieldType =
   | 'null'
   | 'integer';
 
-export type TargetFieldStatus = 'unmapped' | 'mapped' | 'warning' | 'error';
+export type TargetFieldStatus =
+  | 'unmapped'
+  | 'mapped'
+  | 'warning'
+  | 'error'
+  | 'ai'
+  | 'intentionally-unmapped';
 
 export interface TargetFieldRowProps {
   /** Display name of the field */
@@ -38,6 +44,14 @@ export interface TargetFieldRowProps {
   isExpanded: boolean;
   /** Coverage for object/array nodes */
   coverage?: { mapped: number; total: number };
+  /** Human-readable source summary (e.g. source path or static marker) */
+  sourceSummary?: string;
+  /** Display mapping method label */
+  mappingTypeLabel?: string;
+  /** Short notes preview for this row */
+  notesPreview?: string;
+  /** Muted sample output preview text */
+  sampleOutputPreview?: string;
   /** Fired when the row body is clicked */
   onClick: () => void;
   /** Fired when the expand/collapse chevron is clicked */
@@ -111,6 +125,24 @@ function StatusIcon({ status }: { status: TargetFieldStatus }) {
           data-testid="status-icon-unmapped"
         />
       );
+    case 'ai':
+      return (
+        <Sparkles
+          size={14}
+          className="shrink-0 text-violet-400"
+          aria-label="AI suggestion"
+          data-testid="status-icon-ai"
+        />
+      );
+    case 'intentionally-unmapped':
+      return (
+        <Circle
+          size={14}
+          className="shrink-0 text-amber-500"
+          aria-label="Intentionally unmapped"
+          data-testid="status-icon-intentionally-unmapped"
+        />
+      );
   }
 }
 
@@ -141,6 +173,10 @@ export const TargetFieldRow = memo(function TargetFieldRow({
   isExpandable,
   isExpanded,
   coverage,
+  sourceSummary,
+  mappingTypeLabel,
+  notesPreview,
+  sampleOutputPreview,
   onClick,
   onToggleExpand,
 }: TargetFieldRowProps) {
@@ -195,22 +231,54 @@ export const TargetFieldRow = memo(function TargetFieldRow({
         <span className="w-[18px] shrink-0" aria-hidden="true" />
       )}
 
-      {/* Field name + required indicator */}
-      <span className="min-w-0 shrink-0 max-w-[140px] truncate font-mono text-xs text-slate-200" title={fieldPath}>
+      {/* Target */}
+      <span
+        className="min-w-0 shrink-0 max-w-[180px] truncate font-mono text-xs text-slate-200"
+        title={fieldPath}
+      >
         {fieldName}
         {required && (
-          <span
-            className="ml-0.5 text-red-400"
-            aria-label="Required"
-            data-testid="required-indicator"
-          >
+          <span className="ml-0.5 text-red-400" aria-label="Required" data-testid="required-indicator">
             *
           </span>
         )}
       </span>
 
-      {/* Spacer */}
-      <span className="flex-1" />
+      {/* Source summary */}
+      <span
+        className="hidden min-w-0 flex-1 truncate text-[11px] text-slate-400 xl:block"
+        data-testid="source-summary"
+        title={sourceSummary ?? '—'}
+      >
+        {sourceSummary ?? '—'}
+      </span>
+
+      {/* Mapping type */}
+      <span
+        className="hidden w-24 shrink-0 truncate text-[11px] text-slate-400 lg:block"
+        data-testid="mapping-type"
+        title={mappingTypeLabel ?? 'Not configured'}
+      >
+        {mappingTypeLabel ?? 'Not configured'}
+      </span>
+
+      {/* Notes preview */}
+      <span
+        className="hidden min-w-0 w-28 shrink-0 truncate text-[11px] text-slate-500 2xl:block"
+        data-testid="notes-preview"
+        title={notesPreview ?? '—'}
+      >
+        {notesPreview ?? '—'}
+      </span>
+
+      {/* Muted sample output */}
+      <span
+        className="hidden min-w-0 w-28 shrink-0 truncate text-[11px] italic text-slate-500 xl:block"
+        data-testid="sample-output-preview"
+        title={sampleOutputPreview ?? 'No sample output'}
+      >
+        {sampleOutputPreview ?? 'No sample output'}
+      </span>
 
       {/* Coverage bar for object/array rows */}
       {coverage && (

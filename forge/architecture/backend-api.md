@@ -379,6 +379,45 @@ AI safety invariant (FS-088 / FS-074 alignment):
 - create-time generated suggestions are review artifacts only
 - no implicit commit/accept of AI output is allowed in create flow
 
+### FS-092 Mapping Editor contract addendum (authoring-route boundaries + editor-facing payloads)
+
+FS-092 codifies Mapping Editor as an authoring-only route and formalizes additive editor-facing API semantics.
+
+Route-boundary semantics:
+
+- Authoring route (`/projects/:projectId/mappings/:mappingId`) does not introduce deploy-side mutation calls.
+- Full testing and deployment actions are route-outs to canonical routes:
+  - Test Lab: `/projects/:projectId/mappings/:mappingId/test-lab`
+  - Deployment: `/projects/:projectId/mappings/:mappingId/deploy`
+- Backend deploy/promote/rollback contracts are unchanged; FS-092 clarifies that editor Save and editor route-outs are separate concerns.
+
+Mapping payload addendum (additive, backward-compatible):
+
+- Mapping config supports additive editor preferences at `config.editorPreferences`.
+- Canonical FS-092 field currently in-use:
+  - `defaultSelectedSampleId?: string` (mapping-level default source sample selection)
+- Absent `editorPreferences` must remain valid and interpreted as no explicit mapping-level preference.
+
+Sample lifecycle contract usage from Mapping Editor:
+
+- Editor sample add flow uses existing canonical endpoint `POST /schemas/:id/samples` with save-only semantics (`applySuggestedUpdates=false`).
+- FS-092 does not change sample mutation guards; no automatic schema structure mutation occurs unless explicit apply-all mode is requested.
+
+Auto-map request/response addendum:
+
+- Existing `/ai/auto-map` contract remains canonical.
+- FS-092 authoring UX uses deterministic visible-scope targeting via optional request field:
+  - `visibleTargetPaths?: string[]`
+- Optional response `scopeMeta.visibleTargetPaths` and `scopeMeta.sectionPath/mode` are treated as additive metadata for workspace transparency and auditability.
+- Suggestion lifecycle/eligibility metadata remains additive and suggestion-only:
+  - lifecycle status (`suggested|accepted|edited|dismissed|stale`)
+  - action eligibility (`canAccept`, `canBatchAccept`, `blockReasons[]`)
+
+Validation/issues surface contract:
+
+- Editor-side consolidated issues view is derived from canonical deterministic diagnostics already returned by validation flows.
+- API posture remains: deterministic validation is authoritative; AI validation remains advisory/additive.
+- Raw diagnostic payloads remain available for advanced tooling, but FS-092 default UX surfaces BA-friendly issue text and severity.
 
 | Handler | DynamoDB patterns |
 |---|---|

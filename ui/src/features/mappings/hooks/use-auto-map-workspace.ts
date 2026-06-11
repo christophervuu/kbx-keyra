@@ -89,7 +89,7 @@ export interface UseAutoMapWorkspaceResult {
   hasPersistedSuggestions: boolean;
 
   // Actions
-  triggerAutoMap: (sectionPath: string) => void;
+  triggerAutoMap: (sectionPath: string, visibleTargetPaths?: readonly string[]) => void;
   acceptSuggestion: (targetPath: string) => void;
   editSuggestion: (targetPath: string) => void;
   dismissSuggestion: (targetPath: string) => void;
@@ -643,7 +643,12 @@ export function useAutoMapWorkspace({
   type RefreshMode = 'all' | 'unmapped' | 'stale';
 
   const runFetch = useCallback(
-    async (path: string, mode: RefreshMode, existingItems: readonly SuggestionWorkspaceItem[]) => {
+    async (
+      path: string,
+      mode: RefreshMode,
+      existingItems: readonly SuggestionWorkspaceItem[],
+      visibleTargetPaths?: readonly string[],
+    ) => {
       abortControllerRef.current?.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -672,6 +677,7 @@ export function useAutoMapWorkspace({
         sectionPath: normalizedPath === '' ? undefined : normalizedPath,
         targetSection,
         sourceContext: deriveSourceContext(parsedSourceSchemaRef.current),
+        visibleTargetPaths,
       };
 
       try {
@@ -729,7 +735,7 @@ export function useAutoMapWorkspace({
   // ---------------------------------------------------------------------------
 
   const triggerAutoMap = useCallback(
-    (path: string): void => {
+    (path: string, visibleTargetPaths?: readonly string[]): void => {
       const normalizedPath = normalizeSectionPath(path);
       setSectionPath(normalizedPath);
       setLastBatchAcceptResult(null);
@@ -753,7 +759,7 @@ export function useAutoMapWorkspace({
       }
 
       // No persisted suggestions — fetch fresh
-      void runFetch(normalizedPath, 'all', []);
+      void runFetch(normalizedPath, 'all', [], visibleTargetPaths);
     },
     [mappingId, runFetch, applyStaleDetection],
   );

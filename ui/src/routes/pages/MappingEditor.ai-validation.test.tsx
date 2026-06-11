@@ -1,13 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
+import type { ValidationResult as EngineValidationResult } from '@/lib/engine';
 import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 import MappingEditor from '@/routes/pages/MappingEditor';
-
-import type { ValidationResult as EngineValidationResult } from '@/lib/engine';
+import { PATHS } from '@/routes/paths';
 
 const MOCK_CONFIG: MappingConfig = {
   id: 'mapping-1',
@@ -173,23 +175,28 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
 }
 
 function renderPage(adapter: ApiAdapter) {
-  const router = createMemoryRouter(
-    [
-      {
-        path: '/projects/:projectId/mappings/:mappingId',
-        element: <MappingEditor />,
-      },
-    ],
+  return renderWithRouter(adapter, [
     {
-      initialEntries: ['/projects/project-1/mappings/mapping-1'],
-      future: {
-        v7_startTransition: true,
-        v7_relativeSplatPath: true,
-      },
+      path: '/projects/:projectId/mappings/:mappingId',
+      element: <MappingEditor />,
     },
-  );
+  ]);
+}
 
-  return render(
+function renderWithRouter(
+  adapter: ApiAdapter,
+  routes: Array<{ path: string; element: ReactNode }>,
+  initialEntries: string[] = ['/projects/project-1/mappings/mapping-1'],
+) {
+  const router = createMemoryRouter(routes, {
+    initialEntries,
+    future: {
+      v7_startTransition: true,
+      v7_relativeSplatPath: true,
+    },
+  });
+
+  const rendered = render(
     <AdapterProvider adapter={adapter}>
       <RouterProvider
         router={router}
@@ -199,6 +206,8 @@ function renderPage(adapter: ApiAdapter) {
       />
     </AdapterProvider>,
   );
+
+  return { ...rendered, router };
 }
 
 function createValidationErrorResult(targetPath: string): EngineValidationResult {
@@ -297,5 +306,45 @@ describe('MappingEditor AI Validation integration', () => {
     });
 
     validateSpy.mockRestore();
+  });
+
+  it('routes More menu actions to canonical Test Lab and Deployment paths', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter();
+
+    const { router } = renderWithRouter(adapter, [
+      {
+        path: '/projects/:projectId/mappings/:mappingId',
+        element: <MappingEditor />,
+      },
+      {
+        path: PATHS.MAPPING_TEST,
+        element: <div data-testid="test-lab-route" />,
+      },
+      {
+        path: PATHS.MAPPING_DEPLOYMENT,
+        element: <div data-testid="deployment-route" />,
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('more-menu-button'));
+    await user.click(screen.getByTestId('more-menu-test-lab'));
+    await waitFor(() => {
+      expect(screen.getByTestId('test-lab-route')).toBeInTheDocument();
+    });
+
+    await router.navigate('/projects/project-1/mappings/mapping-1');
+    await waitFor(() => {
+      expect(screen.getByTestId('more-menu-button')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('more-menu-button'));
+    await user.click(screen.getByTestId('more-menu-deployment'));
+    await waitFor(() => {
+      expect(screen.getByTestId('deployment-route')).toBeInTheDocument();
+    });
   });
 });

@@ -45,12 +45,16 @@ interface MappingConfigOptions {
   readonly nullSubtrees?: readonly string[];
   readonly constants?: Readonly<Record<string, unknown>>;
   readonly externalSources?: readonly string[];
+  readonly editorPreferences?: {
+    readonly defaultSelectedSampleId?: string;
+  };
 }
 
 interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
@@ -63,6 +67,7 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly revision?: number;
   readonly latestVersion?: number | null;
@@ -75,6 +80,15 @@ interface MappingMetadata {
   readonly configS3Key: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+function normalizeOptionalBusinessContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 interface MappingRevisionItem {
@@ -270,10 +284,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const nextRevision = currentRevision + 1;
+    const businessContext = normalizeOptionalBusinessContext(body?.businessContext);
     const config: MappingConfig = {
       id: mappingId,
       projectId: typeof body?.projectId === 'string' ? body.projectId : existing.projectId,
       name: typeof body?.name === 'string' ? body.name : existing.name,
+      ...(businessContext ? { businessContext } : {}),
       version: nextRevision,
       engineVersion: typeof body?.engineVersion === 'string' ? body.engineVersion : '1.0.0',
       sourceSchemaRef: (body?.sourceSchemaRef as SchemaRef | undefined) ?? undefined,
@@ -327,10 +343,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       TableName: getMappingsTableOrThrow(),
       Key: { mappingId },
       UpdateExpression:
-        'SET #projectId = :projectId, #name = :name, #revision = :revision, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt, #configHash = :configHash',
+        'SET #projectId = :projectId, #name = :name, #businessContext = :businessContext, #revision = :revision, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt, #configHash = :configHash',
       ExpressionAttributeNames: {
         '#projectId': 'projectId',
         '#name': 'name',
+        '#businessContext': 'businessContext',
         '#revision': 'revision',
         '#version': 'version',
         '#status': 'status',
@@ -344,6 +361,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ExpressionAttributeValues: {
         ':projectId': config.projectId ?? existing.projectId,
         ':name': config.name,
+        ':businessContext': businessContext ?? existing.businessContext ?? null,
         ':revision': nextRevision,
         ':version': nextRevision,
         ':status': derivation.status,

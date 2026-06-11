@@ -62,6 +62,8 @@ export interface ConnectedInlinePreviewStripProps {
    * When a diagnostic entry is clicked, this fires with the rule's index.
    */
   onNavigateToRule?: (ruleIndex: number) => void;
+  /** Optional externally managed source payload raw text (e.g. selected schema sample). */
+  externalSourceDataRaw?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,8 +97,9 @@ export function ConnectedInlinePreviewStrip({
   selectedTargetPath,
   getDraftExpression,
   onNavigateToRule,
+  externalSourceDataRaw = null,
 }: ConnectedInlinePreviewStripProps) {
-  const [sourceData, setSourceData] = useState('');
+  const [sourceData, setSourceData] = useState(() => externalSourceDataRaw ?? '');
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [autoRun, setAutoRun] = useState<boolean>(readAutoRunFromStorage);
 
@@ -169,8 +172,6 @@ export function ConnectedInlinePreviewStrip({
     return () => {
       if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
     };
-  // getDraftExpression is stable (useCallback in hook) — safe to include
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath, getDraftExpression, autoRun, sourceData, run]);
 
   const output =

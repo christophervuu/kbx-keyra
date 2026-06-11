@@ -122,6 +122,8 @@ export { BreadcrumbNav } from './BreadcrumbNav';
 export type { BreadcrumbNavProps } from './BreadcrumbNav';
 export { InlinePreviewStrip } from './InlinePreviewStrip';
 export type { InlinePreviewStripProps } from './InlinePreviewStrip';
+export { IssuesPanel } from './IssuesPanel';
+export type { IssuesPanelProps, ConsolidatedIssueItem } from './IssuesPanel';
 export { ConnectedInlinePreviewStrip } from './ConnectedInlinePreviewStrip';
 export type { ConnectedInlinePreviewStripProps } from './ConnectedInlinePreviewStrip';
 export { TestLabPage } from './TestLabPage';

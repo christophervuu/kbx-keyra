@@ -19,6 +19,7 @@ import {
   ScalarFieldBuilder,
   SourceSchemaPanel,
   TargetWorklist,
+  IssuesPanel,
   UnsavedChangesOverlay,
   VersionDiffView,
   VersionHistoryDrawer,
@@ -27,15 +28,63 @@ import {
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
   type TargetFieldStatus,
+  type ConsolidatedIssueItem,
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
 import { useAutoMapWorkspace, useExpressionBuilder, useMappingEditor, useTargetStatus, useVersionHistory } from '@/features/mappings/hooks';
 import { getPendingAutoMapSession } from '@/features/mappings/lib';
+import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-display';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
-import type { SchemaTreeNode } from '@/lib/types/domain';
+import { executeMapping } from '@/lib/engine';
+import type { SchemaSamplePayloadMetadata, SchemaTreeNode } from '@/lib/types/domain';
+import { PATHS } from '@/routes/paths';
+
+const LAST_SELECTED_SAMPLE_STORAGE_PREFIX = 'keyra:mappings:last-selected-sample';
+
+function readLastSelectedSampleId(mappingId: string): string | null {
+  try {
+    const raw = localStorage.getItem(`${LAST_SELECTED_SAMPLE_STORAGE_PREFIX}:${mappingId}`);
+    return raw && raw.trim().length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastSelectedSampleId(mappingId: string, sampleId: string | null): void {
+  try {
+    const key = `${LAST_SELECTED_SAMPLE_STORAGE_PREFIX}:${mappingId}`;
+    if (sampleId === null) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, sampleId);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+export function resolveInitialSelectedSampleId(params: {
+  readonly samples: readonly SchemaSamplePayloadMetadata[];
+  readonly lastSelectedSampleId: string | null;
+  readonly mappingDefaultSampleId: string | null;
+}): string | null {
+  const { samples, lastSelectedSampleId, mappingDefaultSampleId } = params;
+  const available = new Set(samples.map((sample) => sample.sampleId));
+
+  if (lastSelectedSampleId && available.has(lastSelectedSampleId)) {
+    return lastSelectedSampleId;
+  }
+
+  if (mappingDefaultSampleId && available.has(mappingDefaultSampleId)) {
+    return mappingDefaultSampleId;
+  }
+
+  const schemaDefault = samples.find((sample) => sample.usedForInference) ?? null;
+  return schemaDefault?.sampleId ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,6 +164,19 @@ function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldT
   }
 }
 
+function resolveValueAtPath(sourceData: unknown, fieldPath: string): unknown {
+  if (sourceData === null || sourceData === undefined) return undefined;
+  const normalized = fieldPath.replace(/\[(\d+)\]/g, '.$1');
+  const segments = normalized.split('.').filter((segment) => segment.length > 0);
+
+  let current: unknown = sourceData;
+  for (const segment of segments) {
+    if (current === null || current === undefined || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
 // ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
@@ -171,7 +233,60 @@ export default function MappingEditor() {
   // Project name (lightweight fetch — display only)
   // ---------------------------------------------------------------------------
   const adapter = useAdapter();
+  const [isSamplePickerOpen, setIsSamplePickerOpen] = useState(false);
+  const [isAddSampleOpen, setIsAddSampleOpen] = useState(false);
+  const [sampleNameInput, setSampleNameInput] = useState('');
+  const [sampleContentInput, setSampleContentInput] = useState('');
+  const [sampleActionError, setSampleActionError] = useState<string | null>(null);
+  const [isSampleActionLoading, setIsSampleActionLoading] = useState(false);
+  const [isIssuesOpen, setIsIssuesOpen] = useState(false);
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null | undefined>(undefined);
+  const [samplePayloadCache, setSamplePayloadCache] = useState<Record<string, { raw: string; parsed: unknown | null }>>({});
+  const [localSamplePayloadsBySchema, setLocalSamplePayloadsBySchema] = useState<Record<string, readonly SchemaSamplePayloadMetadata[]>>({});
   const [projectName, setProjectName] = useState<string>('Project');
+
+  const sourceSchemaMetadata = editor.sourceSchemaDetail?.metadata ?? null;
+  const sourceSchemaId = sourceSchemaMetadata?.schemaId ?? null;
+  const sourceSchemaDataFormat = sourceSchemaMetadata?.dataFormat ?? 'json';
+
+  const sourceSamples = useMemo(() => {
+    const base = sourceSchemaMetadata?.samplePayloads ?? [];
+    const localForSchema = sourceSchemaId ? (localSamplePayloadsBySchema[sourceSchemaId] ?? []) : [];
+    if (localForSchema.length === 0) {
+      return base;
+    }
+
+    const known = new Set(base.map((sample) => sample.sampleId));
+    const extras = localForSchema.filter((sample) => !known.has(sample.sampleId));
+    return [...base, ...extras];
+  }, [localSamplePayloadsBySchema, sourceSchemaId, sourceSchemaMetadata?.samplePayloads]);
+
+  const mappingDefaultSampleId = editor.configOptions.editorPreferences?.defaultSelectedSampleId ?? null;
+  const resolvedSelectedSampleId = useMemo(() => {
+    const resolvedFromPrecedence = resolveInitialSelectedSampleId({
+      samples: sourceSamples,
+      lastSelectedSampleId: readLastSelectedSampleId(mappingId),
+      mappingDefaultSampleId,
+    });
+
+    if (selectedSampleId === undefined) {
+      return resolvedFromPrecedence;
+    }
+    if (selectedSampleId === null) {
+      return null;
+    }
+
+    if (sourceSamples.some((sample) => sample.sampleId === selectedSampleId)) {
+      return selectedSampleId;
+    }
+
+    return resolvedFromPrecedence;
+  }, [mappingDefaultSampleId, mappingId, selectedSampleId, sourceSamples]);
+
+  const selectedSample = useMemo(
+    () => sourceSamples.find((sample) => sample.sampleId === resolvedSelectedSampleId) ?? null,
+    [resolvedSelectedSampleId, sourceSamples],
+  );
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -180,6 +295,420 @@ export default function MappingEditor() {
     }).catch(() => { /* silently fall back to 'Project' */ });
     return () => { cancelled = true; };
   }, [adapter, projectId]);
+
+  const selectedSamplePayload = useMemo(() => {
+    if (!resolvedSelectedSampleId) return null;
+    return samplePayloadCache[resolvedSelectedSampleId] ?? null;
+  }, [resolvedSelectedSampleId, samplePayloadCache]);
+  const selectedSampleRaw = selectedSamplePayload?.raw ?? null;
+  const selectedSampleParsed = selectedSamplePayload?.parsed ?? null;
+
+  const loadSamplePayload = useCallback(async (sample: SchemaSamplePayloadMetadata) => {
+    const canLoad = typeof adapter.getSchemaSamplePayload === 'function';
+    if (canLoad) {
+      const response = await adapter.getSchemaSamplePayload(sample.schemaId, sample.sampleId);
+      return {
+        raw: response.raw,
+        parsed: response.parsed,
+      };
+    }
+
+    if (sample.source === 'initial_upload' && editor.sourceSchemaDetail) {
+      const raw = typeof editor.sourceSchemaDetail.content === 'string'
+        ? editor.sourceSchemaDetail.content
+        : JSON.stringify(editor.sourceSchemaDetail.content);
+      const parsed = typeof editor.sourceSchemaDetail.content === 'string'
+        ? null
+        : editor.sourceSchemaDetail.content;
+      return { raw, parsed };
+    }
+
+    throw new Error('Sample payload retrieval is not available in this mode.');
+  }, [adapter, editor.sourceSchemaDetail]);
+
+  useEffect(() => {
+    if (!resolvedSelectedSampleId) {
+      return;
+    }
+
+    if (samplePayloadCache[resolvedSelectedSampleId]) {
+      return;
+    }
+
+    const selected = sourceSamples.find((sample) => sample.sampleId === resolvedSelectedSampleId) ?? null;
+    if (selected === null) {
+      return;
+    }
+
+    let active = true;
+    void loadSamplePayload(selected)
+      .then((payload) => {
+        if (!active) return;
+        setSamplePayloadCache((prev) => {
+          if (prev[selected.sampleId]) return prev;
+          return { ...prev, [selected.sampleId]: payload };
+        });
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSampleActionError(err instanceof Error ? err.message : 'Failed to load selected sample payload.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [loadSamplePayload, resolvedSelectedSampleId, samplePayloadCache, sourceSamples]);
+
+  const updateMappingDefaultSample = useCallback((sampleId: string | null) => {
+    const currentPrefs = editor.configOptions.editorPreferences ?? {};
+
+    if (sampleId === null) {
+      const { defaultSelectedSampleId, ...rest } = currentPrefs;
+      void defaultSelectedSampleId;
+      editor.actions.updateConfig({
+        editorPreferences: rest,
+      });
+      return;
+    }
+
+    editor.actions.updateConfig({
+      editorPreferences: {
+        ...currentPrefs,
+        defaultSelectedSampleId: sampleId,
+      },
+    });
+  }, [editor.actions, editor.configOptions.editorPreferences]);
+
+  const selectSample = useCallback(async (
+    sampleId: string | null,
+    options?: {
+      readonly persistLastSelected?: boolean;
+      readonly persistMappingDefault?: boolean;
+      readonly payloadHint?: { raw: string; parsed: unknown | null };
+    },
+  ) => {
+    setSampleActionError(null);
+
+    if (sampleId === null) {
+      setSelectedSampleId(null);
+      if (options?.persistLastSelected) {
+        writeLastSelectedSampleId(mappingId, null);
+      }
+      if (options?.persistMappingDefault) {
+        updateMappingDefaultSample(null);
+      }
+      return;
+    }
+
+    const sample = sourceSamples.find((entry) => entry.sampleId === sampleId) ?? null;
+    if (!sample) {
+      return;
+    }
+
+    if (options?.persistLastSelected) {
+      writeLastSelectedSampleId(mappingId, sample.sampleId);
+    }
+    if (options?.persistMappingDefault) {
+      updateMappingDefaultSample(sample.sampleId);
+    }
+
+    if (options?.payloadHint) {
+      setSamplePayloadCache((prev) => ({ ...prev, [sample.sampleId]: options.payloadHint! }));
+      setSelectedSampleId(sample.sampleId);
+      return;
+    }
+
+    try {
+      const payload = await loadSamplePayload(sample);
+      setSamplePayloadCache((prev) => ({ ...prev, [sample.sampleId]: payload }));
+      setSelectedSampleId(sample.sampleId);
+    } catch (err) {
+      setSampleActionError(err instanceof Error ? err.message : 'Failed to load selected sample payload.');
+    }
+  }, [loadSamplePayload, mappingId, sourceSamples, updateMappingDefaultSample]);
+
+  const handleAddSample = useCallback(async () => {
+    if (!sourceSchemaId) {
+      setSampleActionError('Source schema is not available for adding samples.');
+      return;
+    }
+
+    if (typeof adapter.addSchemaSample !== 'function') {
+      setSampleActionError('Adding schema samples is not available in this mode.');
+      return;
+    }
+
+    const trimmedContent = sampleContentInput.trim();
+    if (!trimmedContent) {
+      setSampleActionError('Sample payload content is required.');
+      return;
+    }
+
+    let parsedForSubmit: unknown;
+    let parsedForContext: unknown | null;
+    if (sourceSchemaDataFormat === 'xml') {
+      parsedForSubmit = trimmedContent;
+      parsedForContext = null;
+    } else {
+      try {
+        parsedForSubmit = JSON.parse(trimmedContent);
+        parsedForContext = parsedForSubmit;
+      } catch {
+        setSampleActionError('Sample payload must be valid JSON.');
+        return;
+      }
+    }
+
+    setIsSampleActionLoading(true);
+    setSampleActionError(null);
+
+    try {
+      const result = await adapter.addSchemaSample(sourceSchemaId, {
+        sampleName: sampleNameInput.trim() || undefined,
+        sampleContent: parsedForSubmit,
+        applySuggestedUpdates: false,
+      });
+
+      setLocalSamplePayloadsBySchema((prev) => {
+        if (!sourceSchemaId) {
+          return prev;
+        }
+
+        const existing = prev[sourceSchemaId] ?? [];
+        if (existing.some((sample) => sample.sampleId === result.sample.sampleId)) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [sourceSchemaId]: [...existing, result.sample],
+        };
+      });
+      setIsAddSampleOpen(false);
+      setSampleNameInput('');
+      setSampleContentInput('');
+
+      const payloadHint = {
+        raw: trimmedContent,
+        parsed: parsedForContext,
+      };
+      await selectSample(result.sample.sampleId, {
+        persistLastSelected: true,
+        persistMappingDefault: true,
+        payloadHint,
+      });
+    } catch (err) {
+      setSampleActionError(err instanceof Error ? err.message : 'Failed to add sample payload.');
+    } finally {
+      setIsSampleActionLoading(false);
+    }
+  }, [adapter, sampleContentInput, sampleNameInput, selectSample, sourceSchemaDataFormat, sourceSchemaId]);
+
+  const sampleOutputByTargetPath = useMemo(() => {
+    if (
+      selectedSampleParsed === null
+      || editor.config === null
+      || editor.sourceSchemaDetail === null
+      || editor.targetSchemaDetail === null
+      || editor.parsedTargetSchema === null
+    ) {
+      return undefined;
+    }
+
+    try {
+      const execution = executeMapping(
+        editor.config,
+        selectedSampleParsed,
+        editor.sourceSchemaDetail.content,
+        editor.targetSchemaDetail.content,
+      );
+
+      const next: Record<string, string | null> = {};
+      for (const node of editor.parsedTargetSchema.nodes) {
+        next[node.path] = resolveFieldTestValue(execution.output, node.path) ?? null;
+      }
+      return next;
+    } catch {
+      return undefined;
+    }
+  }, [
+    editor.config,
+    editor.parsedTargetSchema,
+    editor.sourceSchemaDetail,
+    editor.targetSchemaDetail,
+    selectedSampleParsed,
+  ]);
+
+  const sampleArrayItemCountByTargetPath = useMemo(() => {
+    if (selectedSampleParsed === null || editor.parsedTargetSchema === null) {
+      return undefined;
+    }
+
+    const next: Record<string, number | null> = {};
+    for (const node of editor.parsedTargetSchema.nodes) {
+      if (node.type !== 'array') continue;
+      const value = resolveValueAtPath(selectedSampleParsed, node.path);
+      next[node.path] = Array.isArray(value) ? value.length : null;
+    }
+    return next;
+  }, [editor.parsedTargetSchema, selectedSampleParsed]);
+
+  const sampleSelectorSlot = (
+    <div className="relative" data-testid="sample-picker-slot">
+      <button
+        type="button"
+        onClick={() => setIsSamplePickerOpen((prev) => !prev)}
+        data-testid="sample-picker-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={isSamplePickerOpen}
+        className="inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+      >
+        Sample: {selectedSample?.name ?? 'None'}
+      </button>
+
+      {isSamplePickerOpen && (
+        <div
+          role="dialog"
+          aria-label="Select source sample payload"
+          data-testid="sample-picker-popover"
+          className="absolute right-0 z-50 mt-1 w-80 rounded border border-slate-700 bg-slate-900 p-2 shadow-xl"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-slate-200">Source samples</p>
+            <button
+              type="button"
+              onClick={() => setIsSamplePickerOpen(false)}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="max-h-56 space-y-1 overflow-auto" data-testid="sample-picker-list">
+            <button
+              type="button"
+              onClick={() => {
+                void selectSample(null, {
+                  persistLastSelected: true,
+                  persistMappingDefault: true,
+                });
+                setIsSamplePickerOpen(false);
+              }}
+              data-testid="sample-picker-option-none"
+              className="w-full rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              No sample
+            </button>
+
+            {sourceSamples.map((sample) => (
+              <button
+                key={sample.sampleId}
+                type="button"
+                onClick={() => {
+                  void selectSample(sample.sampleId, {
+                    persistLastSelected: true,
+                    persistMappingDefault: true,
+                  });
+                  setIsSamplePickerOpen(false);
+                }}
+                data-testid={`sample-picker-option-${sample.sampleId}`}
+                className={[
+                  'w-full rounded border px-2 py-1.5 text-left text-xs transition-colors',
+                  resolvedSelectedSampleId === sample.sampleId
+                    ? 'border-blue-600 bg-blue-900/30 text-blue-200'
+                    : 'border-slate-700 text-slate-300 hover:bg-slate-800',
+                ].join(' ')}
+              >
+                <p className="truncate font-medium">{sample.name}</p>
+                <p className="text-[10px] text-slate-500">{sample.dataFormat.toUpperCase()}</p>
+              </button>
+            ))}
+
+            {sourceSamples.length === 0 && (
+              <p className="rounded border border-slate-700 bg-slate-800/40 px-2 py-2 text-xs text-slate-500" data-testid="sample-picker-empty">
+                No samples available for this source schema.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-2 border-t border-slate-800 pt-2">
+            <button
+              type="button"
+              data-testid="sample-picker-add-sample"
+              onClick={() => {
+                setSampleActionError(null);
+                setIsAddSampleOpen(true);
+              }}
+              className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
+            >
+              Add sample payload
+            </button>
+          </div>
+
+          {sampleActionError && (
+            <p className="mt-2 text-xs text-red-300" role="alert" data-testid="sample-picker-error">
+              {sampleActionError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {isAddSampleOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" data-testid="sample-add-dialog">
+          <div role="dialog" aria-modal="true" aria-label="Add sample payload" className="w-full max-w-lg rounded border border-slate-700 bg-slate-900 p-4">
+            <h2 className="text-sm font-semibold text-slate-100">Add sample payload</h2>
+            <p className="mt-1 text-xs text-slate-500">Expected format: {sourceSchemaDataFormat.toUpperCase()}</p>
+
+            <div className="mt-3 space-y-2">
+              <input
+                type="text"
+                value={sampleNameInput}
+                onChange={(e) => setSampleNameInput(e.target.value)}
+                placeholder="Sample name (optional)"
+                data-testid="sample-add-name"
+                className="h-8 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <textarea
+                value={sampleContentInput}
+                onChange={(e) => setSampleContentInput(e.target.value)}
+                rows={8}
+                placeholder={sourceSchemaDataFormat === 'xml' ? '<root />' : '{ "example": true }'}
+                data-testid="sample-add-content"
+                className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 font-mono text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+
+            {sampleActionError && (
+              <p className="mt-2 text-xs text-red-300" role="alert" data-testid="sample-add-error">
+                {sampleActionError}
+              </p>
+            )}
+
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsAddSampleOpen(false)}
+                disabled={isSampleActionLoading}
+                data-testid="sample-add-cancel"
+                className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleAddSample(); }}
+                disabled={isSampleActionLoading || sampleContentInput.trim().length === 0}
+                data-testid="sample-add-submit"
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {isSampleActionLoading ? 'Saving…' : 'Save sample'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // Record recent activity when the mapping loads successfully (FS-049 T-03)
   const { recordActivity } = useRecentActivity();
@@ -225,6 +754,10 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   /** The section path currently loaded in the Auto-Map workspace (preserved across exits). */
   const [autoMapSectionPath, setAutoMapSectionPath] = useState<string | null>(initialPendingSectionPath);
+  const [visibleAutoMapScope, setVisibleAutoMapScope] = useState<{ visibleTargetPaths: string[]; count: number }>({
+    visibleTargetPaths: [],
+    count: 0,
+  });
 
   // ---------------------------------------------------------------------------
   // Auto-Map workspace hook (FS-048 T-10) — canonical review path
@@ -262,10 +795,10 @@ export default function MappingEditor() {
   }, []);
 
   const handleAutoMapTrigger = useCallback(
-    (sectionPath: string) => {
+    (sectionPath: string, visibleTargetPaths?: readonly string[]) => {
       setIsHistoryOpen(false);
       enterAutoMapWorkspace(sectionPath);
-      autoMapWorkspace.triggerAutoMap(sectionPath);
+      autoMapWorkspace.triggerAutoMap(sectionPath, visibleTargetPaths);
     },
     [enterAutoMapWorkspace, autoMapWorkspace],
   );
@@ -274,8 +807,8 @@ export default function MappingEditor() {
     setIsHistoryOpen(false);
     // T-10: header-level "Auto-map" triggers workspace for the root section
     enterAutoMapWorkspace('');
-    void autoMapWorkspace.triggerAutoMap('');
-  }, [enterAutoMapWorkspace, autoMapWorkspace]);
+    void autoMapWorkspace.triggerAutoMap('', visibleAutoMapScope.visibleTargetPaths);
+  }, [enterAutoMapWorkspace, autoMapWorkspace, visibleAutoMapScope.visibleTargetPaths]);
 
   // Create-time and re-entry-safe auto-map pending session hydration.
   useEffect(() => {
@@ -491,6 +1024,38 @@ export default function MappingEditor() {
     return editor.validation.diagnosticsForRule(selectedRuleIndexForSmartFix);
   }, [editor.validation, selectedRuleIndexForSmartFix]);
 
+  const autoMapSuggestionStatusByPath = useMemo(() => {
+    const statusMap: Record<string, 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale'> = {};
+    for (const item of autoMapWorkspace.items) {
+      statusMap[item.targetPath] = item.status;
+    }
+    return statusMap;
+  }, [autoMapWorkspace.items]);
+
+  const consolidatedIssues = useMemo<readonly ConsolidatedIssueItem[]>(() => {
+    if (!editor.validation.result) return [];
+    return editor.validation.result.diagnostics
+      .filter((diag) => diag.severity === 'error' || diag.severity === 'warning')
+      .filter((diag) => typeof diag.targetPath === 'string' && diag.targetPath.length > 0)
+      .map((diag, index) => ({
+        id: `${diag.code}:${diag.targetPath}:${index}`,
+        targetPath: diag.targetPath!,
+        severity: diag.severity,
+        message: diag.message,
+      }));
+  }, [editor.validation.result]);
+
+  const issueCount = consolidatedIssues.length;
+
+  const testLabPath = useMemo(
+    () => PATHS.MAPPING_TEST.replace(':projectId', projectId).replace(':mappingId', mappingId),
+    [mappingId, projectId],
+  );
+  const deploymentPath = useMemo(
+    () => PATHS.MAPPING_DEPLOYMENT.replace(':projectId', projectId).replace(':mappingId', mappingId),
+    [mappingId, projectId],
+  );
+
   // ---------------------------------------------------------------------------
   // Route-level navigation guard (unsaved changes)
   // useBlocker must be called unconditionally (Rules of Hooks)
@@ -598,9 +1163,14 @@ export default function MappingEditor() {
         selectedPath={selectedTargetPath}
         groupingMode="schema"
         onSelectNode={handleSelectTargetNode}
+        onClearSelection={() => setSelectedTargetPath(null)}
+        onVisibleScopeChange={setVisibleAutoMapScope}
+        autoMapSuggestionStatusByPath={autoMapSuggestionStatusByPath}
         view={view}
         onViewToggle={handleViewToggle}
         targetSchemaName={editor.targetSchemaName}
+        sampleOutputByTargetPath={sampleOutputByTargetPath}
+        sampleArrayItemCountByTargetPath={sampleArrayItemCountByTargetPath}
         className="h-full"
       />
     );
@@ -756,6 +1326,7 @@ export default function MappingEditor() {
   // Bottom area: connected inline preview strip (renders inside PreviewProvider)
   const bottomContent = (
     <ConnectedInlinePreviewStrip
+      key={`preview-sample-${resolvedSelectedSampleId ?? 'none'}`}
       config={editor.config}
       sourceSchemaDetail={editor.sourceSchemaDetail}
       targetSchemaDetail={editor.targetSchemaDetail}
@@ -767,8 +1338,27 @@ export default function MappingEditor() {
         const rule = editor.rules[ruleIndex];
         if (rule) setSelectedTargetPath(resolveSelectedTargetPath(rule.target));
       }}
+      externalSourceDataRaw={selectedSampleRaw}
     />
   );
+
+  const issueOverlay = isIssuesOpen
+    ? (
+      <div
+        className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60"
+        data-testid="issues-panel-overlay"
+      >
+        <IssuesPanel
+          issues={consolidatedIssues}
+          onClose={() => setIsIssuesOpen(false)}
+          onOpenRow={(targetPath) => {
+            setIsIssuesOpen(false);
+            handleSelectTargetNode(targetPath);
+          }}
+        />
+      </div>
+    )
+    : null;
 
   return (
     <>
@@ -790,6 +1380,12 @@ export default function MappingEditor() {
         bottomContent={bottomContent}
         onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
         onHistoryToggle={handleOpenHistory}
+        onViewIssues={() => setIsIssuesOpen(true)}
+        issueCount={issueCount}
+        onOpenTestLab={() => navigate(testLabPath)}
+        onOpenDeploymentPage={() => navigate(deploymentPath)}
+        onExportMapping={() => {}}
+        onImportMapping={() => {}}
         onAutoMap={handleAutoMapAll}
         isAutoMapLoading={autoMapWorkspace.status === 'loading'}
         isAutoMapMode={view === 'automap'}
@@ -800,7 +1396,12 @@ export default function MappingEditor() {
             enterAutoMapWorkspace(autoMapWorkspace.sectionPath);
           }
         }}
+        autoMapScopeCount={visibleAutoMapScope.count}
+        showDeployControls={false}
+        sampleSelectorSlot={sampleSelectorSlot}
       />
+
+      {issueOverlay}
 
       <ConfigurationModal
         isOpen={isConfigOpen}

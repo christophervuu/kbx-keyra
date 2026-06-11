@@ -226,4 +226,5 @@ describe('MappingEditor auto-map handoff contract', () => {
 
     expect(screen.getByTestId('automap-reentry-pill')).toHaveTextContent('Auto-Map: 1 pending');
   });
+
 });

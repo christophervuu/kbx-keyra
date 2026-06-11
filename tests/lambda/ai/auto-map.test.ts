@@ -165,6 +165,14 @@ describe('aiAutoMap handler', () => {
         suggestions: Array<{
           target: string;
           expression: string;
+          suggestionId?: string;
+          lifecycleStatus?: string;
+          reviewStatus?: string;
+          actionEligibility?: {
+            canAccept: boolean;
+            canBatchAccept: boolean;
+            blockReasons: string[];
+          };
           validation: {
             valid: boolean;
             diagnostics: Array<{
@@ -191,6 +199,16 @@ describe('aiAutoMap handler', () => {
       valid: true,
       diagnostics: [],
     });
+    expect(parsedBody.data.suggestions[0]).toMatchObject({
+      lifecycleStatus: 'suggested',
+      reviewStatus: 'pending',
+      actionEligibility: {
+        canAccept: true,
+        canBatchAccept: true,
+        blockReasons: [],
+      },
+    });
+    expect(parsedBody.data.suggestions[0]?.suggestionId).toEqual(expect.any(String));
 
     expect(invokeAIMock).toHaveBeenCalledWith('auto-map', {
       targetSection:
@@ -701,8 +719,66 @@ describe('aiAutoMap handler', () => {
 
     expect(response.statusCode).toBe(400);
     expect(JSON.parse(response.body)).toEqual({
-      error: 'Missing required field: targetSection or sectionPath',
+      error: 'Missing required field: targetSection, visibleTargetPaths, or sectionPath',
     });
+  });
+
+  it('accepts visibleTargetPaths-only scope and echoes scope metadata', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'source("Invoice.DocumentType")',
+            explanation: 'Map document type',
+            confidence: 'high',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+    parseMock.mockReturnValue({ ast: {}, diagnostics: [] });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          projectId: 'p-1',
+          mappingId: 'm-1',
+          visibleTargetPaths: ['Order.Header.DocumentType', 'Order.Header.CurrencyCode'],
+          sourceContext: '- Invoice.DocumentType (string)\n- Invoice.CurrencyCode (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(invokeAIMock).toHaveBeenCalledWith(
+      'auto-map',
+      expect.objectContaining({
+        targetSection:
+          '- Order.Header.DocumentType (unknown)\n- Order.Header.CurrencyCode (unknown)',
+      }),
+      expect.any(Object),
+    );
+
+    const parsed = JSON.parse(response.body) as {
+      data: {
+        scopeMeta: { visibleTargetPaths: string[]; mode: 'section' | 'whole'; sectionPath?: string };
+        retrievalMeta: { visibleTargetPaths: string[] };
+      };
+    };
+
+    expect(parsed.data.scopeMeta).toMatchObject({
+      visibleTargetPaths: ['Order.Header.DocumentType', 'Order.Header.CurrencyCode'],
+      mode: 'whole',
+    });
+    expect(parsed.data.retrievalMeta.visibleTargetPaths).toEqual([
+      'Order.Header.DocumentType',
+      'Order.Header.CurrencyCode',
+    ]);
   });
 
   it('maps PROMPT_NOT_FOUND to canonical RESOURCE_NOT_FOUND envelope (AE-06)', async () => {

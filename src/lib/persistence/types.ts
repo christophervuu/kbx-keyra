@@ -15,11 +15,16 @@ export interface MappingRule {
   readonly description?: string;
 }
 
+export interface MappingEditorPreferences {
+  readonly defaultSelectedSampleId?: string;
+}
+
 export interface MappingConfigOptions {
   readonly unmappedTargets?: 'omit' | 'null' | 'error';
   readonly nullSubtrees?: readonly string[];
   readonly constants?: Readonly<Record<string, unknown>>;
   readonly externalSources?: readonly string[];
+  readonly editorPreferences?: MappingEditorPreferences;
 }
 
 export interface MappingConfig {

@@ -757,6 +757,36 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('autoMap forwards additive scoped fields (visibleTargetPaths/sourceSchemaId/businessContext)', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ rules: [], diagnostics: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.autoMap({
+      projectId: 'p-1',
+      mappingId: 'm-1',
+      mode: 'section',
+      sectionPath: 'Order.Header',
+      sourceSchemaId: 'schema-source-1',
+      businessContext: 'Invoice to order mapping',
+      visibleTargetPaths: ['Order.Header.DocumentType', 'Order.Header.CurrencyCode'],
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        mode: 'section',
+        sectionPath: 'Order.Header',
+        sourceSchemaId: 'schema-source-1',
+        businessContext: 'Invoice to order mapping',
+        visibleTargetPaths: ['Order.Header.DocumentType', 'Order.Header.CurrencyCode'],
+      },
+    });
+  });
+
   it('autoMap preserves optional diagnostics/warnings/retrievalMeta', async () => {
     const payload = {
       rules: [],
@@ -806,6 +836,10 @@ describe('HttpAdapter (CRUD)', () => {
       },
       dedupMeta: {
         duplicatesCollapsed: 0,
+      },
+      scopeMeta: {
+        mode: 'whole',
+        visibleTargetPaths: ['Order.Header.DocumentType'],
       },
     };
     vi.mocked(httpRequest).mockResolvedValueOnce(payload);

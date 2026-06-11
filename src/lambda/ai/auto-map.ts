@@ -43,6 +43,12 @@ interface MappingMetadataRecord {
   readonly sourceSchemaId?: string;
 }
 
+interface SuggestionActionEligibility {
+  readonly canAccept: boolean;
+  readonly canBatchAccept: boolean;
+  readonly blockReasons: readonly ('invalid' | 'stale' | 'dismissed' | 'already-reviewed' | 'not-ready')[];
+}
+
 function getEnvValue(key: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.[key];
@@ -164,6 +170,37 @@ function parseTargetSectionLines(targetSection: string): string[] {
     .filter((line) => line !== '' && line.startsWith('- '));
 }
 
+function normalizeVisibleTargetPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+    const trimmed = entry.trim();
+    if (trimmed === '' || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
+function buildTargetSectionFromVisiblePaths(
+  visibleTargetPaths: readonly string[],
+  targetTypeHints: ReadonlyMap<string, string>,
+): string {
+  return visibleTargetPaths
+    .map((path) => `- ${path} (${targetTypeHints.get(path) ?? 'unknown'})`)
+    .join('\n');
+}
+
 function parseTargetTypeMap(targetSection: string): Map<string, string> {
   const map = new Map<string, string>();
   const lines = targetSection.split('\n');
@@ -279,6 +316,7 @@ async function startAutoMapStepFunctionExecution(params: {
   readonly sourceSchemaId?: string;
   readonly mode: AutoMapMode;
   readonly sectionPath?: string;
+  readonly visibleTargetPaths?: readonly string[];
   readonly targetSection: string;
   readonly businessContext: string;
   readonly chunkCount: number;
@@ -297,6 +335,7 @@ async function startAutoMapStepFunctionExecution(params: {
       mappingId: params.mappingId,
       sourceSchemaId: params.sourceSchemaId,
       sectionPath: params.sectionPath,
+      visibleTargetPaths: params.visibleTargetPaths,
       targetSection: params.targetSection,
       businessContext: params.businessContext,
       chunkCount: params.chunkCount,
@@ -523,6 +562,10 @@ function buildSuggestions(
       message: string;
     }>;
   };
+  suggestionId: string;
+  lifecycleStatus: 'suggested';
+  reviewStatus: 'pending';
+  actionEligibility: SuggestionActionEligibility;
 }> {
   const normalizeConfidence = (value: unknown): 'high' | 'medium' | 'low' => {
     if (value === 'high' || value === 'medium' || value === 'low') {
@@ -532,17 +575,45 @@ function buildSuggestions(
     return 'low';
   };
 
+  const toSuggestionId = (target: string, expression: string, index: number): string => {
+    const raw = `${target}|${expression}|${index}`;
+    let hash = 0;
+    for (let i = 0; i < raw.length; i += 1) {
+      hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+      hash |= 0;
+    }
+
+    return `sg-${Math.abs(hash).toString(16)}`;
+  };
+
   return enrichedRules
     .filter((rule): rule is Record<string, unknown> => typeof rule === 'object' && rule !== null)
-    .map((rule) => {
+    .map((rule, index) => {
       const normalizedValidation = normalizeRuleValidation(rule);
+      const target = typeof rule.target === 'string' ? rule.target : '';
+      const expression = typeof rule.expression === 'string' ? rule.expression : '';
+      const actionEligibility: SuggestionActionEligibility = normalizedValidation.valid
+        ? {
+            canAccept: true,
+            canBatchAccept: true,
+            blockReasons: [],
+          }
+        : {
+            canAccept: false,
+            canBatchAccept: false,
+            blockReasons: ['invalid'],
+          };
 
       return {
-        target: typeof rule.target === 'string' ? rule.target : '',
-        expression: typeof rule.expression === 'string' ? rule.expression : '',
+        target,
+        expression,
         explanation: typeof rule.explanation === 'string' ? rule.explanation : '',
         confidence: normalizeConfidence(rule.confidence),
         validation: normalizedValidation,
+        suggestionId: toSuggestionId(target, expression, index),
+        lifecycleStatus: 'suggested' as const,
+        reviewStatus: 'pending' as const,
+        actionEligibility,
       };
     })
     .filter((suggestion) => suggestion.target !== '' && suggestion.expression !== '')
@@ -735,6 +806,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   const targetSectionRaw = requestBody.targetSection;
   const sectionPathRaw = requestBody.sectionPath;
+  const visibleTargetPaths = normalizeVisibleTargetPaths(requestBody.visibleTargetPaths);
+  const targetTypeHints = typeof targetSectionRaw === 'string' && targetSectionRaw !== ''
+    ? parseTargetTypeMap(targetSectionRaw)
+    : new Map<string, string>();
+  const targetSectionFromVisiblePaths = visibleTargetPaths.length > 0
+    ? buildTargetSectionFromVisiblePaths(visibleTargetPaths, targetTypeHints)
+    : null;
   const modeRaw = requestBody.mode;
   const mappingId = typeof requestBody.mappingId === 'string' && requestBody.mappingId !== ''
     ? requestBody.mappingId
@@ -758,21 +836,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const targetSection =
     typeof targetSectionRaw === 'string' && targetSectionRaw !== ''
       ? targetSectionRaw
+      : typeof targetSectionFromVisiblePaths === 'string' && targetSectionFromVisiblePaths !== ''
+        ? targetSectionFromVisiblePaths
       : typeof sectionPathRaw === 'string' && sectionPathRaw !== ''
         ? sectionPathRaw
         : null;
-  const parsedTargetListing =
-    typeof targetSectionRaw === 'string' && targetSectionRaw !== ''
+  const parsedTargetListing = visibleTargetPaths.length > 0
+    ? new Set(visibleTargetPaths)
+    : typeof targetSectionRaw === 'string' && targetSectionRaw !== ''
       ? parseTargetListing(targetSectionRaw)
       : null;
 
   if (targetSection === null) {
     console.error(`${AUTO_MAP_LOG_PREFIX} missing target section`, {
       hasTargetSection: typeof targetSectionRaw === 'string' && targetSectionRaw !== '',
+      hasVisibleTargetPaths: visibleTargetPaths.length > 0,
       hasSectionPath: typeof sectionPathRaw === 'string' && sectionPathRaw !== '',
     });
     return autoMapJsonResponse(400, {
-      error: 'Missing required field: targetSection or sectionPath',
+      error: 'Missing required field: targetSection, visibleTargetPaths, or sectionPath',
     }, requestId);
   }
 
@@ -932,6 +1014,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     maxConcurrency,
     noContext: noContextReason !== undefined,
     noContextReason,
+    visibleTargetPaths: visibleTargetPaths.length > 0 ? visibleTargetPaths : undefined,
+  };
+
+  const scopeMeta = {
+    visibleTargetPaths: visibleTargetPaths.length > 0 ? visibleTargetPaths : undefined,
+    mode,
+    sectionPath: typeof sectionPathRaw === 'string' ? sectionPathRaw : undefined,
   };
 
   console.info(`${AUTO_MAP_LOG_PREFIX} validated request`, {
@@ -947,6 +1036,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     retrievalCandidatesCount,
     retrievalSelectedCount,
     noContextReason,
+    visibleTargetPathsCount: visibleTargetPaths.length,
   });
 
   if (noContextReason !== undefined) {
@@ -958,6 +1048,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         rules: [],
         suggestions: [],
         retrievalMeta,
+        scopeMeta,
       },
     }, requestId);
   }
@@ -980,6 +1071,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         sourceSchemaId: sourceSchemaId ?? sourceSchemaIdFromBody,
         mode,
         sectionPath: typeof sectionPathRaw === 'string' ? sectionPathRaw : undefined,
+        visibleTargetPaths: visibleTargetPaths.length > 0 ? visibleTargetPaths : undefined,
         targetSection,
         businessContext,
         chunkCount: targetChunks.length,
@@ -994,6 +1086,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           rules: [],
           suggestions: [],
           retrievalMeta,
+          scopeMeta,
           orchestration: {
             executionArn,
             stateMachineArn: AUTO_MAP_STEP_FUNCTIONS_ARN,
@@ -1137,6 +1230,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         data: {
           ...(result.data as Record<string, unknown>),
           retrievalMeta,
+          scopeMeta,
         },
       }, requestId);
     }
@@ -1213,6 +1307,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           outcomes: validationOutcomes,
         },
         retrievalMeta,
+        scopeMeta,
       },
     }, requestId);
   } catch {

@@ -105,6 +105,28 @@ describe('create-mapping handler', () => {
     expect(parsed.businessContext).toBeUndefined();
   });
 
+  it('accepts additive editorPreferences in config payload', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      engineVersion: '1.0.0',
+      config: {
+        editorPreferences: {
+          defaultSelectedSampleId: 'sample-1',
+        },
+      },
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"editorPreferences":{"defaultSelectedSampleId":"sample-1"}'),
+    }));
+  });
+
   it('loads target schema content and passes it to validate for coverage derivation', async () => {
     sharedMocks.parseBody.mockReturnValue({
       projectId: 'proj-1',

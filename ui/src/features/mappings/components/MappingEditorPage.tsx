@@ -15,7 +15,7 @@ export interface MappingEditorPageProps {
   /** Route param: project ID */
   projectId: string;
   /** Route param: mapping ID */
-  mappingId: string;
+  mappingId?: string;
   /** Human-readable project name (shown as link in context bar) */
   projectName?: string;
   /** Mapping display name */
@@ -59,6 +59,18 @@ export interface MappingEditorPageProps {
   bottomContent?: ReactNode;
   /** Callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
+  /** Callback to open consolidated issues panel */
+  onViewIssues?: () => void;
+  /** Consolidated warning/error count shown near View Issues */
+  issueCount?: number;
+  /** Callback to route to Test Lab */
+  onOpenTestLab?: () => void;
+  /** Callback to route to Deployment page */
+  onOpenDeploymentPage?: () => void;
+  /** Callback for export action */
+  onExportMapping?: () => void;
+  /** Callback for import action */
+  onImportMapping?: () => void;
   /** Callback to toggle the configuration modal */
   onConfigToggle?: () => void;
   /** Callback fired when the user clicks the "Auto-map" button (header mode). */
@@ -79,6 +91,12 @@ export interface MappingEditorPageProps {
   autoMapSectionPath?: string | null;
   /** Called when the re-entry affordance pill is clicked */
   onReturnToAutoMap?: () => void;
+  /** Number of visible target rows in current search/filter scope */
+  autoMapScopeCount?: number;
+  /** Whether to show deploy badge/link controls in the top bar */
+  showDeployControls?: boolean;
+  /** Optional sample selector control rendered in the top bar. */
+  sampleSelectorSlot?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +137,6 @@ const PLACEHOLDER_LABELS = {
  */
 export function MappingEditorPage({
   projectId,
-  mappingId,
   projectName = 'Project',
   mappingName = 'Untitled Mapping',
   version = 1,
@@ -140,6 +157,12 @@ export function MappingEditorPage({
   builderContent,
   bottomContent,
   onHistoryToggle,
+  onViewIssues,
+  issueCount = 0,
+  onOpenTestLab,
+  onOpenDeploymentPage,
+  onExportMapping,
+  onImportMapping,
   onConfigToggle,
   onAutoMap,
   isAutoMapLoading,
@@ -147,6 +170,9 @@ export function MappingEditorPage({
   autoMapPendingCount = 0,
   autoMapSectionPath = null,
   onReturnToAutoMap,
+  autoMapScopeCount,
+  showDeployControls = true,
+  sampleSelectorSlot,
 }: MappingEditorPageProps) {
   const {
     layout,
@@ -165,11 +191,10 @@ export function MappingEditorPage({
       data-testid="mapping-editor-page"
     >
       {/* Context bar */}
-        <EditorTopBar
+      <EditorTopBar
         projectName={projectName}
         projectId={projectId}
         mappingName={mappingName}
-        mappingId={mappingId}
         version={version}
         currentRevision={currentRevision}
         currentVersion={currentVersion}
@@ -185,11 +210,20 @@ export function MappingEditorPage({
         targetSchemaName={targetSchemaName}
         onConfigToggle={onConfigToggle}
         onHistoryToggle={onHistoryToggle}
+        onViewIssues={onViewIssues}
+        issueCount={issueCount}
+        onOpenTestLab={onOpenTestLab}
+        onOpenDeploymentPage={onOpenDeploymentPage}
+        onExportMapping={onExportMapping}
+        onImportMapping={onImportMapping}
         onAutoMap={onAutoMap}
         isAutoMapLoading={isAutoMapLoading}
         autoMapPendingCount={autoMapPendingCount}
         autoMapSectionPath={autoMapSectionPath}
         onReturnToAutoMap={onReturnToAutoMap}
+        autoMapScopeCount={autoMapScopeCount}
+        showDeployControls={showDeployControls}
+        sampleSelectorSlot={sampleSelectorSlot}
       />
 
       {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}

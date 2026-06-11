@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AutoMapSectionResult, MappingRule, ParsedSchema } from '@/lib/types/domain';
-
 import { useAutoMapWorkspace } from './use-auto-map-workspace';
+
+import type { AutoMapSectionResult, MappingRule, ParsedSchema } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // sessionStorage mock
@@ -204,6 +204,23 @@ describe('useAutoMapWorkspace', () => {
       expect.objectContaining({
         mode: 'section',
         sectionPath: 'Order',
+      }),
+    );
+  });
+
+  it('passes visibleTargetPaths scope when provided to triggerAutoMap', async () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH, ['Order.Id']);
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect((params.adapter as { autoMapSection: ReturnType<typeof vi.fn> }).autoMapSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        visibleTargetPaths: ['Order.Id'],
       }),
     );
   });
@@ -720,6 +737,61 @@ describe('useAutoMapWorkspace', () => {
     // Accepted item must be preserved
     const acceptedItem = result.current.items.find((i) => i.targetPath === 'Order.Id');
     expect(acceptedItem?.status).toBe('accepted');
+  });
+
+  it('refreshAll does not overwrite accepted expressions with newer AI suggestions', async () => {
+    const updateDraft = vi.fn();
+    const adapterMock = {
+      autoMapSection: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ...MOCK_RESULT,
+          suggestions: [
+            {
+              ...SUGGESTION_A,
+              expression: 'source.orderId',
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ...MOCK_RESULT,
+          suggestions: [
+            {
+              ...SUGGESTION_A,
+              expression: 'source.changedOrderId',
+            },
+          ],
+        }),
+    };
+    const params = makeParams({
+      updateDraft,
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => {
+      result.current.acceptSuggestion('Order.Id');
+    });
+    await waitFor(() => {
+      expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('accepted');
+    });
+
+    act(() => {
+      result.current.refreshAll();
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    const accepted = result.current.items.find((i) => i.targetPath === 'Order.Id');
+    expect(accepted?.status).toBe('accepted');
+    expect(accepted?.suggestedExpression).toBe('source.orderId');
+    expect(updateDraft).toHaveBeenCalledWith('Order.Id', 'source.orderId');
+    expect(updateDraft).not.toHaveBeenCalledWith('Order.Id', 'source.changedOrderId');
   });
 
   // -------------------------------------------------------------------------

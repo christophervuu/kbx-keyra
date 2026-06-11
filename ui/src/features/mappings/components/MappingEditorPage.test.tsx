@@ -16,11 +16,11 @@ function renderWithRouter(ui: ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
 
+
 const DEFAULT_TOP_BAR_PROPS = {
   projectName: 'My Project',
   projectId: 'proj-1',
   mappingName: 'Order Transform',
-  mappingId: 'mapping-1',
   version: 3,
   saveStatus: 'saved' as SaveStatus,
   deployStatus: null as HighestDeployStatus | null,
@@ -120,6 +120,16 @@ describe('EditorTopBar', () => {
     expect(schemaNames).toHaveTextContent('PurchaseOrder');
   });
 
+  it('renders sample selector slot when provided', () => {
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        sampleSelectorSlot={<button data-testid="sample-selector-slot">Sample picker</button>}
+      />,
+    );
+    expect(screen.getByTestId('sample-selector-slot')).toBeInTheDocument();
+  });
+
   it('renders "No source" when sourceSchemaName is null', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} sourceSchemaName={null} />);
     expect(screen.getByTestId('schema-names')).toHaveTextContent('No source');
@@ -130,26 +140,26 @@ describe('EditorTopBar', () => {
     expect(screen.getByTestId('schema-names')).toHaveTextContent('No target');
   });
 
-  it('renders "Go to Deploy Page" link with correct href', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    const link = screen.getByTestId('deploy-page-link');
-    expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
+
+  it('hides deploy badge when showDeployControls=false while keeping deployment route-out available', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} showDeployControls={false} />,
+    );
+    expect(screen.queryByTestId('deploy-badge')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    expect(screen.getByTestId('more-menu-deployment')).toBeEnabled();
   });
 
-  it('renders config toggle button when onConfigToggle is provided', () => {
+  it('routes Mapping settings action from More menu when onConfigToggle is provided', () => {
     const onConfigToggle = vi.fn();
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onConfigToggle={onConfigToggle} />);
 
-    const button = screen.getByTestId('config-toggle-button');
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    const button = screen.getByTestId('more-menu-settings');
     expect(button).toBeInTheDocument();
 
     fireEvent.click(button);
     expect(onConfigToggle).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not render config toggle button by default', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.queryByTestId('config-toggle-button')).not.toBeInTheDocument();
   });
 
   it('calls onSave when Save button is clicked', () => {
@@ -194,6 +204,72 @@ describe('EditorTopBar', () => {
     expect(btn).not.toHaveAttribute('aria-disabled', 'true');
   });
 
+  it('renders scoped Auto-map label when autoMapScopeCount is provided', () => {
+    renderWithRouter(
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={vi.fn()} autoMapScopeCount={7} />,
+    );
+    expect(screen.getByTestId('automap-button')).toHaveTextContent('Auto-map (7)');
+    expect(screen.getByTestId('automap-scope-label')).toHaveTextContent('Scope: 7 visible fields');
+  });
+
+  it('renders View Issues button with issue count when provided', () => {
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        onViewIssues={vi.fn()}
+        issueCount={2}
+      />,
+    );
+
+    expect(screen.getByTestId('view-issues-button')).toBeInTheDocument();
+    expect(screen.getByTestId('view-issues-count')).toHaveTextContent('2');
+  });
+
+  it('routes More menu actions through callbacks', () => {
+    const onHistoryToggle = vi.fn();
+    const onOpenTestLab = vi.fn();
+    const onOpenDeploymentPage = vi.fn();
+    const onExportMapping = vi.fn();
+    const onImportMapping = vi.fn();
+    const onConfigToggle = vi.fn();
+
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        onHistoryToggle={onHistoryToggle}
+        onOpenTestLab={onOpenTestLab}
+        onOpenDeploymentPage={onOpenDeploymentPage}
+        onExportMapping={onExportMapping}
+        onImportMapping={onImportMapping}
+        onConfigToggle={onConfigToggle}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-history'));
+    expect(onHistoryToggle).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-test-lab'));
+    expect(onOpenTestLab).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-deployment'));
+    expect(onOpenDeploymentPage).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-export'));
+    expect(onExportMapping).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-import'));
+    expect(onImportMapping).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-settings'));
+    expect(onConfigToggle).toHaveBeenCalledTimes(1);
+  });
+
   it('calls onAutoMap when live Auto-map button is clicked', () => {
     const onAutoMap = vi.fn();
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={onAutoMap} />);
@@ -228,9 +304,7 @@ describe('EditorTopBar', () => {
     const deployBadge = screen.getByTestId('deploy-badge');
     const saveStatus = screen.getByTestId('save-status');
     const autoMap = screen.getByTestId('automap-button');
-    const config = screen.getByTestId('config-toggle-button');
-    const history = screen.getByTestId('history-toggle-button');
-    const deploy = screen.getByTestId('deploy-page-link');
+    const more = screen.getByTestId('more-menu-button');
     const save = screen.getByTestId('save-button');
 
     expect(breadcrumb.compareDocumentPosition(revisionBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -238,10 +312,8 @@ describe('EditorTopBar', () => {
     expect(versionBadge.compareDocumentPosition(deployBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(deployBadge.compareDocumentPosition(saveStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(saveStatus.compareDocumentPosition(autoMap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(autoMap.compareDocumentPosition(config) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(config.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(history.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(deploy.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(autoMap.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(more.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders separator to the right of unsaved changes section', () => {
@@ -499,13 +571,6 @@ describe('MappingEditorPage', () => {
     expect(parseInt(width)).toBeGreaterThan(0);
   });
 
-  it('renders deploy page link with correct route params', () => {
-    renderWithRouter(
-      <MappingEditorPage projectId="my-project" mappingId="my-mapping" />,
-    );
-    const link = screen.getByTestId('deploy-page-link');
-    expect(link).toHaveAttribute('href', '/projects/my-project/mappings/my-mapping/deploy');
-  });
 
   it('renders "Not deployed" badge by default when no deployStatus provided', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
@@ -522,5 +587,30 @@ describe('MappingEditorPage', () => {
       />,
     );
     expect(screen.getByTestId('deploy-badge')).toHaveTextContent('PROD');
+  });
+
+  it('does not render deploy badge in focused authoring shell mode', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        showDeployControls={false}
+      />,
+    );
+    expect(screen.queryByTestId('deploy-badge')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    expect(screen.getByTestId('more-menu-deployment')).toBeEnabled();
+  });
+
+  it('passes sample selector slot through to top bar', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        sampleSelectorSlot={<button data-testid="page-sample-slot">Sample</button>}
+      />,
+    );
+
+    expect(screen.getByTestId('page-sample-slot')).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { BookMarked, Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
@@ -27,8 +28,6 @@ export interface EditorTopBarProps {
   projectId: string;
   /** Human-readable mapping name */
   mappingName: string;
-  /** Mapping ID — used to build the deploy page link */
-  mappingId: string;
   /**
    * Current saved version number (legacy compat — used as fallback for `currentRevision`).
    * @deprecated Use `currentRevision` instead.
@@ -90,6 +89,18 @@ export interface EditorTopBarProps {
   onConfigToggle?: () => void;
   /** Optional callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
+  /** Optional callback to open consolidated issues panel */
+  onViewIssues?: () => void;
+  /** Current consolidated issue count (errors + warnings) */
+  issueCount?: number;
+  /** Optional callback to route to Test Lab */
+  onOpenTestLab?: () => void;
+  /** Optional callback to route to Deployment page */
+  onOpenDeploymentPage?: () => void;
+  /** Optional callback for export action */
+  onExportMapping?: () => void;
+  /** Optional callback for import action */
+  onImportMapping?: () => void;
   /** Optional callback fired when the user clicks the "Auto-map" button (header mode). */
   onAutoMap?: () => void;
   /** True while a header-level auto-map request is in flight — disables button and shows spinner. */
@@ -104,6 +115,12 @@ export interface EditorTopBarProps {
   autoMapSectionPath?: string | null;
   /** Called when the re-entry affordance is clicked — enters workspace mode */
   onReturnToAutoMap?: () => void;
+  /** Count of currently visible target rows in the active filter/search scope. */
+  autoMapScopeCount?: number;
+  /** When false, hides deploy status badge + deploy link for authoring-only shell mode. */
+  showDeployControls?: boolean;
+  /** Optional sample-selector control rendered in the header actions row. */
+  sampleSelectorSlot?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +193,6 @@ export function EditorTopBar({
   projectName,
   projectId,
   mappingName,
-  mappingId,
   version,
   currentRevision,
   currentVersion = null,
@@ -192,12 +208,48 @@ export function EditorTopBar({
   targetSchemaName,
   onConfigToggle,
   onHistoryToggle,
+  onViewIssues,
+  issueCount = 0,
+  onOpenTestLab,
+  onOpenDeploymentPage,
+  onExportMapping,
+  onImportMapping,
   onAutoMap,
   isAutoMapLoading = false,
   autoMapPendingCount = 0,
   autoMapSectionPath = null,
   onReturnToAutoMap,
+  autoMapScopeCount,
+  showDeployControls = true,
+  sampleSelectorSlot,
 }: EditorTopBarProps) {
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isMoreMenuOpen) return;
+
+    function handleOutsideClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (moreMenuRef.current?.contains(target)) return;
+      setIsMoreMenuOpen(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsMoreMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [isMoreMenuOpen]);
+
   const saveConfig = saveStatusConfig[saveStatus];
   const saveLabel = saveConfig.label(unsavedChangeCount);
   const isSaving = saveStatus === 'saving';
@@ -210,10 +262,6 @@ export function EditorTopBar({
   const hasChanges = unsavedChangeCount > 0;
   const canViewChanges = hasChanges && onViewUnsavedChanges !== undefined;
 
-  const deployPath = PATHS.MAPPING_DEPLOYMENT.replace(':projectId', projectId).replace(
-    ':mappingId',
-    mappingId,
-  );
   const projectPath = PATHS.PROJECT_OVERVIEW.replace(':projectId', projectId);
 
   const { label: deployLabel, dotClass } = getDeployBadgeContent(deployStatus, displayRevision);
@@ -267,10 +315,12 @@ export function EditorTopBar({
       </div>
 
       {/* Deploy badge */}
-      <div className="flex items-center gap-1.5" data-testid="deploy-badge">
-        <span className={`h-2 w-2 rounded-full ${dotClass}`} aria-hidden="true" />
-        <span className="text-xs font-medium text-slate-300">{deployLabel}</span>
-      </div>
+      {showDeployControls && (
+        <div className="flex items-center gap-1.5" data-testid="deploy-badge">
+          <span className={`h-2 w-2 rounded-full ${dotClass}`} aria-hidden="true" />
+          <span className="text-xs font-medium text-slate-300">{deployLabel}</span>
+        </div>
+      )}
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -291,6 +341,8 @@ export function EditorTopBar({
         </div>
       )}
 
+      {sampleSelectorSlot}
+
       {/* Save state indicator */}
       <span
         className={`text-xs font-medium ${saveConfig.className}`}
@@ -300,6 +352,26 @@ export function EditorTopBar({
       >
         {saveLabel}
       </span>
+
+      {onViewIssues && (
+        <button
+          type="button"
+          onClick={onViewIssues}
+          data-testid="view-issues-button"
+          className="inline-flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          View Issues
+          {issueCount > 0 && (
+            <span
+              className="inline-flex min-w-[1rem] items-center justify-center rounded-full bg-amber-700/50 px-1 text-[10px] font-semibold text-amber-100"
+              data-testid="view-issues-count"
+              aria-hidden="true"
+            >
+              {issueCount}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* View changes button — visible when there are unsaved changes */}
       {canViewChanges && (
@@ -349,7 +421,11 @@ export function EditorTopBar({
           onClick={onAutoMap}
           disabled={isAutoMapLoading}
           data-testid="automap-button"
-          aria-label="Auto-map all eligible fields"
+          aria-label={
+            typeof autoMapScopeCount === 'number'
+              ? `Auto-map ${autoMapScopeCount} visible fields`
+              : 'Auto-map all eligible fields'
+          }
           className={[
             'inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
             isAutoMapLoading
@@ -365,7 +441,7 @@ export function EditorTopBar({
           ) : (
             <Sparkles size={12} aria-hidden="true" />
           )}
-          Auto-map
+          {typeof autoMapScopeCount === 'number' ? `Auto-map (${autoMapScopeCount})` : 'Auto-map'}
         </button>
       ) : (
         <button
@@ -381,43 +457,113 @@ export function EditorTopBar({
         </button>
       )}
 
-      {/* Config toggle button */}
-      {onConfigToggle && (
-        <button
-          type="button"
-          onClick={onConfigToggle}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
-          data-testid="config-toggle-button"
-          aria-label="Open configuration"
+      {typeof autoMapScopeCount === 'number' && (
+        <span
+          data-testid="automap-scope-label"
+          className="text-[10px] text-slate-500"
+          aria-live="polite"
         >
-          <SlidersHorizontal size={12} aria-hidden="true" />
-          Config
-        </button>
+          Scope: {autoMapScopeCount} visible field{autoMapScopeCount === 1 ? '' : 's'}
+        </span>
       )}
 
-      {/* History toggle button */}
-      {onHistoryToggle && (
+      <div className="relative" ref={moreMenuRef}>
         <button
           type="button"
-          onClick={onHistoryToggle}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
-          data-testid="history-toggle-button"
-          aria-label="Open version history"
+          data-testid="more-menu-button"
+          aria-haspopup="menu"
+          aria-expanded={isMoreMenuOpen}
+          onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
         >
-          <Clock size={12} aria-hidden="true" />
-          History
+          More
         </button>
-      )}
 
-      {/* Deploy page link */}
-      <Link
-        to={deployPath}
-        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-blue-400 transition-colors hover:bg-slate-800 hover:text-blue-300"
-        data-testid="deploy-page-link"
-      >
-        Deploy
-        <ExternalLink size={12} aria-hidden="true" />
-      </Link>
+        {isMoreMenuOpen && (
+          <div
+            role="menu"
+            data-testid="more-menu-popover"
+            className="absolute right-0 z-50 mt-1 w-52 rounded border border-slate-700 bg-slate-900 p-1.5 shadow-xl"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="more-menu-history"
+              onClick={() => {
+                setIsMoreMenuOpen(false);
+                onHistoryToggle?.();
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              <Clock size={12} aria-hidden="true" />
+              Version history
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="more-menu-test-lab"
+              onClick={() => {
+                setIsMoreMenuOpen(false);
+                onOpenTestLab?.();
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              <ExternalLink size={12} aria-hidden="true" />
+              Open Test Lab
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="more-menu-deployment"
+              onClick={() => {
+                setIsMoreMenuOpen(false);
+                onOpenDeploymentPage?.();
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              <ExternalLink size={12} aria-hidden="true" />
+              Open Deployment Page
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="more-menu-export"
+              onClick={() => {
+                setIsMoreMenuOpen(false);
+                onExportMapping?.();
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="more-menu-import"
+              onClick={() => {
+                setIsMoreMenuOpen(false);
+                onImportMapping?.();
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              Import
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="more-menu-settings"
+              onClick={() => {
+                setIsMoreMenuOpen(false);
+                onConfigToggle?.();
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              <SlidersHorizontal size={12} aria-hidden="true" />
+              Mapping settings
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Version button — shown when onCreateVersion is provided */}
       {onCreateVersion && (

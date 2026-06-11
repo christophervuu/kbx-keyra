@@ -316,6 +316,45 @@ Decision rule: if the data is < 1KB and needs to be queried/filtered, it goes in
 
 ---
 
+## FS-092 Mapping Editor persistence addendum
+
+FS-092 introduces additive persistence semantics for editor UX state while preserving revision/version compatibility.
+
+Mapping-config additive editor preferences:
+
+- `MappingConfig.config.editorPreferences` is the canonical additive container for mapping-level editor state.
+- FS-092 in-use field:
+  - `defaultSelectedSampleId?: string`
+- Compatibility rule: persisted mapping configs without `editorPreferences` remain valid; readers must treat missing preference keys as unset defaults.
+
+Selected-sample persistence layering (explicit precedence):
+
+1. per-user last-selected sample for mapping (client preference storage)
+2. mapping-level `defaultSelectedSampleId`
+3. schema default sample (`usedForInference=true`)
+4. none
+
+Storage-boundary contract for FS-092 sample selection:
+
+- Mapping-level default sample is persisted in mapping config (`config.editorPreferences.defaultSelectedSampleId`) and therefore participates in Save/revision/version snapshots.
+- Per-user last-selected sample override is persisted as client preference state (`keyra:mappings:last-selected-sample:{mappingId}`) and is intentionally not part of backend mapping revisions.
+
+Advanced Mode preference persistence:
+
+- Advanced Mode visibility is persisted as per-user global client preference (`keyra:mappings:advanced-mode`).
+- This preference is intentionally outside mapping config and revision/version persistence to avoid cross-user coupling.
+
+Suggestion/workspace persistence boundary (FS-092 carries forward FS-048 model):
+
+- Auto-map suggestion review state remains session-scoped client persistence (`keyra:automap-suggestions:{mappingId}`), section-keyed.
+- Suggestion lifecycle states (`suggested|accepted|edited|dismissed|stale`) are review-state artifacts and are not persisted in mapping backend entities unless/when accepted edits produce rule changes.
+
+No FS-092 table/key migration requirement:
+
+- DynamoDB PK/SK models for `Mappings`, `MappingRevisions`, and `MappingVersions` are unchanged.
+- S3 key layouts for mapping configs/revisions are unchanged.
+- FS-092 persistence changes are additive payload fields + client preference keys only.
+
 ## 6) Draft / Revision / Version Model
 
 ### Three-tier semantics

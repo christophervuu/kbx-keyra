@@ -773,7 +773,41 @@ FS-084 redefines the Home dashboard toward a workspace composition aligned to th
 
 ## Mapping Editor Architecture
 
-FS-020 redesigns the Mapping Editor from an 8-panel grid into a **three-column focused-authoring layout** with a collapsible bottom area. FS-021 adds the two-row top context model and inline preview strip. FS-022 consolidates toolbar controls into panel-local surfaces, removes Focus/Breadcrumb drill-down mode, introduces persistent resizable panel layout, adds Rules View search, and makes inline preview auto-run on Apply unconditional when source data is present. FS-048 introduces an Auto-Map review workspace mode in the center authoring panel.
+### FS-092 authoritative baseline (current)
+
+FS-092 supersedes earlier Mapping Editor page composition on the primary authoring route (`/projects/:projectId/mappings/:mappingId`). Where older FS-020/021/022-era details conflict, FS-092 behavior below is authoritative.
+
+Primary-route information architecture:
+
+- Mapping Editor is an **authoring-only workspace**.
+- Primary composition is **header + filter/controls + target-first mapping grid + row details panels** (Source + Builder).
+- In-page full testing console and in-page deployment workflow are intentionally removed from this route.
+- Save remains the primary mutation action and persists mapping data only (no deploy side effects).
+
+Route-boundary contract (explicit separation of concerns):
+
+- Authoring: `/projects/:projectId/mappings/:mappingId`
+- Test execution workspace: `/projects/:projectId/mappings/:mappingId/test-lab`
+- Deployment workflow: `/projects/:projectId/mappings/:mappingId/deploy`
+- Mapping Editor route-outs use canonical `PATHS` constants and are exposed under **More** menu actions (`Open Test Lab`, `Open Deployment Page`).
+
+FS-092 UI interaction contracts:
+
+- **View Issues consolidation:** top-bar `View Issues` opens a consolidated issues panel with warning/error items and row-open navigation; default copy is BA-friendly and does not expose raw diagnostic payloads by default.
+- **Advanced Mode posture:** DSL/diagnostic detail is hidden by default; Advanced Mode is an explicit opt-in and persisted as a per-user global preference (`keyra:mappings:advanced-mode` in localStorage).
+- **Sample-context precedence:**
+  1. per-user last-selected sample for mapping (`keyra:mappings:last-selected-sample:{mappingId}`),
+  2. mapping default sample (`config.editorPreferences.defaultSelectedSampleId`),
+  3. schema default sample (`usedForInference=true`),
+  4. no sample context.
+- **Sample add/select integration:** sample add from editor uses canonical schema sample lifecycle (`POST /schemas/:id/samples`, save-only mutation mode), then allows immediate selection in picker.
+- **Auto-map scope semantics:** auto-map requests include deterministic visible scope (`visibleTargetPaths`), and top-bar copy makes scope explicit (`Scope: N visible fields`).
+- **Suggestion lifecycle surface:** suggestion states (`suggested`, `accepted`, `edited`, `dismissed`, `stale`) are visible in grid/details surfaces; accepted mappings are not silently overwritten.
+- **Array progressive disclosure:** child-field rendering thresholds are explicit: `<=25` inline, `26–75` filtered/prioritized workspace, `>75` summary-first + strong Array Builder CTA, with optional `View all child fields`.
+
+Legacy note:
+
+- Historical three-column + bottom-area descriptions remain below for implementation lineage context, but do not redefine FS-092 route-boundary or authoring-scope behavior.
 
 ### Three-Column + Resizable Layout (FS-022)
 
