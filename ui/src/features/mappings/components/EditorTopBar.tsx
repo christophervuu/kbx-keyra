@@ -48,6 +48,8 @@ export interface EditorTopBarProps {
   autoMapScopeCount?: number;
   showDeployControls?: boolean;
   sampleSelectorSlot?: ReactNode;
+  onToggleBrowseSource?: () => void;
+  isBrowseSourceActive?: boolean;
   requiredMappedCount?: number;
   requiredFieldCount?: number;
   warningCount?: number;
@@ -102,7 +104,7 @@ export function EditorTopBar(props: EditorTopBarProps) {
 
   return (
     <header
-      className="border-b border-slate-800 bg-slate-950"
+      className="bg-slate-950"
       data-testid="editor-top-bar"
     >
       <nav
@@ -136,6 +138,32 @@ export function EditorTopBar(props: EditorTopBarProps) {
         </h1>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {props.autoMapPendingCount !== undefined && props.autoMapPendingCount > 0 ? (
+            <button
+              type="button"
+              onClick={props.onReturnToAutoMap}
+              className="inline-flex items-center rounded border border-amber-600/60 bg-amber-900/25 px-2.5 py-1 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-900/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400"
+              data-testid="automap-reentry-pill"
+            >
+              Auto-Map: {props.autoMapPendingCount} pending
+            </button>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={props.onToggleBrowseSource}
+            className={[
+              'inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+              props.isBrowseSourceActive
+                ? 'border-blue-500/60 bg-blue-900/40 text-blue-200'
+                : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-slate-100',
+            ].join(' ')}
+            data-testid="browse-source-button"
+            aria-pressed={props.isBrowseSourceActive === true}
+          >
+            Browse Source
+          </button>
+
           {props.sampleSelectorSlot}
 
           <button

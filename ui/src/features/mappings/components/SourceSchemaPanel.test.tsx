@@ -96,23 +96,15 @@ function renderPanel(
 }
 
 describe('SourceSchemaPanel', () => {
-  it('renders SRC badge and source schema name in header', () => {
+  it('does not render source schema name row', () => {
     renderPanel({
       parsedSourceSchema: FLAT_SCHEMA,
       sourceSchemaName: 'Customer Source',
       onStageField: vi.fn(),
     });
-    expect(screen.getByTestId('source-header-badge')).toHaveTextContent('SRC');
-    expect(screen.getByTestId('source-header-name')).toHaveTextContent('Customer Source');
-  });
 
-  it('renders fallback source header name when schema name is missing', () => {
-    renderPanel({
-      parsedSourceSchema: FLAT_SCHEMA,
-      sourceSchemaName: null,
-      onStageField: vi.fn(),
-    });
-    expect(screen.getByTestId('source-header-name')).toHaveTextContent('No source schema');
+    expect(screen.queryByTestId('source-header-name')).not.toBeInTheDocument();
+    expect(screen.queryByText('Customer Source')).not.toBeInTheDocument();
   });
 
   it('renders empty state when schema is null', () => {
@@ -272,26 +264,42 @@ describe('SourceSchemaPanel', () => {
     });
   });
 
-  it('shows selected source metadata details after selecting a leaf field', () => {
-    renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField: vi.fn() });
-
-    expect(screen.getByTestId('source-selected-empty')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('source-field-name'));
-
-    expect(screen.getByTestId('source-selected-path')).toHaveTextContent('name');
-    expect(screen.getByTestId('source-selected-type')).toHaveTextContent('str');
-    expect(screen.getByTestId('source-selected-required')).toHaveTextContent('Required');
-  });
-
-  it('shows sample value in selected source details when preview source data exists', () => {
+  it('renders source row content with type badge and sample payload subline', () => {
     renderPanel(
       { parsedSourceSchema: FLAT_SCHEMA, onStageField: vi.fn() },
       { name: 'Alice', email: 'alice@example.com' },
     );
 
-    fireEvent.click(screen.getByTestId('source-field-name'));
+    expect(screen.getByTestId('source-field-content-name')).toBeInTheDocument();
+    expect(screen.getByTestId('source-field-subline-name')).toHaveTextContent('"Alice"');
+  });
 
-    expect(screen.getByTestId('source-selected-sample-value')).toHaveTextContent('"Alice"');
+  it('falls back to dash when source payload is not loaded', () => {
+    renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField: vi.fn() }, null);
+
+    expect(screen.getByTestId('source-field-subline-name')).toHaveTextContent('—');
+  });
+
+  it('renders container row content without a second subline row', () => {
+    renderPanel({ parsedSourceSchema: NESTED_SCHEMA, onStageField: vi.fn() });
+
+    expect(screen.getByTestId('source-container-content-address')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-container-subline-address')).not.toBeInTheDocument();
+  });
+
+  it('does not render Selected source details section', () => {
+    renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField: vi.fn() });
+
+    expect(screen.queryByTestId('source-selected-details')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-selected-empty')).not.toBeInTheDocument();
+  });
+
+  it('uses equal badge width classes for string and number rows', () => {
+    renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField: vi.fn() });
+
+    const badges = screen.getAllByLabelText(/^type:/i);
+    expect(badges.length).toBeGreaterThan(1);
+    expect(badges[0].className).toContain('min-w-[2rem]');
+    expect(badges[1].className).toContain('min-w-[2rem]');
   });
 });

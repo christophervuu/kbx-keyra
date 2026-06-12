@@ -75,12 +75,14 @@ const TYPE_ABBREV: Record<string, string> = {
 
 interface LeafFieldRowProps {
   node: SchemaTreeNode;
+  sampleValue?: string;
   onStageField: (path: string) => void;
   isHighlighted?: boolean;
 }
 
 const LeafFieldRow = memo(function LeafFieldRow({
   node,
+  sampleValue,
   onStageField,
   isHighlighted = false,
 }: LeafFieldRowProps) {
@@ -104,7 +106,7 @@ const LeafFieldRow = memo(function LeafFieldRow({
       aria-label={`Stage source field ${node.path}`}
       style={{ paddingLeft: node.depth * 16 + 8 }}
       className={[
-        'group flex min-h-[32px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
+        'group flex min-h-[44px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isDragging ? 'opacity-50' : '',
@@ -120,17 +122,26 @@ const LeafFieldRow = memo(function LeafFieldRow({
         aria-hidden="true"
       />
 
-      {/* Field name */}
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200" title={node.path}>
-        {node.fieldName}
-      </span>
-
-      {/* Type badge */}
-      <span
-        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
-        aria-label={`type: ${node.type}`}
-      >
-        {TYPE_ABBREV[node.type] ?? node.type}
+      {/* Field name + sample preview (target-row parity) */}
+      <span className="min-w-0 flex-1" data-testid={`source-field-content-${node.path}`}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={`inline-flex min-w-[2rem] shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
+            aria-label={`type: ${node.type}`}
+          >
+            {TYPE_ABBREV[node.type] ?? node.type}
+          </span>
+          <span className="truncate font-mono text-xs text-slate-200" title={node.path}>
+            {node.fieldName}
+          </span>
+        </span>
+        <p
+          className="ml-[2.6rem] truncate text-[11px] text-slate-500"
+          data-testid={`source-field-subline-${node.path}`}
+          title={sampleValue ?? '—'}
+        >
+          {sampleValue ?? '—'}
+        </p>
       </span>
     </div>
   );
@@ -161,7 +172,7 @@ function ContainerNodeRow({
       aria-expanded={isExpanded}
       style={{ paddingLeft: node.depth * 16 + 4 }}
       className={[
-        'flex min-h-[32px] w-full items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-left text-sm',
+        'flex min-h-[44px] w-full items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-left text-sm',
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isHighlighted ? 'bg-blue-950/30' : '',
@@ -174,14 +185,16 @@ function ContainerNodeRow({
       ) : (
         <ChevronRight size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
       )}
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200" title={node.path}>
-        {node.fieldName}
-      </span>
       <span
-        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
+        className={`inline-flex min-w-[2rem] shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
         aria-label={`type: ${node.type}`}
       >
         {TYPE_ABBREV[node.type] ?? node.type}
+      </span>
+      <span className="min-w-0 flex-1" data-testid={`source-container-content-${node.path}`}>
+        <span className="block truncate font-mono text-xs text-slate-200" title={node.path}>
+          {node.fieldName}
+        </span>
       </span>
     </button>
   );
@@ -196,6 +209,7 @@ interface RenderNodeProps {
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onStageField: (path: string) => void;
+  sourceData: unknown;
   visiblePaths: Set<string> | null;
   matchingPaths: Set<string>;
 }
@@ -205,6 +219,7 @@ function renderNode({
   expandedPaths,
   onToggle,
   onStageField,
+  sourceData,
   visiblePaths,
   matchingPaths,
 }: RenderNodeProps): ReactNode[] {
@@ -231,6 +246,7 @@ function renderNode({
       <LeafFieldRow
         key={node.path}
         node={node}
+        sampleValue={resolveFieldTestValue(sourceData, node.path)}
         onStageField={onStageField}
         isHighlighted={isHighlighted}
       />
@@ -245,6 +261,7 @@ function renderNode({
           expandedPaths,
           onToggle,
           onStageField,
+          sourceData,
           visiblePaths,
           matchingPaths,
         }),
@@ -268,8 +285,8 @@ export function SourceSchemaPanel({
   onStageField,
   className = '',
 }: SourceSchemaPanelProps) {
+  void sourceSchemaName;
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-  const [selectedSourcePath, setSelectedSourcePath] = useState<string | null>(null);
 
   const previewCtx = useContext(PreviewContext);
   const sourceData = previewCtx?.sourceData ?? null;
@@ -294,22 +311,9 @@ export function SourceSchemaPanel({
   };
 
   const handleStageField = (path: string) => {
-    setSelectedSourcePath(path);
     onStageField(path);
   };
 
-  const nodeByPath = useMemo(() => {
-    const map = new Map<string, SchemaTreeNode>();
-    for (const node of allNodes) {
-      map.set(node.path, node);
-    }
-    return map;
-  }, [allNodes]);
-
-  const selectedNode = selectedSourcePath ? nodeByPath.get(selectedSourcePath) ?? null : null;
-  const selectedSampleValue = selectedSourcePath
-    ? resolveFieldTestValue(sourceData, selectedSourcePath)
-    : undefined;
 
   if (!parsedSourceSchema || parsedSourceSchema.nodes.length === 0) {
     return (
@@ -336,25 +340,6 @@ export function SourceSchemaPanel({
       className={`flex flex-col overflow-hidden ${className}`}
       aria-label="Source schema fields"
     >
-      {/* Panel header */}
-      <div className="shrink-0 border-b border-slate-800 px-2 h-8">
-        <div className="flex h-full items-center gap-2">
-          <span
-            data-testid="source-header-badge"
-            className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-sky-900/50 text-sky-300"
-          >
-            SRC
-          </span>
-          <h2
-            className="min-w-0 truncate text-xs font-semibold text-slate-300"
-            data-testid="source-header-name"
-            title={sourceSchemaName ?? 'No source schema'}
-          >
-            {sourceSchemaName ?? 'No source schema'}
-          </h2>
-        </div>
-      </div>
-
       {/* Search header */}
       <div className="shrink-0 border-b border-slate-800 px-2 py-1.5">
         <div className="relative flex items-center">
@@ -414,6 +399,7 @@ export function SourceSchemaPanel({
               expandedPaths: effectiveExpandedPaths,
               onToggle: handleToggle,
               onStageField: handleStageField,
+              sourceData,
               visiblePaths,
               matchingPaths,
             }),
@@ -421,40 +407,6 @@ export function SourceSchemaPanel({
         )}
       </div>
 
-      {/* Selected source details */}
-      <div className="shrink-0 border-t border-slate-800 px-2 py-2" data-testid="source-selected-details">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Selected source</p>
-        {selectedNode ? (
-          <div className="mt-1.5 space-y-1.5 rounded border border-slate-700 bg-slate-900/60 p-2">
-            <p className="truncate font-mono text-[11px] text-slate-200" data-testid="source-selected-path" title={selectedNode.path}>
-              {selectedNode.path}
-            </p>
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[selectedNode.type] ?? 'bg-slate-700/80 text-slate-300'}`}
-                data-testid="source-selected-type"
-              >
-                {TYPE_ABBREV[selectedNode.type] ?? selectedNode.type}
-              </span>
-              <span className="text-[10px] text-slate-400" data-testid="source-selected-required">
-                {selectedNode.isRequired ? 'Required' : 'Optional'}
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-500">Sample value</p>
-            <p
-              className="truncate rounded bg-slate-950/80 px-1.5 py-1 font-mono text-[11px] text-slate-300"
-              data-testid="source-selected-sample-value"
-              title={selectedSampleValue ?? 'No sample value'}
-            >
-              {selectedSampleValue ?? 'No sample value'}
-            </p>
-          </div>
-        ) : (
-          <p className="mt-1 text-[11px] text-slate-500" data-testid="source-selected-empty">
-            Select a source field to view details.
-          </p>
-        )}
-      </div>
     </div>
   );
 }

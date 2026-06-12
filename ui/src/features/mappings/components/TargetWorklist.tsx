@@ -1,4 +1,4 @@
-import { Search, X } from 'lucide-react';
+import { ChevronDown, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -510,39 +510,6 @@ function renderNode({
 }
 
 // ---------------------------------------------------------------------------
-// FilterTab sub-component
-// ---------------------------------------------------------------------------
-
-function FilterTab({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      role="tab"
-      aria-pressed={active}
-      data-testid={`target-filter-${label.toLowerCase().replace(/\s+/g, '-')}`}
-      className={[
-        'inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-        active
-          ? 'border-slate-600 bg-slate-800 text-slate-100'
-          : 'border-slate-700 text-slate-400 hover:bg-slate-900 hover:text-slate-100',
-      ].join(' ')}
-    >
-      {label}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -577,6 +544,7 @@ export function TargetWorklist({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilterTab, setActiveFilterTab] = useState<TargetFilterTab>('all');
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [arrayChildDisplayModeByPath, setArrayChildDisplayModeByPath] = useState<
     Record<string, ArrayChildDisplayMode | undefined>
   >({});
@@ -613,6 +581,7 @@ export function TargetWorklist({
 
   const handleFilterTabClick = useCallback((tab: TargetFilterTab) => {
     setActiveFilterTab(tab);
+    setIsFilterMenuOpen(false);
   }, []);
 
   const handleSetArrayChildDisplayMode = useCallback((path: string, mode: ArrayChildDisplayMode) => {
@@ -672,6 +641,7 @@ export function TargetWorklist({
   }, [onVisibleScopeChange, visibleTargetPaths]);
 
   const isFiltering = searchQuery.trim().length > 0 || activeFilterTab !== 'all';
+  const activeFilterLabel = FILTER_TABS.find((tab) => tab.value === activeFilterTab)?.label ?? 'All';
 
   if (nodes.length === 0) {
     return (
@@ -691,73 +661,94 @@ export function TargetWorklist({
     >
       {/* Search + filter toolbar */}
       <div className="shrink-0 border-b border-slate-800 bg-slate-950 px-2.5 py-1.5">
-          {/* Search input */}
-          <div className="flex items-center gap-1.5">
-            <div className="relative flex flex-1 items-center">
-              <Search
-                size={12}
-                className="pointer-events-none absolute left-2 text-slate-500"
-                aria-hidden="true"
-              />
-              <input
-                type="search"
-                role="searchbox"
-                aria-label="Search target fields"
-                data-testid="target-search"
-                placeholder="Search fields…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  aria-label="Clear search"
-                  data-testid="target-search-clear"
-                  className="absolute right-1.5 text-slate-500 hover:text-slate-300"
-                >
-                  <X size={11} aria-hidden="true" />
-                </button>
-              )}
-            </div>
-
-            {selectedPath && onClearSelection && (
+        {/* Search + filters */}
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex flex-1 items-center">
+            <Search
+              size={12}
+              className="pointer-events-none absolute left-2 text-slate-500"
+              aria-hidden="true"
+            />
+            <input
+              type="search"
+              role="searchbox"
+              aria-label="Search target fields"
+              data-testid="target-search"
+              placeholder="Search fields…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {searchQuery && (
               <button
                 type="button"
-                onClick={onClearSelection}
-                data-testid="target-clear-selection"
-                className="inline-flex h-6 items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-300 transition-colors hover:bg-slate-700/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                data-testid="target-search-clear"
+                className="absolute right-1.5 text-slate-500 hover:text-slate-300"
               >
-                Clear active row
+                <X size={11} aria-hidden="true" />
               </button>
             )}
+          </div>
 
-            <span
-              className="hidden shrink-0 text-[11px] text-slate-500 lg:inline"
-              data-testid="visible-scope-count"
+          <div className="relative">
+            <button
+              type="button"
+              data-testid="target-filter-button"
+              aria-haspopup="menu"
+              aria-expanded={isFilterMenuOpen}
+              onClick={() => setIsFilterMenuOpen((prev) => !prev)}
+              className="inline-flex h-6 items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-300 transition-colors hover:bg-slate-700/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
             >
-              Scope: {visibleTargetPaths.length}
-            </span>
+              Filters: {activeFilterLabel}
+              <ChevronDown size={11} aria-hidden="true" />
+            </button>
+
+            {isFilterMenuOpen && (
+              <div
+                role="menu"
+                data-testid="target-filter-menu"
+                className="absolute right-0 z-30 mt-1 min-w-[180px] rounded border border-slate-700 bg-slate-900 p-1 shadow-xl"
+              >
+                {FILTER_TABS.map(({ value, label }) => {
+                  const active = activeFilterTab === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      data-testid={`target-filter-${label.toLowerCase().replace(/\s+/g, '-')}`}
+                      onClick={() => handleFilterTabClick(value)}
+                      className={[
+                        'flex w-full items-center rounded px-2 py-1.5 text-left text-xs transition-colors',
+                        active
+                          ? 'bg-slate-800 text-slate-100'
+                          : 'text-slate-300 hover:bg-slate-800/70',
+                      ].join(' ')}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="mt-1.5 flex items-center gap-1 overflow-x-auto" role="tablist" aria-label="Target filters">
-            {FILTER_TABS.map(({ value, label }) => (
-              <FilterTab
-                key={value}
-                label={label}
-                active={activeFilterTab === value}
-                onClick={() => handleFilterTabClick(value)}
-              />
-            ))}
-          </div>
-
-          <div className="sr-only">
-            <button type="button" data-testid="target-filter-button" aria-hidden="true" tabIndex={-1} />
-            <div data-testid="target-filter-menu" aria-hidden="true" />
-          </div>
+          {selectedPath && onClearSelection && (
+            <button
+              type="button"
+              onClick={onClearSelection}
+              data-testid="target-clear-selection"
+              className="inline-flex h-6 items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-300 transition-colors hover:bg-slate-700/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              Clear active row
+            </button>
+          )}
         </div>
-      
+      </div>
+
       <div className="grid grid-cols-[56px_minmax(220px,34%)_minmax(160px,24%)_minmax(120px,16%)_1fr] items-center gap-2 border-b border-slate-800 bg-slate-950 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-slate-500">
         <span className="text-center">Status</span>
         <span>Target field</span>

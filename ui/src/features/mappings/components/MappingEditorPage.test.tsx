@@ -71,6 +71,11 @@ describe('EditorTopBar', () => {
     expect(screen.getByTestId('sample-selector-slot')).toBeInTheDocument();
   });
 
+  it('renders Browse Source button in header utility area', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.getByTestId('browse-source-button')).toBeInTheDocument();
+  });
+
   it('renders required/warning/error summary counts', () => {
     renderWithRouter(
       <EditorTopBar
@@ -209,15 +214,14 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('editor-top-bar')).toBeInTheDocument();
   });
 
-  it('renders all semantic slot areas', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('detail-pane')).toBeInTheDocument();
-    expect(screen.getByTestId('source-panel')).toBeInTheDocument();
+  it('renders overview mode with only the Mapping Fields card', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="overview" />);
+    expect(screen.getByTestId('mapping-fields-card')).toBeInTheDocument();
     expect(screen.getByTestId('target-worklist')).toBeInTheDocument();
-    expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bottom-area')).not.toBeInTheDocument();
   });
-
   it('does not render a global-toolbar element', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     expect(screen.queryByTestId('global-toolbar')).not.toBeInTheDocument();
@@ -252,16 +256,18 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('error-summary')).toHaveTextContent('1 error');
   });
 
-  it('renders placeholder in source panel when no sourceContent provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+  it('renders placeholder in source panel when source-browse mode is active', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="source-browse" />,
+    );
     expect(screen.getByTestId('source-panel')).toHaveTextContent('Source Schema');
   });
-
   it('renders custom content in source panel when sourceContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
+        panelMode="source-browse"
         sourceContent={<div data-testid="custom-source">Source Tree</div>}
       />,
     );
@@ -284,44 +290,38 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('custom-worklist')).toBeInTheDocument();
   });
 
-  it('renders placeholder in builder panel when no builderContent provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+  it('renders placeholder in builder panel when row-editing mode is active', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
+    );
     expect(screen.getByTestId('builder-panel')).toHaveTextContent('Builder / Editor');
   });
-
   it('renders custom content in builder panel when builderContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
+        panelMode="row-editing"
         builderContent={<div data-testid="custom-builder">Builder</div>}
       />,
     );
     expect(screen.getByTestId('custom-builder')).toBeInTheDocument();
   });
 
-  it('hides detail pane entirely when showDetailPane=false', () => {
+  it('shows Source card only in source-browse mode', () => {
     renderWithRouter(
-      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" showDetailPane={false} />,
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="source-browse" />,
     );
-    expect(screen.queryByTestId('detail-pane')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('source-panel')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('builder-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
   });
-
-  it('keeps bottomContent out of visible layout when detail pane is hidden', () => {
+  it('shows Source and Builder cards in row-editing mode', () => {
     renderWithRouter(
-      <MappingEditorPage
-        projectId="proj-1"
-        mappingId="mapping-1"
-        showDetailPane={false}
-        bottomContent={<div data-testid="custom-bottom">Preview Panel</div>}
-      />,
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
     );
-    expect(screen.queryByTestId('custom-bottom')).not.toBeInTheDocument();
-    expect(screen.getByTestId('bottom-area-removed')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-card')).toBeInTheDocument();
   });
-
   it('target worklist is always rendered regardless of other slots', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     const worklist = screen.getByTestId('target-worklist');
@@ -334,37 +334,25 @@ describe('MappingEditorPage', () => {
     expect(worklist.className).not.toContain('hidden');
   });
 
-  it('target panel uses flex-1 to fill remaining space', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+  it('target panel uses flex-1 to fill remaining space in non-overview modes', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
+    );
     expect(screen.getByTestId('target-worklist').className).toContain('flex-1');
   });
 
-  it('renders resize handle between source and target columns', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('resize-handle-source')).toBeInTheDocument();
+  it('keeps bottomContent out of visible layout for all modes', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        bottomContent={<div data-testid="custom-bottom">Preview Panel</div>}
+      />,
+    );
+    expect(screen.queryByTestId('custom-bottom')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bottom-area-removed')).toBeInTheDocument();
   });
-
-  it('renders resize handle between target and builder columns', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('resize-handle-builder')).toBeInTheDocument();
-  });
-
-  it('source panel has non-zero inline width by default', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel = screen.getByTestId('source-panel');
-    const width = (panel as HTMLElement).style.width;
-    expect(width).toBeTruthy();
-    expect(parseInt(width)).toBeGreaterThan(0);
-  });
-
-  it('detail pane has non-zero inline width by default', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel = screen.getByTestId('detail-pane');
-    const width = (panel as HTMLElement).style.width;
-    expect(width).toBeTruthy();
-    expect(parseInt(width)).toBeGreaterThan(0);
-  });
-
   it('passes sample selector slot through to top bar', () => {
     renderWithRouter(
       <MappingEditorPage
@@ -375,5 +363,65 @@ describe('MappingEditorPage', () => {
     );
 
     expect(screen.getByTestId('page-sample-slot')).toBeInTheDocument();
+  });
+
+  it('wires Browse Source button pressed state through props', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        isBrowseSourceActive={true}
+      />,
+    );
+    expect(screen.getByTestId('browse-source-button')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('calls onToggleBrowseSource when Browse Source button is clicked', () => {
+    const onToggleBrowseSource = vi.fn();
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        onToggleBrowseSource={onToggleBrowseSource}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('browse-source-button'));
+    expect(onToggleBrowseSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders hide buttons on Source and Builder cards and triggers callbacks', () => {
+    const onHideSourcePanel = vi.fn();
+    const onHideBuilderPanel = vi.fn();
+
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        onHideSourcePanel={onHideSourcePanel}
+        onHideBuilderPanel={onHideBuilderPanel}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('hide-source-panel'));
+    fireEvent.click(screen.getByTestId('hide-builder-panel'));
+
+    expect(onHideSourcePanel).toHaveBeenCalledTimes(1);
+    expect(onHideBuilderPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render Source/Builder cards when hidden flags are true', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        hideSourcePanel={true}
+        hideBuilderPanel={true}
+      />,
+    );
+
+    expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
   });
 });

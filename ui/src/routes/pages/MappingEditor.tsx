@@ -868,6 +868,9 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   const [selectedRuleIndex, setSelectedRuleIndex] = useState<number | null>(null);
   const [stagedSourcePath, setStagedSourcePath] = useState<string | null>(null);
+  const [isSourceBrowseOpen, setIsSourceBrowseOpen] = useState(false);
+  const [isSourcePanelHidden, setIsSourcePanelHidden] = useState(false);
+  const [isBuilderPanelHidden, setIsBuilderPanelHidden] = useState(false);
 
   // Expression builder for Rules View (existing pattern)
   const builderResult = useExpressionBuilder({
@@ -923,6 +926,8 @@ export default function MappingEditor() {
         }
       }
       setStagedSourcePath(null);
+      setIsBuilderPanelHidden(false);
+      setIsSourcePanelHidden(false);
       setSelectedTargetPath(resolveSelectedTargetPath(path));
     },
     [selectedTargetPath, editor.actions, resolveSelectedTargetPath],
@@ -1256,7 +1261,7 @@ export default function MappingEditor() {
   const builderContentInner =
     view === 'rules' ? (
       <div
-        className="h-full"
+        className="h-full min-h-0"
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
@@ -1341,7 +1346,33 @@ export default function MappingEditor() {
 
   const builderContent = view === 'automap' ? autoMapWorkspaceContent : builderContentInner;
 
-  const showDetailPane = view === 'automap' || view === 'rules' || selectedNode !== null;
+  const panelMode: 'overview' | 'source-browse' | 'row-editing' =
+    view === 'automap' || view === 'rules' || selectedNode !== null
+      ? 'row-editing'
+      : isSourceBrowseOpen
+        ? 'source-browse'
+        : 'overview';
+
+  const handleToggleBrowseSource = () => {
+    if (selectedNode !== null) {
+      setIsSourceBrowseOpen(true);
+      setIsSourcePanelHidden(false);
+      return;
+    }
+    setIsSourcePanelHidden(false);
+    setIsSourceBrowseOpen((prev) => !prev);
+  };
+
+  const handleHideSourcePanel = () => {
+    setIsSourcePanelHidden(true);
+    if (selectedNode === null) {
+      setIsSourceBrowseOpen(false);
+    }
+  };
+
+  const handleHideBuilderPanel = () => {
+    setIsBuilderPanelHidden(true);
+  };
 
   const issueOverlay = isIssuesOpen
     ? (
@@ -1378,7 +1409,7 @@ export default function MappingEditor() {
         sourceContent={sourceContent}
         targetWorklistContent={targetWorklistContent}
         builderContent={builderContent}
-        showDetailPane={showDetailPane}
+        panelMode={panelMode}
         onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
         onHistoryToggle={handleOpenHistory}
         onViewIssues={() => setIsIssuesOpen(true)}
@@ -1407,6 +1438,13 @@ export default function MappingEditor() {
         autoMapScopeCount={visibleAutoMapScope.count}
         showDeployControls={false}
         sampleSelectorSlot={sampleSelectorSlot}
+        selectedSampleSourceData={selectedSampleParsed}
+        onToggleBrowseSource={handleToggleBrowseSource}
+        isBrowseSourceActive={panelMode !== 'overview'}
+        hideSourcePanel={isSourcePanelHidden}
+        hideBuilderPanel={isBuilderPanelHidden}
+        onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
+        onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />
 
       {issueOverlay}

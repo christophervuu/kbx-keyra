@@ -380,12 +380,19 @@ describe('TargetWorklist', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Filter tabs
+  // Filter menu
   // ---------------------------------------------------------------------------
 
-  it('renders all target filter tabs', () => {
+  it('renders Filters button on the search row', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.getByTestId('target-filter-button')).toBeInTheDocument();
+  });
 
+  it('shows all filter options in the filter menu', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
+
+    expect(screen.getByTestId('target-filter-menu')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-all')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-required')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-unmapped')).toBeInTheDocument();
@@ -396,19 +403,23 @@ describe('TargetWorklist', () => {
     expect(screen.getByTestId('target-filter-has-notes')).toBeInTheDocument();
   });
 
-  it('activates one tab at a time', () => {
+  it('activates one filter option at a time', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
 
-    expect(screen.getByTestId('target-filter-all')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByTestId('target-filter-button'));
+
+    expect(screen.getByTestId('target-filter-all')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(screen.getByTestId('target-filter-required'));
-    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('target-filter-all')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByTestId('target-filter-button'));
+    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('target-filter-all')).toHaveAttribute('aria-checked', 'false');
   });
 
   it('Required tab shows only required fields', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
 
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
@@ -419,6 +430,7 @@ describe('TargetWorklist', () => {
   it('Unmapped tab shows only unmapped fields', () => {
     const rules = [makeRule('firstName')];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-unmapped'));
 
     expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
@@ -434,6 +446,7 @@ describe('TargetWorklist', () => {
     render(
       <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} validationResult={validation} />,
     );
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-warnings'));
 
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
@@ -449,6 +462,7 @@ describe('TargetWorklist', () => {
     render(
       <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} validationResult={validation} />,
     );
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-errors'));
 
     expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
@@ -464,6 +478,7 @@ describe('TargetWorklist', () => {
         autoMapSuggestionStatusByPath={{ firstName: 'suggested' }}
       />,
     );
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-ai-suggestions'));
 
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
@@ -480,6 +495,7 @@ describe('TargetWorklist', () => {
         autoMapSuggestionStatusByPath={{ lastName: 'suggested' }}
       />,
     );
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-mapped'));
 
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
@@ -498,11 +514,18 @@ describe('TargetWorklist', () => {
     ];
 
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-has-notes'));
 
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  it('does not render visible scope count text', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
+    expect(screen.queryByTestId('visible-scope-count')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Scope:/i)).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------

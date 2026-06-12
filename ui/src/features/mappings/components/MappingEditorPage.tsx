@@ -1,11 +1,10 @@
-import { ChevronRight } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { EditorTopBar } from './EditorTopBar';
 import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
 import { PanelPlaceholder } from './PanelPlaceholder';
 import { PreviewProvider } from '../context/preview-context';
-import { useResizableLayout } from '../hooks/use-resizable-layout';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,8 +56,8 @@ export interface MappingEditorPageProps {
   builderContent?: ReactNode;
   /** Content for the full-width bottom area (Preview / Diagnostics / Testing) */
   bottomContent?: ReactNode;
-  /** Whether the Source + Builder detail pane should be shown */
-  showDetailPane?: boolean;
+  /** Staged layout mode for Mapping Fields / Source / Builder cards */
+  panelMode?: 'overview' | 'source-browse' | 'row-editing';
   /** Callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
   /** Callback to open consolidated issues panel */
@@ -113,6 +112,20 @@ export interface MappingEditorPageProps {
   showDeployControls?: boolean;
   /** Optional sample selector control rendered in the top bar. */
   sampleSelectorSlot?: ReactNode;
+  /** Loaded selected sample payload parsed as object for preview-context readers */
+  selectedSampleSourceData?: unknown | null;
+  /** Toggle Source browse mode (header Browse Source button). */
+  onToggleBrowseSource?: () => void;
+  /** Whether Source browse mode is active in header utility area. */
+  isBrowseSourceActive?: boolean;
+  /** Hide Source card while keeping staged layout mode active */
+  hideSourcePanel?: boolean;
+  /** Hide Builder card while keeping staged layout mode active */
+  hideBuilderPanel?: boolean;
+  /** Fired when Source panel close button is clicked */
+  onHideSourcePanel?: () => void;
+  /** Fired when Builder panel close button is clicked */
+  onHideBuilderPanel?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,21 +205,28 @@ export function MappingEditorPage({
   autoMapScopeCount,
   showDeployControls = true,
   sampleSelectorSlot,
-  showDetailPane = true,
+  selectedSampleSourceData,
+  panelMode = 'overview',
+  onToggleBrowseSource,
+  isBrowseSourceActive = false,
+  hideSourcePanel = false,
+  hideBuilderPanel = false,
+  onHideSourcePanel,
+  onHideBuilderPanel,
 }: MappingEditorPageProps) {
   // FS-092: in-page bottom preview section is intentionally removed from Mapping Editor.
   // Keep prop for backward compatibility with existing call sites.
   void bottomContent;
 
-  const {
-    layout,
-    isDragging,
-    sourceHandleProps,
-    builderHandleProps,
-    expandSource,
-  } = useResizableLayout();
+  const isOverview = panelMode === 'overview';
+  const showSourceCard = (panelMode === 'source-browse' || panelMode === 'row-editing') && !hideSourcePanel;
+  const showBuilderCard = panelMode === 'row-editing' && !hideBuilderPanel;
 
-  const { sourceWidth, targetWidth, sourceCollapsed } = layout;
+  const mappingCardWidthClass = isOverview
+    ? 'w-[min(78%,1200px)]'
+    : showBuilderCard
+      ? 'w-[56%]'
+      : 'w-[68%]';
 
   return (
     <div
@@ -214,7 +234,7 @@ export function MappingEditorPage({
       data-testid="mapping-editor-page"
     >
       {/* Context bar */}
-      <EditorTopBar
+        <EditorTopBar
         projectName={projectName}
         projectId={projectId}
         mappingName={mappingName}
@@ -252,102 +272,98 @@ export function MappingEditorPage({
         autoMapSectionPath={autoMapSectionPath}
         onReturnToAutoMap={onReturnToAutoMap}
         autoMapScopeCount={autoMapScopeCount}
-        showDeployControls={showDeployControls}
-        sampleSelectorSlot={sampleSelectorSlot}
-      />
+          showDeployControls={showDeployControls}
+          sampleSelectorSlot={sampleSelectorSlot}
+          onToggleBrowseSource={onToggleBrowseSource}
+          isBrowseSourceActive={isBrowseSourceActive}
+        />
 
       {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}
-      <PreviewProvider>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900">
-          {/* Grid + details row */}
+      <PreviewProvider sourceData={selectedSampleSourceData}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950">
           <div
             className={[
-              'flex min-h-0 flex-1 border-t border-slate-800 bg-slate-950',
-              isDragging ? 'select-none' : '',
+              'flex h-full min-h-0 flex-1 gap-3 px-3 pt-3 transition-all duration-200 ease-in-out',
+              isOverview ? 'items-stretch justify-center' : 'items-stretch justify-start',
             ].join(' ')}
           >
-            {/* Primary grid area */}
-            <div
-              className="min-w-0 flex-1 overflow-auto"
-              data-testid="target-worklist"
+            <section
+              className={[
+                'flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out',
+                mappingCardWidthClass,
+              ].join(' ')}
+              data-testid="mapping-fields-card"
             >
-              {targetWorklistContent ?? (
-                <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
-              )}
-            </div>
+              <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Target Mapping Fields
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto" data-testid="target-worklist">
+                {targetWorklistContent ?? (
+                  <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+                )}
+              </div>
+            </section>
 
-            {/* Detail pane is shown only for row-focused authoring context */}
-            {showDetailPane && (
-              <>
-                <div
-                  role="separator"
-                  aria-label="Resize details panel"
-                  aria-orientation="vertical"
-                  data-testid="resize-handle-builder"
-                  onMouseDown={builderHandleProps.onMouseDown}
-                  onDoubleClick={builderHandleProps.onDoubleClick}
-                  className="w-1.5 shrink-0 cursor-col-resize bg-slate-900 hover:bg-blue-500/20 active:bg-blue-500/30"
-                />
-                <div
-                  className={[
-                    'flex shrink-0 overflow-hidden border-l border-slate-800 bg-slate-950',
-                    isDragging ? '' : 'transition-[width] duration-200 ease-in-out',
-                  ].join(' ')}
-                  data-testid="detail-pane"
-                  style={{ width: `${targetWidth}px` }}
-                >
-                  {sourceCollapsed ? (
-                    <button
-                      type="button"
-                      data-testid="expand-source"
-                      onClick={expandSource}
-                      aria-label="Expand Source panel"
-                      className="flex w-3.5 shrink-0 flex-col items-center justify-center gap-1 border-r border-slate-800 bg-slate-900 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500"
-                    >
-                      <ChevronRight size={10} aria-hidden="true" />
-                      <span
-                        className="text-[9px] font-medium tracking-wide"
-                        style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+            {showSourceCard && (
+              <section
+                className="flex h-full min-h-0 w-[22%] min-w-[260px] flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out"
+                data-testid="source-card"
+              >
+                <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Source Fields</span>
+                    {onHideSourcePanel ? (
+                      <button
+                        type="button"
+                        aria-label="Hide Source panel"
+                        data-testid="hide-source-panel"
+                        onClick={onHideSourcePanel}
+                        className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
                       >
-                        Source
-                      </span>
-                    </button>
-                  ) : (
-                    <div
-                      data-testid="source-panel"
-                      className={[
-                        'shrink-0 overflow-auto border-r border-slate-800 bg-slate-950',
-                        isDragging ? '' : 'transition-[width] duration-200 ease-in-out',
-                      ].join(' ')}
-                      style={{ width: `${sourceWidth}px` }}
-                    >
-                      {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
-                    </div>
-                  )}
-
-                  <div
-                    role="separator"
-                    aria-label="Resize source panel"
-                    aria-orientation="vertical"
-                    data-testid="resize-handle-source"
-                    onMouseDown={sourceHandleProps.onMouseDown}
-                    onDoubleClick={sourceHandleProps.onDoubleClick}
-                    className="w-1.5 shrink-0 cursor-col-resize bg-slate-900 hover:bg-blue-500/20 active:bg-blue-500/30"
-                  />
-
-                  <div
-                    data-testid="builder-panel"
-                    data-automap-mode={isAutoMapMode ? 'true' : undefined}
-                    className="min-w-0 flex-1 overflow-auto bg-slate-950"
-                  >
-                    {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
+                        <X size={12} aria-hidden="true" />
+                      </button>
+                    ) : null}
                   </div>
                 </div>
-              </>
+                <div className="min-h-0 flex-1 overflow-auto" data-testid="source-panel">
+                  {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
+                </div>
+              </section>
+            )}
+
+            {showBuilderCard && (
+              <section
+                className="flex h-full min-h-0 w-[24%] min-w-[300px] flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out"
+                data-testid="builder-card"
+              >
+                <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Builder</span>
+                    {onHideBuilderPanel ? (
+                      <button
+                        type="button"
+                        aria-label="Hide Builder panel"
+                        data-testid="hide-builder-panel"
+                        onClick={onHideBuilderPanel}
+                        className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+                      >
+                        <X size={12} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div
+                  data-testid="builder-panel"
+                  data-automap-mode={isAutoMapMode ? 'true' : undefined}
+                  className="min-h-0 flex-1 overflow-auto"
+                >
+                  {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
+                </div>
+              </section>
             )}
           </div>
 
-          {!showDetailPane && <div className="sr-only" data-testid="bottom-area-removed" />}
+          <div className="sr-only" data-testid="bottom-area-removed" />
         </div>
       </PreviewProvider>
     </div>
