@@ -71,8 +71,6 @@ const DEFAULT_PROPS = {
   onSelectNode: vi.fn(),
   sort: 'schema' as const,
   onSortChange: vi.fn(),
-  view: 'target' as const,
-  onViewToggle: vi.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -307,22 +305,22 @@ describe('TargetWorklist', () => {
     expect(summary).toHaveTextContent('Items: 12');
   });
 
-  it('renders target panel header title', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    expect(screen.getByTestId('target-header-badge')).toHaveTextContent('TGT');
-    expect(screen.getByTestId('target-header-name')).toHaveTextContent('No target schema');
+  it('shows extracted source field path instead of raw DSL in source summary', () => {
+    const rules: MappingRule[] = [
+      {
+        target: 'firstName',
+        type: 'string',
+        expression: 'source("customer.name")',
+      },
+    ];
+
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+
+    const sourceCell = screen.getByTestId('target-field-row-firstName').querySelector('[data-testid="source-summary"]');
+    expect(sourceCell).toHaveTextContent('customer.name');
+    expect(sourceCell).not.toHaveTextContent('source("customer.name")');
   });
 
-  it('renders target schema name in header when provided', () => {
-    render(
-      <TargetWorklist
-        {...DEFAULT_PROPS}
-        nodes={FLAT_NODES}
-        targetSchemaName="Order Target"
-      />,
-    );
-    expect(screen.getByTestId('target-header-name')).toHaveTextContent('Order Target');
-  });
 
   it('shows children after expanding an object node', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={NESTED_NODES} />);
@@ -382,92 +380,53 @@ describe('TargetWorklist', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Filter dropdown
+  // Filter tabs
   // ---------------------------------------------------------------------------
 
-  it('renders filter button beside search input', () => {
+  it('renders all target filter tabs', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    expect(screen.getByTestId('target-filter-button')).toBeInTheDocument();
-    expect(screen.queryByTestId('target-filter-menu')).not.toBeInTheDocument();
-  });
 
-  it('opens filter dropdown with all four options', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
-    expect(screen.getByTestId('target-filter-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-all')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-required')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-unmapped')).toBeInTheDocument();
     expect(screen.getByTestId('target-filter-warnings')).toBeInTheDocument();
-    expect(screen.getByTestId('target-filter-required')).toBeInTheDocument();
-    expect(screen.getByTestId('target-filter-arrays')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-errors')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-ai-suggestions')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-mapped')).toBeInTheDocument();
+    expect(screen.getByTestId('target-filter-has-notes')).toBeInTheDocument();
   });
 
-  it('filter options start inactive (aria-pressed=false)', () => {
+  it('activates one tab at a time', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
-    expect(screen.getByTestId('target-filter-unmapped')).toHaveAttribute('aria-pressed', 'false');
+
+    expect(screen.getByTestId('target-filter-all')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'false');
-  });
 
-  it('clicking a filter option activates it (aria-pressed=true)', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
     expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('target-filter-all')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('clicking an active filter option deactivates it', () => {
+  it('Required tab shows only required fields', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-required'));
-    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByTestId('target-filter-required'));
-    expect(screen.getByTestId('target-filter-required')).toHaveAttribute('aria-pressed', 'false');
-  });
 
-  it('Required filter shows only required fields', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
-    fireEvent.click(screen.getByTestId('target-filter-required'));
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
   });
 
-  it('Unmapped filter shows only unmapped fields', () => {
+  it('Unmapped tab shows only unmapped fields', () => {
     const rules = [makeRule('firstName')];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-unmapped'));
+
     expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
     expect(screen.getByTestId('target-field-row-lastName')).toBeInTheDocument();
     expect(screen.getByTestId('target-field-row-age')).toBeInTheDocument();
   });
 
-  it('AND logic: Required + Unmapped shows only required AND unmapped fields', () => {
-    // firstName is required but mapped; lastName is not required; age is not required
-    const rules = [makeRule('firstName')];
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
-    fireEvent.click(screen.getByTestId('target-filter-required'));
-    fireEvent.click(screen.getByTestId('target-filter-unmapped'));
-    // firstName is required but mapped — fails unmapped filter
-    // lastName/age are unmapped but not required — fail required filter
-    expect(screen.getByTestId('target-worklist-no-results')).toBeInTheDocument();
-  });
-
-  it('Arrays filter shows only array-type fields', () => {
-    const nodesWithArray: SchemaTreeNode[] = [
-      ...FLAT_NODES,
-      makeNode('tags', 'tags', 'array', 0, false),
-    ];
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodesWithArray} />);
-    fireEvent.click(screen.getByTestId('target-filter-button'));
-    fireEvent.click(screen.getByTestId('target-filter-arrays'));
-    expect(screen.getByTestId('target-field-row-tags')).toBeInTheDocument();
-    expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
-  });
-
-  it('Warnings filter shows only fields with warning/error status', () => {
+  it('Warnings tab shows only warning fields', () => {
     const rules = [makeRule('firstName'), makeRule('lastName')];
     const validation = makeValidation([
       { code: 'W001', severity: 'warning', message: 'warn', targetPath: 'firstName' },
@@ -475,8 +434,72 @@ describe('TargetWorklist', () => {
     render(
       <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} validationResult={validation} />,
     );
-    fireEvent.click(screen.getByTestId('target-filter-button'));
     fireEvent.click(screen.getByTestId('target-filter-warnings'));
+
+    expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  it('Errors tab shows only error fields', () => {
+    const rules = [makeRule('firstName'), makeRule('lastName')];
+    const validation = makeValidation([
+      { code: 'E001', severity: 'error', message: 'err', targetPath: 'lastName' },
+    ]);
+    render(
+      <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} validationResult={validation} />,
+    );
+    fireEvent.click(screen.getByTestId('target-filter-errors'));
+
+    expect(screen.queryByTestId('target-field-row-firstName')).not.toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-lastName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  it('AI Suggestions tab shows only suggested rows', () => {
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        autoMapSuggestionStatusByPath={{ firstName: 'suggested' }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('target-filter-ai-suggestions'));
+
+    expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  it('Mapped tab shows mapped non-suggested rows only', () => {
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        rules={[makeRule('firstName'), makeRule('lastName')]}
+        autoMapSuggestionStatusByPath={{ lastName: 'suggested' }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('target-filter-mapped'));
+
+    expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
+  });
+
+  it('Has Notes tab shows rows with rule description notes', () => {
+    const rules: MappingRule[] = [
+      {
+        target: 'firstName',
+        type: 'string',
+        expression: 'source("firstName")',
+        description: 'Reviewed by analyst',
+      },
+    ];
+
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+    fireEvent.click(screen.getByTestId('target-filter-has-notes'));
+
     expect(screen.getByTestId('target-field-row-firstName')).toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-lastName')).not.toBeInTheDocument();
     expect(screen.queryByTestId('target-field-row-age')).not.toBeInTheDocument();
@@ -533,49 +556,6 @@ describe('TargetWorklist', () => {
     const rules = [makeRule('firstName')];
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
     expect(screen.queryByTestId('expression-summary')).not.toBeInTheDocument();
-  });
-
-  // ---------------------------------------------------------------------------
-  // View toggle
-  // ---------------------------------------------------------------------------
-
-  it('renders view toggle buttons', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} />);
-    const targetButton = screen.getByTestId('toolbar-view-target');
-    const rulesButton = screen.getByTestId('toolbar-view-rules');
-    expect(targetButton).toBeInTheDocument();
-    expect(rulesButton).toBeInTheDocument();
-    expect(targetButton).toHaveAccessibleName('Target view');
-    expect(rulesButton).toHaveAccessibleName('Rules view');
-    expect(targetButton).toHaveTextContent(/^\s*$/);
-    expect(rulesButton).toHaveTextContent(/^\s*$/);
-  });
-
-  it('active view button has aria-pressed=true', () => {
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="target" />);
-    expect(screen.getByTestId('toolbar-view-target')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('toolbar-view-rules')).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('clicking Rules View fires onViewToggle with "rules"', () => {
-    const onViewToggle = vi.fn();
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="target" onViewToggle={onViewToggle} />);
-    fireEvent.click(screen.getByTestId('toolbar-view-rules'));
-    expect(onViewToggle).toHaveBeenCalledWith('rules');
-  });
-
-  it('clicking Target View fires onViewToggle with "target"', () => {
-    const onViewToggle = vi.fn();
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="target" onViewToggle={onViewToggle} />);
-    fireEvent.click(screen.getByTestId('toolbar-view-target'));
-    expect(onViewToggle).not.toHaveBeenCalled();
-  });
-
-  it('clicking the already-active view does not fire onViewToggle', () => {
-    const onViewToggle = vi.fn();
-    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} view="target" onViewToggle={onViewToggle} />);
-    fireEvent.click(screen.getByTestId('toolbar-view-target'));
-    expect(onViewToggle).not.toHaveBeenCalled();
   });
 
   it('does not render breadcrumb-nav', () => {

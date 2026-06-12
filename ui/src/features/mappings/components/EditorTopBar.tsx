@@ -1,228 +1,69 @@
-import { BookMarked, Clock, ExternalLink, Save, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Ellipsis, ExternalLink, Save, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
 import { PATHS } from '@/routes/paths';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error';
 
-/**
- * The highest deployed environment for this mapping, plus the version
- * that was deployed. Used to derive the single deploy badge.
- */
 export interface HighestDeployStatus {
   environment: Environment;
-  /** The version number that is currently deployed to this environment */
   deployedVersion: number;
 }
 
 export interface EditorTopBarProps {
-  /** Human-readable project name */
   projectName: string;
-  /** Project ID — used to build the project overview link */
   projectId: string;
-  /** Human-readable mapping name */
   mappingName: string;
-  /**
-   * Current saved version number (legacy compat — used as fallback for `currentRevision`).
-   * @deprecated Use `currentRevision` instead.
-   */
   version: number;
-  /**
-   * Current revision number (FS-063). When provided, shown as "Rev N" in the badge.
-   * Falls back to `version` when absent.
-   */
   currentRevision?: number;
-  /**
-   * Current version (milestone) number, or null when no version has been created.
-   * Shown alongside the revision badge as "vN" or "—".
-   */
   currentVersion?: number | null;
-  /**
-   * Whether there is a local autosaved draft in localStorage.
-   * When true, a small draft indicator is shown next to the revision badge.
-   */
   hasDraft?: boolean;
-  /**
-   * Whether the Save button should be enabled.
-   * Falls back to `unsavedChangeCount > 0` when absent (backward compat).
-   */
   canSave?: boolean;
-  /**
-   * Callback for the Version button. When provided, the Version button is rendered.
-   * On click calls `createVersion()` from the editor hook.
-   */
   onCreateVersion?: () => void;
-  /**
-   * Highest deployed environment info.
-   * Null when the mapping has never been deployed.
-   */
   deployStatus: HighestDeployStatus | null;
-  /**
-   * Current save status — controls the save state indicator and Save button.
-   * T-02 wires the actual computed state; T-01 accepts it as a prop.
-   */
   saveStatus: SaveStatus;
-  /**
-   * Number of fields with unsaved draft changes.
-   * Replaces the old `unsavedCount` prop.
-   * Controls Save button disabled state and "View changes" button visibility.
-   */
   unsavedChangeCount: number;
-  /**
-   * Callback fired when the user clicks "View changes".
-   * Parent is responsible for opening the UnsavedChangesOverlay.
-   */
   onViewUnsavedChanges?: () => void;
-  /** Callback for the Save button. T-02 wires the actual save action. */
   onSave: () => void;
-  /** Source schema display name (shown in schema context strip) */
   sourceSchemaName: string | null;
-  /** Target schema display name (shown in schema context strip) */
   targetSchemaName: string | null;
-  /** Optional callback to toggle the configuration modal */
   onConfigToggle?: () => void;
-  /** Optional callback to toggle the version history drawer */
   onHistoryToggle?: () => void;
-  /** Optional callback to open consolidated issues panel */
   onViewIssues?: () => void;
-  /** Current consolidated issue count (errors + warnings) */
   issueCount?: number;
-  /** Optional callback to route to Test Lab */
   onOpenTestLab?: () => void;
-  /** Optional callback to route to Deployment page */
+  onOpenRulesView?: () => void;
+  onOpenTargetView?: () => void;
+  isRulesViewActive?: boolean;
   onOpenDeploymentPage?: () => void;
-  /** Optional callback for export action */
   onExportMapping?: () => void;
-  /** Optional callback for import action */
   onImportMapping?: () => void;
-  /** Optional callback fired when the user clicks the "Auto-map" button (header mode). */
   onAutoMap?: () => void;
-  /** True while a header-level auto-map request is in flight — disables button and shows spinner. */
   isAutoMapLoading?: boolean;
-  /**
-   * Number of pending (unreviewed) auto-map suggestions across all sections (FS-048).
-   * When > 0, a subtle re-entry affordance is shown in the top bar.
-   * When 0, the affordance is hidden.
-   */
   autoMapPendingCount?: number;
-  /** Section path with pending suggestions — used for display context */
   autoMapSectionPath?: string | null;
-  /** Called when the re-entry affordance is clicked — enters workspace mode */
   onReturnToAutoMap?: () => void;
-  /** Count of currently visible target rows in the active filter/search scope. */
   autoMapScopeCount?: number;
-  /** When false, hides deploy status badge + deploy link for authoring-only shell mode. */
   showDeployControls?: boolean;
-  /** Optional sample-selector control rendered in the header actions row. */
   sampleSelectorSlot?: ReactNode;
+  requiredMappedCount?: number;
+  requiredFieldCount?: number;
+  warningCount?: number;
+  errorCount?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Save status display config
-// ---------------------------------------------------------------------------
-
-const saveStatusConfig: Record<SaveStatus, { label: (count: number) => string; className: string }> = {
-  saved: { label: () => 'Saved ✓', className: 'text-green-400' },
-  unsaved: {
-    label: (count) =>
-      count === 1 ? '● 1 unsaved change' : `● ${count} unsaved changes`,
-    className: 'text-amber-400',
-  },
-  saving: { label: () => 'Saving…', className: 'text-slate-400' },
-  error: { label: () => 'Save failed', className: 'text-red-400' },
-};
-// ---------------------------------------------------------------------------
-// Deploy badge helpers
-// ---------------------------------------------------------------------------
-
-const ENV_ORDER: Environment[] = ['DEV', 'PREPROD', 'PROD'];
-
-function normalizeEnvironmentLabel(environment: Environment): string {
-  if (environment === 'QA') {
-    return 'PREPROD';
+function saveStatusLabel(status: SaveStatus, unsavedChangeCount: number): string {
+  if (status === 'saving') return 'Saving…';
+  if (status === 'error') return 'Save failed';
+  if (status === 'unsaved' && unsavedChangeCount > 0) {
+    return unsavedChangeCount === 1 ? '1 unsaved change' : `${unsavedChangeCount} unsaved changes`;
   }
-
-  return environment;
+  return 'Saved';
 }
 
-function getDeployBadgeContent(
-  deployStatus: HighestDeployStatus | null,
-  savedVersion: number,
-): { label: string; dotClass: string } {
-  if (!deployStatus) {
-    return { label: 'Not deployed', dotClass: 'bg-slate-500' };
-  }
-
-  const isStale = savedVersion > deployStatus.deployedVersion;
-  const envLabel = normalizeEnvironmentLabel(deployStatus.environment);
-
-  if (isStale) {
-    return { label: `${envLabel} (stale)`, dotClass: 'bg-amber-500' };
-  }
-
-  return { label: envLabel, dotClass: 'bg-green-500' };
-}
-
-// Keep ENV_ORDER in scope for potential future use (e.g. sorting multi-env arrays)
-void ENV_ORDER;
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-/**
- * Context bar for the Mapping Editor — Row 2 of the 2-row top area.
- *
- * Displays:
- * - ProjectName / MappingName breadcrumb links
- * - Version badge
- * - Single highest-environment deploy badge with stale indicator
- * - Save state indicator ("Saved ✓" or "N unsaved changes")
- * - Save button (primary, disabled when saved)
- * - History button (optional)
- * - Config button (optional)
- * - Deploy page link
- */
-export function EditorTopBar({
-  projectName,
-  projectId,
-  mappingName,
-  version,
-  currentRevision,
-  currentVersion = null,
-  hasDraft = false,
-  canSave,
-  onCreateVersion,
-  deployStatus,
-  saveStatus,
-  unsavedChangeCount,
-  onViewUnsavedChanges,
-  onSave,
-  sourceSchemaName,
-  targetSchemaName,
-  onConfigToggle,
-  onHistoryToggle,
-  onViewIssues,
-  issueCount = 0,
-  onOpenTestLab,
-  onOpenDeploymentPage,
-  onExportMapping,
-  onImportMapping,
-  onAutoMap,
-  isAutoMapLoading = false,
-  autoMapPendingCount = 0,
-  autoMapSectionPath = null,
-  onReturnToAutoMap,
-  autoMapScopeCount,
-  showDeployControls = true,
-  sampleSelectorSlot,
-}: EditorTopBarProps) {
+export function EditorTopBar(props: EditorTopBarProps) {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -250,348 +91,227 @@ export function EditorTopBar({
     };
   }, [isMoreMenuOpen]);
 
-  const saveConfig = saveStatusConfig[saveStatus];
-  const saveLabel = saveConfig.label(unsavedChangeCount);
-  const isSaving = saveStatus === 'saving';
+  const projectPath = PATHS.PROJECT_OVERVIEW.replace(':projectId', props.projectId);
+  const saveLabel = saveStatusLabel(props.saveStatus, props.unsavedChangeCount);
+  const isSaving = props.saveStatus === 'saving';
+  const isSaveEnabled = props.canSave ?? props.unsavedChangeCount > 0;
+  const canViewChanges = props.unsavedChangeCount > 0 && props.onViewUnsavedChanges !== undefined;
 
-  // Save is enabled when canSave is explicitly set; else fall back to unsavedChangeCount > 0
-  const isSaveEnabled = canSave ?? unsavedChangeCount > 0;
-
-  const displayRevision = currentRevision ?? version;
-
-  const hasChanges = unsavedChangeCount > 0;
-  const canViewChanges = hasChanges && onViewUnsavedChanges !== undefined;
-
-  const projectPath = PATHS.PROJECT_OVERVIEW.replace(':projectId', projectId);
-
-  const { label: deployLabel, dotClass } = getDeployBadgeContent(deployStatus, displayRevision);
+  const sourceName = props.sourceSchemaName ?? 'No source';
+  const targetName = props.targetSchemaName ?? 'No target';
 
   return (
     <header
-      className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-700 bg-slate-900 px-4 py-2"
+      className="border-b border-slate-800 bg-slate-950"
       data-testid="editor-top-bar"
     >
-      {/* Left: project / mapping breadcrumb + revision + version */}
-      <div className="flex items-center gap-1.5 text-sm" data-testid="editor-breadcrumb">
-        <Link
-          to={projectPath}
-          className="font-medium text-slate-400 hover:text-slate-200 transition-colors"
-          data-testid="project-name-link"
-        >
-          {projectName}
+      <nav
+        className="flex items-center gap-1.5 border-b border-slate-800 px-6 py-2 text-sm"
+        data-testid="editor-breadcrumb"
+        aria-label="Breadcrumb"
+      >
+        <Link to="/" className="text-slate-400 transition-colors hover:text-slate-200">
+          Home
         </Link>
         <span className="text-slate-600" aria-hidden="true">/</span>
-        <span className="font-semibold text-slate-100" data-testid="mapping-name">
-          {mappingName}
-        </span>
-        {/* Revision badge */}
-        <span
-          className="rounded bg-slate-700 px-1.5 py-0.5 text-xs font-medium text-slate-300"
-          data-testid="revision-badge"
-          title={`Current revision: ${displayRevision}`}
+        <span className="text-slate-500" aria-disabled="true">Projects</span>
+        <span className="text-slate-600" aria-hidden="true">/</span>
+        <Link
+          to={projectPath}
+          className="text-slate-400 transition-colors hover:text-slate-200"
+          data-testid="project-name-link"
         >
-          Rev {displayRevision}
+          {props.projectName}
+        </Link>
+        <span className="text-slate-600" aria-hidden="true">/</span>
+        <span className="text-slate-300" aria-current="page" data-testid="mapping-name-breadcrumb">
+          {props.mappingName}
         </span>
-        {/* Version badge */}
-        <span
-          className="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-medium text-slate-400 border border-slate-600"
-          data-testid="version-badge"
-          title={currentVersion != null ? `Latest version: ${currentVersion}` : 'No version created yet'}
-        >
-          {currentVersion != null ? `v${currentVersion}` : '—'}
-        </span>
-        {/* Draft indicator — shown when there is an autosaved local draft */}
-        {hasDraft && (
-          <span
-            className="inline-flex items-center gap-1 rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-700/40"
-            data-testid="draft-indicator"
-            title="You have an autosaved local draft"
-            aria-label="Unsaved local draft"
+      </nav>
+
+      <div className="px-4 py-2.5">
+        <div className="flex items-start justify-between gap-3">
+        <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-100" data-testid="schema-names" title={`${sourceName} → ${targetName}`}>
+          {sourceName} → {targetName}
+        </h1>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {props.sampleSelectorSlot}
+
+          <button
+            type="button"
+            onClick={props.onSave}
+            disabled={!isSaveEnabled || isSaving}
+            className="inline-flex items-center gap-1.5 rounded border border-blue-500/50 bg-blue-700/80 px-2.5 py-1 text-xs font-medium text-blue-100 transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+            data-testid="save-button"
+            aria-label="Save mapping"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
-            Draft
-          </span>
-        )}
-      </div>
+            <Save size={12} aria-hidden="true" />
+            Save
+          </button>
 
-      {/* Deploy badge */}
-      {showDeployControls && (
-        <div className="flex items-center gap-1.5" data-testid="deploy-badge">
-          <span className={`h-2 w-2 rounded-full ${dotClass}`} aria-hidden="true" />
-          <span className="text-xs font-medium text-slate-300">{deployLabel}</span>
-        </div>
-      )}
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Schema context (source → target) */}
-      {(sourceSchemaName || targetSchemaName) && (
-        <div
-          className="hidden items-center gap-1 text-xs text-slate-500 xl:flex"
-          data-testid="schema-names"
-        >
-          <span className="max-w-28 truncate" title={sourceSchemaName ?? 'No source schema'}>
-            {sourceSchemaName ?? 'No source'}
-          </span>
-          <span className="text-slate-700" aria-hidden="true">→</span>
-          <span className="max-w-28 truncate" title={targetSchemaName ?? 'No target schema'}>
-            {targetSchemaName ?? 'No target'}
-          </span>
-        </div>
-      )}
-
-      {sampleSelectorSlot}
-
-      {/* Save state indicator */}
-      <span
-        className={`text-xs font-medium ${saveConfig.className}`}
-        role="status"
-        aria-live="polite"
-        data-testid="save-status"
-      >
-        {saveLabel}
-      </span>
-
-      {onViewIssues && (
-        <button
-          type="button"
-          onClick={onViewIssues}
-          data-testid="view-issues-button"
-          className="inline-flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-        >
-          View Issues
-          {issueCount > 0 && (
-            <span
-              className="inline-flex min-w-[1rem] items-center justify-center rounded-full bg-amber-700/50 px-1 text-[10px] font-semibold text-amber-100"
-              data-testid="view-issues-count"
-              aria-hidden="true"
-            >
-              {issueCount}
-            </span>
-          )}
-        </button>
-      )}
-
-      {/* View changes button — visible when there are unsaved changes */}
-      {canViewChanges && (
-        <button
-          type="button"
-          onClick={onViewUnsavedChanges}
-          className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-amber-300 border border-amber-700/50 bg-amber-900/20 hover:bg-amber-900/40 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500"
-          data-testid="view-changes-button"
-          aria-label={`View ${unsavedChangeCount} unsaved ${unsavedChangeCount === 1 ? 'change' : 'changes'}`}
-        >
-          View changes
-          <span
-            className="inline-flex items-center justify-center rounded-full bg-amber-700/60 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100 min-w-[1.25rem]"
-            aria-hidden="true"
-            data-testid="view-changes-badge"
-          >
-            {unsavedChangeCount}
-          </span>
-        </button>
-      )}
-
-      {/* Auto-Map re-entry affordance (FS-048) — shown when pending suggestions exist */}
-      {autoMapPendingCount > 0 && onReturnToAutoMap && (
-        <button
-          type="button"
-          data-testid="automap-reentry-pill"
-          onClick={onReturnToAutoMap}
-          aria-label={`Return to Auto-Map review — ${autoMapPendingCount} pending${autoMapSectionPath ? ` for ${autoMapSectionPath}` : ''}`}
-          className={[
-            'inline-flex items-center gap-1.5 rounded-full border border-violet-700/50 bg-violet-900/20',
-            'px-2.5 py-0.5 text-[10px] font-medium text-violet-300 transition-colors',
-            'hover:border-violet-600 hover:bg-violet-900/40 hover:text-violet-200',
-            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-500',
-          ].join(' ')}
-        >
-          <Sparkles size={10} aria-hidden="true" />
-          Auto-Map: {autoMapPendingCount} pending
-        </button>
-      )}
-
-      <span className="text-slate-600" aria-hidden="true">|</span>
-
-      {/* Auto-map button — live when onAutoMap provided, placeholder otherwise */}
-      {onAutoMap ? (
-        <button
-          type="button"
-          onClick={onAutoMap}
-          disabled={isAutoMapLoading}
-          data-testid="automap-button"
-          aria-label={
-            typeof autoMapScopeCount === 'number'
-              ? `Auto-map ${autoMapScopeCount} visible fields`
-              : 'Auto-map all eligible fields'
-          }
-          className={[
-            'inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-            isAutoMapLoading
-              ? 'cursor-not-allowed text-slate-500 opacity-60'
-              : 'text-blue-400 hover:bg-slate-800 hover:text-blue-300',
-          ].join(' ')}
-        >
-          {isAutoMapLoading ? (
-            <span
-              className="h-3 w-3 animate-spin rounded-full border border-blue-400 border-t-transparent"
-              aria-hidden="true"
-            />
-          ) : (
-            <Sparkles size={12} aria-hidden="true" />
-          )}
-          {typeof autoMapScopeCount === 'number' ? `Auto-map (${autoMapScopeCount})` : 'Auto-map'}
-        </button>
-      ) : (
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          title="AI-powered auto-mapping — coming soon"
-          data-testid="automap-button"
-          className="inline-flex cursor-not-allowed items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-slate-500 opacity-50"
-        >
-          <Sparkles size={12} aria-hidden="true" />
-          Auto-map
-        </button>
-      )}
-
-      {typeof autoMapScopeCount === 'number' && (
-        <span
-          data-testid="automap-scope-label"
-          className="text-[10px] text-slate-500"
-          aria-live="polite"
-        >
-          Scope: {autoMapScopeCount} visible field{autoMapScopeCount === 1 ? '' : 's'}
-        </span>
-      )}
-
-      <div className="relative" ref={moreMenuRef}>
-        <button
-          type="button"
-          data-testid="more-menu-button"
-          aria-haspopup="menu"
-          aria-expanded={isMoreMenuOpen}
-          onClick={() => setIsMoreMenuOpen((prev) => !prev)}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-        >
-          More
-        </button>
-
-        {isMoreMenuOpen && (
-          <div
-            role="menu"
-            data-testid="more-menu-popover"
-            className="absolute right-0 z-50 mt-1 w-52 rounded border border-slate-700 bg-slate-900 p-1.5 shadow-xl"
-          >
+          <div className="relative" ref={moreMenuRef}>
             <button
               type="button"
-              role="menuitem"
-              data-testid="more-menu-history"
-              onClick={() => {
-                setIsMoreMenuOpen(false);
-                onHistoryToggle?.();
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+              data-testid="more-menu-button"
+              aria-haspopup="menu"
+              aria-expanded={isMoreMenuOpen}
+              aria-label="More options"
+              onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+              className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
             >
-              <Clock size={12} aria-hidden="true" />
-              Version history
+              <Ellipsis size={14} aria-hidden="true" />
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="more-menu-test-lab"
-              onClick={() => {
-                setIsMoreMenuOpen(false);
-                onOpenTestLab?.();
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
-            >
-              <ExternalLink size={12} aria-hidden="true" />
-              Open Test Lab
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="more-menu-deployment"
-              onClick={() => {
-                setIsMoreMenuOpen(false);
-                onOpenDeploymentPage?.();
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
-            >
-              <ExternalLink size={12} aria-hidden="true" />
-              Open Deployment Page
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="more-menu-export"
-              onClick={() => {
-                setIsMoreMenuOpen(false);
-                onExportMapping?.();
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
-            >
-              Export
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="more-menu-import"
-              onClick={() => {
-                setIsMoreMenuOpen(false);
-                onImportMapping?.();
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
-            >
-              Import
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              data-testid="more-menu-settings"
-              onClick={() => {
-                setIsMoreMenuOpen(false);
-                onConfigToggle?.();
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
-            >
-              <SlidersHorizontal size={12} aria-hidden="true" />
-              Mapping settings
-            </button>
+
+            {isMoreMenuOpen && (
+              <div
+                role="menu"
+                data-testid="more-menu-popover"
+                className="absolute right-0 z-50 mt-1 w-56 rounded border border-slate-700 bg-slate-900 p-1.5 shadow-xl"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-history"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onHistoryToggle?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  Version history
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-test-lab"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onOpenTestLab?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  <ExternalLink size={12} aria-hidden="true" />
+                  Open Test Lab
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-rules-view"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onOpenRulesView?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  Open Mapping Rules
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-target-view"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onOpenTargetView?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  Open Target Properties
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-deployment"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onOpenDeploymentPage?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  <ExternalLink size={12} aria-hidden="true" />
+                  Open Deployment Page
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-export"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onExportMapping?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  Export
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-import"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onImportMapping?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  Import
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="more-menu-settings"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    props.onConfigToggle?.();
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                >
+                  <SlidersHorizontal size={12} aria-hidden="true" />
+                  Mapping settings
+                </button>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Version button — shown when onCreateVersion is provided */}
-      {onCreateVersion && (
-        <button
-          type="button"
-          onClick={onCreateVersion}
-          disabled={isSaving}
-          className="inline-flex items-center gap-1.5 rounded border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:border-slate-500 hover:bg-slate-700 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-          data-testid="version-button"
-          aria-label="Create a new version milestone"
-        >
-          <BookMarked size={12} aria-hidden="true" />
-          Version
-        </button>
-      )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-400" data-testid="editor-summary-row">
+        <span className="font-medium text-emerald-400" data-testid="required-mapped-summary">
+          {props.requiredMappedCount ?? 0} / {props.requiredFieldCount ?? 0} required fields mapped
+        </span>
+        <span className="text-slate-600" aria-hidden="true">·</span>
+        <span className="font-medium text-amber-400" data-testid="warning-summary">
+          {props.warningCount ?? 0} warning{(props.warningCount ?? 0) === 1 ? '' : 's'}
+        </span>
+        <span className="text-slate-600" aria-hidden="true">·</span>
+        <span className="font-medium text-red-400" data-testid="error-summary">
+          {props.errorCount ?? 0} error{(props.errorCount ?? 0) === 1 ? '' : 's'}
+        </span>
+        <span className="text-slate-600" aria-hidden="true">·</span>
+        {canViewChanges ? (
+          <button
+            type="button"
+            onClick={props.onViewUnsavedChanges}
+            className="text-sm text-blue-400 transition-colors hover:text-blue-300"
+            data-testid="save-status"
+          >
+            {saveLabel}
+          </button>
+        ) : (
+          <span
+            className={props.saveStatus === 'saved' ? 'text-slate-400' : 'text-blue-400'}
+            role="status"
+            aria-live="polite"
+            data-testid="save-status"
+          >
+            {saveLabel}
+          </span>
+        )}
+        </div>
 
-      {/* Save button */}
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={!isSaveEnabled || isSaving}
-        className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
-        data-testid="save-button"
-        aria-label="Save mapping"
-      >
-        <Save size={12} aria-hidden="true" />
-        Save
-      </button>
+        <span className="sr-only" data-testid="mapping-name">
+          {props.mappingName}
+        </span>
+      </div>
     </header>
   );
 }

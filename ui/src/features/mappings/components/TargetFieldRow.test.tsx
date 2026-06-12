@@ -125,14 +125,25 @@ describe('TargetFieldRow', () => {
     expect(screen.queryByTestId('expression-summary')).not.toBeInTheDocument();
   });
 
-  it('applies indentation based on depth', () => {
+  it('renders mapping method in a badge', () => {
+    render(<TargetFieldRow {...BASE_PROPS} mappingTypeLabel="Direct Copy" />);
+    const method = screen.getByTestId('mapping-type');
+    expect(method).toHaveTextContent('Direct Copy');
+    const badge = method.querySelector('span');
+    expect(badge?.className).toContain('rounded');
+    expect(badge?.className).toContain('border');
+  });
+
+  it('applies indentation to target content based on depth', () => {
     const { rerender } = render(<TargetFieldRow {...BASE_PROPS} depth={0} />);
-    const row0 = screen.getByRole('row');
-    expect(row0).toHaveStyle({ paddingLeft: '0px' });
+    let targetCell = screen.getByTestId('row-col-target');
+    let targetContent = targetCell.querySelector('div');
+    expect(targetContent).toHaveStyle({ paddingLeft: '0px' });
 
     rerender(<TargetFieldRow {...BASE_PROPS} depth={2} />);
-    const row2 = screen.getByRole('row');
-    expect(row2).toHaveStyle({ paddingLeft: '32px' });
+    targetCell = screen.getByTestId('row-col-target');
+    targetContent = targetCell.querySelector('div');
+    expect(targetContent).toHaveStyle({ paddingLeft: '32px' });
   });
 
   it('shows expand chevron for expandable nodes', () => {
@@ -172,13 +183,13 @@ describe('TargetFieldRow', () => {
   it('applies selected highlight class when isSelected=true', () => {
     render(<TargetFieldRow {...BASE_PROPS} isSelected={true} />);
     const row = screen.getByRole('row');
-    expect(row.className).toContain('bg-slate-800/70');
+    expect(row.className).toContain('bg-blue-950/35');
   });
 
   it('does not apply selected highlight when isSelected=false', () => {
     render(<TargetFieldRow {...BASE_PROPS} isSelected={false} />);
     const row = screen.getByRole('row');
-    expect(row.className).not.toContain('bg-slate-800/70');
+    expect(row.className).not.toContain('bg-blue-950/35');
   });
 
   it('displays coverage text for object nodes', () => {

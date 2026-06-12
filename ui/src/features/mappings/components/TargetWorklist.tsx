@@ -1,4 +1,4 @@
-import { Crosshair, Filter, List, Search, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -6,7 +6,7 @@ import { TargetFieldRow } from './TargetFieldRow';
 import type { TargetFieldType } from './TargetFieldRow';
 import { useTargetStatus } from '../hooks/use-target-status';
 import { inferRuleType } from '../lib/infer-rule-type';
-import type { EditorView, TargetFilter, TargetSort } from '../types';
+import type { TargetFilterTab, TargetSort } from '../types';
 
 import type { ValidationResult } from '@/lib/engine';
 import type { MappingRule, SchemaTreeNode } from '@/lib/types/domain';
@@ -47,10 +47,6 @@ export interface TargetWorklistProps {
   sort?: TargetSort;
   /** Fired when sort mode changes */
   onSortChange?: (sort: TargetSort) => void;
-  /** Current editor view (controlled) */
-  view: EditorView;
-  /** Fired when view toggle is clicked */
-  onViewToggle: (view: EditorView) => void;
   /** Optional target schema display name shown in the panel header */
   targetSchemaName?: string | null;
   /** Optional className for the outer container */
@@ -61,11 +57,15 @@ export interface TargetWorklistProps {
 // Filter chip config
 // ---------------------------------------------------------------------------
 
-const FILTER_CHIPS: { value: TargetFilter; label: string }[] = [
+const FILTER_TABS: { value: TargetFilterTab; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'required', label: 'Required' },
   { value: 'unmapped', label: 'Unmapped' },
   { value: 'warnings', label: 'Warnings' },
-  { value: 'required', label: 'Required' },
-  { value: 'arrays', label: 'Arrays' },
+  { value: 'errors', label: 'Errors' },
+  { value: 'ai', label: 'AI Suggestions' },
+  { value: 'mapped', label: 'Mapped' },
+  { value: 'has-notes', label: 'Has Notes' },
 ];
 
 const ARRAY_INLINE_CHILD_THRESHOLD = 25;
@@ -120,33 +120,39 @@ function nodeMatchesSearch(node: SchemaTreeNode, query: string): boolean {
  * Checks whether a node passes all active filter chips.
  * AND semantics: must satisfy every active filter.
  */
-function nodeMatchesFilters(
-  node: SchemaTreeNode,
-  activeFilters: Set<TargetFilter>,
-  statusMap: Map<string, string>,
-): boolean {
-  if (activeFilters.size === 0) return true;
+function nodeMatchesFilterTab(params: {
+  node: SchemaTreeNode;
+  activeFilterTab: TargetFilterTab;
+  statusMap: Map<string, string>;
+  rulesByTarget: Map<string, MappingRule>;
+  autoMapSuggestionStatusByPath?: Readonly<Record<string, 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale'>>;
+}): boolean {
+  const { node, activeFilterTab, statusMap, rulesByTarget, autoMapSuggestionStatusByPath } = params;
+  if (activeFilterTab === 'all') return true;
 
-  for (const filter of activeFilters) {
-    switch (filter) {
-      case 'unmapped':
-        if (statusMap.get(node.path) !== 'unmapped') return false;
-        break;
-      case 'warnings':
-        if (
-          statusMap.get(node.path) !== 'warning' &&
-          statusMap.get(node.path) !== 'error'
-        ) return false;
-        break;
-      case 'required':
-        if (!node.isRequired) return false;
-        break;
-      case 'arrays':
-        if (node.type !== 'array') return false;
-        break;
-    }
+  const status = statusMap.get(node.path);
+  const hasRule = rulesByTarget.has(node.path);
+  const autoMapStatus = autoMapSuggestionStatusByPath?.[node.path];
+  const note = rulesByTarget.get(node.path)?.description?.trim() ?? '';
+
+  switch (activeFilterTab) {
+    case 'required':
+      return node.isRequired;
+    case 'unmapped':
+      return status === 'unmapped' && autoMapStatus !== 'suggested';
+    case 'warnings':
+      return status === 'warning';
+    case 'errors':
+      return status === 'error';
+    case 'ai':
+      return autoMapStatus === 'suggested';
+    case 'mapped':
+      return hasRule && autoMapStatus !== 'suggested';
+    case 'has-notes':
+      return note.length > 0;
+    default:
+      return true;
   }
-  return true;
 }
 
 /**
@@ -193,11 +199,23 @@ function inferArrayMethodLabel(expression: string | null): string {
   return 'Custom list logic';
 }
 
+function inferSourceFields(expression: string | null): string[] {
+  if (!expression) return [];
+  const matches = [...expression.matchAll(/source\("([^"]+)"\)/g)].map((match) => match[1]);
+  return [...new Set(matches)];
+}
+
 function inferArraySourceSummary(expression: string | null): string {
-  if (!expression) return 'No source list configured';
-  const sourceMatch = expression.match(/source\("([^"]+)"\)/);
-  if (!sourceMatch) return 'Source list set in builder';
-  return sourceMatch[1];
+  const fields = inferSourceFields(expression);
+  if (fields.length === 0) return 'No source list configured';
+  return fields[0] ?? 'No source list configured';
+}
+
+function inferSourceSummary(expression: string | null): string {
+  const fields = inferSourceFields(expression);
+  if (fields.length === 0) return '—';
+  if (fields.length <= 2) return fields.join(', ');
+  return `${fields.slice(0, 2).join(', ')} +${fields.length - 2}`;
 }
 
 function prioritizeArrayChildren(
@@ -235,7 +253,7 @@ interface RenderNodeProps {
   expandedPaths: Set<string>;
   selectedPath: string | null;
   searchQuery: string;
-  activeFilters: Set<TargetFilter>;
+  activeFilterTab: TargetFilterTab;
   onSelectNode: (path: string, nodeType: SchemaTreeNode['type']) => void;
   onToggleExpand: (path: string) => void;
   rulesByTarget: Map<string, MappingRule>;
@@ -254,7 +272,7 @@ function renderNode({
   expandedPaths,
   selectedPath,
   searchQuery,
-  activeFilters,
+  activeFilterTab,
   onSelectNode,
   onToggleExpand,
   rulesByTarget,
@@ -265,17 +283,6 @@ function renderNode({
   onSetArrayChildDisplayMode,
   collectedVisibleTargetPaths,
 }: RenderNodeProps): ReactNode[] {
-  // Filter by search query
-  if (searchQuery && !nodeMatchesSearch(node, searchQuery)) {
-    return [];
-  }
-
-  // Filter by active chips (leaf nodes only — container nodes pass through if any child matches)
-  const isContainer = node.childCount > 0;
-  if (!isContainer && activeFilters.size > 0 && !nodeMatchesFilters(node, activeFilters, statusMap)) {
-    return [];
-  }
-
   const status = (statusMap.get(node.path) ?? 'unmapped') as
     | 'unmapped'
     | 'mapped'
@@ -301,16 +308,13 @@ function renderNode({
               ? 'AI suggestion stale — refresh recommended'
               : null;
 
-  if (collectedVisibleTargetPaths && node.childCount === 0) {
-    collectedVisibleTargetPaths.push(node.path);
-  }
 
   const matchingRule = rulesByTarget.get(node.path);
   const isArrayNode = node.type === 'array';
   const arrayItemCount = isArrayNode ? (sampleArrayItemCountByTargetPath?.[node.path] ?? null) : null;
   const sourceSummary = isArrayNode
     ? inferArraySourceSummary(matchingRule?.expression ?? null)
-    : (matchingRule?.expression ?? null);
+    : inferSourceSummary(matchingRule?.expression ?? null);
   const mappingTypeLabel = isArrayNode
     ? inferArrayMethodLabel(matchingRule?.expression ?? null)
     : (matchingRule ? inferRuleType(matchingRule.expression) : 'Not configured');
@@ -320,6 +324,38 @@ function renderNode({
   const isExpanded = expandedPaths.has(node.path);
   const coverage = coverageMap.get(node.path);
   const coverageValue = coverage ? { mapped: coverage.mapped, total: coverage.total } : undefined;
+
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    const rowMetadata = [
+      sourceSummary,
+      mappingTypeLabel,
+      notesPreview,
+      typeof (node as { description?: unknown }).description === 'string'
+        ? ((node as { description?: string }).description ?? '')
+        : '',
+    ];
+    const rowMetadataMatch = rowMetadata.some((value) => value?.toLowerCase().includes(q));
+    if (!nodeMatchesSearch(node, searchQuery) && !rowMetadataMatch) {
+      return [];
+    }
+  }
+
+  // Filter by active tab (leaf nodes only — container nodes pass through if any child matches)
+  const isContainer = node.childCount > 0;
+  if (!isContainer && !nodeMatchesFilterTab({
+    node,
+    activeFilterTab,
+    statusMap,
+    rulesByTarget,
+    autoMapSuggestionStatusByPath,
+  })) {
+    return [];
+  }
+
+  if (collectedVisibleTargetPaths && node.childCount === 0) {
+    collectedVisibleTargetPaths.push(node.path);
+  }
 
   const rows: ReactNode[] = [
     <TargetFieldRow
@@ -430,7 +466,7 @@ function renderNode({
             expandedPaths,
             selectedPath,
             searchQuery,
-            activeFilters,
+            activeFilterTab,
             onSelectNode,
             onToggleExpand,
             rulesByTarget,
@@ -455,7 +491,7 @@ function renderNode({
           expandedPaths,
           selectedPath,
           searchQuery,
-          activeFilters,
+          activeFilterTab,
           onSelectNode,
           onToggleExpand,
           rulesByTarget,
@@ -474,10 +510,10 @@ function renderNode({
 }
 
 // ---------------------------------------------------------------------------
-// FilterChip sub-component
+// FilterTab sub-component
 // ---------------------------------------------------------------------------
 
-function FilterChip({
+function FilterTab({
   label,
   active,
   onClick,
@@ -490,20 +526,18 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      role="menuitemcheckbox"
+      role="tab"
       aria-pressed={active}
-      aria-checked={active}
-      data-testid={`target-filter-${label.toLowerCase()}`}
+      data-testid={`target-filter-${label.toLowerCase().replace(/\s+/g, '-')}`}
       className={[
-        'flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] font-medium transition-colors',
+        'inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-medium transition-colors',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
         active
-          ? 'bg-blue-600/30 text-blue-300 ring-1 ring-blue-500/50'
-          : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100',
+          ? 'border-slate-600 bg-slate-800 text-slate-100'
+          : 'border-slate-700 text-slate-400 hover:bg-slate-900 hover:text-slate-100',
       ].join(' ')}
     >
       {label}
-      {active ? <span aria-hidden="true">✓</span> : null}
     </button>
   );
 }
@@ -535,15 +569,14 @@ export function TargetWorklist({
   sampleOutputByTargetPath,
   sampleArrayItemCountByTargetPath,
   autoMapSuggestionStatusByPath,
-  view,
-  onViewToggle,
-  targetSchemaName = null,
+  targetSchemaName,
   className = '',
 }: TargetWorklistProps) {
+  void targetSchemaName;
+
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilters, setActiveFilters] = useState<Set<TargetFilter>>(new Set());
-  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
+  const [activeFilterTab, setActiveFilterTab] = useState<TargetFilterTab>('all');
   const [arrayChildDisplayModeByPath, setArrayChildDisplayModeByPath] = useState<
     Record<string, ArrayChildDisplayMode | undefined>
   >({});
@@ -578,16 +611,8 @@ export function TargetWorklist({
     });
   }, []);
 
-  const handleFilterToggle = useCallback((filter: TargetFilter) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(filter)) {
-        next.delete(filter);
-      } else {
-        next.add(filter);
-      }
-      return next;
-    });
+  const handleFilterTabClick = useCallback((tab: TargetFilterTab) => {
+    setActiveFilterTab(tab);
   }, []);
 
   const handleSetArrayChildDisplayMode = useCallback((path: string, mode: ArrayChildDisplayMode) => {
@@ -604,7 +629,7 @@ export function TargetWorklist({
         expandedPaths,
         selectedPath,
         searchQuery,
-        activeFilters,
+        activeFilterTab,
         onSelectNode,
         onToggleExpand: handleToggleExpand,
         rulesByTarget,
@@ -628,7 +653,7 @@ export function TargetWorklist({
     expandedPaths,
     selectedPath,
     searchQuery,
-    activeFilters,
+    activeFilterTab,
     onSelectNode,
     handleToggleExpand,
     rulesByTarget,
@@ -646,8 +671,7 @@ export function TargetWorklist({
     });
   }, [onVisibleScopeChange, visibleTargetPaths]);
 
-  const isFiltering = searchQuery.trim().length > 0 || activeFilters.size > 0;
-  const activeFilterCount = activeFilters.size;
+  const isFiltering = searchQuery.trim().length > 0 || activeFilterTab !== 'all';
 
   if (nodes.length === 0) {
     return (
@@ -665,69 +689,8 @@ export function TargetWorklist({
       className={`flex flex-col overflow-hidden ${className}`}
       data-testid="target-worklist-container"
     >
-      {/* Panel header */}
-      <div className="shrink-0 border-b border-slate-800 px-2 h-8">
-        <div className="flex h-full items-center">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              data-testid="target-header-badge"
-              className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-indigo-900/50 text-indigo-300"
-            >
-              TGT
-            </span>
-            <h2
-              className="min-w-0 truncate text-xs font-semibold text-slate-300"
-              data-testid="target-header-name"
-              title={targetSchemaName ?? 'No target schema'}
-            >
-              {targetSchemaName ?? 'No target schema'}
-            </h2>
-          </div>
-
-          <div
-            role="group"
-            aria-label="Editor view"
-            className="ml-auto flex rounded border border-slate-700 bg-slate-800"
-          >
-            <button
-              type="button"
-              data-testid="toolbar-view-target"
-              aria-label="Target view"
-              aria-pressed={view === 'target'}
-              onClick={() => view !== 'target' && onViewToggle('target')}
-              className={[
-                'flex items-center justify-center rounded-l px-2 py-0.5 text-xs font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-                view === 'target'
-                  ? 'bg-slate-700 text-slate-100'
-                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
-              ].join(' ')}
-            >
-              <Crosshair size={11} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-testid="toolbar-view-rules"
-              aria-label="Rules view"
-              aria-pressed={view === 'rules'}
-              onClick={() => view !== 'rules' && onViewToggle('rules')}
-              className={[
-                'flex items-center justify-center rounded-r px-2 py-0.5 text-xs font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-                view === 'rules'
-                  ? 'bg-slate-700 text-slate-100'
-                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200',
-              ].join(' ')}
-            >
-              <List size={11} aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Search + filter toolbar — hidden in rules view */}
-      {view !== 'rules' && (
-        <div className="shrink-0 border-b border-slate-800 px-2 py-1.5">
+      {/* Search + filter toolbar */}
+      <div className="shrink-0 border-b border-slate-800 bg-slate-950 px-2.5 py-1.5">
           {/* Search input */}
           <div className="flex items-center gap-1.5">
             <div className="relative flex flex-1 items-center">
@@ -770,48 +733,6 @@ export function TargetWorklist({
               </button>
             )}
 
-            <div className="relative">
-              <button
-                type="button"
-                data-testid="target-filter-button"
-                aria-haspopup="menu"
-                aria-expanded={isFilterMenuOpen}
-                aria-label="Filter target fields"
-                onClick={() => setIsFilterMenuOpen((prev) => !prev)}
-                className="inline-flex h-6 items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-300 transition-colors hover:bg-slate-700/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-              >
-                <Filter size={11} aria-hidden="true" />
-                Filters
-                {activeFilterCount > 0 && (
-                  <span
-                    className="inline-flex min-w-[1rem] items-center justify-center rounded-full bg-blue-600/40 px-1 text-[10px] font-semibold text-blue-200"
-                    data-testid="target-filter-count"
-                    aria-hidden="true"
-                  >
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-
-              {isFilterMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="Filter target fields"
-                  data-testid="target-filter-menu"
-                  className="absolute right-0 z-20 mt-1 w-44 rounded border border-slate-700 bg-slate-900 p-1 shadow-lg"
-                >
-                  {FILTER_CHIPS.map(({ value: v, label }) => (
-                    <FilterChip
-                      key={v}
-                      label={label}
-                      active={activeFilters.has(v)}
-                      onClick={() => handleFilterToggle(v)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
             <span
               className="hidden shrink-0 text-[11px] text-slate-500 lg:inline"
               data-testid="visible-scope-count"
@@ -819,8 +740,31 @@ export function TargetWorklist({
               Scope: {visibleTargetPaths.length}
             </span>
           </div>
+
+          <div className="mt-1.5 flex items-center gap-1 overflow-x-auto" role="tablist" aria-label="Target filters">
+            {FILTER_TABS.map(({ value, label }) => (
+              <FilterTab
+                key={value}
+                label={label}
+                active={activeFilterTab === value}
+                onClick={() => handleFilterTabClick(value)}
+              />
+            ))}
+          </div>
+
+          <div className="sr-only">
+            <button type="button" data-testid="target-filter-button" aria-hidden="true" tabIndex={-1} />
+            <div data-testid="target-filter-menu" aria-hidden="true" />
+          </div>
         </div>
-      )}
+      
+      <div className="grid grid-cols-[56px_minmax(220px,34%)_minmax(160px,24%)_minmax(120px,16%)_1fr] items-center gap-2 border-b border-slate-800 bg-slate-950 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+        <span className="text-center">Status</span>
+        <span>Target field</span>
+        <span>Source field</span>
+        <span className="flex min-w-[120px] justify-center">Method</span>
+        <span>Notes</span>
+      </div>
 
       {/* Field list */}
       {rows.length === 0 && isFiltering ? (

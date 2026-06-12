@@ -12,7 +12,6 @@ import {
   BuilderEmptyState,
   ConfigurationModal,
   ConfigurationPanel,
-  ConnectedInlinePreviewStrip,
   ExpressionBuilderPanel,
   ObjectSummaryPanel,
   RefreshConfirmBanner,
@@ -300,7 +299,6 @@ export default function MappingEditor() {
     if (!resolvedSelectedSampleId) return null;
     return samplePayloadCache[resolvedSelectedSampleId] ?? null;
   }, [resolvedSelectedSampleId, samplePayloadCache]);
-  const selectedSampleRaw = selectedSamplePayload?.raw ?? null;
   const selectedSampleParsed = selectedSamplePayload?.parsed ?? null;
 
   const loadSamplePayload = useCallback(async (sample: SchemaSamplePayloadMetadata) => {
@@ -1047,6 +1045,28 @@ export default function MappingEditor() {
 
   const issueCount = consolidatedIssues.length;
 
+  const { requiredFieldCount, requiredMappedCount, warningCount, errorCount } = useMemo(() => {
+    const nodes = editor.parsedTargetSchema?.nodes ?? [];
+    const requiredLeaves = nodes.filter((node) => node.childCount === 0 && node.isRequired);
+
+    const mappedTargets = new Set(effectiveRules.map((rule) => rule.target));
+    const requiredMapped = requiredLeaves.filter((node) => mappedTargets.has(node.path)).length;
+
+    let warnings = 0;
+    let errors = 0;
+    for (const diag of editor.validation.result?.diagnostics ?? []) {
+      if (diag.severity === 'warning') warnings += 1;
+      if (diag.severity === 'error') errors += 1;
+    }
+
+    return {
+      requiredFieldCount: requiredLeaves.length,
+      requiredMappedCount: requiredMapped,
+      warningCount: warnings,
+      errorCount: errors,
+    };
+  }, [editor.parsedTargetSchema?.nodes, effectiveRules, editor.validation.result]);
+
   const testLabPath = useMemo(
     () => PATHS.MAPPING_TEST.replace(':projectId', projectId).replace(':mappingId', mappingId),
     [mappingId, projectId],
@@ -1166,8 +1186,6 @@ export default function MappingEditor() {
         onClearSelection={() => setSelectedTargetPath(null)}
         onVisibleScopeChange={setVisibleAutoMapScope}
         autoMapSuggestionStatusByPath={autoMapSuggestionStatusByPath}
-        view={view}
-        onViewToggle={handleViewToggle}
         targetSchemaName={editor.targetSchemaName}
         sampleOutputByTargetPath={sampleOutputByTargetPath}
         sampleArrayItemCountByTargetPath={sampleArrayItemCountByTargetPath}
@@ -1323,24 +1341,7 @@ export default function MappingEditor() {
 
   const builderContent = view === 'automap' ? autoMapWorkspaceContent : builderContentInner;
 
-  // Bottom area: connected inline preview strip (renders inside PreviewProvider)
-  const bottomContent = (
-    <ConnectedInlinePreviewStrip
-      key={`preview-sample-${resolvedSelectedSampleId ?? 'none'}`}
-      config={editor.config}
-      sourceSchemaDetail={editor.sourceSchemaDetail}
-      targetSchemaDetail={editor.targetSchemaDetail}
-      projectId={projectId}
-      mappingId={mappingId}
-      selectedTargetPath={selectedTargetPath}
-      getDraftExpression={editor.actions.getDraftExpression}
-      onNavigateToRule={(ruleIndex) => {
-        const rule = editor.rules[ruleIndex];
-        if (rule) setSelectedTargetPath(resolveSelectedTargetPath(rule.target));
-      }}
-      externalSourceDataRaw={selectedSampleRaw}
-    />
-  );
+  const showDetailPane = view === 'automap' || view === 'rules' || selectedNode !== null;
 
   const issueOverlay = isIssuesOpen
     ? (
@@ -1377,12 +1378,19 @@ export default function MappingEditor() {
         sourceContent={sourceContent}
         targetWorklistContent={targetWorklistContent}
         builderContent={builderContent}
-        bottomContent={bottomContent}
+        showDetailPane={showDetailPane}
         onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
         onHistoryToggle={handleOpenHistory}
         onViewIssues={() => setIsIssuesOpen(true)}
         issueCount={issueCount}
+        requiredMappedCount={requiredMappedCount}
+        requiredFieldCount={requiredFieldCount}
+        warningCount={warningCount}
+        errorCount={errorCount}
         onOpenTestLab={() => navigate(testLabPath)}
+        onOpenRulesView={() => handleViewToggle('rules')}
+        onOpenTargetView={() => handleViewToggle('target')}
+        isRulesViewActive={view === 'rules'}
         onOpenDeploymentPage={() => navigate(deploymentPath)}
         onExportMapping={() => {}}
         onImportMapping={() => {}}

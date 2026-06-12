@@ -234,7 +234,8 @@ describe('MappingEditor AI Validation integration', () => {
       expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('toolbar-view-rules'));
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-rules-view'));
 
     expect(screen.getByTestId('ai-validation-panel')).toBeInTheDocument();
     expect(screen.getByTestId('validation-summary-bar')).toBeInTheDocument();
@@ -251,7 +252,8 @@ describe('MappingEditor AI Validation integration', () => {
       expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('toolbar-view-rules'));
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-rules-view'));
     fireEvent.click(screen.getByTestId('ai-validation-run'));
 
     await waitFor(() => {

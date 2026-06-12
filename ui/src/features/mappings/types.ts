@@ -77,6 +77,15 @@ export interface FailureExplanation {
  * Multiple filters can be active simultaneously.
  */
 export type TargetFilter = 'unmapped' | 'warnings' | 'required' | 'arrays';
+export type TargetFilterTab =
+  | 'all'
+  | 'required'
+  | 'unmapped'
+  | 'warnings'
+  | 'errors'
+  | 'ai'
+  | 'mapped'
+  | 'has-notes';
 
 /**
  * Sort/grouping modes for the Target Worklist.
