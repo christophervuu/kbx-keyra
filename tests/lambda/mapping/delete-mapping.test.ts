@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const sharedMocks = vi.hoisted(() => ({
   parsePathParam: vi.fn(),
   getItem: vi.fn(),
+  query: vi.fn(),
+  updateItem: vi.fn(),
   deleteItem: vi.fn(),
   deleteObject: vi.fn(),
   jsonResponse: vi.fn(),
@@ -34,10 +36,13 @@ describe('delete-mapping handler', () => {
     vi.resetModules();
     const env = getEnvStore();
     env.MAPPINGS_TABLE = 'Mappings';
+    env.PROJECTS_TABLE = 'Projects';
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('map-1');
-    sharedMocks.getItem.mockReset().mockResolvedValue({ mappingId: 'map-1', configS3Key: 'mappings/map-1/config.json' });
+    sharedMocks.getItem.mockReset().mockResolvedValue({ mappingId: 'map-1', projectId: 'proj-1', sourceSchemaId: 'schema-1', targetSchemaId: 'schema-2', configS3Key: 'mappings/map-1/config.json' });
+    sharedMocks.query.mockReset().mockResolvedValue([]);
+    sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.deleteItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.deleteObject.mockReset().mockResolvedValue(undefined);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
@@ -52,6 +57,8 @@ describe('delete-mapping handler', () => {
 
     expect(result.statusCode).toBe(204);
     expect(sharedMocks.deleteItem).toHaveBeenCalledTimes(1);
+    expect(sharedMocks.query).toHaveBeenCalledTimes(1);
+    expect(sharedMocks.updateItem).toHaveBeenCalledTimes(1);
     expect(sharedMocks.deleteObject).toHaveBeenCalledTimes(1);
   });
 
@@ -62,5 +69,32 @@ describe('delete-mapping handler', () => {
     const result = await handler({ body: null, pathParameters: { id: 'missing' } });
 
     expect(result.statusCode).toBe(404);
+  });
+
+  it('removes now-unreferenced schemas from project links after mapping deletion', async () => {
+    sharedMocks.query.mockResolvedValueOnce([
+      { mappingId: 'map-2', projectId: 'proj-1', sourceSchemaId: 'schema-2', targetSchemaId: 'schema-3', configS3Key: 'mappings/map-2/config.json' },
+    ]);
+    sharedMocks.getItem
+      .mockResolvedValueOnce({ mappingId: 'map-1', projectId: 'proj-1', sourceSchemaId: 'schema-1', targetSchemaId: 'schema-2', configS3Key: 'mappings/map-1/config.json' })
+      .mockResolvedValueOnce({
+        projectId: 'proj-1',
+        linkedSchemaIds: ['schema-1', 'schema-2', 'schema-3'],
+        schemaRefs: [{ schemaId: 'schema-1', type: 'local' }, { schemaId: 'schema-2', type: 'local' }, { schemaId: 'schema-3', type: 'local' }],
+      });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(204);
+    expect(sharedMocks.updateItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        TableName: 'Projects',
+        Key: { projectId: 'proj-1' },
+        ExpressionAttributeValues: expect.objectContaining({
+          ':linkedSchemaIds': ['schema-2', 'schema-3'],
+        }),
+      }),
+    );
   });
 });

@@ -11,6 +11,7 @@ import {
   parsePathParam,
   query,
   scan,
+  updateItem,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
@@ -99,15 +100,63 @@ function contentKey(schemaId: string, format: SchemaFormat): string {
   return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
 }
 
-function referencingProjectIds(projects: readonly ProjectRecord[], schemaId: string): string[] {
-  return projects
-    .filter((project) => {
-      const inSchemaRefs = (project.schemaRefs ?? []).some((ref) => ref.schemaId === schemaId);
-      const inLinkedSchemaIds = (project.linkedSchemaIds ?? []).some((id) => id === schemaId);
-      return inSchemaRefs || inLinkedSchemaIds;
-    })
-    .map((project) => project.projectId)
-    .filter((id): id is string => typeof id === 'string' && id.trim() !== '');
+function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds' | 'schemaRefs'>): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((ref) => ref.schemaId ?? '');
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
+function projectReferencesSchema(project: ProjectRecord, schemaId: string): boolean {
+  const inSchemaRefs = (project.schemaRefs ?? []).some((ref) => ref.schemaId === schemaId);
+  const inLinkedSchemaIds = normalizeLinkedSchemaIds(project).includes(schemaId);
+  return inSchemaRefs || inLinkedSchemaIds;
+}
+
+async function pruneSchemaFromProjects(schemaId: string, projects: readonly ProjectRecord[]): Promise<void> {
+  const updates = projects.filter((project) => projectReferencesSchema(project, schemaId));
+
+  for (const project of updates) {
+    const nextSchemaRefs = (project.schemaRefs ?? []).filter((ref) => ref.schemaId !== schemaId);
+    const nextLinkedSchemaIds = normalizeLinkedSchemaIds({
+      linkedSchemaIds: project.linkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
+    }).filter((id) => id !== schemaId);
+
+    await updateItem({
+      TableName: getProjectsTableOrThrow(),
+      Key: { projectId: project.projectId },
+      UpdateExpression: 'SET #schemaRefs = :schemaRefs, #linkedSchemaIds = :linkedSchemaIds, #updatedAt = :updatedAt',
+      ExpressionAttributeNames: {
+        '#schemaRefs': 'schemaRefs',
+        '#linkedSchemaIds': 'linkedSchemaIds',
+        '#updatedAt': 'updatedAt',
+      },
+      ExpressionAttributeValues: {
+        ':schemaRefs': nextSchemaRefs,
+        ':linkedSchemaIds': nextLinkedSchemaIds,
+        ':updatedAt': new Date().toISOString(),
+      },
+    });
+  }
 }
 
 async function findDependentMappings(schemaId: string): Promise<readonly string[]> {
@@ -138,20 +187,17 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
 
-    const projects = await scan<ProjectRecord>({
-      TableName: getProjectsTableOrThrow(),
-    });
-    const refs = referencingProjectIds(projects, schemaId);
-    if (refs.length > 0) {
-      const err = conflict(`Schema is referenced by projects: [${refs.join(', ')}]`);
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable);
-    }
-
     const dependentMappings = await findDependentMappings(schemaId);
     if (dependentMappings.length > 0) {
       const err = conflict(`Schema is referenced by mappings: [${dependentMappings.join(', ')}]`);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
     }
+
+    const projects = await scan<ProjectRecord>({
+      TableName: getProjectsTableOrThrow(),
+    });
+
+    await pruneSchemaFromProjects(schemaId, projects);
 
     const nodes = await query<SchemaNodeKey>({
       TableName: getSchemaNodesTableOrThrow(),

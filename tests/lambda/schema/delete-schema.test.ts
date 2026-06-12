@@ -5,6 +5,7 @@ const sharedMocks = vi.hoisted(() => ({
   getItem: vi.fn(),
   scan: vi.fn(),
   query: vi.fn(),
+  updateItem: vi.fn(),
   deleteItem: vi.fn(),
   deleteObject: vi.fn(),
   conflict: vi.fn(),
@@ -46,6 +47,7 @@ describe('delete-schema handler', () => {
     sharedMocks.getItem.mockReset().mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema' });
     sharedMocks.scan.mockReset().mockResolvedValue([]);
     sharedMocks.query.mockReset().mockResolvedValue([{ schemaId: 'schema-1', path: 'Invoice.Id' }]);
+    sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.deleteItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.deleteObject.mockReset().mockResolvedValue(undefined);
     sharedMocks.conflict.mockReset().mockImplementation((message: string) => ({ code: 'CONFLICT', message, statusCode: 409, retryable: false }));
@@ -64,27 +66,32 @@ describe('delete-schema handler', () => {
     expect(sharedMocks.deleteItem).toHaveBeenCalledTimes(2); // one node + schema metadata
   });
 
-  it('referenced schema returns 409 conflict with project ids', async () => {
-    sharedMocks.scan.mockResolvedValueOnce([
-      { projectId: 'proj-1', schemaRefs: [{ schemaId: 'schema-1' }] },
-      { projectId: 'proj-2', schemaRefs: [] },
-    ]);
+  it('prunes stale project schema links before deleting schema', async () => {
+    sharedMocks.scan
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { projectId: 'proj-1', schemaRefs: [{ schemaId: 'schema-1', type: 'local' }], linkedSchemaIds: ['schema-1'] },
+        { projectId: 'proj-2', schemaRefs: [], linkedSchemaIds: [] },
+      ]);
 
     const { handler } = await importHandler();
     const result = await handler({ body: null, pathParameters: { id: 'schema-1' } });
 
-    expect(result.statusCode).toBe(409);
-    const parsed = JSON.parse(result.body) as { error: { message: string } };
-    expect(parsed.error.message).toContain('proj-1');
+    expect(result.statusCode).toBe(204);
+    expect(sharedMocks.updateItem).toHaveBeenCalledTimes(1);
+    expect(sharedMocks.updateItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        TableName: 'Projects',
+        Key: { projectId: 'proj-1' },
+      }),
+    );
   });
 
   it('mapping-dependent schema returns 409 conflict with mapping ids', async () => {
-    sharedMocks.scan
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { mappingId: 'map-1', sourceSchemaId: 'schema-1' },
-        { mappingId: 'map-2', sourceSchemaId: 'other', targetSchemaId: 'other' },
-      ]);
+    sharedMocks.scan.mockResolvedValueOnce([
+      { mappingId: 'map-1', sourceSchemaId: 'schema-1' },
+      { mappingId: 'map-2', sourceSchemaId: 'other', targetSchemaId: 'other' },
+    ]);
 
     const { handler } = await importHandler();
     const result = await handler({ body: null, pathParameters: { id: 'schema-1' } });

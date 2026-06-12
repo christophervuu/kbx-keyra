@@ -864,10 +864,54 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   async deleteMapping(id: string): Promise<void> {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
+    const mappingToDelete = mappings.find((item) => item.metadata.mappingId === id);
     const next = mappings.filter((item) => item.metadata.mappingId !== id);
     this.writeArray(STORAGE_KEYS.mappings, next);
     localStorage.removeItem(this.versionKey(id));
     localStorage.removeItem(this.revisionKey(id));
+
+    if (!mappingToDelete) {
+      return;
+    }
+
+    const projectId = mappingToDelete.metadata.projectId;
+    const projectMappings = next.filter((item) => item.metadata.projectId === projectId);
+    const referencedSchemaIds = new Set<string>();
+    for (const mapping of projectMappings) {
+      const sourceSchemaId = mapping.metadata.sourceSchemaId;
+      const targetSchemaId = mapping.metadata.targetSchemaId;
+      if (typeof sourceSchemaId === 'string' && sourceSchemaId.trim().length > 0) {
+        referencedSchemaIds.add(sourceSchemaId);
+      }
+      if (typeof targetSchemaId === 'string' && targetSchemaId.trim().length > 0) {
+        referencedSchemaIds.add(targetSchemaId);
+      }
+    }
+
+    const projects = this.readArray<Project>(STORAGE_KEYS.projects);
+    const projectIndex = projects.findIndex((item) => item.projectId === projectId);
+    if (projectIndex < 0) {
+      return;
+    }
+
+    const current = projects[projectIndex];
+    const currentRefs = current.schemaRefs ?? [];
+    const nextSchemaRefs = currentRefs.filter((ref) => referencedSchemaIds.has(ref.schemaId));
+    const nextLinkedSchemaIds = normalizeProjectLinkedSchemaIds({
+      linkedSchemaIds: current.linkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
+    }).filter((schemaId) => referencedSchemaIds.has(schemaId));
+
+    const nextProject: Project = {
+      ...current,
+      linkedSchemaIds: nextLinkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
+      updatedAt: this.nowIso(),
+    };
+
+    const nextProjects = [...projects];
+    nextProjects[projectIndex] = nextProject;
+    this.writeArray(STORAGE_KEYS.projects, nextProjects);
   }
 
   async listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]> {

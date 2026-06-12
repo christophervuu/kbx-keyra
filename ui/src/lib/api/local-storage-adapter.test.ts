@@ -749,6 +749,46 @@ describe('LocalStorageAdapter', () => {
     await expect(adapter.listRevisions(created.mappingId)).resolves.toEqual([]);
   });
 
+  it('deleteMapping prunes stale linked schema ids for the project', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+      linkedSchemaIds: ['source-a', 'target-a', 'source-b', 'target-b'],
+      schemaRefs: [
+        { schemaId: 'source-a', type: 'local' },
+        { schemaId: 'target-a', type: 'local' },
+        { schemaId: 'source-b', type: 'local' },
+        { schemaId: 'target-b', type: 'local' },
+      ],
+    });
+
+    const mappingA = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: { schemaId: 'source-a', type: 'local' },
+      targetSchemaRef: { schemaId: 'target-a', type: 'local' },
+    });
+
+    await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping B',
+      sourceSchemaRef: { schemaId: 'source-b', type: 'local' },
+      targetSchemaRef: { schemaId: 'target-b', type: 'local' },
+    });
+
+    await adapter.deleteMapping(mappingA.mappingId);
+
+    const detail = await adapter.getProject(project.projectId);
+    expect(detail.linkedSchemaIds).toEqual(['source-b', 'target-b']);
+    expect(detail.schemaRefs).toEqual([
+      { schemaId: 'source-b', type: 'local' },
+      { schemaId: 'target-b', type: 'local' },
+    ]);
+  });
+
   it('deployMapping enforces revision->DEV rule and writes deployment history', async () => {
     const adapter = new LocalStorageAdapter();
     const project = await adapter.createProject({
