@@ -12,7 +12,7 @@ export interface VersionDeploySectionProps {
 
 /**
  * Lists mapping versions (milestones) with a deploy button on each row.
- * Versions are deployable to all environments (DEV/QA/PROD).
+ * Versions are deployable to all runtime environments (DEV/PREPROD/PROD).
  */
 export function VersionDeploySection({
   versions,

@@ -1,5 +1,7 @@
 import type {
   ActivityEntry,
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
   AutoMapInput,
   AutoMapResult,
   AutoMapSectionInput,
@@ -13,6 +15,7 @@ import type {
   Environment,
   ExplainRuleInput,
   ExplainRuleResult,
+  CdmBulkSyncResult,
   GitHubFile,
   LinkCdmSchemaInput,
   LinkPublishedSchemaInput,
@@ -28,6 +31,7 @@ import type {
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
+  SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -48,18 +52,29 @@ export type DeploymentSourceType = 'revision' | 'version';
 
 export type DeploymentStatus = 'current' | 'stale' | 'not-deployed';
 
+export type DeploymentOrchestrationStatus =
+  | 'queued'
+  | 'in_progress'
+  | 'retrying'
+  | 'succeeded'
+  | 'failed'
+  | 'timed_out';
+
 export interface DeploymentRecord {
   readonly mappingId: string;
   readonly environmentDeployedAt: string;
   readonly environment: Environment;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
-  readonly configS3Key: string;
-  readonly configHash: string;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
+  readonly configS3Key?: string;
+  readonly configHash?: string;
   readonly deployedAt: string;
   readonly deployedBy: string;
   readonly promotedFrom?: Environment;
   readonly rollbackOf?: string;
+  readonly orchestrationId?: string;
 }
 
 export interface CurrentDeployment {
@@ -68,8 +83,10 @@ export interface CurrentDeployment {
   readonly deployedAt: string;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
-  readonly configHash: string;
-  readonly configS3Key: string;
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
+  readonly configHash?: string;
+  readonly configS3Key?: string;
 }
 
 export interface EnvironmentDeploymentSummary {
@@ -80,8 +97,10 @@ export interface EnvironmentDeploymentSummary {
 
 export interface CurrentDeployments {
   readonly DEV: EnvironmentDeploymentSummary;
-  readonly QA: EnvironmentDeploymentSummary;
+  readonly PREPROD: EnvironmentDeploymentSummary;
   readonly PROD: EnvironmentDeploymentSummary;
+  /** Legacy alias retained for compatibility; normalize behavior to PREPROD. */
+  readonly QA: EnvironmentDeploymentSummary;
 }
 
 export interface ApiAdapter {
@@ -90,6 +109,10 @@ export interface ApiAdapter {
   getSchema(id: string): Promise<SchemaDetail>;
   createSchema(input: CreateSchemaInput): Promise<SchemaMetadata>;
   updateSchema(id: string, input: UpdateSchemaInput): Promise<SchemaMetadata>;
+  markSchemaReviewed?(id: string): Promise<SchemaMetadata>;
+  addSchemaSample?(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult>;
+  deleteSchemaSample?(id: string, sampleId: string): Promise<SchemaMetadata>;
+  getSchemaSamplePayload?(id: string, sampleId: string): Promise<SchemaSamplePayloadContent>;
   deleteSchema(id: string): Promise<void>;
 
   // Mappings
@@ -172,7 +195,17 @@ export interface ApiAdapter {
   // GitHub: CDM Repo (read-only)
   listCdmSchemas(path?: string): Promise<GitHubFile[]>;
   linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata>;
-  syncCdmSchema(schemaId: string): Promise<SchemaSyncResult>;
+  syncAllCdmSchemas(): Promise<CdmBulkSyncResult>;
+  syncCdmSchema(
+    schemaId: string,
+    options?: {
+      /**
+       * When true, performs lightweight status refresh (GET /schemas/:id/sync-cdm)
+       * to surface update-available without mutating schema content.
+       */
+      statusOnly?: boolean;
+    },
+  ): Promise<SchemaSyncResult>;
 
   // GitHub: Non-CDM Repo (read-write)
   listPublishedSchemas(path?: string): Promise<GitHubFile[]>;

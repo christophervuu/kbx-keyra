@@ -8,6 +8,7 @@ function createConfig(overrides: Partial<AIRuntimeConfig> = {}): AIRuntimeConfig
     mode: 'aws',
     promptRegistryTable: 'integrations-keyra-promptregistry',
     promptRegistryLocalDir: undefined,
+    promptRegistryActivePointerEnv: undefined,
     dslAssetBucket: 'integrations-keyra',
     dslAssetKey: 'prompt-assets/dsl/keyra-dsl-reference.md',
     dslAssetLocalPath: undefined,
@@ -23,6 +24,7 @@ function createInvocationParams() {
     model: 'openai/gpt-4.1-mini',
     temperature: 0,
     maxTokens: 400,
+    timeoutMs: 5_000,
     systemMessage: 'System message with {{dslReference}}',
     userMessage: 'Explain source("id") for Order.Id',
     responseSchema: {
@@ -278,7 +280,7 @@ describe('ModelClient', () => {
     expect(request).toMatchObject({
       model: params.model,
       temperature: params.temperature,
-      max_tokens: params.maxTokens,
+      max_completion_tokens: params.maxTokens,
       messages: [
         { role: 'system', content: params.systemMessage },
         { role: 'user', content: params.userMessage },
@@ -329,6 +331,86 @@ describe('ModelClient', () => {
     });
   });
 
+  it('normalizes strict object schemas so required includes all properties', async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: '{}' } }],
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      },
+    });
+
+    const client = new ModelClient(createConfig(), {
+      chat: {
+        completions: {
+          create,
+        },
+      },
+    });
+
+    await client.invoke({
+      ...createInvocationParams(),
+      responseSchema: {
+        type: 'object',
+        properties: {
+          explanation: { type: 'string' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          limitations: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['explanation'],
+      },
+    });
+
+    const request = create.mock.calls[0]?.[0] as {
+      response_format: {
+        json_schema: {
+          schema: {
+            properties: Record<string, unknown>;
+            required: unknown;
+          };
+        };
+      };
+    };
+
+    const schema = request.response_format.json_schema.schema;
+    expect(schema.required).toEqual(['explanation', 'confidence', 'limitations']);
+
+    const confidence = schema.properties.confidence as { anyOf?: unknown[] };
+    const limitations = schema.properties.limitations as { anyOf?: unknown[] };
+    expect(Array.isArray(confidence.anyOf)).toBe(true);
+    expect(Array.isArray(limitations.anyOf)).toBe(true);
+  });
+
+  it('omits temperature for GPT-5 family models', async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: '{}' } }],
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      },
+    });
+
+    const client = new ModelClient(createConfig(), {
+      chat: {
+        completions: {
+          create,
+        },
+      },
+    });
+
+    await client.invoke({
+      ...createInvocationParams(),
+      model: 'openai/gpt-5-mini',
+      temperature: 0,
+    });
+
+    const request = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request).not.toHaveProperty('temperature');
+    expect(request.max_completion_tokens).toBe(400);
+  });
+
   it('returns CONFIG_ERROR when GITHUB_TOKEN is missing', async () => {
     const create = vi.fn();
     const client = new ModelClient(createConfig({ githubToken: undefined }), {
@@ -347,5 +429,33 @@ describe('ModelClient', () => {
       expect(result.error.message).toContain('GITHUB_TOKEN');
     }
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('maps invocation timeout to TIMEOUT', async () => {
+    const create = vi.fn().mockImplementation(
+      async () =>
+        await new Promise(() => {
+          // intentionally unresolved to trigger timeout
+        }),
+    );
+
+    const client = new ModelClient(createConfig(), {
+      chat: {
+        completions: {
+          create,
+        },
+      },
+    });
+
+    const result = await client.invoke({
+      ...createInvocationParams(),
+      timeoutMs: 1,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('TIMEOUT');
+      expect(result.error.message).toContain('timed out');
+    }
   });
 });

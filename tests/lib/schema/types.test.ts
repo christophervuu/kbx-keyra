@@ -2,12 +2,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   DYNAMO_BATCH_SIZE,
+  INGESTION_BATCH_SIZE,
   INLINE_FIELD_THRESHOLD,
-  OPENSEARCH_BULK_SIZE,
+  getRetrievalCaps,
   getInlineFieldThreshold,
   type IngestionRequest,
   type IngestionResult,
   type QuerySchemaNodesRequest,
+  type SchemaRetriever,
+  type SchemaRetrieverMode,
+  type SchemaRetrieverSearchRequest,
   type SchemaMetadata,
   type SchemaNode,
   type SchemaSearchResult,
@@ -25,6 +29,11 @@ function getTestEnvStore(): EnvStore {
 }
 
 const ORIGINAL_INLINE_THRESHOLD = getTestEnvStore().SCHEMA_INLINE_FIELD_THRESHOLD;
+const ORIGINAL_STAGE = getTestEnvStore().STAGE;
+const ORIGINAL_RAG_LEXICAL_CAP = getTestEnvStore().RAG_LEXICAL_CAP;
+const ORIGINAL_RAG_RERANK_CAP = getTestEnvStore().RAG_RERANK_CAP;
+const ORIGINAL_RAG_TOPK = getTestEnvStore().RAG_TOPK;
+const ORIGINAL_RAG_CONTEXT_EXPANSION_CAP = getTestEnvStore().RAG_CONTEXT_EXPANSION_CAP;
 
 function setInlineThreshold(value: string | undefined): void {
   const envStore = getTestEnvStore();
@@ -40,12 +49,18 @@ function setInlineThreshold(value: string | undefined): void {
 describe('lib/schema types and constants', () => {
   afterEach(() => {
     setInlineThreshold(ORIGINAL_INLINE_THRESHOLD);
+    const env = getTestEnvStore();
+    env.STAGE = ORIGINAL_STAGE;
+    env.RAG_LEXICAL_CAP = ORIGINAL_RAG_LEXICAL_CAP;
+    env.RAG_RERANK_CAP = ORIGINAL_RAG_RERANK_CAP;
+    env.RAG_TOPK = ORIGINAL_RAG_TOPK;
+    env.RAG_CONTEXT_EXPANSION_CAP = ORIGINAL_RAG_CONTEXT_EXPANSION_CAP;
   });
 
   it('exports constants with documented baseline values', () => {
     expect(INLINE_FIELD_THRESHOLD).toBe(500);
     expect(DYNAMO_BATCH_SIZE).toBe(25);
-    expect(OPENSEARCH_BULK_SIZE).toBe(500);
+    expect(INGESTION_BATCH_SIZE).toBe(500);
   });
 
   it('exposes assignable contracts for schema ingestion types', () => {
@@ -118,6 +133,16 @@ describe('lib/schema types and constants', () => {
       parentChain: ['Order', 'Order.Buyer', 'Order.Buyer.Address'],
     };
 
+    const mode: SchemaRetrieverMode = 'dynamodb';
+    const retrieverRequest: SchemaRetrieverSearchRequest = {
+      schemaId: 'schema-1',
+      query: 'postal',
+      limit: 10,
+    };
+    const retriever: SchemaRetriever = {
+      searchSchemaNodes: async () => [searchResult],
+    };
+
     expect(node.path).toContain('Order.Header');
     expect(metadata.status).toBe('ready');
     expect(request.format).toBe('json-schema');
@@ -125,6 +150,26 @@ describe('lib/schema types and constants', () => {
     expect(stepFunctionsResult.status).toBe('ingesting');
     expect(queryRequest.includeParentChain).toBe(true);
     expect(searchResult.parentChain?.at(-1)).toBe('Order.Buyer.Address');
+    expect(mode).toBe('dynamodb');
+    expect(retrieverRequest.limit).toBe(10);
+    void retriever.searchSchemaNodes(retrieverRequest);
+
+    const telemetryRequest: SchemaRetrieverSearchRequest = {
+      schemaId: 'schema-1',
+      query: 'postal',
+      onShadowTelemetry: (payload) => {
+        expect(payload.primary).toBe('dynamodb');
+        expect(payload.secondary).toBe('dynamodb');
+      },
+    };
+
+    telemetryRequest.onShadowTelemetry?.({
+      schemaId: 'schema-1',
+      queryLength: 6,
+      primary: 'dynamodb',
+      secondary: 'dynamodb',
+      sampled: false,
+    });
   });
 
   it('returns default threshold when env var is unset', () => {
@@ -143,5 +188,49 @@ describe('lib/schema types and constants', () => {
     setInlineThreshold('not-a-number');
 
     expect(getInlineFieldThreshold()).toBe(500);
+  });
+
+  it('returns stage-based retrieval caps for dev/qa/prod', () => {
+    const env = getTestEnvStore();
+
+    env.STAGE = 'dev';
+    expect(getRetrievalCaps()).toEqual({
+      lexicalCap: 120,
+      rerankCap: 80,
+      topK: 12,
+      contextExpansionCap: 24,
+    });
+
+    env.STAGE = 'qa';
+    expect(getRetrievalCaps()).toEqual({
+      lexicalCap: 150,
+      rerankCap: 100,
+      topK: 15,
+      contextExpansionCap: 30,
+    });
+
+    env.STAGE = 'prod';
+    expect(getRetrievalCaps()).toEqual({
+      lexicalCap: 180,
+      rerankCap: 120,
+      topK: 18,
+      contextExpansionCap: 36,
+    });
+  });
+
+  it('applies env overrides and clamps rerank/topK relationships', () => {
+    const env = getTestEnvStore();
+    env.STAGE = 'prod';
+    env.RAG_LEXICAL_CAP = '50';
+    env.RAG_RERANK_CAP = '999';
+    env.RAG_TOPK = '200';
+    env.RAG_CONTEXT_EXPANSION_CAP = '7';
+
+    expect(getRetrievalCaps()).toEqual({
+      lexicalCap: 50,
+      rerankCap: 50,
+      topK: 50,
+      contextExpansionCap: 7,
+    });
   });
 });

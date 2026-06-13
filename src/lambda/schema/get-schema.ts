@@ -12,12 +12,32 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import {
+  normalizeSchemaOrigin,
+  normalizeSchemaReviewState,
+  normalizeSchemaSourceKind,
+  normalizeSchemaStatus,
+  normalizeSchemaSyncStatus,
+  schemaDataFormatFromSourceKind,
+  type SchemaReviewState,
+  type SchemaSourceKind,
+} from '../../lib/persistence/types.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
 
 interface SchemaMetadata {
   readonly schemaId: string;
+  readonly origin?: 'cdm' | 'uploaded' | 'inferred' | 'published' | 'local';
+  readonly syncStatus: 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
   readonly format: SchemaFormat;
+  readonly status?: 'ingesting' | 'ready' | 'processing' | 'needs_review' | 'error';
+  readonly inferred?: boolean;
+  readonly sourceKind?: SchemaSourceKind;
+  readonly reviewedAt?: string;
+  readonly reviewState?: SchemaReviewState;
+  readonly dataFormat?: 'json' | 'xml';
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly unknown[];
 }
 
 interface SchemaDetail {
@@ -86,7 +106,33 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     const detail: SchemaDetail = {
-      metadata,
+      metadata: {
+        ...metadata,
+        sourceKind: normalizeSchemaSourceKind({
+          sourceKind: metadata.sourceKind,
+          format: metadata.format,
+          inferred: metadata.inferred,
+        }),
+        dataFormat: schemaDataFormatFromSourceKind(
+          normalizeSchemaSourceKind({
+            sourceKind: metadata.sourceKind,
+            format: metadata.format,
+            inferred: metadata.inferred,
+          }),
+        ),
+        status: normalizeSchemaStatus({
+          status: metadata.status,
+          inferred: metadata.inferred,
+          reviewedAt: metadata.reviewedAt,
+        }),
+        reviewState: normalizeSchemaReviewState({
+          reviewState: metadata.reviewState,
+          inferred: metadata.inferred,
+          reviewedAt: metadata.reviewedAt,
+        }),
+        ...(metadata.origin !== undefined ? { origin: normalizeSchemaOrigin(metadata.origin) } : {}),
+        syncStatus: normalizeSchemaSyncStatus(metadata.syncStatus),
+      },
       content: parseContent(raw, metadata.format),
     };
 

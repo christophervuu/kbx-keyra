@@ -1,11 +1,11 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-import { MappingStatusIcon } from './MappingStatusIcon';
-import { SchemaTreeNodeIcon } from './SchemaTreeNodeIcon';
-import { EditableNodeControls } from './EditableNodeControls';
-
 import type { EditNodeCallbacks } from '../types';
+import { EditableNodeControls } from './EditableNodeControls';
+import { MappingStatusIcon } from './MappingStatusIcon';
+
+import { getTypeBadge } from '@/features/mappings/lib/source-field-display';
 import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types';
 
 interface SchemaTreeNodeRowProps {
@@ -32,6 +32,66 @@ interface SchemaTreeNodeRowProps {
   editable?: boolean;
   /** Edit operation callbacks (provided when editable=true) */
   onNodeEdit?: EditNodeCallbacks;
+  /** Show only rows with likely review issues */
+  showIssuesOnly?: boolean;
+  /** Optional selected sample value shown on the right side */
+  sampleValue?: string;
+}
+
+const TYPE_LABELS: Record<SchemaTreeNode['type'], string> = {
+  string: 'STR',
+  number: 'NUM',
+  boolean: 'BOOL',
+  array: 'ARR',
+  object: 'OBJ',
+  enum: 'STR',
+  null: 'NULL',
+  any: 'ANY',
+  union: 'UNI',
+};
+
+function normalizeUnionTypes(unionTypes: readonly string[]): string[] {
+  return Array.from(
+    new Set(
+      unionTypes
+        .map((type) => type.trim())
+        .filter((type) => type.length > 0),
+    ),
+  );
+}
+
+function resolveDisplayType(node: SchemaTreeNode): SchemaTreeNode['type'] {
+  if (node.type !== 'union' || !node.unionTypes || node.unionTypes.length === 0) {
+    return node.type;
+  }
+
+  const normalized = normalizeUnionTypes(node.unionTypes);
+  if (normalized.length !== 1) {
+    return 'union';
+  }
+
+  const only = normalized[0].toLowerCase();
+  if (only === 'string') return 'string';
+  if (only === 'number' || only === 'integer') return 'number';
+  if (only === 'boolean') return 'boolean';
+  if (only === 'array') return 'array';
+  if (only === 'object') return 'object';
+  if (only === 'null') return 'null';
+  if (only === 'any' || only === 'unknown') return 'any';
+  return 'union';
+}
+
+function formatUnionTypes(unionTypes: readonly string[]): string {
+  const deduped = normalizeUnionTypes(unionTypes);
+  if (deduped.length <= 1) return '';
+
+  const limit = 6;
+  const visible = deduped.slice(0, limit);
+  const remaining = deduped.length - visible.length;
+
+  return remaining > 0
+    ? `(${visible.join(' | ')} | +${remaining} more)`
+    : `(${visible.join(' | ')})`;
 }
 
 export function SchemaTreeNodeRow({
@@ -48,6 +108,8 @@ export function SchemaTreeNodeRow({
   setSize,
   editable = false,
   onNodeEdit,
+  showIssuesOnly = false,
+  sampleValue,
 }: SchemaTreeNodeRowProps) {
   const isExpandable = node.childCount > 0;
   const [isRenaming, setIsRenaming] = useState(false);
@@ -72,8 +134,14 @@ export function SchemaTreeNodeRow({
     setTimeout(() => renameInputRef.current?.focus(), 0);
   }
 
-  const selectedClass = isSelected ? 'bg-blue-950/60 ring-1 ring-blue-500/30' : '';
-  const focusedClass = isFocused ? 'ring-2 ring-blue-400 ring-inset' : '';
+  const selectedClass = isSelected
+    ? 'bg-blue-950/60 ring-1 ring-blue-500/30'
+    : '';
+  void isFocused;
+  const displayType = resolveDisplayType(node);
+  const displayTypeForBadge = displayType === 'null' ? 'null' : displayType;
+  const mappedBadge = getTypeBadge(displayTypeForBadge);
+  const badgeColorClass = mappedBadge.className;
 
   return (
     <div
@@ -84,7 +152,7 @@ export function SchemaTreeNodeRow({
       aria-selected={isSelected}
       aria-posinset={posInSet}
       aria-setsize={setSize}
-      className={`group relative flex items-center h-8 px-2 hover:bg-slate-800/50 cursor-default select-none ${selectedClass} ${focusedClass}`}
+      className={`group relative flex h-8 w-full items-center pr-2 hover:bg-slate-800/50 cursor-default select-none ${selectedClass}`}
       onClick={handleRowClick}
     >
       {/* Tree line guides */}
@@ -112,8 +180,12 @@ export function SchemaTreeNodeRow({
         ) : null}
       </span>
 
-      {/* Type icon */}
-      <SchemaTreeNodeIcon type={node.type} className="mr-1.5" />
+      <span
+        data-testid={`schema-node-type-label-${node.path.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+        className={`mr-2 inline-flex min-w-9 items-center justify-center rounded border border-slate-700 px-1 py-0.5 text-[10px] font-semibold tracking-wide ${badgeColorClass}`}
+      >
+        {TYPE_LABELS[displayType]}
+      </span>
 
       {/* Field name — inline rename input or static text */}
       {editable && isRenaming ? (
@@ -136,7 +208,10 @@ export function SchemaTreeNodeRow({
           className="w-32 rounded border border-blue-500 bg-slate-800 px-1 py-0 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
         />
       ) : (
-        <span className="text-sm text-slate-200 truncate">
+        <span
+          className="text-sm text-slate-200 truncate"
+          title={!editable && node.description ? node.description : undefined}
+        >
           {highlightQuery ? (
             <HighlightedText text={node.fieldName} query={highlightQuery} />
           ) : (
@@ -152,6 +227,12 @@ export function SchemaTreeNodeRow({
         </span>
       )}
 
+      {showIssuesOnly && node.inferred && (
+        <span className="ml-2 rounded border border-amber-700/80 bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-200">
+          Review
+        </span>
+      )}
+
       {/* Child count badge (read-only mode) */}
       {!editable && isExpandable && (
         <span className="ml-2 text-xs text-slate-500">
@@ -160,9 +241,26 @@ export function SchemaTreeNodeRow({
       )}
 
       {/* Union types indicator */}
-      {!editable && node.unionTypes && node.unionTypes.length > 0 && (
-        <span className="ml-2 text-xs text-pink-400/70">
-          ({node.unionTypes.join(' | ')})
+      {!editable && displayType === 'union' && node.unionTypes && node.unionTypes.length > 0 && (() => {
+        const unionSummary = formatUnionTypes(node.unionTypes);
+        if (!unionSummary) return null;
+
+        return (
+          <span className="ml-2 truncate text-xs text-pink-400/70" title={unionSummary}>
+            {unionSummary}
+          </span>
+        );
+      })()}
+
+      <span className="ml-auto" aria-hidden="true" />
+
+      {sampleValue && (
+        <span
+          data-testid={`schema-node-sample-value-${node.path.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+          className="max-w-[45%] truncate text-right text-xs text-slate-400"
+          title={sampleValue}
+        >
+          {sampleValue}
         </span>
       )}
 
@@ -170,18 +268,6 @@ export function SchemaTreeNodeRow({
       {mappingStatus && (
         <span className="ml-2 shrink-0">
           <MappingStatusIcon status={mappingStatus} />
-        </span>
-      )}
-
-      {/* Description tooltip (read-only mode) */}
-      {!editable && node.description && (
-        <span className="relative ml-auto">
-          <span className="text-xs text-slate-500 cursor-help" title={node.description}>
-            ℹ
-          </span>
-          <span className="absolute left-0 bottom-full mb-1 hidden group-hover:block z-10 max-w-xs px-2 py-1 text-xs text-slate-200 bg-slate-700 border border-slate-600 rounded shadow-lg whitespace-normal">
-            {node.description}
-          </span>
         </span>
       )}
 

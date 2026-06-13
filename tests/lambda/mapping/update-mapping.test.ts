@@ -7,6 +7,7 @@ const sharedMocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
   requireFields: vi.fn(),
   getItem: vi.fn(),
+  getObject: vi.fn(),
   query: vi.fn(),
   putObject: vi.fn(),
   updateItem: vi.fn(),
@@ -51,6 +52,7 @@ describe('update-mapping handler', () => {
     const env = getEnvStore();
     env.MAPPINGS_TABLE = 'Mappings';
     env.MAPPING_REVISIONS_TABLE = 'MappingRevisions';
+    env.SCHEMAS_TABLE = 'Schemas';
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('map-1');
@@ -77,6 +79,7 @@ describe('update-mapping handler', () => {
       updatedAt: '2026-05-15T00:00:00.000Z',
     });
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
+    sharedMocks.getObject.mockReset().mockResolvedValue('');
     sharedMocks.query.mockReset().mockResolvedValue([]);
     sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.conflict.mockReset().mockImplementation((message) => ({ code: 'CONFLICT', message, statusCode: 409, retryable: false }));
@@ -102,6 +105,79 @@ describe('update-mapping handler', () => {
     expect(parsed.ruleCount).toBe(1);
     expect(parsed.status).toBe('ready');
     expect(parsed.coverage).toBe(50);
+  });
+
+  it('persists optional businessContext and additive editorPreferences on update payload', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      businessContext: 'Map invoice totals and currency into order payload.',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      config: {
+        editorPreferences: {
+          defaultSelectedSampleId: 'sample-2',
+        },
+      },
+      rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"editorPreferences":{"defaultSelectedSampleId":"sample-2"}'),
+    }));
+
+    expect(sharedMocks.updateItem).toHaveBeenCalledWith(expect.objectContaining({
+      ExpressionAttributeValues: expect.objectContaining({
+        ':businessContext': 'Map invoice totals and currency into order payload.',
+      }),
+    }));
+  });
+
+  it('loads target schema content and passes it to validate for coverage derivation', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      config: {},
+      rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 1,
+        revision: 1,
+        status: 'draft',
+        ruleCount: 0,
+        coverage: 0,
+        configS3Key: 'mappings/map-1/config.json',
+        createdAt: '2026-05-15T00:00:00.000Z',
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject.mockResolvedValue('{"type":"object"}');
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.getItem).toHaveBeenCalledWith({
+      TableName: 'Schemas',
+      Key: { schemaId: 'schema-1' },
+    });
+    expect(sharedMocks.getObject).toHaveBeenCalledWith({
+      Bucket: 'Content',
+      Key: 'schemas/schema-1/content.json',
+    });
+    expect(validateMock).toHaveBeenCalledTimes(1);
+    expect(validateMock.mock.calls[0]?.[2]).toEqual({ type: 'object' });
   });
 
   it('missing mapping returns 404', async () => {

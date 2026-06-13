@@ -6,18 +6,19 @@ import { Button } from '@/components';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { ConfirmDialog } from '@/features/mappings/components';
 import {
+  AiValidationPanel,
   ArrayBuilder,
   AutoMapWorkspace,
   BuilderEmptyState,
   ConfigurationModal,
   ConfigurationPanel,
-  ConnectedInlinePreviewStrip,
   ExpressionBuilderPanel,
   ObjectSummaryPanel,
   RefreshConfirmBanner,
   ScalarFieldBuilder,
   SourceSchemaPanel,
   TargetWorklist,
+  IssuesPanel,
   UnsavedChangesOverlay,
   VersionDiffView,
   VersionHistoryDrawer,
@@ -25,15 +26,64 @@ import {
   WorkspaceNoSourceDataCallout,
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
+  type TargetFieldStatus,
+  type ConsolidatedIssueItem,
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
-import { useMappingEditor, useVersionHistory, useTargetStatus, useAutoMapWorkspace } from '@/features/mappings/hooks';
-import { useExpressionBuilder } from '@/features/mappings/hooks';
+import { useAutoMapWorkspace, useExpressionBuilder, useMappingEditor, useTargetStatus, useVersionHistory } from '@/features/mappings/hooks';
+import { getPendingAutoMapSession } from '@/features/mappings/lib';
+import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-display';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
-import type { MappingNodeStatus, SchemaTreeNode } from '@/lib/types/domain';
+import { executeMapping } from '@/lib/engine';
+import type { SchemaSamplePayloadMetadata, SchemaTreeNode } from '@/lib/types/domain';
+import { PATHS } from '@/routes/paths';
+
+const LAST_SELECTED_SAMPLE_STORAGE_PREFIX = 'keyra:mappings:last-selected-sample';
+
+function readLastSelectedSampleId(mappingId: string): string | null {
+  try {
+    const raw = localStorage.getItem(`${LAST_SELECTED_SAMPLE_STORAGE_PREFIX}:${mappingId}`);
+    return raw && raw.trim().length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastSelectedSampleId(mappingId: string, sampleId: string | null): void {
+  try {
+    const key = `${LAST_SELECTED_SAMPLE_STORAGE_PREFIX}:${mappingId}`;
+    if (sampleId === null) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, sampleId);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+export function resolveInitialSelectedSampleId(params: {
+  readonly samples: readonly SchemaSamplePayloadMetadata[];
+  readonly lastSelectedSampleId: string | null;
+  readonly mappingDefaultSampleId: string | null;
+}): string | null {
+  const { samples, lastSelectedSampleId, mappingDefaultSampleId } = params;
+  const available = new Set(samples.map((sample) => sample.sampleId));
+
+  if (lastSelectedSampleId && available.has(lastSelectedSampleId)) {
+    return lastSelectedSampleId;
+  }
+
+  if (mappingDefaultSampleId && available.has(mappingDefaultSampleId)) {
+    return mappingDefaultSampleId;
+  }
+
+  const schemaDefault = samples.find((sample) => sample.usedForInference) ?? null;
+  return schemaDefault?.sampleId ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,6 +163,19 @@ function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldT
   }
 }
 
+function resolveValueAtPath(sourceData: unknown, fieldPath: string): unknown {
+  if (sourceData === null || sourceData === undefined) return undefined;
+  const normalized = fieldPath.replace(/\[(\d+)\]/g, '.$1');
+  const segments = normalized.split('.').filter((segment) => segment.length > 0);
+
+  let current: unknown = sourceData;
+  for (const segment of segments) {
+    if (current === null || current === undefined || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
 // ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
@@ -169,7 +232,60 @@ export default function MappingEditor() {
   // Project name (lightweight fetch — display only)
   // ---------------------------------------------------------------------------
   const adapter = useAdapter();
+  const [isSamplePickerOpen, setIsSamplePickerOpen] = useState(false);
+  const [isAddSampleOpen, setIsAddSampleOpen] = useState(false);
+  const [sampleNameInput, setSampleNameInput] = useState('');
+  const [sampleContentInput, setSampleContentInput] = useState('');
+  const [sampleActionError, setSampleActionError] = useState<string | null>(null);
+  const [isSampleActionLoading, setIsSampleActionLoading] = useState(false);
+  const [isIssuesOpen, setIsIssuesOpen] = useState(false);
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null | undefined>(undefined);
+  const [samplePayloadCache, setSamplePayloadCache] = useState<Record<string, { raw: string; parsed: unknown | null }>>({});
+  const [localSamplePayloadsBySchema, setLocalSamplePayloadsBySchema] = useState<Record<string, readonly SchemaSamplePayloadMetadata[]>>({});
   const [projectName, setProjectName] = useState<string>('Project');
+
+  const sourceSchemaMetadata = editor.sourceSchemaDetail?.metadata ?? null;
+  const sourceSchemaId = sourceSchemaMetadata?.schemaId ?? null;
+  const sourceSchemaDataFormat = sourceSchemaMetadata?.dataFormat ?? 'json';
+
+  const sourceSamples = useMemo(() => {
+    const base = sourceSchemaMetadata?.samplePayloads ?? [];
+    const localForSchema = sourceSchemaId ? (localSamplePayloadsBySchema[sourceSchemaId] ?? []) : [];
+    if (localForSchema.length === 0) {
+      return base;
+    }
+
+    const known = new Set(base.map((sample) => sample.sampleId));
+    const extras = localForSchema.filter((sample) => !known.has(sample.sampleId));
+    return [...base, ...extras];
+  }, [localSamplePayloadsBySchema, sourceSchemaId, sourceSchemaMetadata?.samplePayloads]);
+
+  const mappingDefaultSampleId = editor.configOptions.editorPreferences?.defaultSelectedSampleId ?? null;
+  const resolvedSelectedSampleId = useMemo(() => {
+    const resolvedFromPrecedence = resolveInitialSelectedSampleId({
+      samples: sourceSamples,
+      lastSelectedSampleId: readLastSelectedSampleId(mappingId),
+      mappingDefaultSampleId,
+    });
+
+    if (selectedSampleId === undefined) {
+      return resolvedFromPrecedence;
+    }
+    if (selectedSampleId === null) {
+      return null;
+    }
+
+    if (sourceSamples.some((sample) => sample.sampleId === selectedSampleId)) {
+      return selectedSampleId;
+    }
+
+    return resolvedFromPrecedence;
+  }, [mappingDefaultSampleId, mappingId, selectedSampleId, sourceSamples]);
+
+  const selectedSample = useMemo(
+    () => sourceSamples.find((sample) => sample.sampleId === resolvedSelectedSampleId) ?? null,
+    [resolvedSelectedSampleId, sourceSamples],
+  );
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -178,6 +294,419 @@ export default function MappingEditor() {
     }).catch(() => { /* silently fall back to 'Project' */ });
     return () => { cancelled = true; };
   }, [adapter, projectId]);
+
+  const selectedSamplePayload = useMemo(() => {
+    if (!resolvedSelectedSampleId) return null;
+    return samplePayloadCache[resolvedSelectedSampleId] ?? null;
+  }, [resolvedSelectedSampleId, samplePayloadCache]);
+  const selectedSampleParsed = selectedSamplePayload?.parsed ?? null;
+
+  const loadSamplePayload = useCallback(async (sample: SchemaSamplePayloadMetadata) => {
+    const canLoad = typeof adapter.getSchemaSamplePayload === 'function';
+    if (canLoad) {
+      const response = await adapter.getSchemaSamplePayload(sample.schemaId, sample.sampleId);
+      return {
+        raw: response.raw,
+        parsed: response.parsed,
+      };
+    }
+
+    if (sample.source === 'initial_upload' && editor.sourceSchemaDetail) {
+      const raw = typeof editor.sourceSchemaDetail.content === 'string'
+        ? editor.sourceSchemaDetail.content
+        : JSON.stringify(editor.sourceSchemaDetail.content);
+      const parsed = typeof editor.sourceSchemaDetail.content === 'string'
+        ? null
+        : editor.sourceSchemaDetail.content;
+      return { raw, parsed };
+    }
+
+    throw new Error('Sample payload retrieval is not available in this mode.');
+  }, [adapter, editor.sourceSchemaDetail]);
+
+  useEffect(() => {
+    if (!resolvedSelectedSampleId) {
+      return;
+    }
+
+    if (samplePayloadCache[resolvedSelectedSampleId]) {
+      return;
+    }
+
+    const selected = sourceSamples.find((sample) => sample.sampleId === resolvedSelectedSampleId) ?? null;
+    if (selected === null) {
+      return;
+    }
+
+    let active = true;
+    void loadSamplePayload(selected)
+      .then((payload) => {
+        if (!active) return;
+        setSamplePayloadCache((prev) => {
+          if (prev[selected.sampleId]) return prev;
+          return { ...prev, [selected.sampleId]: payload };
+        });
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSampleActionError(err instanceof Error ? err.message : 'Failed to load selected sample payload.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [loadSamplePayload, resolvedSelectedSampleId, samplePayloadCache, sourceSamples]);
+
+  const updateMappingDefaultSample = useCallback((sampleId: string | null) => {
+    const currentPrefs = editor.configOptions.editorPreferences ?? {};
+
+    if (sampleId === null) {
+      const { defaultSelectedSampleId, ...rest } = currentPrefs;
+      void defaultSelectedSampleId;
+      editor.actions.updateConfig({
+        editorPreferences: rest,
+      });
+      return;
+    }
+
+    editor.actions.updateConfig({
+      editorPreferences: {
+        ...currentPrefs,
+        defaultSelectedSampleId: sampleId,
+      },
+    });
+  }, [editor.actions, editor.configOptions.editorPreferences]);
+
+  const selectSample = useCallback(async (
+    sampleId: string | null,
+    options?: {
+      readonly persistLastSelected?: boolean;
+      readonly persistMappingDefault?: boolean;
+      readonly payloadHint?: { raw: string; parsed: unknown | null };
+    },
+  ) => {
+    setSampleActionError(null);
+
+    if (sampleId === null) {
+      setSelectedSampleId(null);
+      if (options?.persistLastSelected) {
+        writeLastSelectedSampleId(mappingId, null);
+      }
+      if (options?.persistMappingDefault) {
+        updateMappingDefaultSample(null);
+      }
+      return;
+    }
+
+    const sample = sourceSamples.find((entry) => entry.sampleId === sampleId) ?? null;
+    if (!sample) {
+      return;
+    }
+
+    if (options?.persistLastSelected) {
+      writeLastSelectedSampleId(mappingId, sample.sampleId);
+    }
+    if (options?.persistMappingDefault) {
+      updateMappingDefaultSample(sample.sampleId);
+    }
+
+    if (options?.payloadHint) {
+      setSamplePayloadCache((prev) => ({ ...prev, [sample.sampleId]: options.payloadHint! }));
+      setSelectedSampleId(sample.sampleId);
+      return;
+    }
+
+    try {
+      const payload = await loadSamplePayload(sample);
+      setSamplePayloadCache((prev) => ({ ...prev, [sample.sampleId]: payload }));
+      setSelectedSampleId(sample.sampleId);
+    } catch (err) {
+      setSampleActionError(err instanceof Error ? err.message : 'Failed to load selected sample payload.');
+    }
+  }, [loadSamplePayload, mappingId, sourceSamples, updateMappingDefaultSample]);
+
+  const handleAddSample = useCallback(async () => {
+    if (!sourceSchemaId) {
+      setSampleActionError('Source schema is not available for adding samples.');
+      return;
+    }
+
+    if (typeof adapter.addSchemaSample !== 'function') {
+      setSampleActionError('Adding schema samples is not available in this mode.');
+      return;
+    }
+
+    const trimmedContent = sampleContentInput.trim();
+    if (!trimmedContent) {
+      setSampleActionError('Sample payload content is required.');
+      return;
+    }
+
+    let parsedForSubmit: unknown;
+    let parsedForContext: unknown | null;
+    if (sourceSchemaDataFormat === 'xml') {
+      parsedForSubmit = trimmedContent;
+      parsedForContext = null;
+    } else {
+      try {
+        parsedForSubmit = JSON.parse(trimmedContent);
+        parsedForContext = parsedForSubmit;
+      } catch {
+        setSampleActionError('Sample payload must be valid JSON.');
+        return;
+      }
+    }
+
+    setIsSampleActionLoading(true);
+    setSampleActionError(null);
+
+    try {
+      const result = await adapter.addSchemaSample(sourceSchemaId, {
+        sampleName: sampleNameInput.trim() || undefined,
+        sampleContent: parsedForSubmit,
+        applySuggestedUpdates: false,
+      });
+
+      setLocalSamplePayloadsBySchema((prev) => {
+        if (!sourceSchemaId) {
+          return prev;
+        }
+
+        const existing = prev[sourceSchemaId] ?? [];
+        if (existing.some((sample) => sample.sampleId === result.sample.sampleId)) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [sourceSchemaId]: [...existing, result.sample],
+        };
+      });
+      setIsAddSampleOpen(false);
+      setSampleNameInput('');
+      setSampleContentInput('');
+
+      const payloadHint = {
+        raw: trimmedContent,
+        parsed: parsedForContext,
+      };
+      await selectSample(result.sample.sampleId, {
+        persistLastSelected: true,
+        persistMappingDefault: true,
+        payloadHint,
+      });
+    } catch (err) {
+      setSampleActionError(err instanceof Error ? err.message : 'Failed to add sample payload.');
+    } finally {
+      setIsSampleActionLoading(false);
+    }
+  }, [adapter, sampleContentInput, sampleNameInput, selectSample, sourceSchemaDataFormat, sourceSchemaId]);
+
+  const sampleOutputByTargetPath = useMemo(() => {
+    if (
+      selectedSampleParsed === null
+      || editor.config === null
+      || editor.sourceSchemaDetail === null
+      || editor.targetSchemaDetail === null
+      || editor.parsedTargetSchema === null
+    ) {
+      return undefined;
+    }
+
+    try {
+      const execution = executeMapping(
+        editor.config,
+        selectedSampleParsed,
+        editor.sourceSchemaDetail.content,
+        editor.targetSchemaDetail.content,
+      );
+
+      const next: Record<string, string | null> = {};
+      for (const node of editor.parsedTargetSchema.nodes) {
+        next[node.path] = resolveFieldTestValue(execution.output, node.path) ?? null;
+      }
+      return next;
+    } catch {
+      return undefined;
+    }
+  }, [
+    editor.config,
+    editor.parsedTargetSchema,
+    editor.sourceSchemaDetail,
+    editor.targetSchemaDetail,
+    selectedSampleParsed,
+  ]);
+
+  const sampleArrayItemCountByTargetPath = useMemo(() => {
+    if (selectedSampleParsed === null || editor.parsedTargetSchema === null) {
+      return undefined;
+    }
+
+    const next: Record<string, number | null> = {};
+    for (const node of editor.parsedTargetSchema.nodes) {
+      if (node.type !== 'array') continue;
+      const value = resolveValueAtPath(selectedSampleParsed, node.path);
+      next[node.path] = Array.isArray(value) ? value.length : null;
+    }
+    return next;
+  }, [editor.parsedTargetSchema, selectedSampleParsed]);
+
+  const sampleSelectorSlot = (
+    <div className="relative" data-testid="sample-picker-slot">
+      <button
+        type="button"
+        onClick={() => setIsSamplePickerOpen((prev) => !prev)}
+        data-testid="sample-picker-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={isSamplePickerOpen}
+        className="inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+      >
+        Sample: {selectedSample?.name ?? 'None'}
+      </button>
+
+      {isSamplePickerOpen && (
+        <div
+          role="dialog"
+          aria-label="Select source sample payload"
+          data-testid="sample-picker-popover"
+          className="absolute right-0 z-50 mt-1 w-80 rounded border border-slate-700 bg-slate-900 p-2 shadow-xl"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-slate-200">Source samples</p>
+            <button
+              type="button"
+              onClick={() => setIsSamplePickerOpen(false)}
+              className="text-xs text-slate-500 hover:text-slate-300"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="max-h-56 space-y-1 overflow-auto" data-testid="sample-picker-list">
+            <button
+              type="button"
+              onClick={() => {
+                void selectSample(null, {
+                  persistLastSelected: true,
+                  persistMappingDefault: true,
+                });
+                setIsSamplePickerOpen(false);
+              }}
+              data-testid="sample-picker-option-none"
+              className="w-full rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+            >
+              No sample
+            </button>
+
+            {sourceSamples.map((sample) => (
+              <button
+                key={sample.sampleId}
+                type="button"
+                onClick={() => {
+                  void selectSample(sample.sampleId, {
+                    persistLastSelected: true,
+                    persistMappingDefault: true,
+                  });
+                  setIsSamplePickerOpen(false);
+                }}
+                data-testid={`sample-picker-option-${sample.sampleId}`}
+                className={[
+                  'w-full rounded border px-2 py-1.5 text-left text-xs transition-colors',
+                  resolvedSelectedSampleId === sample.sampleId
+                    ? 'border-blue-600 bg-blue-900/30 text-blue-200'
+                    : 'border-slate-700 text-slate-300 hover:bg-slate-800',
+                ].join(' ')}
+              >
+                <p className="truncate font-medium">{sample.name}</p>
+                <p className="text-[10px] text-slate-500">{sample.dataFormat.toUpperCase()}</p>
+              </button>
+            ))}
+
+            {sourceSamples.length === 0 && (
+              <p className="rounded border border-slate-700 bg-slate-800/40 px-2 py-2 text-xs text-slate-500" data-testid="sample-picker-empty">
+                No samples available for this source schema.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-2 border-t border-slate-800 pt-2">
+            <button
+              type="button"
+              data-testid="sample-picker-add-sample"
+              onClick={() => {
+                setSampleActionError(null);
+                setIsAddSampleOpen(true);
+              }}
+              className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
+            >
+              Add sample payload
+            </button>
+          </div>
+
+          {sampleActionError && (
+            <p className="mt-2 text-xs text-red-300" role="alert" data-testid="sample-picker-error">
+              {sampleActionError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {isAddSampleOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" data-testid="sample-add-dialog">
+          <div role="dialog" aria-modal="true" aria-label="Add sample payload" className="w-full max-w-lg rounded border border-slate-700 bg-slate-900 p-4">
+            <h2 className="text-sm font-semibold text-slate-100">Add sample payload</h2>
+            <p className="mt-1 text-xs text-slate-500">Expected format: {sourceSchemaDataFormat.toUpperCase()}</p>
+
+            <div className="mt-3 space-y-2">
+              <input
+                type="text"
+                value={sampleNameInput}
+                onChange={(e) => setSampleNameInput(e.target.value)}
+                placeholder="Sample name (optional)"
+                data-testid="sample-add-name"
+                className="h-8 w-full rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <textarea
+                value={sampleContentInput}
+                onChange={(e) => setSampleContentInput(e.target.value)}
+                rows={8}
+                placeholder={sourceSchemaDataFormat === 'xml' ? '<root />' : '{ "example": true }'}
+                data-testid="sample-add-content"
+                className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 font-mono text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+
+            {sampleActionError && (
+              <p className="mt-2 text-xs text-red-300" role="alert" data-testid="sample-add-error">
+                {sampleActionError}
+              </p>
+            )}
+
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsAddSampleOpen(false)}
+                disabled={isSampleActionLoading}
+                data-testid="sample-add-cancel"
+                className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleAddSample(); }}
+                disabled={isSampleActionLoading || sampleContentInput.trim().length === 0}
+                data-testid="sample-add-submit"
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {isSampleActionLoading ? 'Saving…' : 'Save sample'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // Record recent activity when the mapping loads successfully (FS-049 T-03)
   const { recordActivity } = useRecentActivity();
@@ -195,8 +724,41 @@ export default function MappingEditor() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isChangesOverlayOpen, setIsChangesOverlayOpen] = useState(false);
 
+  const navigationAutoMapCreateNotice = useMemo(() => {
+    const navState = location.state as Record<string, unknown> | null;
+    return navState && typeof navState.autoMapCreateNotice === 'string'
+      ? navState.autoMapCreateNotice
+      : null;
+  }, [location.state]);
+  const [dismissedAutoMapCreateNotice, setDismissedAutoMapCreateNotice] = useState<string | null>(null);
+  const autoMapCreateNotice =
+    navigationAutoMapCreateNotice !== null && navigationAutoMapCreateNotice !== dismissedAutoMapCreateNotice
+      ? navigationAutoMapCreateNotice
+      : null;
+
+  const pendingAutoMapSession = useMemo(() => getPendingAutoMapSession(mappingId), [mappingId]);
+  const initialPendingSectionPath =
+    pendingAutoMapSession.pendingCount > 0
+      ? (pendingAutoMapSession.primarySectionPath ?? '')
+      : null;
+
   // ---------------------------------------------------------------------------
-  // Auto-Map workspace hook (FS-048 T-10) — replaces useAutoMapReview (FS-046)
+  // View state (must be before handleAutoMapTrigger)
+  // ---------------------------------------------------------------------------
+  const [view, setView] = useState<EditorView>(() => (initialPendingSectionPath !== null ? 'automap' : 'target'));
+
+  // ---------------------------------------------------------------------------
+  // Auto-Map workspace mode state (FS-048 T-02)
+  // ---------------------------------------------------------------------------
+  /** The section path currently loaded in the Auto-Map workspace (preserved across exits). */
+  const [autoMapSectionPath, setAutoMapSectionPath] = useState<string | null>(initialPendingSectionPath);
+  const [visibleAutoMapScope, setVisibleAutoMapScope] = useState<{ visibleTargetPaths: string[]; count: number }>({
+    visibleTargetPaths: [],
+    count: 0,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-Map workspace hook (FS-048 T-10) — canonical review path
   // ---------------------------------------------------------------------------
   const autoMapWorkspace = useAutoMapWorkspace({
     adapter,
@@ -210,16 +772,7 @@ export default function MappingEditor() {
     parsedTargetSchema: editor.parsedTargetSchema,
   });
 
-  // ---------------------------------------------------------------------------
-  // View state (must be before handleAutoMapTrigger)
-  // ---------------------------------------------------------------------------
-  const [view, setView] = useState<EditorView>('target');
-
-  // ---------------------------------------------------------------------------
-  // Auto-Map workspace mode state (FS-048 T-02)
-  // ---------------------------------------------------------------------------
-  /** The section path currently loaded in the Auto-Map workspace (preserved across exits). */
-  const [autoMapSectionPath, setAutoMapSectionPath] = useState<string | null>(null);
+  const hydratedPendingSessionForMappingIdRef = useRef<string | null>(null);
 
   /** Enter the Auto-Map workspace for a given section path. */
   const enterAutoMapWorkspace = useCallback((sectionPath: string) => {
@@ -240,10 +793,10 @@ export default function MappingEditor() {
   }, []);
 
   const handleAutoMapTrigger = useCallback(
-    (sectionPath: string) => {
+    (sectionPath: string, visibleTargetPaths?: readonly string[]) => {
       setIsHistoryOpen(false);
       enterAutoMapWorkspace(sectionPath);
-      autoMapWorkspace.triggerAutoMap(sectionPath);
+      autoMapWorkspace.triggerAutoMap(sectionPath, visibleTargetPaths);
     },
     [enterAutoMapWorkspace, autoMapWorkspace],
   );
@@ -252,8 +805,22 @@ export default function MappingEditor() {
     setIsHistoryOpen(false);
     // T-10: header-level "Auto-map" triggers workspace for the root section
     enterAutoMapWorkspace('');
-    void autoMapWorkspace.triggerAutoMap('');
-  }, [enterAutoMapWorkspace, autoMapWorkspace]);
+    void autoMapWorkspace.triggerAutoMap('', visibleAutoMapScope.visibleTargetPaths);
+  }, [enterAutoMapWorkspace, autoMapWorkspace, visibleAutoMapScope.visibleTargetPaths]);
+
+  // Create-time and re-entry-safe auto-map pending session hydration.
+  useEffect(() => {
+    if (initialPendingSectionPath === null) {
+      return;
+    }
+
+    if (hydratedPendingSessionForMappingIdRef.current === mappingId) {
+      return;
+    }
+
+    hydratedPendingSessionForMappingIdRef.current = mappingId;
+    autoMapWorkspace.triggerAutoMap(initialPendingSectionPath);
+  }, [mappingId, initialPendingSectionPath, autoMapWorkspace]);
 
   // ---------------------------------------------------------------------------
   // Restore handler
@@ -301,6 +868,9 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   const [selectedRuleIndex, setSelectedRuleIndex] = useState<number | null>(null);
   const [stagedSourcePath, setStagedSourcePath] = useState<string | null>(null);
+  const [isSourceBrowseOpen, setIsSourceBrowseOpen] = useState(false);
+  const [isSourcePanelHidden, setIsSourcePanelHidden] = useState(false);
+  const [isBuilderPanelHidden, setIsBuilderPanelHidden] = useState(false);
 
   // Expression builder for Rules View (existing pattern)
   const builderResult = useExpressionBuilder({
@@ -356,6 +926,8 @@ export default function MappingEditor() {
         }
       }
       setStagedSourcePath(null);
+      setIsBuilderPanelHidden(false);
+      setIsSourcePanelHidden(false);
       setSelectedTargetPath(resolveSelectedTargetPath(path));
     },
     [selectedTargetPath, editor.actions, resolveSelectedTargetPath],
@@ -369,9 +941,9 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   // Derived: target status map (for ObjectSummaryPanel child info)
   // ---------------------------------------------------------------------------
-  const targetMappingStatus = useMemo<Map<string, MappingNodeStatus> | undefined>(() => {
+  const targetMappingStatus = useMemo<Map<string, TargetFieldStatus> | undefined>(() => {
     if (!editor.parsedTargetSchema) return undefined;
-    const statusMap = new Map<string, MappingNodeStatus>();
+    const statusMap = new Map<string, TargetFieldStatus>();
     const targetPaths = collectTargetSchemaPaths(editor.parsedTargetSchema.nodes);
     for (const path of targetPaths) statusMap.set(path, 'unmapped');
 
@@ -384,19 +956,26 @@ export default function MappingEditor() {
 
     for (const [path, indexes] of ruleIndexesByTarget.entries()) {
       if (!statusMap.has(path)) continue;
-      let hasDiagnostics = false;
+      let hasErrorDiagnostics = false;
+      let hasWarningDiagnostics = false;
       for (const ruleIndex of indexes) {
         const diagnostics = editor.validation.diagnosticsForRule(ruleIndex);
-        if (
-          diagnostics.some(
-            (d) => d.severity === 'warning' || d.severity === 'error',
-          )
-        ) {
-          hasDiagnostics = true;
+        if (diagnostics.some((d) => d.severity === 'error')) {
+          hasErrorDiagnostics = true;
           break;
         }
+        if (diagnostics.some((d) => d.severity === 'warning')) {
+          hasWarningDiagnostics = true;
+        }
       }
-      statusMap.set(path, hasDiagnostics ? 'warning' : 'mapped');
+
+      if (hasErrorDiagnostics) {
+        statusMap.set(path, 'error');
+      } else if (hasWarningDiagnostics) {
+        statusMap.set(path, 'warning');
+      } else {
+        statusMap.set(path, 'mapped');
+      }
     }
     return statusMap;
   }, [editor.parsedTargetSchema, effectiveRules, editor.validation]);
@@ -427,15 +1006,80 @@ export default function MappingEditor() {
     return findNodeByPath(editor.parsedTargetSchema.nodes, selectedTargetPath) ?? null;
   }, [selectedTargetPath, editor.parsedTargetSchema]);
 
-  const selectedNodeStatus = useMemo((): 'unmapped' | 'mapped' | 'warning' | 'error' => {
+  const selectedNodeStatus = useMemo((): TargetFieldStatus => {
     if (!selectedTargetPath || !targetMappingStatus) return 'unmapped';
-    return (targetMappingStatus.get(selectedTargetPath) as 'unmapped' | 'mapped' | 'warning' | 'error') ?? 'unmapped';
+    return targetMappingStatus.get(selectedTargetPath) ?? 'unmapped';
   }, [selectedTargetPath, targetMappingStatus]);
 
   const selectedNodeExpression = useMemo(() => {
     if (!selectedTargetPath) return '';
     return editor.rules.find((r) => r.target === selectedTargetPath)?.expression ?? '';
   }, [selectedTargetPath, editor.rules]);
+
+  const selectedRuleIndexForSmartFix = useMemo(() => {
+    if (!selectedTargetPath) return null;
+    const idx = editor.rules.findIndex((r) => r.target === selectedTargetPath);
+    return idx >= 0 ? idx : null;
+  }, [selectedTargetPath, editor.rules]);
+
+  const selectedRuleDiagnosticsForSmartFix = useMemo(() => {
+    if (selectedRuleIndexForSmartFix === null) return [];
+    return editor.validation.diagnosticsForRule(selectedRuleIndexForSmartFix);
+  }, [editor.validation, selectedRuleIndexForSmartFix]);
+
+  const autoMapSuggestionStatusByPath = useMemo(() => {
+    const statusMap: Record<string, 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale'> = {};
+    for (const item of autoMapWorkspace.items) {
+      statusMap[item.targetPath] = item.status;
+    }
+    return statusMap;
+  }, [autoMapWorkspace.items]);
+
+  const consolidatedIssues = useMemo<readonly ConsolidatedIssueItem[]>(() => {
+    if (!editor.validation.result) return [];
+    return editor.validation.result.diagnostics
+      .filter((diag) => diag.severity === 'error' || diag.severity === 'warning')
+      .filter((diag) => typeof diag.targetPath === 'string' && diag.targetPath.length > 0)
+      .map((diag, index) => ({
+        id: `${diag.code}:${diag.targetPath}:${index}`,
+        targetPath: diag.targetPath!,
+        severity: diag.severity,
+        message: diag.message,
+      }));
+  }, [editor.validation.result]);
+
+  const issueCount = consolidatedIssues.length;
+
+  const { requiredFieldCount, requiredMappedCount, warningCount, errorCount } = useMemo(() => {
+    const nodes = editor.parsedTargetSchema?.nodes ?? [];
+    const requiredLeaves = nodes.filter((node) => node.childCount === 0 && node.isRequired);
+
+    const mappedTargets = new Set(effectiveRules.map((rule) => rule.target));
+    const requiredMapped = requiredLeaves.filter((node) => mappedTargets.has(node.path)).length;
+
+    let warnings = 0;
+    let errors = 0;
+    for (const diag of editor.validation.result?.diagnostics ?? []) {
+      if (diag.severity === 'warning') warnings += 1;
+      if (diag.severity === 'error') errors += 1;
+    }
+
+    return {
+      requiredFieldCount: requiredLeaves.length,
+      requiredMappedCount: requiredMapped,
+      warningCount: warnings,
+      errorCount: errors,
+    };
+  }, [editor.parsedTargetSchema?.nodes, effectiveRules, editor.validation.result]);
+
+  const testLabPath = useMemo(
+    () => PATHS.MAPPING_TEST.replace(':projectId', projectId).replace(':mappingId', mappingId),
+    [mappingId, projectId],
+  );
+  const deploymentPath = useMemo(
+    () => PATHS.MAPPING_DEPLOYMENT.replace(':projectId', projectId).replace(':mappingId', mappingId),
+    [mappingId, projectId],
+  );
 
   // ---------------------------------------------------------------------------
   // Route-level navigation guard (unsaved changes)
@@ -494,25 +1138,48 @@ export default function MappingEditor() {
   // Right column: Target Worklist (target view) or RuleList (rules view)
   const targetWorklistContent =
     view === 'rules' ? (
-      <RuleList
-        rules={editor.rules}
-        schemasLoaded={editor.schemasLoaded}
-        summary={editor.validation.summary}
-        coveragePercent={editor.validation.coveragePercent}
-        isValidating={editor.validation.isValidating}
-        diagnosticsForRule={editor.validation.diagnosticsForRule}
-        selectedRuleIndex={selectedRuleIndex}
-        onRuleSelect={setSelectedRuleIndex}
-        view={view}
-        onViewToggle={handleViewToggle}
-        onAddRule={editor.actions.addRule}
-        onEditRule={editor.actions.updateRule}
-        onDeleteRule={editor.actions.deleteRule}
-        onReorderRule={editor.actions.reorderRules}
-        onBulkDelete={editor.actions.bulkDelete}
-        onBulkDuplicate={editor.actions.bulkDuplicate}
-        onPasteRules={editor.actions.pasteRules}
-      />
+      <div className="flex h-full min-h-0 flex-col" data-testid="rules-view-panel">
+        <AiValidationPanel
+          status={editor.aiValidation.status}
+          report={editor.aiValidation.report}
+          error={editor.aiValidation.error}
+          rules={editor.rules}
+          onRun={() => {
+            editor.actions.runAiValidation();
+          }}
+          onRetry={() => {
+            editor.actions.retryAiValidation();
+          }}
+          onReset={() => {
+            editor.actions.resetAiValidation();
+          }}
+          onNavigateToRule={(ruleIndex) => {
+            setSelectedRuleIndex(ruleIndex);
+          }}
+        />
+
+        <div className="min-h-0 flex-1">
+          <RuleList
+            rules={editor.rules}
+            schemasLoaded={editor.schemasLoaded}
+            summary={editor.validation.summary}
+            coveragePercent={editor.validation.coveragePercent}
+            isValidating={editor.validation.isValidating}
+            diagnosticsForRule={editor.validation.diagnosticsForRule}
+            selectedRuleIndex={selectedRuleIndex}
+            onRuleSelect={setSelectedRuleIndex}
+            view={view}
+            onViewToggle={handleViewToggle}
+            onAddRule={editor.actions.addRule}
+            onEditRule={editor.actions.updateRule}
+            onDeleteRule={editor.actions.deleteRule}
+            onReorderRule={editor.actions.reorderRules}
+            onBulkDelete={editor.actions.bulkDelete}
+            onBulkDuplicate={editor.actions.bulkDuplicate}
+            onPasteRules={editor.actions.pasteRules}
+          />
+        </div>
+      </div>
     ) : (
       <TargetWorklist
         nodes={editor.parsedTargetSchema?.nodes ?? []}
@@ -521,9 +1188,12 @@ export default function MappingEditor() {
         selectedPath={selectedTargetPath}
         groupingMode="schema"
         onSelectNode={handleSelectTargetNode}
-        view={view}
-        onViewToggle={handleViewToggle}
+        onClearSelection={() => setSelectedTargetPath(null)}
+        onVisibleScopeChange={setVisibleAutoMapScope}
+        autoMapSuggestionStatusByPath={autoMapSuggestionStatusByPath}
         targetSchemaName={editor.targetSchemaName}
+        sampleOutputByTargetPath={sampleOutputByTargetPath}
+        sampleArrayItemCountByTargetPath={sampleArrayItemCountByTargetPath}
         className="h-full"
       />
     );
@@ -544,6 +1214,8 @@ export default function MappingEditor() {
       onRefreshAll={autoMapWorkspace.refreshAll}
       onRefreshUnmapped={autoMapWorkspace.refreshUnmapped}
       onAcceptAllValid={autoMapWorkspace.bulkAcceptAllValid}
+      batchAcceptResult={autoMapWorkspace.lastBatchAcceptResult}
+      onClearBatchAcceptResult={autoMapWorkspace.clearBatchAcceptResult}
       onExitWorkspace={exitAutoMapWorkspace}
       onAccept={autoMapWorkspace.acceptSuggestion}
       onEdit={autoMapWorkspace.editSuggestion}
@@ -589,7 +1261,7 @@ export default function MappingEditor() {
   const builderContentInner =
     view === 'rules' ? (
       <div
-        className="h-full"
+        className="h-full min-h-0"
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
@@ -650,6 +1322,7 @@ export default function MappingEditor() {
     ) : (
       <ScalarFieldBuilder
         key={selectedNode.path}
+        mappingId={mappingId}
         selectedTargetPath={selectedNode.path}
         selectedTargetType={toTargetFieldType(selectedNode.type)}
         selectedTargetRequired={selectedNode.isRequired}
@@ -663,6 +1336,9 @@ export default function MappingEditor() {
         unsavedChangeCount={editor.unsavedChangeCount}
         onViewUnsavedChanges={() => { setIsChangesOverlayOpen(true); }}
         onClearMapping={(targetPath) => { editor.actions.deleteRuleByTarget(targetPath); }}
+        currentRuleIndex={selectedRuleIndexForSmartFix}
+        currentRuleDiagnostics={selectedRuleDiagnosticsForSmartFix}
+        currentRuleVersion={editor.currentRevision}
         savedRules={editor.rules}
         className="h-full"
       />
@@ -670,22 +1346,51 @@ export default function MappingEditor() {
 
   const builderContent = view === 'automap' ? autoMapWorkspaceContent : builderContentInner;
 
-  // Bottom area: connected inline preview strip (renders inside PreviewProvider)
-  const bottomContent = (
-    <ConnectedInlinePreviewStrip
-      config={editor.config}
-      sourceSchemaDetail={editor.sourceSchemaDetail}
-      targetSchemaDetail={editor.targetSchemaDetail}
-      projectId={projectId}
-      mappingId={mappingId}
-      selectedTargetPath={selectedTargetPath}
-      getDraftExpression={editor.actions.getDraftExpression}
-      onNavigateToRule={(ruleIndex) => {
-        const rule = editor.rules[ruleIndex];
-        if (rule) setSelectedTargetPath(resolveSelectedTargetPath(rule.target));
-      }}
-    />
-  );
+  const panelMode: 'overview' | 'source-browse' | 'row-editing' =
+    view === 'automap' || view === 'rules' || selectedNode !== null
+      ? 'row-editing'
+      : isSourceBrowseOpen
+        ? 'source-browse'
+        : 'overview';
+
+  const handleToggleBrowseSource = () => {
+    if (selectedNode !== null) {
+      setIsSourceBrowseOpen(true);
+      setIsSourcePanelHidden(false);
+      return;
+    }
+    setIsSourcePanelHidden(false);
+    setIsSourceBrowseOpen((prev) => !prev);
+  };
+
+  const handleHideSourcePanel = () => {
+    setIsSourcePanelHidden(true);
+    if (selectedNode === null) {
+      setIsSourceBrowseOpen(false);
+    }
+  };
+
+  const handleHideBuilderPanel = () => {
+    setIsBuilderPanelHidden(true);
+  };
+
+  const issueOverlay = isIssuesOpen
+    ? (
+      <div
+        className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60"
+        data-testid="issues-panel-overlay"
+      >
+        <IssuesPanel
+          issues={consolidatedIssues}
+          onClose={() => setIsIssuesOpen(false)}
+          onOpenRow={(targetPath) => {
+            setIsIssuesOpen(false);
+            handleSelectTargetNode(targetPath);
+          }}
+        />
+      </div>
+    )
+    : null;
 
   return (
     <>
@@ -704,9 +1409,22 @@ export default function MappingEditor() {
         sourceContent={sourceContent}
         targetWorklistContent={targetWorklistContent}
         builderContent={builderContent}
-        bottomContent={bottomContent}
+        panelMode={panelMode}
         onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
         onHistoryToggle={handleOpenHistory}
+        onViewIssues={() => setIsIssuesOpen(true)}
+        issueCount={issueCount}
+        requiredMappedCount={requiredMappedCount}
+        requiredFieldCount={requiredFieldCount}
+        warningCount={warningCount}
+        errorCount={errorCount}
+        onOpenTestLab={() => navigate(testLabPath)}
+        onOpenRulesView={() => handleViewToggle('rules')}
+        onOpenTargetView={() => handleViewToggle('target')}
+        isRulesViewActive={view === 'rules'}
+        onOpenDeploymentPage={() => navigate(deploymentPath)}
+        onExportMapping={() => {}}
+        onImportMapping={() => {}}
         onAutoMap={handleAutoMapAll}
         isAutoMapLoading={autoMapWorkspace.status === 'loading'}
         isAutoMapMode={view === 'automap'}
@@ -717,7 +1435,19 @@ export default function MappingEditor() {
             enterAutoMapWorkspace(autoMapWorkspace.sectionPath);
           }
         }}
+        autoMapScopeCount={visibleAutoMapScope.count}
+        showDeployControls={false}
+        sampleSelectorSlot={sampleSelectorSlot}
+        selectedSampleSourceData={selectedSampleParsed}
+        onToggleBrowseSource={handleToggleBrowseSource}
+        isBrowseSourceActive={panelMode !== 'overview'}
+        hideSourcePanel={isSourcePanelHidden}
+        hideBuilderPanel={isBuilderPanelHidden}
+        onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
+        onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />
+
+      {issueOverlay}
 
       <ConfigurationModal
         isOpen={isConfigOpen}
@@ -762,8 +1492,25 @@ export default function MappingEditor() {
         />
       )}
 
-      {/* Auto-Map review drawer (FS-046) — unwired in T-10; component kept for reference */}
-      {/* <AutoMapReviewDrawer ... /> */}
+      {autoMapCreateNotice && (
+        <div
+          className="fixed bottom-6 right-6 z-50 max-w-md rounded-md border border-amber-700/60 bg-slate-900/95 px-4 py-3 text-sm text-amber-200 shadow-lg"
+          role="status"
+          data-testid="automap-create-notice"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p>{autoMapCreateNotice}</p>
+            <button
+              type="button"
+              onClick={() => setDismissedAutoMapCreateNotice(navigationAutoMapCreateNotice)}
+              className="text-xs text-amber-300 hover:text-amber-100"
+              aria-label="Dismiss auto-map notice"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Route-level unsaved-changes guard dialog */}
       <ConfirmDialog

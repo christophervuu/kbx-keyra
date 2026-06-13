@@ -8,7 +8,6 @@ export type {
   MappingRowData,
   ProjectLoadState,
   SchemaCardData,
-  SchemaScope,
 } from './types';
 
 // Hooks (populated by subsequent tasks)

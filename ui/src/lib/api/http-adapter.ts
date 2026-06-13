@@ -1,4 +1,4 @@
-import { AdapterMethodNotImplementedError } from './errors';
+import { FeatureNotEnabledError } from './errors';
 import { httpRequest } from './http-client';
 import { LocalStorageAdapter } from './local-storage-adapter';
 import type {
@@ -10,10 +10,13 @@ import type {
 
 import type {
   ActivityEntry,
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
   AutoMapInput,
   AutoMapResult,
   AutoMapSectionInput,
   AutoMapSectionResult,
+  CdmBulkSyncResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -38,6 +41,7 @@ import type {
   ProjectMetadata,
   SchemaDetail,
   SchemaMetadata,
+  SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -56,7 +60,8 @@ import type {
 
 interface CurrentDeploymentsApiResponse {
   readonly DEV: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
-  readonly QA: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+  readonly PREPROD: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
+  readonly QA?: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
   readonly PROD: (CurrentDeployment & { readonly mappingIdEnvironment?: string }) | null;
 }
 
@@ -127,6 +132,46 @@ export class HttpAdapter extends LocalStorageAdapter {
       path: `/schemas/${encodeURIComponent(id)}`,
       method: 'PUT',
       body: input,
+    });
+  }
+
+  override async markSchemaReviewed(id: string): Promise<SchemaMetadata> {
+    const response = await httpRequest<{
+      metadata: SchemaMetadata;
+    }>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/mark-reviewed`,
+      method: 'POST',
+      body: {},
+    });
+
+    return response.metadata;
+  }
+
+  override async addSchemaSample(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult> {
+    return httpRequest<AddSchemaSampleResult>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async deleteSchemaSample(id: string, sampleId: string): Promise<SchemaMetadata> {
+    const response = await httpRequest<{ metadata: SchemaMetadata }>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}`,
+      method: 'DELETE',
+    });
+
+    return response.metadata;
+  }
+
+  override async getSchemaSamplePayload(id: string, sampleId: string): Promise<SchemaSamplePayloadContent> {
+    return httpRequest<SchemaSamplePayloadContent>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}`,
+      method: 'GET',
     });
   }
 
@@ -323,23 +368,23 @@ export class HttpAdapter extends LocalStorageAdapter {
   }
 
   override async listTemplates(): Promise<TemplateMetadata[]> {
-    throw this.notImplemented('listTemplates');
+    throw this.featureNotEnabled('listTemplates');
   }
 
   override async getTemplate(id: string): Promise<TemplateDetail> {
     void id;
-    throw this.notImplemented('getTemplate');
+    throw this.featureNotEnabled('getTemplate');
   }
 
   override async getDeploymentContext(mappingId: string): Promise<DeploymentContext> {
     void mappingId;
-    throw this.notImplemented('getDeploymentContext');
+    throw this.featureNotEnabled('getDeploymentContext');
   }
 
   override async deploy(mappingId: string, environment: Environment): Promise<LegacyDeploymentRecord> {
     void mappingId;
     void environment;
-    throw this.notImplemented('deploy');
+    throw this.featureNotEnabled('deploy');
   }
 
   override async promote(
@@ -350,7 +395,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     void mappingId;
     void from;
     void to;
-    throw this.notImplemented('promote');
+    throw this.featureNotEnabled('promote');
   }
 
   override async rollback(
@@ -361,7 +406,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     void mappingId;
     void environment;
     void targetVersion;
-    throw this.notImplemented('rollback');
+    throw this.featureNotEnabled('rollback');
   }
 
   override async getDeploymentDiff(
@@ -372,7 +417,7 @@ export class HttpAdapter extends LocalStorageAdapter {
     void mappingId;
     void fromVersion;
     void toVersion;
-    throw this.notImplemented('getDeploymentDiff');
+    throw this.featureNotEnabled('getDeploymentDiff');
   }
 
   override async deployMapping(
@@ -458,105 +503,178 @@ export class HttpAdapter extends LocalStorageAdapter {
       latestVersion,
     };
 
+    const preprodDeployment = current.PREPROD ?? current.QA ?? null;
+
     return {
       DEV: {
         environment: 'DEV',
         deployment: current.DEV,
         status: computeStatus(current.DEV, stalenessInput),
       },
-      QA: {
-        environment: 'QA',
-        deployment: current.QA,
-        status: computeStatus(current.QA, stalenessInput),
+      PREPROD: {
+        environment: 'PREPROD',
+        deployment: preprodDeployment,
+        status: computeStatus(preprodDeployment, stalenessInput),
       },
       PROD: {
         environment: 'PROD',
         deployment: current.PROD,
         status: computeStatus(current.PROD, stalenessInput),
       },
+      QA: {
+        environment: 'PREPROD',
+        deployment: preprodDeployment,
+        status: computeStatus(preprodDeployment, stalenessInput),
+      },
     };
   }
 
   override async listCdmSchemas(path?: string): Promise<GitHubFile[]> {
-    void path;
-    throw this.notImplemented('listCdmSchemas');
+    const query = typeof path === 'string' && path.trim() !== ''
+      ? `?path=${encodeURIComponent(path.trim())}`
+      : '';
+
+    return httpRequest<GitHubFile[]>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/cdm${query}`,
+      method: 'GET',
+    });
   }
 
   override async linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata> {
-    void input;
-    throw this.notImplemented('linkCdmSchema');
+    return httpRequest<SchemaMetadata>({
+      baseUrl: this.apiUrl,
+      path: '/schemas/cdm/link',
+      method: 'POST',
+      body: {
+        projectId: input.projectId,
+        path: input.path,
+        ...(typeof input.branch === 'string' && input.branch.trim() !== '' ? { branch: input.branch.trim() } : {}),
+        ...(typeof input.name === 'string' && input.name.trim() !== '' ? { name: input.name.trim() } : {}),
+      },
+    });
   }
 
-  override async syncCdmSchema(schemaId: string): Promise<SchemaSyncResult> {
-    void schemaId;
-    throw this.notImplemented('syncCdmSchema');
+  override async syncAllCdmSchemas(): Promise<CdmBulkSyncResult> {
+    return httpRequest<CdmBulkSyncResult>({
+      baseUrl: this.apiUrl,
+      path: '/schemas/cdm/sync',
+      method: 'POST',
+      body: {},
+    });
+  }
+
+  override async syncCdmSchema(
+    schemaId: string,
+    options?: {
+      statusOnly?: boolean;
+    },
+  ): Promise<SchemaSyncResult> {
+    return httpRequest<SchemaSyncResult>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(schemaId)}/sync-cdm`,
+      method: options?.statusOnly ? 'GET' : 'POST',
+      ...(options?.statusOnly ? {} : { body: {} }),
+    });
   }
 
   override async listPublishedSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw this.notImplemented('listPublishedSchemas');
+    throw this.featureNotEnabled('listPublishedSchemas');
   }
 
   override async publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void> {
     void schemaId;
     void input;
-    throw this.notImplemented('publishSchemaToGitHub');
+    throw this.featureNotEnabled('publishSchemaToGitHub');
   }
 
   override async linkPublishedSchema(input: LinkPublishedSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw this.notImplemented('linkPublishedSchema');
+    throw this.featureNotEnabled('linkPublishedSchema');
   }
 
   override async autoMap(input: AutoMapInput): Promise<AutoMapResult> {
-    void input;
-    throw this.notImplemented('autoMap');
+    return httpRequest<AutoMapResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
-    void input;
-    throw this.notImplemented('autoMapSection');
+    return httpRequest<AutoMapSectionResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult> {
-    void input;
-    throw this.notImplemented('suggestExpression');
+    return httpRequest<SuggestExpressionResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/suggest-expression',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
-    void input;
-    throw this.notImplemented('explainRule');
+    return httpRequest<ExplainRuleResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/explain-rule',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async smartFix(input: SmartFixInput): Promise<SmartFixResult> {
-    void input;
-    throw this.notImplemented('smartFix');
+    return httpRequest<SmartFixResult>({
+      baseUrl: this.apiUrl,
+      path: '/ai/smart-fix',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async validateMappings(input: ValidateMappingsInput): Promise<ValidationReport> {
-    void input;
-    throw this.notImplemented('validateMappings');
+    return httpRequest<ValidationReport>({
+      baseUrl: this.apiUrl,
+      path: '/ai/validate-mappings',
+      method: 'POST',
+      body: input,
+    });
   }
 
   override async querySchemaNodes(schemaId: string, query: string): Promise<SchemaSearchResult[]> {
-    void schemaId;
-    void query;
-    throw this.notImplemented('querySchemaNodes');
+    return httpRequest<SchemaSearchResult[]>({
+      baseUrl: this.apiUrl,
+      path: `/schemas/${encodeURIComponent(schemaId)}/query`,
+      method: 'POST',
+      body: {
+        query,
+      },
+    });
   }
 
   override async listActivity(projectId?: string, limit?: number): Promise<ActivityEntry[]> {
     void projectId;
     void limit;
-    throw this.notImplemented('listActivity');
+    throw this.featureNotEnabled('listActivity');
   }
 
   override async previewOnServer(mappingId: string, input: ServerPreviewInput): Promise<ServerPreviewResult> {
-    void mappingId;
-    void input;
-    throw this.notImplemented('previewOnServer');
+    return httpRequest<ServerPreviewResult>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/preview`,
+      method: 'POST',
+      body: input,
+    });
   }
 
-  private notImplemented(methodName: string): AdapterMethodNotImplementedError {
-    return new AdapterMethodNotImplementedError(methodName);
+  private featureNotEnabled(featureName: string): FeatureNotEnabledError {
+    return new FeatureNotEnabledError(featureName);
   }
 }

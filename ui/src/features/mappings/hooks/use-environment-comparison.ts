@@ -317,9 +317,12 @@ export function useEnvironmentComparison({
         const meta: ComparisonSideMetadata = {
           executionContext: 'server',
           environment: serverResult.metadata.environment,
-          configVersion: serverResult.metadata.snapshotVersion,
-          snapshotVersion: serverResult.metadata.snapshotVersion,
+          configVersion: serverResult.metadata.sourceNumber,
           deployedAt: serverResult.metadata.deployedAt,
+          sourceType: serverResult.metadata.sourceType,
+          sourceNumber: serverResult.metadata.sourceNumber,
+          artifactId: serverResult.metadata.artifactId,
+          artifactHash: serverResult.metadata.artifactHash,
           engineVersion: serverResult.metadata.engineVersion,
         };
 

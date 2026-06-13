@@ -1,54 +1,92 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 import { InferredSchemaBanner } from '../InferredSchemaBanner';
+import { ReplaceFileDialog } from '../ReplaceFileDialog';
+import { ViewRawModal } from '../ViewRawModal';
 
-const SCHEMA_ID = 'schema-test-1';
-const STORAGE_KEY = `keyra:schema-banner-dismissed:${SCHEMA_ID}`;
+import { AdapterProvider } from '@/lib/api';
+import type { ApiAdapter } from '@/lib/api';
+import type { SchemaDetail } from '@/lib/types';
 
 describe('InferredSchemaBanner', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  afterEach(() => {
-    localStorage.clear();
-  });
-
   it('renders nothing when inferred is false', () => {
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={false} />);
+    render(<InferredSchemaBanner inferred={false} />);
     expect(screen.queryByTestId('inferred-schema-banner')).not.toBeInTheDocument();
   });
 
-  it('renders the banner when inferred is true and not dismissed', () => {
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={true} />);
+  it('renders the banner when inferred is true', () => {
+    render(<InferredSchemaBanner inferred={true} />);
     expect(screen.getByTestId('inferred-schema-banner')).toBeInTheDocument();
     expect(screen.getByText(/inferred from sample data/i)).toBeInTheDocument();
   });
 
-  it('renders nothing when already dismissed in localStorage', () => {
-    localStorage.setItem(STORAGE_KEY, 'true');
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={true} />);
-    expect(screen.queryByTestId('inferred-schema-banner')).not.toBeInTheDocument();
+  it('shows Mark as Reviewed button only for needs_review', () => {
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        onMarkReviewed={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('mark-reviewed-button')).toBeInTheDocument();
   });
 
-  it('hides banner on dismiss and writes to localStorage', async () => {
-    render(<InferredSchemaBanner schemaId={SCHEMA_ID} inferred={true} />);
-    expect(screen.getByTestId('inferred-schema-banner')).toBeInTheDocument();
+  it('renders actionable review rows when review issues are provided', () => {
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        reviewIssues={[
+          { code: 'missing_description', count: 2, blocking: false },
+          { code: 'type_ambiguity_conflict', count: 1, blocking: false },
+        ]}
+      />,
+    );
 
-    await userEvent.click(screen.getByTestId('inferred-banner-dismiss'));
+    expect(screen.getByTestId('review-issues-list')).toBeInTheDocument();
+    expect(screen.getByTestId('review-issue-missing_description')).toBeInTheDocument();
+    expect(screen.getByTestId('review-issue-type_ambiguity_conflict')).toBeInTheDocument();
+  });
 
-    expect(screen.queryByTestId('inferred-schema-banner')).not.toBeInTheDocument();
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
+  it('renders compact reviewed summary state', () => {
+    render(<InferredSchemaBanner inferred={true} reviewed={true} />);
+
+    expect(screen.getByText(/schema marked as reviewed/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('mark-reviewed-button')).not.toBeInTheDocument();
+  });
+
+  it('calls onMarkReviewed when button is clicked', async () => {
+    const onMarkReviewed = vi.fn();
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        onMarkReviewed={onMarkReviewed}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('mark-reviewed-button'));
+
+    expect(onMarkReviewed).toHaveBeenCalledOnce();
+  });
+
+  it('renders mark reviewed error when provided', () => {
+    render(
+      <InferredSchemaBanner
+        inferred={true}
+        needsReview={true}
+        onMarkReviewed={vi.fn()}
+        markReviewedError="Unable to mark as reviewed"
+      />,
+    );
+
+    expect(screen.getByTestId('mark-reviewed-error')).toHaveTextContent('Unable to mark as reviewed');
   });
 });
-
-// ---------------------------------------------------------------------------
-// ViewRawModal
-// ---------------------------------------------------------------------------
-
-import { ViewRawModal } from '../ViewRawModal';
 
 describe('ViewRawModal', () => {
   const onClose = vi.fn();
@@ -114,23 +152,23 @@ describe('ViewRawModal', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// ReplaceFileDialog
-// ---------------------------------------------------------------------------
-
-import { MemoryRouter } from 'react-router-dom';
-import { AdapterProvider } from '@/lib/api';
-import type { ApiAdapter } from '@/lib/api';
-import type { SchemaDetail } from '@/lib/types';
-
-import { ReplaceFileDialog } from '../ReplaceFileDialog';
-
 const VALID_JSON_SCHEMA = JSON.stringify({
   type: 'object',
   properties: { name: { type: 'string' } },
 });
 
 const INVALID_JSON = 'not valid json {{{{';
+
+function makeUploadFile(contents: string, name: string, type: string) {
+  const file = new File([contents], name, { type });
+  if (typeof file.text !== 'function') {
+    Object.defineProperty(file, 'text', {
+      value: () => Promise.resolve(contents),
+      configurable: true,
+    });
+  }
+  return file;
+}
 
 const MOCK_DETAIL: SchemaDetail = {
   metadata: {
@@ -141,7 +179,7 @@ const MOCK_DETAIL: SchemaDetail = {
     origin: 'local',
     status: 'ready',
     scope: 'project',
-    syncStatus: 'not-synced',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-02T00:00:00Z',
@@ -155,6 +193,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getSchema: vi.fn().mockResolvedValue(MOCK_DETAIL),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockResolvedValue(MOCK_DETAIL.metadata),
+    markSchemaReviewed: vi.fn().mockResolvedValue(MOCK_DETAIL.metadata),
     deleteSchema: vi.fn(),
     listMappings: vi.fn().mockResolvedValue([]),
     getMapping: vi.fn(),
@@ -223,7 +262,7 @@ describe('ReplaceFileDialog', () => {
         </MemoryRouter>
       </AdapterProvider>,
     );
-    expect(screen.queryByTestId('replace-file-dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('replace-schema-dialog')).not.toBeInTheDocument();
   });
 
   it('shows confirmation message in step 1', () => {
@@ -234,16 +273,16 @@ describe('ReplaceFileDialog', () => {
 
   it('advances to file pick step on confirm click', async () => {
     renderDialog(createMockAdapter());
-    await userEvent.click(screen.getByTestId('replace-confirm-button'));
-    expect(screen.getByTestId('replace-pick-button')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('replace-schema-confirm-button'));
+    expect(screen.getByTestId('replace-schema-pick-button')).toBeInTheDocument();
   });
 
   it('shows error when invalid JSON file is selected', async () => {
     renderDialog(createMockAdapter());
-    await userEvent.click(screen.getByTestId('replace-confirm-button'));
+    await userEvent.click(screen.getByTestId('replace-schema-confirm-button'));
 
-    const file = new File([INVALID_JSON], 'schema.json', { type: 'application/json' });
-    const input = screen.getByTestId('replace-file-input');
+    const file = makeUploadFile(INVALID_JSON, 'schema.json', 'application/json');
+    const input = screen.getByTestId('replace-schema-file-input');
     await userEvent.upload(input, file);
 
     const errorEl = await screen.findByTestId('replace-parse-error');
@@ -256,13 +295,13 @@ describe('ReplaceFileDialog', () => {
     const onReplaced = vi.fn();
 
     renderDialog(createMockAdapter({ updateSchema, getSchema }), onReplaced);
-    await userEvent.click(screen.getByTestId('replace-confirm-button'));
+    await userEvent.click(screen.getByTestId('replace-schema-confirm-button'));
 
-    const file = new File([VALID_JSON_SCHEMA], 'schema.json', { type: 'application/json' });
-    const input = screen.getByTestId('replace-file-input');
+    const file = makeUploadFile(VALID_JSON_SCHEMA, 'schema.json', 'application/json');
+    const input = screen.getByTestId('replace-schema-file-input');
     await userEvent.upload(input, file);
 
-    await screen.findByText(/replace schema file/i); // wait for async
+    await screen.findByText(/replace schema/i); // wait for async
 
     // Allow async ops to settle
     await new Promise((r) => setTimeout(r, 50));

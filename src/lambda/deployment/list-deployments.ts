@@ -11,7 +11,7 @@ import {
 } from '../shared/index.js';
 import { listHistory } from '../../lib/persistence/deployments.js';
 
-type DeploymentEnvironment = 'DEV' | 'QA' | 'PROD';
+type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 
 interface MappingMetadata {
   readonly mappingId: string;
@@ -36,8 +36,13 @@ function parseEnvironment(value: string | null): DeploymentEnvironment | null {
     return null;
   }
 
-  if (value === 'DEV' || value === 'QA' || value === 'PROD') {
+  if (value === 'DEV' || value === 'PREPROD' || value === 'PROD') {
     return value;
+  }
+
+  // FS-081 legacy compatibility: allow QA query value and normalize to PREPROD.
+  if (value === 'QA') {
+    return 'PREPROD';
   }
 
   return null;

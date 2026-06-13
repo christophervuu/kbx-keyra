@@ -5,8 +5,10 @@ import type {
   AIErrorCode,
   AIResponse,
   AIResult,
+  CanonicalPromptId,
   DslAssetLoader,
   InvokeAIOptions,
+  PromptIdResolution,
   PromptRecord,
   PromptRegistryAdapter,
 } from '../../../src/lib/ai/index.js';
@@ -24,6 +26,14 @@ describe('lib/ai types exports', () => {
       maxTokens: 400,
       updatedAt: '2026-05-09T00:00:00.000Z',
       updatedBy: 'test-user',
+    };
+
+    const canonicalPromptId: CanonicalPromptId = 'natural-language-to-dsl';
+    const promptIdResolution: PromptIdResolution = {
+      requestedPromptId: 'nl-to-rule',
+      canonicalPromptId,
+      aliasApplied: true,
+      aliasPromptId: 'nl-to-rule',
     };
 
     const promptRegistry: PromptRegistryAdapter = {
@@ -50,6 +60,7 @@ describe('lib/ai types exports', () => {
 
     expect(loaded).toEqual(promptRecord);
     expect(dsl).toContain('KeyRa DSL');
+    expect(promptIdResolution.canonicalPromptId).toBe('natural-language-to-dsl');
   });
 
   it('exports AIResult, AIError, AIResponse, and AIErrorCode as discriminated contracts', () => {

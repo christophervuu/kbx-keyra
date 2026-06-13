@@ -1,7 +1,10 @@
 import type {
+  SchemaDataFormat,
   MappingNodeStatus,
   ParsedSchema,
   SchemaFormat,
+  SchemaOwnership,
+  SchemaStatus,
   SchemaNodeType,
   SchemaOrigin,
   SchemaTreeNode,
@@ -28,6 +31,8 @@ export interface SchemaTreeViewProps {
   readonly editable?: boolean;
   /** Edit operation callbacks — required when editable is true */
   readonly onNodeEdit?: EditNodeCallbacks;
+  /** Optional per-field sample value text displayed at row right side */
+  readonly sampleValueByPath?: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,15 +85,22 @@ export type ParseInferredSchemaFn = (content: string, format: 'json' | 'xml') =>
 // Schema Library Types (FS-016)
 // ---------------------------------------------------------------------------
 
-export type SyncStatus = 'synced' | 'not-synced' | 'local-changes' | 'local' | 'inferred';
-export type DisplayFormat = 'JSON Schema' | 'XSD' | 'Inferred';
+export type SyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'local' | 'inferred';
+export type DisplayFormat = 'JSON' | 'XSD' | 'Inferred';
+export type FilterDataFormat = Uppercase<SchemaDataFormat>;
+export type FilterOwnership = SchemaOwnership;
+export type FilterStatus = Extract<SchemaStatus, 'ready' | 'processing' | 'needs_review' | 'error'>;
+export type SchemaLibraryViewMode = 'card' | 'list';
 
 export interface SchemaLibraryItem {
   schemaId: string;
   name: string;
   description?: string;
+  disambiguator?: string;
   origin: SchemaOrigin;
-  scope: 'global' | 'project';
+  ownership: FilterOwnership;
+  dataFormat: FilterDataFormat;
+  status: FilterStatus;
   format: SchemaFormat;
   displayFormat: DisplayFormat;
   fieldCount: number;
@@ -101,12 +113,19 @@ export interface SchemaLibraryItem {
 
 export interface SchemaLibraryFilters {
   search: string;
-  origins: SchemaOrigin[];
-  formats: DisplayFormat[];
-  scopes: Array<'global' | 'project'>;
+  ownerships: FilterOwnership[];
+  dataFormats: FilterDataFormat[];
+  statuses: FilterStatus[];
 }
 
-export type SortField = 'name' | 'fieldCount' | 'updatedAt' | 'origin';
+export type SortField =
+  | 'name'
+  | 'status'
+  | 'dataFormat'
+  | 'fieldCount'
+  | 'projectCount'
+  | 'updatedAt'
+  | 'ownership';
 export type SortDirection = 'asc' | 'desc';
 
 export interface SchemaLibrarySort {

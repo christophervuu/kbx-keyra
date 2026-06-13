@@ -36,7 +36,27 @@ describe('get-schema handler', () => {
     env.CONTENT_BUCKET = 'Content';
 
     sharedMocks.parsePathParam.mockReset().mockReturnValue('schema-1');
-    sharedMocks.getItem.mockReset().mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getItem.mockReset().mockResolvedValue({
+      schemaId: 'schema-1',
+      format: 'json-schema',
+      origin: 'local',
+      syncStatus: 'local-changes',
+      inferred: true,
+      status: 'ready',
+      samplePayloadCount: 1,
+      samplePayloads: [
+        {
+          sampleId: 'sample-1',
+          schemaId: 'schema-1',
+          name: 'Initial upload',
+          dataFormat: 'json',
+          contentRef: 'schemas/schema-1/samples/sample-1/payload.json',
+          usedForInference: true,
+          source: 'initial_upload',
+          createdAt: '2026-06-08T00:00:00.000Z',
+        },
+      ],
+    });
     sharedMocks.getObject.mockReset().mockResolvedValue(JSON.stringify({ type: 'object', properties: {} }));
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
@@ -51,6 +71,13 @@ describe('get-schema handler', () => {
     expect(result.statusCode).toBe(200);
     const parsed = JSON.parse(result.body) as { metadata: { schemaId: string }; content: Record<string, unknown> };
     expect(parsed.metadata.schemaId).toBe('schema-1');
+    expect((parsed.metadata as { origin?: string }).origin).toBe('uploaded');
+    expect((parsed.metadata as { syncStatus?: string }).syncStatus).toBe('sync-failed');
+    expect((parsed.metadata as { sourceKind?: string }).sourceKind).toBe('inferred_from_json');
+    expect((parsed.metadata as { dataFormat?: string }).dataFormat).toBe('json');
+    expect((parsed.metadata as { status?: string }).status).toBe('needs_review');
+    expect((parsed.metadata as { reviewState?: string }).reviewState).toBe('unreviewed');
+    expect((parsed.metadata as { samplePayloadCount?: number }).samplePayloadCount).toBe(1);
     expect(typeof parsed.content).toBe('object');
   });
 

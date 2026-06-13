@@ -9,6 +9,7 @@
 import { AlertTriangle, Lightbulb, X } from 'lucide-react';
 
 import type { ExplainRuleState } from '../hooks/use-explain-rule';
+import { AiGeneratedStateLabel } from './AiSuggestionReviewPrimitives';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -86,9 +87,15 @@ export function ExplanationPanel({ state, onDismiss, onRetry }: ExplanationPanel
           </button>
         </>
       ) : (
-        <p className="text-xs leading-relaxed text-slate-200">
-          {state.result?.explanation}
-        </p>
+        <>
+          <AiGeneratedStateLabel
+            mode="explanation"
+            testId="explanation-assistance-label"
+          />
+          <p className="text-xs leading-relaxed text-slate-200">
+            {state.result?.explanation}
+          </p>
+        </>
       )}
     </div>
   );

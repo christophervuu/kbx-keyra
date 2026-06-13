@@ -1,20 +1,18 @@
 // ActiveFilterChips — Displays active filter values as removable chips (FS-016 T-03)
 
-import type { SchemaOrigin } from '@/lib/types';
-
-import type { DisplayFormat } from '../types';
+import type { FilterDataFormat, FilterOwnership, FilterStatus } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface ActiveFilterChipsProps {
-  origins: SchemaOrigin[];
-  formats: DisplayFormat[];
-  scopes: Array<'global' | 'project'>;
-  onRemoveOrigin: (origin: SchemaOrigin) => void;
-  onRemoveFormat: (format: DisplayFormat) => void;
-  onRemoveScope: (scope: 'global' | 'project') => void;
+  ownerships: FilterOwnership[];
+  dataFormats: FilterDataFormat[];
+  statuses: FilterStatus[];
+  onRemoveOwnership: (ownership: FilterOwnership) => void;
+  onRemoveDataFormat: (format: FilterDataFormat) => void;
+  onRemoveStatus: (status: FilterStatus) => void;
   onClearAll: () => void;
 }
 
@@ -52,26 +50,37 @@ function Chip({ label, onRemove, colorClass = 'bg-slate-700 text-slate-200' }: C
 // Origin color mapping
 // ---------------------------------------------------------------------------
 
-const ORIGIN_COLORS: Record<SchemaOrigin, string> = {
+const OWNERSHIP_COLORS: Record<FilterOwnership, string> = {
   cdm: 'bg-purple-200 text-purple-900',
-  published: 'bg-blue-200 text-blue-900',
-  local: 'bg-green-200 text-green-900',
+  user: 'bg-blue-200 text-blue-900',
 };
+
+const STATUS_COLORS: Record<FilterStatus, string> = {
+  ready: 'bg-emerald-200 text-emerald-900',
+  processing: 'bg-slate-200 text-slate-900',
+  needs_review: 'bg-amber-200 text-amber-900',
+  error: 'bg-rose-200 text-rose-900',
+};
+
+function statusLabel(status: FilterStatus): string {
+  const displayStatus = status === 'needs_review' ? 'ready' : status;
+  return displayStatus[0].toUpperCase() + displayStatus.slice(1);
+}
 
 // ---------------------------------------------------------------------------
 // ActiveFilterChips
 // ---------------------------------------------------------------------------
 
 export function ActiveFilterChips({
-  origins,
-  formats,
-  scopes,
-  onRemoveOrigin,
-  onRemoveFormat,
-  onRemoveScope,
+  ownerships,
+  dataFormats,
+  statuses,
+  onRemoveOwnership,
+  onRemoveDataFormat,
+  onRemoveStatus,
   onClearAll,
 }: ActiveFilterChipsProps) {
-  const hasAny = origins.length > 0 || formats.length > 0 || scopes.length > 0;
+  const hasAny = ownerships.length > 0 || dataFormats.length > 0 || statuses.length > 0;
 
   if (!hasAny) return null;
 
@@ -81,29 +90,29 @@ export function ActiveFilterChips({
       data-testid="active-filter-chips"
       aria-label="Active filters"
     >
-      {origins.map((origin) => (
+      {ownerships.map((ownership) => (
         <Chip
-          key={`origin-${origin}`}
-          label={origin.charAt(0).toUpperCase() + origin.slice(1)}
-          onRemove={() => onRemoveOrigin(origin)}
-          colorClass={ORIGIN_COLORS[origin]}
+          key={`ownership-${ownership}`}
+          label={ownership === 'cdm' ? 'CDM' : 'User'}
+          onRemove={() => onRemoveOwnership(ownership)}
+          colorClass={OWNERSHIP_COLORS[ownership]}
         />
       ))}
 
-      {formats.map((format) => (
+      {dataFormats.map((format) => (
         <Chip
-          key={`format-${format}`}
+          key={`data-format-${format}`}
           label={format}
-          onRemove={() => onRemoveFormat(format)}
+          onRemove={() => onRemoveDataFormat(format)}
         />
       ))}
 
-      {scopes.map((scope) => (
+      {statuses.map((status) => (
         <Chip
-          key={`scope-${scope}`}
-          label={scope === 'global' ? 'Global' : 'Project-Level'}
-          onRemove={() => onRemoveScope(scope)}
-          colorClass="bg-amber-100 text-amber-800"
+          key={`status-${status}`}
+          label={statusLabel(status)}
+          onRemove={() => onRemoveStatus(status)}
+          colorClass={STATUS_COLORS[status]}
         />
       ))}
 

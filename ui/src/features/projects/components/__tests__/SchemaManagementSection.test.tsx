@@ -17,8 +17,8 @@ const SCHEMA_A: SchemaCardData = {
   schemaId: 'schema-1',
   name: 'Customer Schema',
   format: 'json-schema',
-  origin: 'local',
-  scope: 'project-level',
+  origin: 'uploaded',
+  sourceType: 'upload',
   fieldCount: 8,
   syncStatus: 'ready',
   isInferred: false,
@@ -82,15 +82,17 @@ function renderSection(
     React.createElement(
       AdapterProvider,
       { adapter },
-      React.createElement(SchemaManagementSection, {
-        schemas,
-        onUpload: overrides.onUpload ?? vi.fn(),
-        onLink: overrides.onLink ?? vi.fn().mockResolvedValue(undefined),
-        onRemove: overrides.onRemove ?? vi.fn().mockResolvedValue(undefined),
-        onView: overrides.onView ?? vi.fn(),
-        mappingsReferencingSchema: overrides.mappingsReferencingSchema ?? (() => []),
-      }),
-    ),
+        React.createElement(SchemaManagementSection, {
+          schemas,
+          onUpload: overrides.onUpload ?? vi.fn(),
+          projectId: 'project-1',
+          onLink: overrides.onLink ?? vi.fn().mockResolvedValue(undefined),
+          onRemove: overrides.onRemove ?? vi.fn().mockResolvedValue(undefined),
+          onResync: vi.fn().mockResolvedValue({ message: 'Schema re-synced from CDM source.' }),
+          onView: overrides.onView ?? vi.fn(),
+          mappingsReferencingSchema: overrides.mappingsReferencingSchema ?? (() => []),
+        }),
+      ),
   );
 }
 
@@ -163,10 +165,10 @@ describe('SchemaManagementSection', () => {
     expect(onUpload).toHaveBeenCalled();
   });
 
-  it('clicking Remove triggers confirmation dialog', async () => {
+  it('clicking Unlink triggers confirmation dialog', async () => {
     const user = userEvent.setup();
     renderSection([SCHEMA_A]);
-    await user.click(screen.getByRole('button', { name: /remove schema customer schema/i }));
+    await user.click(screen.getByRole('button', { name: /unlink schema customer schema/i }));
     expect(screen.getByTestId('remove-confirm-dialog')).toBeInTheDocument();
     expect(screen.getByText(/from this project/i)).toBeInTheDocument();
   });
@@ -176,7 +178,7 @@ describe('SchemaManagementSection', () => {
     renderSection([SCHEMA_A], {
       mappingsReferencingSchema: () => ['Mapping One', 'Mapping Two'],
     });
-    await user.click(screen.getByRole('button', { name: /remove schema/i }));
+    await user.click(screen.getByRole('button', { name: /unlink schema/i }));
     expect(screen.getByText('Mapping One')).toBeInTheDocument();
     expect(screen.getByText('Mapping Two')).toBeInTheDocument();
   });
@@ -185,7 +187,7 @@ describe('SchemaManagementSection', () => {
     const onRemove = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
     renderSection([SCHEMA_A], { onRemove });
-    await user.click(screen.getByRole('button', { name: /remove schema customer schema/i }));
+    await user.click(screen.getByRole('button', { name: /unlink schema customer schema/i }));
     await user.click(screen.getByTestId('remove-confirm-button'));
     expect(onRemove).toHaveBeenCalledWith('schema-1');
     await waitFor(() =>
@@ -197,7 +199,7 @@ describe('SchemaManagementSection', () => {
     const onRemove = vi.fn();
     const user = userEvent.setup();
     renderSection([SCHEMA_A], { onRemove });
-    await user.click(screen.getByRole('button', { name: /remove schema customer schema/i }));
+    await user.click(screen.getByRole('button', { name: /unlink schema customer schema/i }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onRemove).not.toHaveBeenCalled();
     expect(screen.queryByTestId('remove-confirm-dialog')).not.toBeInTheDocument();
@@ -219,5 +221,48 @@ describe('SchemaManagementSection', () => {
     renderSection([SCHEMA_A], { onView });
     await user.click(screen.getByRole('button', { name: /view schema customer schema/i }));
     expect(onView).toHaveBeenCalledWith('schema-1');
+  });
+
+  it('CDM card shows Re-sync and Unlink actions only (plus View)', async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn().mockResolvedValue(undefined);
+    const onResync = vi.fn().mockResolvedValue({ message: 'Schema re-synced from CDM source.' });
+
+    render(
+      React.createElement(
+        AdapterProvider,
+        { adapter: createMockAdapter() },
+        React.createElement(SchemaManagementSection, {
+          projectId: 'project-1',
+          schemas: [
+            {
+              ...SCHEMA_A,
+              schemaId: 'schema-cdm-1',
+              name: 'CDM Customer',
+              origin: 'cdm',
+              sourceType: 'github',
+              syncStatus: 'update-available',
+            },
+          ],
+          onUpload: vi.fn(),
+          onLink: vi.fn().mockResolvedValue(undefined),
+          onRemove,
+          onResync,
+          onView: vi.fn(),
+          mappingsReferencingSchema: () => [],
+        }),
+      ),
+    );
+
+    expect(screen.getByRole('button', { name: /view schema cdm customer/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /re-sync schema cdm customer/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /unlink schema cdm customer/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /remove schema cdm customer/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /re-sync schema cdm customer/i }));
+    await waitFor(() => {
+      expect(onResync).toHaveBeenCalledWith('schema-cdm-1');
+    });
+    expect(screen.getByTestId('resync-success')).toHaveTextContent('Schema re-synced from CDM source.');
   });
 });

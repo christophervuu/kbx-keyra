@@ -3,21 +3,45 @@ import {
   ERROR_CODES,
   S3ServiceError,
   errorResponse,
+  getItem,
   internalError,
   jsonResponse,
+  notFound,
   parseBody,
   putItem,
   putObject,
   requireFields,
+  updateItem,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import { normalizeSchemaOrigin, type CanonicalSchemaOrigin, type SchemaOrigin } from '../../lib/persistence/types.js';
+import {
+  normalizeSchemaReviewState,
+  normalizeSchemaSourceKind,
+  schemaDataFormatFromSourceKind,
+  type SchemaDataFormat,
+  type SchemaReviewState,
+  type SchemaSamplePayloadMetadata,
+  type SchemaSourceKind,
+} from '../../lib/persistence/types.js';
 
 type SchemaFormat = 'json-schema' | 'xsd';
-type SchemaOrigin = 'cdm' | 'published' | 'local';
 type SchemaIngestStatus = 'ingesting' | 'ready' | 'error';
 type SchemaScope = 'global' | 'project';
-type SchemaSyncStatus = 'synced' | 'not-synced' | 'local-changes';
+type SchemaSyncStatus = 'synced' | 'update-available' | 'sync-failed' | 'not-synced' | 'local-changes';
+
+interface SchemaRef {
+  readonly schemaId: string;
+  readonly type: 'github' | 'local' | 'published';
+  readonly commitSha?: string;
+}
+
+interface ProjectRecord {
+  readonly projectId: string;
+  readonly schemaRefs?: readonly SchemaRef[];
+  readonly linkedSchemaIds?: readonly string[];
+}
 
 interface SchemaNodeRecord {
   readonly schemaId: string;
@@ -39,6 +63,7 @@ interface SchemaSourceUpload {
 interface SchemaSourceGitHub {
   readonly type: 'github';
   readonly repo: string;
+  readonly repoId?: number;
   readonly branch: string;
   readonly path: string;
   readonly commitSha?: string;
@@ -51,16 +76,45 @@ interface SchemaMetadata {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly fieldCount: number;
-  readonly origin: SchemaOrigin;
+  readonly origin: CanonicalSchemaOrigin;
   readonly status: SchemaIngestStatus;
-  readonly scope: SchemaScope;
+  readonly scope?: SchemaScope;
   readonly description?: string;
   readonly updatedBy?: string;
   readonly inferred?: boolean;
+  readonly dataFormat?: SchemaDataFormat;
+  readonly sourceKind?: SchemaSourceKind;
+  readonly reviewState?: SchemaReviewState;
+  readonly reviewedAt?: string;
+  readonly samplePayloadCount?: number;
+  readonly samplePayloads?: readonly SchemaSamplePayloadMetadata[];
   readonly syncStatus: SchemaSyncStatus;
   readonly source: SchemaSource;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+function toDataFormat(format: SchemaFormat): SchemaDataFormat {
+  return format === 'xsd' ? 'xml' : 'json';
+}
+
+function inferSourceKind(format: SchemaFormat, inferred: boolean): SchemaSourceKind {
+  return normalizeSchemaSourceKind({ format, inferred });
+}
+
+function buildSamplePayloadRef(schemaId: string, sampleId: string, dataFormat: SchemaDataFormat): string {
+  return `schemas/${schemaId}/samples/${sampleId}/payload.${dataFormat === 'xml' ? 'xml' : 'json'}`;
+}
+
+function hashContent(content: string): string {
+  let hash = 2166136261;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
 }
 
 const INLINE_THRESHOLD = 500;
@@ -73,6 +127,7 @@ function getEnvValue(key: string): string | undefined {
 const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const SCHEMA_NODES_TABLE = getEnvValue('SCHEMA_NODES_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
+const PROJECTS_TABLE = getEnvValue('PROJECTS_TABLE');
 
 function getSchemasTableOrThrow(): string {
   const table = SCHEMAS_TABLE?.trim();
@@ -101,6 +156,15 @@ function getContentBucketOrThrow(): string {
   return bucket;
 }
 
+function getProjectsTableOrThrow(): string {
+  const table = PROJECTS_TABLE?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: PROJECTS_TABLE');
+  }
+
+  return table;
+}
+
 function generateSchemaId(): string {
   const cryptoRef = globalThis.crypto as { randomUUID?: () => string } | undefined;
   if (cryptoRef && typeof cryptoRef.randomUUID === 'function') {
@@ -123,7 +187,7 @@ function asSchemaFormat(value: unknown): SchemaFormat | null {
 }
 
 function asSchemaOrigin(value: unknown): SchemaOrigin | null {
-  if (value === 'cdm' || value === 'published' || value === 'local') {
+  if (value === 'cdm' || value === 'inferred' || value === 'uploaded' || value === 'published' || value === 'local') {
     return value;
   }
 
@@ -134,8 +198,39 @@ function asSchemaScope(value: unknown): SchemaScope {
   return value === 'global' ? 'global' : 'project';
 }
 
+function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds' | 'schemaRefs'>): readonly string[] {
+  const values = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds
+    : (project.schemaRefs ?? []).map((ref) => ref.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
 function asSchemaSyncStatus(value: unknown): SchemaSyncStatus {
-  if (value === 'synced' || value === 'not-synced' || value === 'local-changes') {
+  if (
+    value === 'synced'
+    || value === 'update-available'
+    || value === 'sync-failed'
+    || value === 'not-synced'
+    || value === 'local-changes'
+  ) {
     return value;
   }
 
@@ -154,6 +249,7 @@ function asSource(value: unknown): SchemaSource {
       return {
         type: 'github',
         repo: source.repo,
+        ...(typeof source.repoId === 'number' ? { repoId: source.repoId } : {}),
         branch: source.branch,
         path: source.path,
         ...(typeof source.commitSha === 'string' ? { commitSha: source.commitSha } : {}),
@@ -317,6 +413,7 @@ function contentKey(schemaId: string, format: SchemaFormat): string {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const body = parseBody(event);
+  const bodyRecord = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const required = requireFields(body, ['name', 'format', 'origin', 'content']);
   if (!required.ok) {
     const err = required.error;
@@ -340,6 +437,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   try {
     const schemaId = generateSchemaId();
+    const sampleId = generateSchemaId();
     const now = new Date().toISOString();
     const estimated = estimateFieldCount(content, format);
     const inline = estimated <= INLINE_THRESHOLD;
@@ -348,17 +446,50 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ? (format === 'json-schema' ? generateJsonSchemaNodes(schemaId, content) : generateXsdNodes(schemaId, content))
       : [];
 
+    const projectId = typeof body?.projectId === 'string' && body.projectId.trim() !== '' ? body.projectId.trim() : undefined;
+
+    const inferred = typeof body?.inferred === 'boolean' ? body.inferred : false;
+    const reviewedAt = typeof bodyRecord.reviewedAt === 'string' ? bodyRecord.reviewedAt : undefined;
+    const reviewStateInput = typeof bodyRecord.reviewState === 'string' ? bodyRecord.reviewState : undefined;
+    const sourceKind = inferSourceKind(format, inferred);
+    const dataFormat = schemaDataFormatFromSourceKind(sourceKind);
+    const reviewState = normalizeSchemaReviewState({
+      reviewState: reviewStateInput,
+      inferred,
+      reviewedAt,
+    });
+
+    const initialSamplePayload: SchemaSamplePayloadMetadata | undefined = inferred
+      ? {
+          sampleId,
+          schemaId,
+          name: 'Initial upload',
+          dataFormat,
+          contentRef: buildSamplePayloadRef(schemaId, sampleId, dataFormat),
+          usedForInference: true,
+          source: 'initial_upload',
+          sizeBytes: content.length,
+          hash: hashContent(content),
+          createdAt: now,
+        }
+      : undefined;
+
     const metadata: SchemaMetadata = {
       schemaId,
       name: String(body?.name ?? ''),
       format,
+      dataFormat: toDataFormat(format),
+      sourceKind,
       fieldCount: inline ? nodes.length : 0,
-      origin,
+      origin: normalizeSchemaOrigin(origin),
       status: inline ? 'ready' : 'ingesting',
-      scope: asSchemaScope(body?.scope),
+      ...(body?.scope !== undefined ? { scope: asSchemaScope(body?.scope) } : {}),
       ...(typeof body?.description === 'string' ? { description: body.description } : {}),
       ...(typeof body?.updatedBy === 'string' ? { updatedBy: body.updatedBy } : {}),
-      inferred: typeof body?.inferred === 'boolean' ? body.inferred : false,
+      inferred,
+      reviewState,
+      ...(reviewedAt ? { reviewedAt } : {}),
+      ...(initialSamplePayload ? { samplePayloadCount: 1, samplePayloads: [initialSamplePayload] } : {}),
       syncStatus: asSchemaSyncStatus(body?.syncStatus),
       source: asSource(body?.source),
       createdAt: now,
@@ -371,6 +502,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       Body: content,
       ContentType: format === 'xsd' ? 'application/xml' : 'application/json',
     });
+
+    if (initialSamplePayload) {
+      await putObject({
+        Bucket: getContentBucketOrThrow(),
+        Key: initialSamplePayload.contentRef,
+        Body: content,
+        ContentType: dataFormat === 'xml' ? 'application/xml' : 'application/json',
+      });
+    }
 
     await putItem({
       TableName: getSchemasTableOrThrow(),
@@ -386,6 +526,52 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       }
     } else {
       console.log('Schema async ingestion kickoff intended', { schemaId, estimatedFieldCount: estimated });
+    }
+
+    if (projectId) {
+      const project = await getItem<ProjectRecord>({
+        TableName: getProjectsTableOrThrow(),
+        Key: { projectId },
+      });
+
+      if (!project) {
+        const err = notFound('Project', projectId);
+        return errorResponse(err.code, err.message, err.statusCode, err.retryable, err.requestId);
+      }
+
+      const currentSchemaRefs = project.schemaRefs ?? [];
+      const hasSchemaRef = currentSchemaRefs.some((schemaRef) => schemaRef.schemaId === schemaId);
+      const nextSchemaRefs = hasSchemaRef
+        ? currentSchemaRefs
+        : [
+            ...currentSchemaRefs,
+            {
+              schemaId,
+              type: metadata.source.type === 'github' ? 'github' : 'published',
+            },
+          ];
+
+      const currentLinkedSchemaIds = normalizeLinkedSchemaIds(project);
+      const nextLinkedSchemaIds = currentLinkedSchemaIds.includes(schemaId)
+        ? currentLinkedSchemaIds
+        : [...currentLinkedSchemaIds, schemaId];
+
+      await updateItem({
+        TableName: getProjectsTableOrThrow(),
+        Key: { projectId },
+        UpdateExpression: 'SET #schemaRefs = :schemaRefs, #linkedSchemaIds = :linkedSchemaIds, #updatedAt = :updatedAt',
+        ExpressionAttributeNames: {
+          '#schemaRefs': 'schemaRefs',
+          '#linkedSchemaIds': 'linkedSchemaIds',
+          '#updatedAt': 'updatedAt',
+        },
+        ExpressionAttributeValues: {
+          ':schemaRefs': nextSchemaRefs,
+          ':linkedSchemaIds': nextLinkedSchemaIds,
+          ':updatedAt': new Date().toISOString(),
+        },
+        ReturnValues: 'ALL_NEW',
+      });
     }
 
     return jsonResponse(201, metadata);

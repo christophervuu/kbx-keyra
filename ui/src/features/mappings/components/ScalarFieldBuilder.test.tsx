@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React, { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,7 @@ import { usePreviewSetters } from '../context/preview-context';
 
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
-import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode, SuggestExpressionResult } from '@/lib/types/domain';
+import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode, SmartFixResult, SuggestExpressionResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -68,6 +68,7 @@ function makeDraftApi(overrides: {
 }
 
 const DEFAULT_PROPS: ScalarFieldBuilderProps = {
+  mappingId: 'mapping-123',
   selectedTargetPath: 'patient.firstName',
   selectedTargetType: 'string',
   selectedTargetRequired: false,
@@ -77,6 +78,9 @@ const DEFAULT_PROPS: ScalarFieldBuilderProps = {
   updateDraft: vi.fn(),
   revertDraft: vi.fn(),
   getDraftExpression: () => null,
+  currentRuleIndex: null,
+  currentRuleDiagnostics: [],
+  currentRuleVersion: 0,
 };
 
 // Default mock adapter used by renderBuilder when no adapter override is provided
@@ -86,7 +90,39 @@ function makeDefaultAdapter(): Partial<ApiAdapter> {
     suggestExpression: vi.fn().mockResolvedValue({
       expression: 'source("firstName")',
       explanation: 'Maps first name.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 10,
+        includedNodeCount: 10,
+        truncated: false,
+        approxTokenCount: 128,
+        byteLength: 512,
+      },
     } satisfies SuggestExpressionResult),
+    smartFix: vi.fn().mockResolvedValue({
+      originalExpression: 'source("firstName")',
+      suggestedExpression: 'trim(source("firstName"))',
+      explanation: 'Trim surrounding whitespace from first name.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      diagnosticsScopeApplied: 'all',
+      context: {
+        truncated: false,
+        approxTokenCount: 100,
+        byteLength: 500,
+        totalDiagnosticCount: 1,
+        includedDiagnosticCount: 1,
+        sourceNodeCount: 10,
+        includedSourceNodeCount: 10,
+        targetNodeCount: 10,
+        includedTargetNodeCount: 10,
+      },
+      applyGuard: {
+        ruleVersion: 1,
+        ruleHash: 'fnv1a-c8f6f0de',
+      },
+    } satisfies SmartFixResult),
   };
 }
 
@@ -241,7 +277,7 @@ describe('ScalarFieldBuilder', () => {
 
   it('renders question-first Step 1 prompt in builder mode', () => {
     renderBuilder();
-    expect(screen.getByTestId('scalar-entry-question')).toHaveTextContent('Where does this value come from?');
+    expect(screen.getByTestId('scalar-entry-question')).toHaveTextContent('Value source');
     expect(screen.queryByText('Step 1')).not.toBeInTheDocument();
     expect(screen.queryByText('Step 2')).not.toBeInTheDocument();
   });
@@ -251,8 +287,9 @@ describe('ScalarFieldBuilder', () => {
 
     expect(screen.getByTestId('scalar-entry-mode-source')).toHaveTextContent('Source field');
     expect(screen.getByTestId('scalar-entry-mode-static')).toHaveTextContent('Static value');
-    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External');
-    expect(screen.getByTestId('scalar-entry-mode-external')).toBeDisabled();
+    expect(screen.getByTestId('scalar-entry-mode-constant')).toHaveTextContent('Constant');
+    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External source');
+    expect(screen.getByTestId('scalar-entry-mode-unmapped')).toHaveTextContent('Leave unmapped');
     expect(screen.queryByTestId('scalar-source-field-section')).not.toBeInTheDocument();
   });
 
@@ -300,6 +337,60 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('add-logic-option-transform')).toBeInTheDocument();
   });
 
+  it('renders constant value source controls and emits constant DSL', async () => {
+    const user = userEvent.setup();
+    const updateDraft = vi.fn();
+    renderBuilder({ updateDraft });
+
+    await user.click(screen.getByTestId('scalar-entry-mode-constant'));
+    const input = screen.getByTestId('scalar-constant-input');
+    await user.type(input, 'TAX_RATE');
+
+    expect(screen.getByTestId('scalar-constant-section')).toBeInTheDocument();
+    expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'constant("TAX_RATE")');
+  });
+
+  it('renders external value source controls and emits external DSL', async () => {
+    const user = userEvent.setup();
+    const updateDraft = vi.fn();
+    renderBuilder({ updateDraft });
+
+    await user.click(screen.getByTestId('scalar-entry-mode-external'));
+    const input = screen.getByTestId('scalar-external-input');
+    await user.type(input, 'lookupTable');
+
+    expect(screen.getByTestId('scalar-external-section')).toBeInTheDocument();
+    expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'external("lookupTable")');
+  });
+
+  it('supports leave unmapped value source and shows BA-friendly validation copy', async () => {
+    const user = userEvent.setup();
+    renderBuilder({ selectedTargetRequired: true });
+
+    await user.click(screen.getByTestId('scalar-entry-mode-unmapped'));
+
+    expect(screen.getByTestId('scalar-unmapped-section')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-validation-message')).toHaveTextContent('Required field intentionally unmapped');
+  });
+
+  it('keeps advanced mode DSL hidden by default and reveals it when enabled', async () => {
+    const user = userEvent.setup();
+    renderBuilder({ currentExpression: 'source("firstName")' });
+
+    expect(screen.getByTestId('advanced-mode-hidden')).toBeInTheDocument();
+    expect(screen.queryByTestId('advanced-mode-dsl-panel')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('advanced-mode-toggle'));
+    expect(screen.getByTestId('advanced-mode-dsl-panel')).toBeInTheDocument();
+  });
+
+  it('renders builder guidance sections for output, notes, and value source label', () => {
+    renderBuilder();
+    expect(screen.getByTestId('builder-target-output')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-notes-input')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-value-source-label')).toBeInTheDocument();
+  });
+
   it('switches to editor mode when Editor toggle is clicked', () => {
     renderBuilder();
     fireEvent.click(screen.getByTestId('mode-toggle-editor'));
@@ -337,9 +428,25 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('ai-explain-btn')).toBeDisabled();
   });
 
-  it('renders AI Fix button as disabled', () => {
+  it('renders AI Fix button as disabled when no rule diagnostics are provided', () => {
     renderBuilder();
     expect(screen.getByTestId('ai-fix-btn')).toBeDisabled();
+  });
+
+  it('enables AI Fix button when rule diagnostics are provided', () => {
+    renderBuilder({
+      currentExpression: 'source("firstName")',
+      currentRuleIndex: 0,
+      currentRuleVersion: 1,
+      currentRuleDiagnostics: [
+        {
+          code: 'TYPE_MISMATCH',
+          severity: 'error',
+          message: 'Expected string.',
+        },
+      ],
+    });
+    expect(screen.getByTestId('ai-fix-btn')).not.toBeDisabled();
   });
 
   it('AI buttons have descriptive per-action tooltips (FS-040 T-04)', () => {
@@ -356,7 +463,7 @@ describe('ScalarFieldBuilder', () => {
     );
     expect(screen.getByTestId('ai-fix-btn')).toHaveAttribute(
       'title',
-      'AI-powered fix suggestions \u2014 available in a future release',
+      'Fix requires rule diagnostics',
     );
   });
 
@@ -436,7 +543,7 @@ describe('ScalarFieldBuilder', () => {
       currentStatus: 'mapped',
     });
     // RawDslEditor should contain the expression text
-    const textarea = screen.getByRole('textbox');
+    const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
     expect(textarea).toHaveValue('{"id": "x"}');
   });
 
@@ -575,7 +682,7 @@ describe('ScalarFieldBuilder', () => {
         revertDraft,
         getDraftExpression,
       });
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'source("x")' } });
       expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("x")');
     });
@@ -592,7 +699,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}', // forces editor mode
         onExpressionChange,
       });
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'source("x")' } });
       expect(onExpressionChange).toHaveBeenCalledWith('source("x")');
     });
@@ -713,7 +820,7 @@ describe('ScalarFieldBuilder', () => {
         getDraftExpression,
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'source("email")' } });
       // Now reset — trivial expression, no confirmation
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
@@ -725,7 +832,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
       expect(screen.getByTestId('reset-draft-confirm-prompt')).toBeInTheDocument();
@@ -736,7 +843,7 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
       fireEvent.click(screen.getByTestId('reset-draft-confirm'));
@@ -748,13 +855,13 @@ describe('ScalarFieldBuilder', () => {
         currentExpression: '{"id": "x"}',
       });
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      const textarea = screen.getByRole('textbox');
+      const textarea = screen.getByRole('textbox', { name: 'DSL expression editor' });
       fireEvent.change(textarea, { target: { value: 'upper(source("email"))' } });
       fireEvent.click(screen.getByTestId('reset-draft-btn'));
       fireEvent.click(screen.getByTestId('reset-draft-cancel'));
       expect(screen.queryByTestId('reset-draft-confirm-prompt')).not.toBeInTheDocument();
       // Expression textarea should still have the value
-      expect(screen.getByRole('textbox')).toHaveValue('upper(source("email"))');
+      expect(screen.getByRole('textbox', { name: 'DSL expression editor' })).toHaveValue('upper(source("email"))');
     });
   });
 
@@ -1029,20 +1136,30 @@ describe('ScalarFieldBuilder', () => {
       expect(btn).toHaveAttribute('title', 'Explain this expression using AI');
     });
 
-    it('AE-01: shows explanation panel with text on success', async () => {
+    it('AE-01/AE-04/AE-03: shows explanation panel with text + generated-assistance label and does not mutate draft/expression state', async () => {
       const explainRule = vi.fn().mockResolvedValue({
         explanation: 'Maps the first name from the source.',
+        confidence: 'high',
+        limitations: ['Assumes source firstName exists.'],
       } satisfies ExplainRuleResult);
+      const updateDraft = vi.fn();
+      const revertDraft = vi.fn();
+      const getDraftExpression = vi.fn().mockReturnValue(null);
+
       renderBuilder(
         {
           currentExpression: 'source("firstName")',
-          updateDraft: vi.fn(),
-          getDraftExpression: vi.fn().mockReturnValue(null),
+          updateDraft,
+          revertDraft,
+          getDraftExpression,
         },
         { explainRule },
       );
       // Switch to editor mode so expression state is driven by raw DSL
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      const editor = screen.getByRole('textbox', { name: 'DSL expression editor' }) as HTMLTextAreaElement;
+      const before = editor.value;
 
       fireEvent.click(screen.getByTestId('ai-explain-btn'));
 
@@ -1052,6 +1169,14 @@ describe('ScalarFieldBuilder', () => {
       expect(screen.getByTestId('explanation-panel')).toHaveTextContent(
         'Maps the first name from the source.',
       );
+      expect(screen.getByTestId('explanation-assistance-label')).toHaveTextContent(
+        'AI-generated assistance. This explanation is not persisted to mapping content.',
+      );
+
+      // Non-mutation guarantee (AE-03): explain flow must not change draft/expression state.
+      expect(editor.value).toBe(before);
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(revertDraft).not.toHaveBeenCalled();
     });
 
     it('AE-04: shows offline error message', async () => {
@@ -1078,18 +1203,67 @@ describe('ScalarFieldBuilder', () => {
       );
     });
 
-    it('AE-05: shows network error message and Try again button', async () => {
-      const netMsg = 'Could not reach the Explain service. Check your connection and try again.';
-      const explainRule = vi.fn().mockRejectedValue(new Error(netMsg));
+    it('AE-05: retrying Explain after failure does not mutate draft/expression state', async () => {
+      const updateDraft = vi.fn();
+      const revertDraft = vi.fn();
+      const getDraftExpression = vi.fn().mockReturnValue(null);
+      const explainRule = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Could not reach the Explain service. Check your connection and try again.'))
+        .mockResolvedValueOnce({
+          explanation: 'Maps first name from source.',
+        } satisfies ExplainRuleResult);
+
       renderBuilder(
         {
           currentExpression: 'source("firstName")',
-          updateDraft: vi.fn(),
-          getDraftExpression: vi.fn().mockReturnValue(null),
+          updateDraft,
+          revertDraft,
+          getDraftExpression,
         },
         { explainRule },
       );
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      const editor = screen.getByRole('textbox', { name: 'DSL expression editor' }) as HTMLTextAreaElement;
+      const before = editor.value;
+
+      fireEvent.click(screen.getByTestId('ai-explain-btn'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      await waitFor(() => {
+        expect(screen.getByTestId('explanation-panel')).toHaveTextContent('Maps first name from source.');
+      });
+
+      expect(explainRule).toHaveBeenCalledTimes(2);
+      expect(editor.value).toBe(before);
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(revertDraft).not.toHaveBeenCalled();
+    });
+
+    it('AE-03: shows network error message + Try again and preserves expression/draft state', async () => {
+      const netMsg = 'Could not reach the Explain service. Check your connection and try again.';
+      const explainRule = vi.fn().mockRejectedValue(new Error(netMsg));
+      const updateDraft = vi.fn();
+      const revertDraft = vi.fn();
+      const getDraftExpression = vi.fn().mockReturnValue(null);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          updateDraft,
+          revertDraft,
+          getDraftExpression,
+        },
+        { explainRule },
+      );
+      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
+
+      const editor = screen.getByRole('textbox', { name: 'DSL expression editor' }) as HTMLTextAreaElement;
+      const before = editor.value;
 
       fireEvent.click(screen.getByTestId('ai-explain-btn'));
 
@@ -1098,6 +1272,11 @@ describe('ScalarFieldBuilder', () => {
       });
       expect(screen.getByTestId('explanation-panel')).toHaveTextContent(netMsg);
       expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+
+      // Non-mutation guarantee (AE-03)
+      expect(editor.value).toBe(before);
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(revertDraft).not.toHaveBeenCalled();
     });
 
     it('AE-08: dismiss closes the panel', async () => {
@@ -1162,6 +1341,41 @@ describe('ScalarFieldBuilder', () => {
   // ---------------------------------------------------------------------------
 
   describe('Suggest Expression (FS-042)', () => {
+    it('generate sends canonical suggest payload (mappingId/target/instruction, no sourceContext)', async () => {
+      const suggestExpression = vi.fn().mockResolvedValue({
+        expression: 'source("firstName")',
+        explanation: 'Maps first name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
+      } satisfies SuggestExpressionResult);
+      renderBuilder({ mappingId: 'mapping-xyz' }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+      fireEvent.change(textarea, { target: { value: 'map first name' } });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(suggestExpression).toHaveBeenCalledTimes(1);
+      });
+
+      const firstCall = suggestExpression.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(firstCall).toMatchObject({
+        mappingId: 'mapping-xyz',
+        instruction: 'map first name',
+        targetPath: 'patient.firstName',
+        targetType: 'string',
+      });
+      expect(firstCall).not.toHaveProperty('sourceContext');
+    });
+
     it('clicking Suggest button opens the inline input area', () => {
       renderBuilder();
       fireEvent.click(screen.getByTestId('ai-suggest-btn'));
@@ -1191,6 +1405,15 @@ describe('ScalarFieldBuilder', () => {
       const suggestExpression = vi.fn().mockResolvedValue({
         expression: 'source("firstName")',
         explanation: 'Maps first name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
       } satisfies SuggestExpressionResult);
       renderBuilder({ updateDraft }, { suggestExpression });
 
@@ -1220,6 +1443,15 @@ describe('ScalarFieldBuilder', () => {
       const suggestExpression = vi.fn().mockResolvedValue({
         expression: 'concat(source("customer.firstName"), " ", source("customer.lastName"))',
         explanation: 'Concatenate first and last name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
       } satisfies SuggestExpressionResult);
       renderBuilder({ updateDraft }, { suggestExpression });
 
@@ -1261,6 +1493,489 @@ describe('ScalarFieldBuilder', () => {
       );
 
       expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+    });
+
+    it('invalid suggestion shows diagnostics, blocks Accept, and dismiss does not mutate draft', async () => {
+      const updateDraft = vi.fn();
+      const suggestExpression = vi.fn().mockResolvedValue({
+        expression: 'concat(source("firstName"), source("amount"))',
+        explanation: 'Combine values',
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expression returns string but target expects number.',
+            },
+          ],
+        },
+        readyToApply: false,
+        context: {
+          sourceNodeCount: 10,
+          includedNodeCount: 10,
+          truncated: false,
+          approxTokenCount: 128,
+          byteLength: 512,
+        },
+      } satisfies SuggestExpressionResult);
+      renderBuilder({ selectedTargetType: 'number', updateDraft }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      const textarea = screen.getByRole('textbox', { name: /natural language instruction/i });
+      fireEvent.change(textarea, { target: { value: 'format name and amount' } });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('suggest-expression-validation')).toBeInTheDocument();
+      });
+
+      const acceptBtn = screen.getByRole('button', { name: /accept/i });
+      expect(acceptBtn).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: /dismiss suggestion/i }));
+      expect(screen.queryByTestId('suggest-expression-inline')).not.toBeInTheDocument();
+      expect(updateDraft).not.toHaveBeenCalled();
+    });
+
+    it('AE-05: failed Suggest generation + retry preserves draft until explicit accept', async () => {
+      const updateDraft = vi.fn();
+      const suggestExpression = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Could not reach the Suggest service. Check your connection and try again.'))
+        .mockResolvedValueOnce({
+          expression: 'source("firstName")',
+          explanation: 'Maps first name.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 10,
+            includedNodeCount: 10,
+            truncated: false,
+            approxTokenCount: 128,
+            byteLength: 512,
+          },
+        } satisfies SuggestExpressionResult);
+
+      renderBuilder({ updateDraft }, { suggestExpression });
+
+      fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      fireEvent.change(screen.getByRole('textbox', { name: /natural language instruction/i }), {
+        target: { value: 'map first name' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+      });
+      expect(updateDraft).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+      // Still no mutation on lifecycle events alone.
+      expect(updateDraft).not.toHaveBeenCalled();
+
+      if (!screen.queryByRole('button', { name: /generate expression/i })) {
+        fireEvent.click(screen.getByTestId('ai-suggest-btn'));
+      }
+
+      fireEvent.change(screen.getByRole('textbox', { name: /natural language instruction/i }), {
+        target: { value: 'map first name again' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /generate expression/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    });
+  });
+
+  describe('Smart Fix (FS-071)', () => {
+    it('runs Smart Fix and renders review panel with original/suggested/explanation', async () => {
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('smart-fix-inline')).toBeInTheDocument();
+      });
+
+      const comparison = screen.getByTestId('smart-fix-comparison');
+      expect(comparison).toBeInTheDocument();
+      expect(within(comparison).getByText('Current expression')).toBeInTheDocument();
+      expect(within(comparison).getByText('Generated fix')).toBeInTheDocument();
+      expect(within(comparison).getByText('source("firstName")')).toBeInTheDocument();
+      expect(within(comparison).getByText('trim(source("firstName"))')).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /smart fix expression editor/i })).toHaveValue('trim(source("firstName"))');
+      expect(screen.getByTestId('smart-fix-explanation')).toHaveTextContent('Trim whitespace around the name.');
+      expect(screen.getByTestId('smart-fix-assistance-label')).toHaveTextContent(
+        'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
+      );
+    });
+
+    it('accept applies expression and dismiss closes panel', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'trim(source("firstName"))');
+      expect(screen.queryByTestId('smart-fix-inline')).not.toBeInTheDocument();
+    });
+
+    it('invalid suggestion gates accept until user edits to valid expression', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'source(',
+        explanation: 'Attempted fix.',
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              code: 'PARSE_ERROR',
+              severity: 'error',
+              message: 'Expression could not be parsed.',
+            },
+          ],
+        },
+        readyToApply: false,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'PARSE_ERROR',
+              severity: 'error',
+              message: 'Expression could not be parsed.',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeDisabled();
+      expect(screen.getByTestId('smart-fix-validation')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('smart-fix-edit-btn'));
+      const editor = screen.getByRole('textbox', { name: /smart fix expression editor/i });
+      fireEvent.change(editor, { target: { value: 'source("firstName")' } });
+
+      expect(screen.getByRole('button', { name: /accept smart fix/i })).not.toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    });
+
+    it('stale mismatch blocks accept and offers rerun latest CTA', async () => {
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 99,
+          ruleHash: 'fnv1a-deadbeef',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+
+      expect(screen.getByTestId('smart-fix-stale')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /re-run fix on latest rule/i })).toBeInTheDocument();
+    });
+
+    it('AE-05: stale rerun flow does not mutate draft until explicit Smart Fix accept', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi
+        .fn()
+        .mockResolvedValueOnce({
+          originalExpression: 'source("firstName")',
+          suggestedExpression: 'trim(source("firstName"))',
+          explanation: 'Trim whitespace around the name.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          diagnosticsScopeApplied: 'all',
+          context: {
+            truncated: false,
+            approxTokenCount: 90,
+            byteLength: 480,
+            totalDiagnosticCount: 1,
+            includedDiagnosticCount: 1,
+            sourceNodeCount: 10,
+            includedSourceNodeCount: 10,
+            targetNodeCount: 10,
+            includedTargetNodeCount: 10,
+          },
+          applyGuard: {
+            ruleVersion: 99,
+            ruleHash: 'fnv1a-deadbeef',
+          },
+        } satisfies SmartFixResult)
+        .mockResolvedValueOnce({
+          originalExpression: 'source("firstName")',
+          suggestedExpression: 'source("firstName")',
+          explanation: 'Use latest rule snapshot.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          diagnosticsScopeApplied: 'all',
+          context: {
+            truncated: false,
+            approxTokenCount: 60,
+            byteLength: 320,
+            totalDiagnosticCount: 1,
+            includedDiagnosticCount: 1,
+            sourceNodeCount: 10,
+            includedSourceNodeCount: 10,
+            targetNodeCount: 10,
+            includedTargetNodeCount: 10,
+          },
+          applyGuard: {
+            ruleVersion: 1,
+            ruleHash: 'fnv1a-c8f6f0de',
+          },
+        } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      // First accept attempt is blocked by stale apply guard.
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('smart-fix-stale')).toBeInTheDocument();
+      });
+      expect(updateDraft).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: /re-run fix on latest rule/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /accept smart fix/i })).toBeInTheDocument();
+      });
+
+      // Rerun lifecycle remains non-mutating.
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(smartFix).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(screen.getByRole('button', { name: /accept smart fix/i }));
+      expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'source("firstName")');
+    });
+
+    it('dismiss does not mutate draft state', async () => {
+      const updateDraft = vi.fn();
+      const smartFix = vi.fn().mockResolvedValue({
+        originalExpression: 'source("firstName")',
+        suggestedExpression: 'trim(source("firstName"))',
+        explanation: 'Trim whitespace around the name.',
+        validation: { valid: true, diagnostics: [] },
+        readyToApply: true,
+        diagnosticsScopeApplied: 'all',
+        context: {
+          truncated: false,
+          approxTokenCount: 90,
+          byteLength: 480,
+          totalDiagnosticCount: 1,
+          includedDiagnosticCount: 1,
+          sourceNodeCount: 10,
+          includedSourceNodeCount: 10,
+          targetNodeCount: 10,
+          includedTargetNodeCount: 10,
+        },
+        applyGuard: {
+          ruleVersion: 1,
+          ruleHash: 'fnv1a-c8f6f0de',
+        },
+      } satisfies SmartFixResult);
+
+      renderBuilder(
+        {
+          currentExpression: 'source("firstName")',
+          currentRuleIndex: 0,
+          currentRuleVersion: 1,
+          currentRuleDiagnostics: [
+            {
+              code: 'TYPE_MISMATCH',
+              severity: 'error',
+              message: 'Expected string',
+            },
+          ],
+          updateDraft,
+        },
+        { smartFix },
+      );
+
+      fireEvent.click(screen.getByTestId('ai-fix-btn'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /dismiss smart fix/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /dismiss smart fix/i }));
+      expect(updateDraft).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('smart-fix-inline')).not.toBeInTheDocument();
     });
   });
 });

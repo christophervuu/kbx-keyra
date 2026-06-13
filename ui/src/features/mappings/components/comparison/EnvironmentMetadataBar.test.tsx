@@ -34,17 +34,23 @@ const SERVER_DEV_METADATA: ComparisonSideMetadata = {
   executionContext: 'server',
   environment: 'DEV',
   configVersion: 2,
-  snapshotVersion: 2,
   deployedAt: '2026-01-01T00:00:00Z',
+  sourceType: 'version',
+  sourceNumber: 2,
+  artifactId: 'artifact-dev-2',
+  artifactHash: 'hash-dev-2',
   engineVersion: '1.0.0',
 };
 
-const SERVER_QA_METADATA: ComparisonSideMetadata = {
+const SERVER_PREPROD_METADATA: ComparisonSideMetadata = {
   executionContext: 'server',
-  environment: 'QA',
+  environment: 'PREPROD',
   configVersion: 1,
-  snapshotVersion: 1,
   deployedAt: '2026-01-01T00:00:00Z',
+  sourceType: 'revision',
+  sourceNumber: 1,
+  artifactId: 'artifact-preprod-1',
+  artifactHash: 'hash-preprod-1',
   engineVersion: '1.0.0',
 };
 
@@ -52,8 +58,11 @@ const SERVER_PROD_METADATA: ComparisonSideMetadata = {
   executionContext: 'server',
   environment: 'PROD',
   configVersion: 4,
-  snapshotVersion: 4,
   deployedAt: '2026-01-01T00:00:00Z',
+  sourceType: 'version',
+  sourceNumber: 4,
+  artifactId: 'artifact-prod-4',
+  artifactHash: 'hash-prod-4',
   engineVersion: '1.0.0',
 };
 
@@ -111,9 +120,9 @@ describe('EnvironmentMetadataBar', () => {
     expect(screen.getByTestId('metadata-context').textContent).toBe('DEV');
   });
 
-  it('server QA: shows "QA" context badge', () => {
-    render(<EnvironmentMetadataBar metadata={SERVER_QA_METADATA} label="QA" />);
-    expect(screen.getByTestId('metadata-context').textContent).toBe('QA');
+  it('server PREPROD: shows "PREPROD" context badge', () => {
+    render(<EnvironmentMetadataBar metadata={SERVER_PREPROD_METADATA} label="PREPROD" />);
+    expect(screen.getByTestId('metadata-context').textContent).toBe('PREPROD');
   });
 
   it('server PROD: shows "PROD" context badge', () => {
@@ -121,9 +130,14 @@ describe('EnvironmentMetadataBar', () => {
     expect(screen.getByTestId('metadata-context').textContent).toBe('PROD');
   });
 
-  it('server-side: shows version as "Snapshot v{snapshotVersion}"', () => {
+  it('server-side version source: shows "v{sourceNumber}"', () => {
     render(<EnvironmentMetadataBar metadata={SERVER_DEV_METADATA} label="DEV" />);
-    expect(screen.getByTestId('metadata-version').textContent).toBe('Snapshot v2');
+    expect(screen.getByTestId('metadata-version').textContent).toBe('v2');
+  });
+
+  it('server-side revision source: shows "Rev {sourceNumber}"', () => {
+    render(<EnvironmentMetadataBar metadata={SERVER_PREPROD_METADATA} label="PREPROD" />);
+    expect(screen.getByTestId('metadata-version').textContent).toBe('Rev 1');
   });
 
   it('server-side: shows deployment timestamp', () => {

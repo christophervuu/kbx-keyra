@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAdapter } from '@/lib/api';
-import type { CurrentDeployments, DeploymentRecord, DeploymentSourceType } from '@/lib/api/types';
+import type {
+  CurrentDeployments,
+  DeploymentOrchestrationStatus,
+  DeploymentRecord,
+  DeploymentSourceType,
+} from '@/lib/api/types';
+import { toAppError } from '@/lib/state/app-error';
 import type { Environment, MappingRevision, MappingVersion } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -44,7 +50,21 @@ export interface UseDeploymentPageResult {
   /** Whether a deploy/promote/rollback action is in progress */
   isDeploying: boolean;
   /** Feedback message after a deploy/promote/rollback (success or error) */
-  deployFeedback: { kind: 'success' | 'error'; message: string } | null;
+  deployFeedback:
+    | {
+      kind: 'success';
+      message: string;
+      orchestration?: DeploymentActionOrchestrationDetails;
+      artifact?: DeploymentActionArtifactDetails;
+    }
+    | {
+      kind: 'error';
+      message: string;
+      cdmBlockIssues?: readonly CdmDeployBlockUiIssue[];
+      orchestration?: DeploymentActionOrchestrationDetails;
+      artifact?: DeploymentActionArtifactDetails;
+    }
+    | null;
   /** Clear the deploy feedback banner */
   clearDeployFeedback: () => void;
 
@@ -57,6 +77,160 @@ export interface UseDeploymentPageResult {
 
   /** Refresh all data */
   refresh: () => void;
+}
+
+export type CdmDeployBlockUiIssueReason =
+  | 'unsynced'
+  | 'update-failed'
+  | 'metadata-incomplete'
+  | 'ingest-not-ready'
+  | 'schema-missing';
+
+export type CdmDeployBlockUiIssueRemediation =
+  | 're-sync-schema'
+  | 'retry-sync'
+  | 'relink-cdm-schema'
+  | 'complete-ingestion';
+
+export interface CdmDeployBlockUiIssue {
+  readonly schemaId: string;
+  readonly schemaName?: string;
+  readonly referenceRole: 'source' | 'target';
+  readonly reason: CdmDeployBlockUiIssueReason;
+  readonly remediationKey: CdmDeployBlockUiIssueRemediation;
+}
+
+export interface DeploymentActionOrchestrationDetails {
+  readonly orchestrationId?: string;
+  readonly status?: DeploymentOrchestrationStatus;
+  readonly attemptCount?: number;
+  readonly finalStatus?: DeploymentOrchestrationStatus;
+}
+
+export interface DeploymentActionArtifactDetails {
+  readonly artifactId?: string;
+  readonly artifactHash?: string;
+}
+
+interface OrchestrationErrorDetails {
+  readonly orchestrationId?: unknown;
+  readonly attemptCount?: unknown;
+  readonly finalStatus?: unknown;
+  readonly status?: unknown;
+  readonly artifactId?: unknown;
+  readonly artifactHash?: unknown;
+}
+
+function isOrchestrationStatus(value: unknown): value is DeploymentOrchestrationStatus {
+  return (
+    value === 'queued' ||
+    value === 'in_progress' ||
+    value === 'retrying' ||
+    value === 'succeeded' ||
+    value === 'failed' ||
+    value === 'timed_out'
+  );
+}
+
+function parseOrchestrationDetails(error: unknown): {
+  orchestration?: DeploymentActionOrchestrationDetails;
+  artifact?: DeploymentActionArtifactDetails;
+} {
+  const appError = toAppError(error);
+  const details = appError.details as OrchestrationErrorDetails | undefined;
+  if (!details || typeof details !== 'object') {
+    return {};
+  }
+
+  const orchestration: DeploymentActionOrchestrationDetails = {
+    ...(typeof details.orchestrationId === 'string' ? { orchestrationId: details.orchestrationId } : {}),
+    ...(typeof details.attemptCount === 'number' ? { attemptCount: details.attemptCount } : {}),
+    ...(isOrchestrationStatus(details.status) ? { status: details.status } : {}),
+    ...(isOrchestrationStatus(details.finalStatus) ? { finalStatus: details.finalStatus } : {}),
+  };
+
+  const artifact: DeploymentActionArtifactDetails = {
+    ...(typeof details.artifactId === 'string' ? { artifactId: details.artifactId } : {}),
+    ...(typeof details.artifactHash === 'string' ? { artifactHash: details.artifactHash } : {}),
+  };
+
+  return {
+    ...(Object.keys(orchestration).length > 0 ? { orchestration } : {}),
+    ...(Object.keys(artifact).length > 0 ? { artifact } : {}),
+  };
+}
+
+interface CdmDeployBlockDetails {
+  readonly issues?: unknown;
+}
+
+function isReferenceRole(value: unknown): value is CdmDeployBlockUiIssue['referenceRole'] {
+  return value === 'source' || value === 'target';
+}
+
+function isIssueReason(value: unknown): value is CdmDeployBlockUiIssueReason {
+  return (
+    value === 'unsynced' ||
+    value === 'update-failed' ||
+    value === 'metadata-incomplete' ||
+    value === 'ingest-not-ready' ||
+    value === 'schema-missing'
+  );
+}
+
+function isRemediationKey(value: unknown): value is CdmDeployBlockUiIssueRemediation {
+  return (
+    value === 're-sync-schema' ||
+    value === 'retry-sync' ||
+    value === 'relink-cdm-schema' ||
+    value === 'complete-ingestion'
+  );
+}
+
+function parseCdmDeployBlockIssues(error: unknown): readonly CdmDeployBlockUiIssue[] | undefined {
+  const appError = toAppError(error);
+  if (appError.code !== 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE') {
+    return undefined;
+  }
+
+  const details = appError.details as CdmDeployBlockDetails | undefined;
+  if (!details || !Array.isArray(details.issues)) {
+    return [];
+  }
+
+  const parsed: CdmDeployBlockUiIssue[] = [];
+  for (const issue of details.issues) {
+    if (!issue || typeof issue !== 'object') {
+      continue;
+    }
+
+    const typed = issue as {
+      schemaId?: unknown;
+      schemaName?: unknown;
+      referenceRole?: unknown;
+      reason?: unknown;
+      remediationKey?: unknown;
+    };
+
+    if (
+      typeof typed.schemaId !== 'string' ||
+      !isReferenceRole(typed.referenceRole) ||
+      !isIssueReason(typed.reason) ||
+      !isRemediationKey(typed.remediationKey)
+    ) {
+      continue;
+    }
+
+    parsed.push({
+      schemaId: typed.schemaId,
+      ...(typeof typed.schemaName === 'string' ? { schemaName: typed.schemaName } : {}),
+      referenceRole: typed.referenceRole,
+      reason: typed.reason,
+      remediationKey: typed.remediationKey,
+    });
+  }
+
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,10 +250,7 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
-  const [deployFeedback, setDeployFeedback] = useState<{
-    kind: 'success' | 'error';
-    message: string;
-  } | null>(null);
+  const [deployFeedback, setDeployFeedback] = useState<UseDeploymentPageResult['deployFeedback']>(null);
 
   const mountedRef = useRef(true);
 
@@ -101,7 +272,7 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         setDeploymentHistory(sorted);
       } catch (err) {
         if (!mountedRef.current) return;
-        setHistoryError(err instanceof Error ? err.message : 'Failed to load history');
+        setHistoryError(toAppError(err).message || 'Failed to load history');
         setDeploymentHistory([]);
       } finally {
         if (mountedRef.current) {
@@ -131,7 +302,7 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
       setCurrentDeployments(deployments);
     } catch (err) {
       if (!mountedRef.current) return;
-      setError(err instanceof Error ? err.message : 'Failed to load deployment data');
+      setError(toAppError(err).message || 'Failed to load deployment data');
     } finally {
       if (mountedRef.current) {
         setIsLoading(false);
@@ -196,14 +367,27 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         setDeployFeedback({
           kind: 'success',
           message: `${label} deployed to ${record.environment} successfully.`,
+          orchestration: {
+            orchestrationId: record.orchestrationId,
+            status: 'succeeded',
+          },
+          artifact: {
+            artifactId: record.artifactId,
+            artifactHash: record.artifactHash,
+          },
         });
         await refreshCurrentDeployments();
         void loadHistory(input.environment);
       } catch (err) {
         if (!mountedRef.current) return;
+        const cdmBlockIssues = parseCdmDeployBlockIssues(err);
+        const appError = toAppError(err);
+        const details = parseOrchestrationDetails(err);
         setDeployFeedback({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Deploy failed',
+          message: appError.message || 'Deploy failed',
+          ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
+          ...details,
         });
       } finally {
         if (mountedRef.current) {
@@ -232,14 +416,27 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         setDeployFeedback({
           kind: 'success',
           message: `${label} promoted from ${fromEnvironment} to ${toEnvironment} successfully.`,
+          orchestration: {
+            orchestrationId: record.orchestrationId,
+            status: 'succeeded',
+          },
+          artifact: {
+            artifactId: record.artifactId,
+            artifactHash: record.artifactHash,
+          },
         });
         await refreshCurrentDeployments();
         void loadHistory(toEnvironment);
       } catch (err) {
         if (!mountedRef.current) return;
+        const cdmBlockIssues = parseCdmDeployBlockIssues(err);
+        const appError = toAppError(err);
+        const details = parseOrchestrationDetails(err);
         setDeployFeedback({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Promote failed',
+          message: appError.message || 'Promote failed',
+          ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
+          ...details,
         });
       } finally {
         if (mountedRef.current) {
@@ -271,14 +468,25 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         setDeployFeedback({
           kind: 'success',
           message: `Rolled back ${env} to ${label}.`,
+          orchestration: {
+            orchestrationId: record.orchestrationId,
+            status: 'succeeded',
+          },
+          artifact: {
+            artifactId: record.artifactId,
+            artifactHash: record.artifactHash,
+          },
         });
         await refreshCurrentDeployments();
         void loadHistory(env);
       } catch (err) {
         if (!mountedRef.current) return;
+        const appError = toAppError(err);
+        const details = parseOrchestrationDetails(err);
         setDeployFeedback({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Rollback failed',
+          message: appError.message || 'Rollback failed',
+          ...details,
         });
       } finally {
         if (mountedRef.current) {

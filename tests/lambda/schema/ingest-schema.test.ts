@@ -11,8 +11,6 @@ const schemaLibMocks = vi.hoisted(() => ({
   parseXsd: vi.fn(),
   getInlineFieldThreshold: vi.fn(),
   batchWriteSchemaNodes: vi.fn(),
-  ensureIndexExists: vi.fn(),
-  bulkIndexSchemaNodes: vi.fn(),
   storeProcessedContent: vi.fn(),
   updateSchemaStatus: vi.fn(),
   getSchemaMetadata: vi.fn(),
@@ -84,13 +82,14 @@ describe('ingest-schema handler', () => {
     schemaLibMocks.parseXsd.mockReset().mockReturnValue({ nodes: [], fieldCount: 0 });
     schemaLibMocks.getInlineFieldThreshold.mockReset().mockReturnValue(500);
     schemaLibMocks.batchWriteSchemaNodes.mockReset().mockResolvedValue({ written: 0, failed: 0 });
-    schemaLibMocks.ensureIndexExists.mockReset().mockResolvedValue(undefined);
-    schemaLibMocks.bulkIndexSchemaNodes.mockReset().mockResolvedValue({ indexed: 0, failed: 0 });
     schemaLibMocks.storeProcessedContent.mockReset().mockResolvedValue('schemas/generated/content.json');
     schemaLibMocks.updateSchemaStatus.mockReset().mockResolvedValue(undefined);
     schemaLibMocks.getSchemaMetadata.mockReset().mockResolvedValue(null);
 
     startExecutionSendMock.mockResolvedValue({ executionArn: 'arn:aws:states:exec-123' });
+    vi.spyOn(console, 'info').mockImplementation(() => {
+      // noop
+    });
   });
 
   afterEach(() => {
@@ -117,7 +116,6 @@ describe('ingest-schema handler', () => {
     expect(response.statusCode).toBe(201);
     expect(schemaLibMocks.createSchemaMetadata).toHaveBeenCalledTimes(1);
     expect(schemaLibMocks.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
-    expect(schemaLibMocks.bulkIndexSchemaNodes).toHaveBeenCalledTimes(1);
     expect(startExecutionSendMock).not.toHaveBeenCalled();
   });
 
@@ -261,21 +259,48 @@ describe('ingest-schema handler', () => {
     expect(schemaLibMocks.parseXsd).toHaveBeenCalledTimes(1);
   });
 
-  it('returns success with warning when OpenSearch indexing fails', async () => {
-    schemaLibMocks.parseJsonSchema.mockReturnValue({ nodes: [], fieldCount: 10 });
-    schemaLibMocks.ensureIndexExists.mockRejectedValue(new Error('OpenSearch unavailable'));
+  it('emits embedding size/throughput telemetry for inline ingestion retrieval fields', async () => {
+    schemaLibMocks.parseJsonSchema.mockReturnValue({
+      nodes: [
+        {
+          schemaId: 'schema-fixed-id',
+          path: 'Order.Id',
+          fieldName: 'Id',
+          type: 'string',
+          depth: 0,
+          isArray: false,
+          isRequired: true,
+          childCount: 0,
+          subtreeFieldCount: 1,
+          embeddingText: 'Order.Id | Id (string)',
+          embedding: [0.1, 0.2, 0.3],
+        },
+      ],
+      fieldCount: 1,
+    });
 
+    const infoSpy = vi.spyOn(console, 'info');
     const { handler } = await importHandler();
     const response = await handler(
       createEvent({
-        name: 'Search Warning',
-        content: '{"type":"object","properties":{}}',
+        name: 'Telemetry Schema',
+        content: '{"type":"object","properties":{"Id":{"type":"string"}}}',
         format: 'json-schema',
       }),
     );
 
     expect(response.statusCode).toBe(201);
-    const parsed = JSON.parse(response.body) as { searchIndexWarning?: boolean };
-    expect(parsed.searchIndexWarning).toBe(true);
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[schema-ingestion] retrieval fields prepared',
+      expect.objectContaining({
+        schemaId: expect.any(String),
+        fieldCount: 1,
+        isInline: true,
+        nodeCount: 1,
+        nodesWithEmbeddingText: 1,
+        nodesWithEmbeddingVector: 1,
+        approxEmbeddingBytes: 24,
+      }),
+    );
   });
 });

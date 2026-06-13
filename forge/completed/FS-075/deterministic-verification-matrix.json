@@ -1,0 +1,194 @@
+{
+  "matrixId": "FS-075-T01-deterministic",
+  "spec": "FS-075",
+  "specRevision": 2,
+  "task": "T-01",
+  "updatedAt": "2026-06-02",
+  "features": [
+    {
+      "featureId": "explain-rule",
+      "featureName": "Explain Rule",
+      "sourceSpec": "FS-069",
+      "deterministicChecks": [
+        {
+          "checkId": "explain.lambda.contract",
+          "description": "Explain lambda contract + normalized error handling",
+          "implements": [
+            "AE-01"
+          ],
+          "command": "vitest run --passWithNoTests tests/lambda/ai/explain-rule.test.ts"
+        },
+        {
+          "checkId": "explain.ui.hook",
+          "description": "Explain UI hook flow remains suggestion/read-only",
+          "implements": [
+            "AE-01"
+          ],
+          "command": "pnpm -C ui exec vitest run src/features/mappings/hooks/use-explain-rule.test.ts"
+        }
+      ]
+    },
+    {
+      "featureId": "suggest-expression",
+      "featureName": "Suggest Expression",
+      "sourceSpec": "FS-070",
+      "deterministicChecks": [
+        {
+          "checkId": "suggest.lambda.validation-gate",
+          "description": "Suggest lambda enforces validation metadata before apply-ready responses",
+          "implements": [
+            "AE-05"
+          ],
+          "command": "vitest run --passWithNoTests tests/lambda/ai/suggest-expression.test.ts"
+        },
+        {
+          "checkId": "suggest.ui.review-state",
+          "description": "Suggest UI state blocks apply when invalid and preserves non-commit review flow",
+          "implements": [
+            "AE-05",
+            "AE-06"
+          ],
+          "command": "pnpm -C ui exec vitest run src/features/mappings/hooks/use-suggest-expression.test.ts"
+        }
+      ]
+    },
+    {
+      "featureId": "smart-fix",
+      "featureName": "Smart Fix",
+      "sourceSpec": "FS-071",
+      "deterministicChecks": [
+        {
+          "checkId": "smart-fix.lambda.validation-gate",
+          "description": "Smart Fix lambda returns validation-gated suggestions",
+          "implements": [
+            "AE-05"
+          ],
+          "command": "vitest run --passWithNoTests tests/lambda/ai/smart-fix.test.ts"
+        },
+        {
+          "checkId": "smart-fix.ui.review-state",
+          "description": "Smart Fix UI keep-suggestion-until-accept/apply semantics",
+          "implements": [
+            "AE-05",
+            "AE-06"
+          ],
+          "command": "pnpm -C ui exec vitest run src/features/mappings/hooks/use-smart-fix.test.ts"
+        }
+      ]
+    },
+    {
+      "featureId": "ai-validation",
+      "featureName": "AI Validation",
+      "sourceSpec": "FS-072",
+      "deterministicChecks": [
+        {
+          "checkId": "ai-validation.lambda.contract",
+          "description": "AI validation lambda structured advisory report contract",
+          "implements": [
+            "AE-01"
+          ],
+          "command": "vitest run --passWithNoTests tests/lambda/ai/validate-mappings.test.ts"
+        },
+        {
+          "checkId": "ai-validation.ui.flow",
+          "description": "AI validation UI route/hook deterministic advisory behavior",
+          "implements": [
+            "AE-01"
+          ],
+          "command": "pnpm -C ui exec vitest run src/features/mappings/hooks/use-ai-validation.test.ts src/routes/pages/MappingEditor.ai-validation.test.tsx"
+        }
+      ]
+    },
+    {
+      "featureId": "auto-map",
+      "featureName": "Auto-Map",
+      "sourceSpec": "FS-073",
+      "deterministicChecks": [
+        {
+          "checkId": "auto-map.lambda.validation-metadata",
+          "description": "Auto-Map lambda includes validation-aware suggestion metadata",
+          "implements": [
+            "AE-05"
+          ],
+          "command": "vitest run --passWithNoTests tests/lambda/ai/auto-map.test.ts"
+        },
+        {
+          "checkId": "auto-map.ui.workspace-state",
+          "description": "Auto-Map workspace preserves suggestion-only lifecycle until explicit apply",
+          "implements": [
+            "AE-06"
+          ],
+          "command": "pnpm -C ui exec vitest run src/features/mappings/hooks/use-auto-map-workspace.test.ts"
+        }
+      ]
+    }
+  ],
+  "globalDeterministicChecks": [
+    {
+      "checkId": "global.backend-only.guardrails",
+      "description": "UI AI guardrails static policy check",
+      "implements": [
+        "AE-01"
+      ],
+      "command": "npm run lint:ui:ai-guardrails"
+    },
+    {
+      "checkId": "global.no-browser-secrets",
+      "description": "UI no-browser-secret static policy check",
+      "implements": [
+        "AE-04"
+      ],
+      "command": "npm run lint:ui:no-browser-secrets"
+    },
+    {
+      "checkId": "global.phase1.persistence-regression",
+      "description": "Phase 1 persistence model non-regression unit suites",
+      "implements": [
+        "AE-07"
+      ],
+      "command": "vitest run --passWithNoTests tests/lib/persistence/*.test.ts"
+    },
+    {
+      "checkId": "global.phase1.schema-ingestion-regression",
+      "description": "Phase 1 schema ingestion/query non-regression suites (ingestion integration + query handler contract)",
+      "implements": [
+        "AE-07"
+      ],
+      "command": "vitest run --passWithNoTests tests/integration/schema-ingestion/inline-path.test.ts tests/integration/schema-ingestion/step-functions-path.test.ts tests/lambda/schema/query-schema-nodes.test.ts"
+    },
+    {
+      "checkId": "global.phase1.adapter-parity-regression",
+      "description": "Phase 1 adapter parity non-regression via HttpAdapter/LocalStorageAdapter contracts",
+      "implements": [
+        "AE-07"
+      ],
+      "command": "pnpm -C ui exec vitest run src/lib/api/http-adapter.test.ts && pnpm -C ui exec vitest run src/lib/api/local-storage-adapter.test.ts"
+    }
+  ],
+  "safetyInvariantCoverage": [
+    {
+      "invariantId": "validation-before-display",
+      "implements": [
+        "AE-05"
+      ],
+      "coveredBy": [
+        "suggest.lambda.validation-gate",
+        "suggest.ui.review-state",
+        "smart-fix.lambda.validation-gate",
+        "smart-fix.ui.review-state",
+        "auto-map.lambda.validation-metadata"
+      ]
+    },
+    {
+      "invariantId": "no-auto-commit",
+      "implements": [
+        "AE-06"
+      ],
+      "coveredBy": [
+        "suggest.ui.review-state",
+        "smart-fix.ui.review-state",
+        "auto-map.ui.workspace-state"
+      ]
+    }
+  ]
+}

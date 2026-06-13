@@ -15,7 +15,10 @@ import type {
 
 import type { ApiAdapter } from '@/lib/api/types';
 import type {
+  SuggestionActionEligibility,
+  SuggestionApplyBlockReason,
   AutoMapSectionInput,
+  AutoMapSectionResult,
   AutoMapSuggestion,
   MappingRule,
   ParsedSchema,
@@ -35,6 +38,8 @@ const RATE_LIMIT_FRAGMENT = 'temporarily busy';
 const RATE_LIMIT_FRAGMENT_ALT = 'rate limit';
 const NETWORK_ERROR_FRAGMENT = 'Could not reach';
 const UNEXPECTED_RESPONSE_FRAGMENT = 'unexpected response';
+const FEATURE_NOT_ENABLED_FRAGMENT = 'not enabled in this mode';
+const FEATURE_NOT_ENABLED_CODE = 'FEATURE_NOT_ENABLED';
 const GENERIC_ERROR_MESSAGE = 'An unexpected error occurred. Please try again.';
 const OFFLINE_USER_MESSAGE = 'Auto-Map is not available in offline mode';
 const NO_ELIGIBLE_TARGETS_MESSAGE = 'No eligible target fields found in this section';
@@ -84,12 +89,14 @@ export interface UseAutoMapWorkspaceResult {
   hasPersistedSuggestions: boolean;
 
   // Actions
-  triggerAutoMap: (sectionPath: string) => void;
+  triggerAutoMap: (sectionPath: string, visibleTargetPaths?: readonly string[]) => void;
   acceptSuggestion: (targetPath: string) => void;
   editSuggestion: (targetPath: string) => void;
   dismissSuggestion: (targetPath: string) => void;
   undoDismiss: (targetPath: string) => void;
   bulkAcceptAllValid: () => void;
+  lastBatchAcceptResult: BatchAcceptResult | null;
+  clearBatchAcceptResult: () => void;
 
   // Refresh
   refreshAll: () => void;
@@ -111,12 +118,36 @@ export interface UseAutoMapWorkspaceResult {
   restorePreviousSuggestions: () => void;
 }
 
+export interface BatchAcceptSkipEntry {
+  readonly targetPath: string;
+  readonly reasons: readonly SuggestionApplyBlockReason[];
+  readonly primaryReason: SuggestionApplyBlockReason;
+}
+
+export interface BatchAcceptResult {
+  readonly attempted: number;
+  readonly applied: number;
+  readonly skipped: number;
+  readonly skippedByReason: Readonly<Record<SuggestionApplyBlockReason, number>>;
+  readonly skippedItems: readonly BatchAcceptSkipEntry[];
+  readonly completedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function mapErrorToMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+
+  if (code === FEATURE_NOT_ENABLED_CODE || message.includes(FEATURE_NOT_ENABLED_FRAGMENT)) {
+    return message;
+  }
+
   if (message.includes(OFFLINE_MODE_FRAGMENT)) return OFFLINE_USER_MESSAGE;
   if (message.includes(RATE_LIMIT_FRAGMENT) || message.includes(RATE_LIMIT_FRAGMENT_ALT)) return message;
   if (message.includes(NETWORK_ERROR_FRAGMENT)) return message;
@@ -134,6 +165,90 @@ function deriveSourceContext(schema: ParsedSchema | null | undefined): string | 
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
+function normalizeSectionPath(path: string): string {
+  return path.trim();
+}
+
+function normalizeSuggestionValidation(suggestion: AutoMapSuggestion): {
+  valid: boolean;
+  diagnostics: readonly {
+    severity: string;
+    code: string;
+    message: string;
+  }[];
+} {
+  const diagnostics = suggestion.validation?.diagnostics ?? [];
+  const normalizedDiagnostics = diagnostics.map((item) => ({
+    severity: item.severity,
+    code: item.code,
+    message: item.message,
+  }));
+
+  if (suggestion.validation && typeof suggestion.validation.valid === 'boolean') {
+    return {
+      valid: suggestion.validation.valid,
+      diagnostics: normalizedDiagnostics,
+    };
+  }
+
+  return {
+    valid: false,
+    diagnostics: [
+      {
+        severity: 'error',
+        code: 'VALIDATION_MISSING',
+        message: 'No validation status returned',
+      },
+    ],
+  };
+}
+
+function deriveSuggestionActionEligibility(item: {
+  status: SuggestionLifecycleStatus;
+  validation?: { valid: boolean };
+}): SuggestionActionEligibility {
+  const blockReasons: SuggestionApplyBlockReason[] = [];
+
+  if (item.validation?.valid !== true) {
+    blockReasons.push('invalid');
+  }
+
+  if (item.status === 'stale') {
+    blockReasons.push('stale');
+  }
+
+  if (item.status === 'dismissed') {
+    blockReasons.push('dismissed');
+  }
+
+  if (item.status === 'accepted' || item.status === 'edited') {
+    blockReasons.push('already-reviewed');
+  }
+
+  const canAccept = blockReasons.length === 0;
+
+  return {
+    canAccept,
+    canBatchAccept: canAccept && item.status === 'suggested',
+    blockReasons,
+  };
+}
+
+function extractRunMeta(result: AutoMapSectionResult): WorkspaceRunMeta {
+  const mode = result.retrievalMeta?.mode;
+  return {
+    mode: mode === 'section' || mode === 'whole' ? mode : null,
+    chunkCount: result.retrievalMeta?.chunkCount ?? null,
+    retrievalCandidatesCount: result.retrievalMeta?.retrievalCandidatesCount ?? null,
+    retrievalSelectedCount: result.retrievalMeta?.retrievalSelectedCount ?? null,
+    validationPassCount: result.validationMeta?.validationPassCount ?? null,
+    validationFailCount: result.validationMeta?.validationFailCount ?? null,
+    duplicatesCollapsed: result.dedupMeta?.duplicatesCollapsed ?? null,
+    noContext: result.retrievalMeta?.noContext === true,
+    noContextReason: result.retrievalMeta?.noContextReason ?? null,
+  };
+}
+
 function suggestionToWorkspaceItem(
   suggestion: AutoMapSuggestion,
   rules: readonly MappingRule[],
@@ -145,7 +260,7 @@ function suggestionToWorkspaceItem(
     suggestedExpression: suggestion.expression,
     explanation: suggestion.explanation,
     confidence: suggestion.confidence,
-    validation: suggestion.validation,
+    validation: normalizeSuggestionValidation(suggestion),
     status: overrideStatus ?? 'suggested',
     isNew: existingRule === undefined,
     existingExpressionAtGeneration: existingRule?.expression ?? null,
@@ -229,12 +344,47 @@ const EMPTY_WORKSPACE_SUMMARY: AutoMapWorkspaceSummary = {
   stale: 0,
   generatedAt: null,
   lastRefreshedAt: null,
+  mode: null,
+  chunkCount: null,
+  retrievalCandidatesCount: null,
+  retrievalSelectedCount: null,
+  validationPassCount: null,
+  validationFailCount: null,
+  duplicatesCollapsed: null,
+  noContext: false,
+  noContextReason: null,
+};
+
+type WorkspaceRunMeta = Pick<
+  AutoMapWorkspaceSummary,
+  | 'mode'
+  | 'chunkCount'
+  | 'retrievalCandidatesCount'
+  | 'retrievalSelectedCount'
+  | 'validationPassCount'
+  | 'validationFailCount'
+  | 'duplicatesCollapsed'
+  | 'noContext'
+  | 'noContextReason'
+>;
+
+const EMPTY_RUN_META: WorkspaceRunMeta = {
+  mode: null,
+  chunkCount: null,
+  retrievalCandidatesCount: null,
+  retrievalSelectedCount: null,
+  validationPassCount: null,
+  validationFailCount: null,
+  duplicatesCollapsed: null,
+  noContext: false,
+  noContextReason: null,
 };
 
 function computeSummary(
   items: readonly SuggestionWorkspaceItem[],
   generatedAt: string | null,
   lastRefreshedAt: string | null,
+  runMeta: WorkspaceRunMeta,
 ): AutoMapWorkspaceSummary {
   return {
     total: items.length,
@@ -253,6 +403,15 @@ function computeSummary(
     lowConfidence: items.filter((i) => i.confidence === 'low').length,
     generatedAt,
     lastRefreshedAt,
+    mode: runMeta.mode,
+    chunkCount: runMeta.chunkCount,
+    retrievalCandidatesCount: runMeta.retrievalCandidatesCount,
+    retrievalSelectedCount: runMeta.retrievalSelectedCount,
+    validationPassCount: runMeta.validationPassCount,
+    validationFailCount: runMeta.validationFailCount,
+    duplicatesCollapsed: runMeta.duplicatesCollapsed,
+    noContext: runMeta.noContext,
+    noContextReason: runMeta.noContextReason,
   };
 }
 
@@ -308,7 +467,7 @@ function applyFilters(
 /**
  * Orchestration hook for the Auto-Map Review Workspace (FS-048).
  *
- * Evolves `useAutoMapReview` (FS-046) with:
+ * Canonical Auto-Map workspace hook (FS-048) with:
  * - Persistent suggestion state via sessionStorage (T-01 utilities)
  * - Extended lifecycle: suggested → accepted | edited | dismissed | stale
  * - Refresh/merge logic that preserves terminal states
@@ -334,10 +493,17 @@ export function useAutoMapWorkspace({
   const [items, setItems] = useState<readonly SuggestionWorkspaceItem[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [runMeta, setRunMeta] = useState<WorkspaceRunMeta>(EMPTY_RUN_META);
   const [summary, setSummary] = useState<AutoMapWorkspaceSummary>(EMPTY_WORKSPACE_SUMMARY);
   const [activeFilters, setActiveFilters] = useState<Set<SuggestionFilter>>(
     () => new Set(['needsReview']),
   );
+  const [lastBatchAcceptResult, setLastBatchAcceptResult] = useState<BatchAcceptResult | null>(null);
+
+  const runMetaRef = useRef<WorkspaceRunMeta>(EMPTY_RUN_META);
+  useEffect(() => {
+    runMetaRef.current = runMeta;
+  }, [runMeta]);
 
   // Previous suggestions snapshot for error recovery (AE-15)
   const [previousItems, setPreviousItems] = useState<readonly SuggestionWorkspaceItem[] | null>(null);
@@ -392,12 +558,14 @@ export function useAutoMapWorkspace({
       nextGeneratedAt: string | null,
       nextLastRefreshedAt: string | null,
       path: string | null,
+      nextRunMeta: WorkspaceRunMeta,
     ) => {
       setItems(nextItems);
       setGeneratedAt(nextGeneratedAt);
       generatedAtRef.current = nextGeneratedAt;
       setLastRefreshedAt(nextLastRefreshedAt);
-      setSummary(computeSummary(nextItems, nextGeneratedAt, nextLastRefreshedAt));
+      setRunMeta(nextRunMeta);
+      setSummary(computeSummary(nextItems, nextGeneratedAt, nextLastRefreshedAt, nextRunMeta));
 
       if (path !== null) {
         const persistedItems = nextItems.map(workspaceItemToPersistedItem);
@@ -439,7 +607,7 @@ export function useAutoMapWorkspace({
         });
         if (!changed) return prev;
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAtRef.current, null));
+        setSummary(computeSummary(nextItems, generatedAtRef.current, null, runMetaRef.current));
         if (path !== null) {
           saveAutoMapSuggestions(mappingId, path, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAtRef.current ?? undefined,
@@ -475,7 +643,12 @@ export function useAutoMapWorkspace({
   type RefreshMode = 'all' | 'unmapped' | 'stale';
 
   const runFetch = useCallback(
-    async (path: string, mode: RefreshMode, existingItems: readonly SuggestionWorkspaceItem[]) => {
+    async (
+      path: string,
+      mode: RefreshMode,
+      existingItems: readonly SuggestionWorkspaceItem[],
+      visibleTargetPaths?: readonly string[],
+    ) => {
       abortControllerRef.current?.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -484,8 +657,13 @@ export function useAutoMapWorkspace({
 
       setStatus('loading');
       setError(null);
+      setLastBatchAcceptResult(null);
 
-      const targetSection = deriveEligibleTargets(parsedTargetSchemaRef.current, path);
+      const normalizedPath = normalizeSectionPath(path);
+      const targetSection = deriveEligibleTargets(
+        parsedTargetSchemaRef.current,
+        normalizedPath === '' ? null : normalizedPath,
+      );
       if (targetSection === '') {
         setStatus('error');
         setError(NO_ELIGIBLE_TARGETS_MESSAGE);
@@ -495,13 +673,16 @@ export function useAutoMapWorkspace({
       const input: AutoMapSectionInput = {
         projectId,
         mappingId,
-        sectionPath: path,
+        mode: normalizedPath === '' ? 'whole' : 'section',
+        sectionPath: normalizedPath === '' ? undefined : normalizedPath,
         targetSection,
         sourceContext: deriveSourceContext(parsedSourceSchemaRef.current),
+        visibleTargetPaths,
       };
 
       try {
         const result = await adapterRef.current.autoMapSection(input);
+        const nextRunMeta = extractRunMeta(result);
 
         if (requestIdRef.current !== currentRequestId || controller.signal.aborted) return;
 
@@ -538,7 +719,7 @@ export function useAutoMapWorkspace({
         const now = new Date().toISOString();
         const merged = mergeItems(existingItems, freshItems);
 
-        commitItems(merged, generatedAtRef.current ?? now, now, path);
+        commitItems(merged, generatedAtRef.current ?? now, now, path, nextRunMeta);
         setStatus('success');
       } catch (err) {
         if (requestIdRef.current !== currentRequestId || controller.signal.aborted) return;
@@ -554,11 +735,13 @@ export function useAutoMapWorkspace({
   // ---------------------------------------------------------------------------
 
   const triggerAutoMap = useCallback(
-    (path: string): void => {
-      setSectionPath(path);
+    (path: string, visibleTargetPaths?: readonly string[]): void => {
+      const normalizedPath = normalizeSectionPath(path);
+      setSectionPath(normalizedPath);
+      setLastBatchAcceptResult(null);
 
       // Check for persisted suggestions first (AE-02)
-      const persisted = loadAutoMapSuggestions(mappingId, path);
+      const persisted = loadAutoMapSuggestions(mappingId, normalizedPath);
       if (persisted !== null) {
         const restoredItems = persisted.items.map(persistedItemToWorkspaceItem);
         const restoredAt = persisted.generatedAt;
@@ -566,16 +749,17 @@ export function useAutoMapWorkspace({
         setGeneratedAt(restoredAt);
         generatedAtRef.current = restoredAt;
         setLastRefreshedAt(restoredAt);
-        setSummary(computeSummary(restoredItems, restoredAt, restoredAt));
+        setRunMeta(EMPTY_RUN_META);
+        setSummary(computeSummary(restoredItems, restoredAt, restoredAt, EMPTY_RUN_META));
         setStatus('success');
         setError(null);
         // Run staleness detection on restored items (AE-03)
-        applyStaleDetection(restoredItems, rulesRef.current, path);
+        applyStaleDetection(restoredItems, rulesRef.current, normalizedPath);
         return;
       }
 
       // No persisted suggestions — fetch fresh
-      void runFetch(path, 'all', []);
+      void runFetch(normalizedPath, 'all', [], visibleTargetPaths);
     },
     [mappingId, runFetch, applyStaleDetection],
   );
@@ -618,7 +802,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: nextStatus };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         // Persist updated state
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
@@ -635,13 +819,15 @@ export function useAutoMapWorkspace({
     (targetPath: string): void => {
       setItems((prev) => {
         const item = prev.find((i) => i.targetPath === targetPath);
-        if (!item || item.status === 'accepted') return prev;
+        if (!item) return prev;
+        const eligibility = deriveSuggestionActionEligibility(item);
+        if (!eligibility.canAccept) return prev;
         updateDraftRef.current(targetPath, item.suggestedExpression);
         const idx = prev.findIndex((i) => i.targetPath === targetPath);
         const next = [...prev];
         next[idx] = { ...next[idx], status: 'accepted' };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAt ?? undefined,
@@ -658,6 +844,8 @@ export function useAutoMapWorkspace({
       setItems((prev) => {
         const item = prev.find((i) => i.targetPath === targetPath);
         if (!item) return prev;
+        const eligibility = deriveSuggestionActionEligibility(item);
+        if (!eligibility.canAccept) return prev;
         updateDraftRef.current(targetPath, item.suggestedExpression);
         setSelectedTargetPathRef.current(targetPath);
         exitWorkspaceRef.current();
@@ -665,7 +853,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: 'edited' };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAt ?? undefined,
@@ -693,7 +881,7 @@ export function useAutoMapWorkspace({
         const next = [...prev];
         next[idx] = { ...next[idx], status: 'suggested' };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
-        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
           saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
             generatedAt: generatedAt ?? undefined,
@@ -707,16 +895,47 @@ export function useAutoMapWorkspace({
 
   const bulkAcceptAllValid = useCallback((): void => {
     setItems((prev) => {
+      const skippedByReason: Record<SuggestionApplyBlockReason, number> = {
+        invalid: 0,
+        stale: 0,
+        dismissed: 0,
+        'already-reviewed': 0,
+        'not-ready': 0,
+      };
+      const skippedItems: BatchAcceptSkipEntry[] = [];
+      let applied = 0;
+
       const next = prev.map((item): SuggestionWorkspaceItem => {
-        if (item.status !== 'suggested') return item;
-        const isValid =
-          item.validation === undefined || item.validation.valid === true;
-        if (!isValid) return item;
+        const eligibility = deriveSuggestionActionEligibility(item);
+        if (!eligibility.canBatchAccept) {
+          const primaryReason = eligibility.blockReasons[0] ?? 'not-ready';
+          skippedByReason[primaryReason] += 1;
+          skippedItems.push({
+            targetPath: item.targetPath,
+            reasons: eligibility.blockReasons,
+            primaryReason,
+          });
+          return item;
+        }
+
         updateDraftRef.current(item.targetPath, item.suggestedExpression);
+        applied += 1;
         return { ...item, status: 'accepted' };
       });
+
+      const computedResult: BatchAcceptResult = {
+        attempted: prev.length,
+        applied,
+        skipped: prev.length - applied,
+        skippedByReason,
+        skippedItems,
+        completedAt: new Date().toISOString(),
+      };
+
+      setLastBatchAcceptResult(computedResult);
+
       const nextItems = next as readonly SuggestionWorkspaceItem[];
-      setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt));
+      setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
       if (sectionPath !== null) {
         saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
           generatedAt: generatedAt ?? undefined,
@@ -725,6 +944,10 @@ export function useAutoMapWorkspace({
       return nextItems;
     });
   }, [generatedAt, lastRefreshedAt, mappingId, sectionPath]);
+
+  const clearBatchAcceptResult = useCallback(() => {
+    setLastBatchAcceptResult(null);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Staleness (for T-04)
@@ -747,7 +970,7 @@ export function useAutoMapWorkspace({
     setItems(previousItems);
     setGeneratedAt(restoredAt);
     setLastRefreshedAt(restoredAt);
-    setSummary(computeSummary(previousItems, restoredAt, restoredAt));
+    setSummary(computeSummary(previousItems, restoredAt, restoredAt, runMetaRef.current));
     setStatus('success');
     setError(null);
     setPreviousItems(null);
@@ -796,6 +1019,8 @@ export function useAutoMapWorkspace({
     dismissSuggestion,
     undoDismiss,
     bulkAcceptAllValid,
+    lastBatchAcceptResult,
+    clearBatchAcceptResult,
     refreshAll,
     refreshUnmapped,
     refreshStale,

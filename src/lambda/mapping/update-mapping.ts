@@ -13,6 +13,7 @@ import {
   conflict,
   errorResponse,
   getItem,
+  getObject,
   internalError,
   jsonResponse,
   notFound,
@@ -44,12 +45,16 @@ interface MappingConfigOptions {
   readonly nullSubtrees?: readonly string[];
   readonly constants?: Readonly<Record<string, unknown>>;
   readonly externalSources?: readonly string[];
+  readonly editorPreferences?: {
+    readonly defaultSelectedSampleId?: string;
+  };
 }
 
 interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
@@ -62,6 +67,7 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly revision?: number;
   readonly latestVersion?: number | null;
@@ -74,6 +80,15 @@ interface MappingMetadata {
   readonly configS3Key: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+function normalizeOptionalBusinessContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 interface MappingRevisionItem {
@@ -93,6 +108,7 @@ function getEnvValue(key: string): string | undefined {
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
 const MAPPING_REVISIONS_TABLE = getEnvValue('MAPPING_REVISIONS_TABLE');
+const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 
 function getMappingsTableOrThrow(): string {
@@ -120,6 +136,55 @@ function getContentBucketOrThrow(): string {
   }
 
   return bucket;
+}
+
+function getSchemasTable(): string | null {
+  const table = SCHEMAS_TABLE?.trim();
+  return table && table.length > 0 ? table : null;
+}
+
+interface SchemaMetadata {
+  readonly schemaId: string;
+  readonly format: 'json-schema' | 'xsd';
+}
+
+function buildSchemaContentS3Key(schemaId: string, format: SchemaMetadata['format']): string {
+  return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
+}
+
+async function loadTargetSchemaContent(schemaId: string | undefined): Promise<unknown | null> {
+  if (!schemaId) {
+    return null;
+  }
+
+  const schemasTable = getSchemasTable();
+  if (!schemasTable) {
+    return null;
+  }
+
+  try {
+    const schemaMetadata = await getItem<SchemaMetadata>({
+      TableName: schemasTable,
+      Key: { schemaId },
+    });
+
+    if (!schemaMetadata) {
+      return null;
+    }
+
+    const rawSchema = await getObject({
+      Bucket: getContentBucketOrThrow(),
+      Key: buildSchemaContentS3Key(schemaId, schemaMetadata.format),
+    });
+
+    if (schemaMetadata.format === 'xsd') {
+      return rawSchema;
+    }
+
+    return JSON.parse(rawSchema) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function toEngineConfig(config: MappingConfig): EngineMappingConfig {
@@ -158,13 +223,14 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
   };
 }
 
-function deriveStatusAndCoverage(config: MappingConfig): { status: MappingMetadata['status']; coverage: number; ruleCount: number } {
+async function deriveStatusAndCoverage(config: MappingConfig): Promise<{ status: MappingMetadata['status']; coverage: number; ruleCount: number }> {
   const ruleCount = config.rules.length;
   if (ruleCount === 0) {
     return { status: 'draft', coverage: 0, ruleCount };
   }
 
-  const result = validate(toEngineConfig(config), null, null);
+  const targetSchema = await loadTargetSchemaContent(config.targetSchemaRef?.schemaId);
+  const result = validate(toEngineConfig(config), null, targetSchema);
   const hasErrors = result.diagnostics.some((diagnostic) => diagnostic.severity === 'error');
 
   return {
@@ -183,9 +249,9 @@ function toRevisionS3Key(mappingId: string, revision: number): string {
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const mappingId = parsePathParam(event, 'id');
+  const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: mappingId', 400, false);
   }
 
   const body = parseBody(event);
@@ -218,10 +284,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const nextRevision = currentRevision + 1;
+    const businessContext = normalizeOptionalBusinessContext(body?.businessContext);
     const config: MappingConfig = {
       id: mappingId,
       projectId: typeof body?.projectId === 'string' ? body.projectId : existing.projectId,
       name: typeof body?.name === 'string' ? body.name : existing.name,
+      ...(businessContext ? { businessContext } : {}),
       version: nextRevision,
       engineVersion: typeof body?.engineVersion === 'string' ? body.engineVersion : '1.0.0',
       sourceSchemaRef: (body?.sourceSchemaRef as SchemaRef | undefined) ?? undefined,
@@ -253,7 +321,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    const derivation = deriveStatusAndCoverage(config);
+    const derivation = await deriveStatusAndCoverage(config);
     const updatedAt = new Date().toISOString();
 
     const revisionConfigS3Key = toRevisionS3Key(mappingId, nextRevision);
@@ -275,10 +343,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       TableName: getMappingsTableOrThrow(),
       Key: { mappingId },
       UpdateExpression:
-        'SET #projectId = :projectId, #name = :name, #revision = :revision, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt, #configHash = :configHash',
+        'SET #projectId = :projectId, #name = :name, #businessContext = :businessContext, #revision = :revision, #version = :version, #status = :status, #sourceSchemaId = :sourceSchemaId, #targetSchemaId = :targetSchemaId, #ruleCount = :ruleCount, #coverage = :coverage, #updatedAt = :updatedAt, #configHash = :configHash',
       ExpressionAttributeNames: {
         '#projectId': 'projectId',
         '#name': 'name',
+        '#businessContext': 'businessContext',
         '#revision': 'revision',
         '#version': 'version',
         '#status': 'status',
@@ -292,6 +361,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ExpressionAttributeValues: {
         ':projectId': config.projectId ?? existing.projectId,
         ':name': config.name,
+        ':businessContext': businessContext ?? existing.businessContext ?? null,
         ':revision': nextRevision,
         ':version': nextRevision,
         ':status': derivation.status,

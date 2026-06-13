@@ -4,6 +4,7 @@ export interface AIRuntimeConfig {
   readonly mode: AIRuntimeMode;
   readonly promptRegistryTable: string;
   readonly promptRegistryLocalDir: string | undefined;
+  readonly promptRegistryActivePointerEnv: string | undefined;
   readonly dslAssetBucket: string;
   readonly dslAssetKey: string;
   readonly dslAssetLocalPath: string | undefined;
@@ -14,6 +15,7 @@ export interface AIRuntimeConfig {
 export const DEFAULT_AI_RUNTIME_CONFIG: Omit<AIRuntimeConfig, 'mode' | 'githubToken'> = {
   promptRegistryTable: 'integrations-keyra-promptregistry',
   promptRegistryLocalDir: undefined,
+  promptRegistryActivePointerEnv: undefined,
   dslAssetBucket: 'integrations-keyra',
   dslAssetKey: 'prompt-assets/dsl/keyra-dsl-reference.md',
   dslAssetLocalPath: undefined,
@@ -46,6 +48,9 @@ export function loadConfig(): AIRuntimeConfig {
     promptRegistryTable: getEnvValue('PROMPT_REGISTRY_TABLE') ?? DEFAULT_AI_RUNTIME_CONFIG.promptRegistryTable,
     promptRegistryLocalDir:
       readOptionalEnv(getEnvValue('PROMPT_REGISTRY_LOCAL_DIR')) ?? DEFAULT_AI_RUNTIME_CONFIG.promptRegistryLocalDir,
+    promptRegistryActivePointerEnv:
+      readOptionalEnv(getEnvValue('PROMPT_REGISTRY_ACTIVE_POINTER_ENV')) ??
+      DEFAULT_AI_RUNTIME_CONFIG.promptRegistryActivePointerEnv,
     dslAssetBucket: getEnvValue('DSL_ASSET_BUCKET') ?? DEFAULT_AI_RUNTIME_CONFIG.dslAssetBucket,
     dslAssetKey: getEnvValue('DSL_ASSET_KEY') ?? DEFAULT_AI_RUNTIME_CONFIG.dslAssetKey,
     dslAssetLocalPath:

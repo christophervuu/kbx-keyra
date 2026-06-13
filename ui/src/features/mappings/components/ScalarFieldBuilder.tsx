@@ -25,30 +25,31 @@
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, Lightbulb, Loader2, MoreVertical, RotateCcw, Sparkles, Undo2, Wrench, XCircle } from 'lucide-react';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import { RawDslEditor } from './RawDslEditor';
-import type { RawDslEditorRef } from './RawDslEditor';
-import { ComplexExpressionWarning } from './ComplexExpressionWarning';
+import type { LogicKind } from './AddLogicPicker';
+import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { ChainBuilderShell } from './ChainBuilderShell';
 import { ChainSourceCard } from './ChainSourceCard';
-import { StaticValueInput } from './StaticValueInput';
-import { LogicStepList } from './LogicStepList';
-import { BuilderFeedbackArea } from './BuilderFeedbackArea';
-import { ValidationSummaryRow } from './ValidationSummaryRow';
+import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { ExplanationPanel } from './ExplanationPanel';
+import { LogicStepList } from './LogicStepList';
+import { RawDslEditor } from './RawDslEditor';
+import type { RawDslEditorRef } from './RawDslEditor';
+import { SmartFixInline } from './SmartFixInline';
+import { StaticValueInput } from './StaticValueInput';
 import { SuggestExpressionInline } from './SuggestExpressionInline';
 import type { TargetFieldStatus, TargetFieldType } from './TargetFieldRow';
-import { useDslValidation } from '../hooks/use-dsl-validation';
-import { useDropZone } from '../hooks/use-drop-zone';
-import { useBuilderValidation } from '../hooks/use-builder-validation';
-import { useExplainRule } from '../hooks/use-explain-rule';
-import { useSuggestExpression } from '../hooks/use-suggest-expression';
-import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
-import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
+import { ValidationSummaryRow } from './ValidationSummaryRow';
 import { PreviewContext } from '../context/preview-context';
+import { useBuilderValidation } from '../hooks/use-builder-validation';
+import { useDropZone } from '../hooks/use-drop-zone';
+import { useDslValidation } from '../hooks/use-dsl-validation';
+import { useExplainRule } from '../hooks/use-explain-rule';
+import { useSmartFix } from '../hooks/use-smart-fix';
+import { useSuggestExpression } from '../hooks/use-suggest-expression';
+import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type {
   ChainBuilderState,
   LogicStep,
-  BuilderEntryType,
   StaticValueBranch,
 } from '../lib/chain-builder-state';
 import {
@@ -57,19 +58,21 @@ import {
   createEmptyConditionStep,
   createEmptyValueMapStep,
 } from '../lib/chain-builder-state';
-import { generateExpressionFromChain } from '../lib/chain-expression-generator';
 import { decomposeToChain } from '../lib/chain-decomposer';
+import { generateExpressionFromChain } from '../lib/chain-expression-generator';
 import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
-import type { LogicKind } from './AddLogicPicker';
-import { flattenSchemaPaths } from '../lib/autocomplete-utils';
+import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
+import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 
-import type { ParsedSchema, MappingRule, SchemaTreeNode } from '@/lib/types/domain';
+import type { Diagnostic, ParsedSchema, MappingRule, SmartFixInput } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface ScalarFieldBuilderProps {
+  /** Mapping identifier used for AI suggestion requests */
+  mappingId: string;
   /** Full dot-path of the selected target field */
   selectedTargetPath: string;
   /** JSON Schema type of the selected target field */
@@ -127,6 +130,12 @@ export interface ScalarFieldBuilderProps {
   unsavedChangeCount?: number;
   /** Opens the unsaved changes modal */
   onViewUnsavedChanges?: () => void;
+  /** Selected rule index for Smart Fix request context */
+  currentRuleIndex?: number | null;
+  /** Rule diagnostics for Smart Fix request context (default scope: all diagnostics for selected rule) */
+  currentRuleDiagnostics?: readonly Diagnostic[];
+  /** Rule version snapshot for Smart Fix stale-apply guard */
+  currentRuleVersion?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,13 +157,24 @@ const STATUS_CLASSES: Record<TargetFieldStatus, string> = {
   mapped: 'text-green-400',
   warning: 'text-amber-400',
   error: 'text-red-400',
+  ai: 'text-violet-400',
+  'intentionally-unmapped': 'text-amber-500',
 };
 
 const AI_EXPLAIN_TOOLTIP = 'Explain this expression using AI';
-const AI_FIX_TOOLTIP = 'AI-powered fix suggestions \u2014 available in a future release';
+const AI_FIX_TOOLTIP = 'Generate AI-powered fix suggestions for current diagnostics';
 
 /** Regex for a trivial bare source reference — no confirmation needed on reset */
 const TRIVIAL_EXPRESSION_RE = /^source\("[^"]*"\)$/;
+
+function computeRuleHash(expression: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < expression.length; i += 1) {
+    hash ^= expression.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -203,14 +223,20 @@ function MappingStatusIcon({ status }: { status: TargetFieldStatus }) {
       return <AlertTriangle size={14} className="text-amber-400" aria-hidden="true" />;
     case 'error':
       return <XCircle size={14} className="text-red-400" aria-hidden="true" />;
+    case 'ai':
+      return <Sparkles size={14} className="text-violet-400" aria-hidden="true" />;
+    case 'intentionally-unmapped':
+      return <Circle size={14} className="text-amber-500" aria-hidden="true" />;
     case 'unmapped':
     default:
       return <Circle size={14} className="text-slate-600" aria-hidden="true" />;
   }
 }
 
+type ScalarValueSourceType = 'source' | 'static' | 'constant' | 'external' | 'unmapped';
+
 interface ScalarEntryOption {
-  readonly type: BuilderEntryType;
+  readonly type: ScalarValueSourceType;
   readonly label: string;
   readonly description: string;
   readonly disabled?: boolean;
@@ -226,14 +252,22 @@ const SCALAR_ENTRY_OPTIONS: readonly ScalarEntryOption[] = [
   {
     type: 'static',
     label: 'Static value',
-    description: 'Use a literal value for this target field',
+    description: 'Enter a fixed value directly',
+  },
+  {
+    type: 'constant',
+    label: 'Constant',
+    description: 'Reference a named mapping constant',
   },
   {
     type: 'external',
-    label: 'External',
-    description: 'Use an external data source',
-    disabled: true,
-    tooltip: 'External data sources — available in a future release',
+    label: 'External source',
+    description: 'Reference a named external data source',
+  },
+  {
+    type: 'unmapped',
+    label: 'Leave unmapped',
+    description: 'Do not map this field right now',
   },
 ];
 
@@ -241,8 +275,8 @@ function ScalarEntryModeSelector({
   selectedType,
   onSelect,
 }: {
-  selectedType: BuilderEntryType | null;
-  onSelect: (type: BuilderEntryType) => void;
+  selectedType: ScalarValueSourceType | null;
+  onSelect: (type: ScalarValueSourceType) => void;
 }) {
   return (
     <div className="space-y-1.5" data-testid="scalar-entry-mode-selector">
@@ -415,36 +449,11 @@ function HeaderOverflowMenu({
 }
 
 // ---------------------------------------------------------------------------
-// Source context formatting (for SuggestExpression)
-// ---------------------------------------------------------------------------
-
-/**
- * Converts a ParsedSchema tree into a newline-separated text block of leaf
- * field paths and types, capped at 200 entries.
- * Format: "- {path} ({type})"
- */
-function formatSourceContext(parsedSourceSchema: ParsedSchema | null): string {
-  if (!parsedSourceSchema?.nodes) return '';
-  const lines: string[] = [];
-  function walk(nodes: SchemaTreeNode[]) {
-    for (const node of nodes) {
-      if (lines.length >= 200) return;
-      if (node.children && node.children.length > 0) {
-        walk(node.children);
-      } else {
-        lines.push(`- ${node.path} (${node.type})`);
-      }
-    }
-  }
-  walk(parsedSourceSchema.nodes);
-  return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function ScalarFieldBuilder({
+  mappingId,
   selectedTargetPath,
   selectedTargetType,
   selectedTargetRequired,
@@ -457,6 +466,9 @@ export function ScalarFieldBuilder({
   getDraftExpression,
   onExpressionChange,
   onClearMapping,
+  currentRuleIndex = null,
+  currentRuleDiagnostics = [],
+  currentRuleVersion = 0,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
@@ -465,15 +477,24 @@ export function ScalarFieldBuilder({
   const prevHydratedTargetRef = useRef<string>(selectedTargetPath);
   const hasHydratedTargetRef = useRef(false);
   const skipNextBuilderEmissionRef = useRef(false);
-  const hydrationPathRef = useRef(selectedTargetPath);
 
-  if (hydrationPathRef.current !== selectedTargetPath) {
-    hydrationPathRef.current = selectedTargetPath;
+  useEffect(() => {
     hasHydratedTargetRef.current = false;
-  }
+  }, [selectedTargetPath]);
 
   // FS-038 T-12: Chain builder state
   const [chainState, setChainState] = useState<ChainBuilderState>(() => createEmptyChainState());
+  const [valueSourceType, setValueSourceType] = useState<ScalarValueSourceType | null>(null);
+  const [constantName, setConstantName] = useState('');
+  const [externalName, setExternalName] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
+  const [advancedModeEnabled, setAdvancedModeEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('keyra:mappings:advanced-mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [hasSelectedEntryType, setHasSelectedEntryType] = useState(false);
   const [isEntryQuestionExpanded, setIsEntryQuestionExpanded] = useState(true);
   // Whether the add-logic picker is open (shown below source card / static input)
@@ -481,6 +502,14 @@ export function ScalarFieldBuilder({
 
   // FS-040 T-04: Reset draft confirmation state
   const [confirmingReset, setConfirmingReset] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('keyra:mappings:advanced-mode', advancedModeEnabled ? 'true' : 'false');
+    } catch {
+      // ignore storage unavailability
+    }
+  }, [advancedModeEnabled]);
 
   // FS-041: Explain Rule hook
   const { state: explainState, explain, dismiss: dismissExplain } = useExplainRule();
@@ -500,9 +529,19 @@ export function ScalarFieldBuilder({
     reset: resetSuggest,
   } = useSuggestExpression();
 
+  const smartFix = useSmartFix();
+  const [smartFixApplyConflict, setSmartFixApplyConflict] = useState<string | null>(null);
+
   // Reset suggestion panel when the selected field changes
   useEffect(() => {
     resetSuggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTargetPath]);
+
+  useEffect(() => {
+    smartFix.reset();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clear stale conflict when active row changes
+    setSmartFixApplyConflict(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath]);
 
@@ -529,17 +568,65 @@ export function ScalarFieldBuilder({
 
   const hydrateFromExpression = useCallback((expr: string, options?: { warningOnFailure?: boolean }) => {
     const warningOnFailure = options?.warningOnFailure ?? false;
+    const trimmedExpr = expr.trim();
     hasHydratedTargetRef.current = false;
     skipNextBuilderEmissionRef.current = true;
     setExpression(expr);
 
-    if (!expr) {
+    if (!trimmedExpr) {
       setDecompositionWarning(null);
       setChainState(createEmptyChainState());
-      setHasSelectedEntryType(false);
+      setValueSourceType('unmapped');
+      setHasSelectedEntryType(true);
       setMode('builder');
       hasHydratedTargetRef.current = true;
       return;
+    }
+
+    const sourceMatch = trimmedExpr.match(/^source\("([^"]+)"\)$/);
+    if (sourceMatch) {
+      const sourcePath = sourceMatch[1] ?? '';
+      setConstantName('');
+      setExternalName('');
+      setChainState({
+        ...createEmptyChainState(),
+        entryType: 'source',
+        sourcePath,
+      });
+      setValueSourceType('source');
+      setHasSelectedEntryType(true);
+      setDecompositionWarning(null);
+      setMode('builder');
+      hasHydratedTargetRef.current = true;
+      return;
+    }
+
+    const staticMatch = trimmedExpr.match(/^static\((.*)\)$/);
+    if (staticMatch) {
+      setConstantName('');
+      setExternalName('');
+      setValueSourceType('static');
+      setHasSelectedEntryType(true);
+    } else {
+      const constantMatch = trimmedExpr.match(/^constant\("([^"]+)"\)$/);
+      if (constantMatch) {
+        setConstantName(constantMatch[1] ?? '');
+        setExternalName('');
+        setValueSourceType('constant');
+        setHasSelectedEntryType(true);
+      } else {
+        const externalMatch = trimmedExpr.match(/^external\("([^"]+)"\)$/);
+        if (externalMatch) {
+          setExternalName(externalMatch[1] ?? '');
+          setConstantName('');
+          setValueSourceType('external');
+          setHasSelectedEntryType(true);
+        } else {
+          setConstantName('');
+          setExternalName('');
+          setValueSourceType('source');
+        }
+      }
     }
 
     const chainResult = decomposeToChain(expr);
@@ -571,6 +658,7 @@ export function ScalarFieldBuilder({
     }
 
     setChainState(createEmptyChainState());
+    setValueSourceType('source');
     setDecompositionWarning(
       warningOnFailure ? (result.reason ?? 'Expression cannot be loaded into the guided builder.') : null,
     );
@@ -586,6 +674,9 @@ export function ScalarFieldBuilder({
     if (!hasHydratedTargetRef.current) {
       return;
     }
+    if (valueSourceType !== null && valueSourceType !== 'source' && valueSourceType !== 'static') {
+      return;
+    }
     if (skipNextBuilderEmissionRef.current) {
       skipNextBuilderEmissionRef.current = false;
       return;
@@ -593,7 +684,7 @@ export function ScalarFieldBuilder({
     const generated = generateExpressionFromChain(chainState);
     handleExpressionChange(generated);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chainState, mode]);
+  }, [chainState, mode, valueSourceType]);
 
   // Hydrate builder state when target field changes.
   // Priority: draft expression → saved expression → empty state.
@@ -601,6 +692,7 @@ export function ScalarFieldBuilder({
     const draftExpr = getDraftExpression(selectedTargetPath);
     const expr = draftExpr ?? currentExpression ?? '';
     prevHydratedTargetRef.current = selectedTargetPath;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     hydrateFromExpression(expr, { warningOnFailure: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTargetPath, currentExpression]);
@@ -634,8 +726,29 @@ export function ScalarFieldBuilder({
     validationState.structureIssues.length;
   const summaryWarningCount = diagnostics.filter((d) => d.severity === 'warning').length;
 
+  const valueSourceLabel =
+    SCALAR_ENTRY_OPTIONS.find((option) => option.type === valueSourceType)?.label ?? 'Not selected';
+  const builderValidationMessage = (() => {
+    if (summaryErrorCount > 0) {
+      return 'This mapping has issues that need attention before save.';
+    }
+    if (summaryWarningCount > 0) {
+      return 'This mapping has warnings. Review recommended.';
+    }
+    if (valueSourceType === 'unmapped') {
+      return selectedTargetRequired
+        ? 'Required field intentionally unmapped. This may be blocked by strict validation settings.'
+        : 'Field intentionally left unmapped.';
+    }
+    if (expression.trim().length === 0) {
+      return 'Choose a value source to start mapping this field.';
+    }
+    return 'Looks good. No validation issues for this field.';
+  })();
+
   const handleInsertSourceField = useCallback(
     (path: string) => {
+      setValueSourceType('source');
       if (mode === 'editor') {
         rawDslRef.current?.insertText(`source("${path}")`);
       } else {
@@ -653,6 +766,7 @@ export function ScalarFieldBuilder({
 
   useEffect(() => {
     if (stagedSourcePath === null || stagedSourcePath.trim().length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     handleInsertSourceField(stagedSourcePath);
   }, [stagedSourcePath, handleInsertSourceField]);
 
@@ -697,18 +811,115 @@ export function ScalarFieldBuilder({
 
   // Reset draft is enabled when expression is non-empty
   const canResetDraft = expression.trim().length > 0;
+  const canRunSmartFix =
+    currentRuleIndex !== null
+    && currentRuleIndex >= 0
+    && expression.trim().length > 0
+    && currentRuleDiagnostics.length > 0;
+
+  const buildSmartFixInput = useCallback((): SmartFixInput | null => {
+    if (
+      currentRuleIndex === null
+      || currentRuleIndex < 0
+      || expression.trim().length === 0
+      || currentRuleDiagnostics.length === 0
+    ) {
+      return null;
+    }
+
+    const trimmedExpression = expression.trim();
+
+    return {
+      mappingId,
+      ruleIndex: currentRuleIndex,
+      targetPath: selectedTargetPath,
+      targetType: selectedTargetType,
+      failingExpression: trimmedExpression,
+      diagnostics: currentRuleDiagnostics,
+      diagnosticScope: 'all',
+      ruleVersion: currentRuleVersion,
+      ruleHash: computeRuleHash(trimmedExpression),
+    };
+  }, [
+    currentRuleDiagnostics,
+    currentRuleIndex,
+    currentRuleVersion,
+    expression,
+    mappingId,
+    selectedTargetPath,
+    selectedTargetType,
+  ]);
+
+  const handleSmartFixAccept = useCallback((nextExpression: string) => {
+    const result = smartFix.state.result;
+    if (result === null) {
+      return;
+    }
+
+    if (result.applyGuard.ruleVersion !== currentRuleVersion) {
+      setSmartFixApplyConflict('Rule version mismatch. Re-run fix on latest rule before applying.');
+      return;
+    }
+
+    updateDraft(selectedTargetPath, nextExpression);
+    onExpressionChangeRef.current?.(nextExpression);
+    hydrateFromExpression(nextExpression, { warningOnFailure: false });
+    setSmartFixApplyConflict(null);
+    smartFix.dismiss();
+  }, [
+    currentRuleVersion,
+    hydrateFromExpression,
+    selectedTargetPath,
+    smartFix,
+    updateDraft,
+  ]);
+
+  const handleSmartFixRerunLatest = useCallback(() => {
+    const latestInput = buildSmartFixInput();
+    if (latestInput === null) {
+      return;
+    }
+
+    setSmartFixApplyConflict(null);
+    smartFix.rerunOnLatest(latestInput);
+  }, [buildSmartFixInput, smartFix]);
 
   // FS-038 T-12: Chain state update handlers
-  const handleEntryTypeChange = useCallback((type: BuilderEntryType) => {
+  const handleEntryTypeChange = useCallback((type: ScalarValueSourceType) => {
     setAddLogicPickerOpen(false);
     setHasSelectedEntryType(true);
     setIsEntryQuestionExpanded(false);
-    setChainState((prev) => ({
-      ...createEmptyChainState(),
-      entryType: type,
-      sourcePath: type === 'source' ? prev.sourcePath : undefined,
-    }));
-  }, []);
+    setValueSourceType(type);
+
+    if (type === 'source' || type === 'static') {
+      setConstantName('');
+      setExternalName('');
+      setChainState((prev) => ({
+        ...createEmptyChainState(),
+        entryType: type,
+        sourcePath: type === 'source' ? prev.sourcePath : undefined,
+      }));
+    } else if (type === 'constant') {
+      setExternalName('');
+      setChainState(createEmptyChainState());
+      if (mode === 'builder') {
+        handleExpressionChange(constantName.trim().length > 0 ? `constant("${constantName.trim()}")` : '');
+      }
+    } else if (type === 'external') {
+      setConstantName('');
+      setChainState(createEmptyChainState());
+      if (mode === 'builder') {
+        handleExpressionChange(externalName.trim().length > 0 ? `external("${externalName.trim()}")` : '');
+      }
+    } else {
+      setConstantName('');
+      setExternalName('');
+      setChainState(createEmptyChainState());
+      if (mode === 'builder') {
+        handleExpressionChange('');
+      }
+    }
+  }, [constantName, externalName, handleExpressionChange, mode]);
 
   const handleSourceSelect = useCallback((path: string) => {
     setChainState((prev) => ({ ...prev, sourcePath: path }));
@@ -759,17 +970,22 @@ export function ScalarFieldBuilder({
 
   // Source field options for parameter slots
   const sourceOptions = parsedSourceSchema ? flattenSchemaPaths(parsedSourceSchema) : [];
+  const currentStatusForHeader: TargetFieldStatus =
+    valueSourceType === 'unmapped' && selectedTargetRequired
+      ? 'intentionally-unmapped'
+      : currentStatus;
 
   // Current value label for condition/value map forms
   const currentValueLabel = chainState.sourcePath ?? 'the current value';
-  const selectedEntryOption = hasSelectedEntryType
-    ? SCALAR_ENTRY_OPTIONS.find((option) => option.type === chainState.entryType)
-    : undefined;
   const hasAnsweredEntryQuestion =
-    (hasSelectedEntryType && chainState.entryType === 'source' && Boolean(chainState.sourcePath?.trim()))
-    || (hasSelectedEntryType && chainState.entryType === 'static' && chainState.staticValue !== undefined);
+    (valueSourceType === 'source' && Boolean(chainState.sourcePath?.trim()))
+    || (valueSourceType === 'static' && chainState.staticValue !== undefined)
+    || (valueSourceType === 'constant' && constantName.trim().length > 0)
+    || (valueSourceType === 'external' && externalName.trim().length > 0)
+    || valueSourceType === 'unmapped';
   const shouldShowLogicLane =
-    hasAnsweredEntryQuestion || chainState.logicSteps.length > 0 || addLogicPickerOpen;
+    (valueSourceType === 'source' || valueSourceType === 'static')
+    && (hasAnsweredEntryQuestion || chainState.logicSteps.length > 0 || addLogicPickerOpen);
 
   return (
     <div
@@ -782,8 +998,8 @@ export function ScalarFieldBuilder({
       <div className="shrink-0 border-b border-slate-700 px-4 py-3">
         <div className="flex items-center gap-2">
           {/* Mapping status icon */}
-          <span className={STATUS_CLASSES[currentStatus]} data-testid="header-status-icon">
-            <MappingStatusIcon status={currentStatus} />
+          <span className={STATUS_CLASSES[currentStatusForHeader]} data-testid="header-status-icon">
+            <MappingStatusIcon status={currentStatusForHeader} />
           </span>
 
           {/* Type badge */}
@@ -832,6 +1048,13 @@ export function ScalarFieldBuilder({
       {/* Feedback Area — Expression, Result, Validation (FS-040 T-02)      */}
       {/* Replaces the old Suggested Sources section.                        */}
       {/* ------------------------------------------------------------------ */}
+      <div className="px-4 pt-3" data-testid="builder-target-output">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Target output</p>
+        <p className="mt-1 truncate rounded border border-slate-700 bg-slate-900/70 px-2 py-1 font-mono text-xs text-slate-300" title={expression || 'No output yet'}>
+          {expression || 'No output yet'}
+        </p>
+      </div>
+
       <BuilderFeedbackArea
         expression={expression}
         sourceData={sourceData}
@@ -850,6 +1073,54 @@ export function ScalarFieldBuilder({
         incompleteCount={0}
         testId="scalar-validation-summary"
       />
+
+      <div className="space-y-2 border-b border-slate-800 px-4 py-3" data-testid="builder-guidance-section">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Value source</p>
+          <p className="text-xs text-slate-300" data-testid="builder-value-source-label">{valueSourceLabel}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Validation</p>
+          <p className="text-xs text-slate-300" data-testid="builder-validation-message">{builderValidationMessage}</p>
+        </div>
+        <div>
+          <label htmlFor="builder-notes" className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Notes
+          </label>
+          <textarea
+            id="builder-notes"
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.target.value)}
+            placeholder="Add business notes for this mapping"
+            data-testid="builder-notes-input"
+            className="mt-1 h-16 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+        <div className="rounded border border-slate-700 bg-slate-900/40 p-2" data-testid="builder-advanced-mode">
+          <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={advancedModeEnabled}
+              onChange={(e) => setAdvancedModeEnabled(e.target.checked)}
+              data-testid="advanced-mode-toggle"
+              className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500"
+            />
+            Advanced Mode (show DSL diagnostics)
+          </label>
+          {advancedModeEnabled ? (
+            <div className="mt-2 space-y-1" data-testid="advanced-mode-dsl-panel">
+              <p className="text-[10px] text-slate-500">Generated DSL</p>
+              <pre className="max-h-24 overflow-auto rounded bg-slate-950 px-2 py-1 text-[11px] text-slate-300">
+                {expression || '// no expression'}
+              </pre>
+            </div>
+          ) : (
+            <p className="mt-1 text-[11px] text-slate-500" data-testid="advanced-mode-hidden">
+              Raw DSL is hidden in default mode.
+            </p>
+          )}
+        </div>
+      </div>
 
       <div
         className={[
@@ -905,7 +1176,6 @@ export function ScalarFieldBuilder({
               onToggleMode={() => { setMode('editor'); }}
               onClearMapping={() => { onClearMapping?.(selectedTargetPath); }}
               onExpressionClick={() => { setMode('editor'); }}
-              parsedSourceSchema={parsedSourceSchema}
               onExpressionAccept={(expr) => {
                 updateDraft(selectedTargetPath, expr);
               }}
@@ -915,7 +1185,7 @@ export function ScalarFieldBuilder({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400" data-testid="scalar-entry-question">
-                      Where does this value come from?
+                      Value source
                     </p>
                     <button
                       type="button"
@@ -939,7 +1209,7 @@ export function ScalarFieldBuilder({
                   </div>
                   {isEntryQuestionExpanded ? (
                     <ScalarEntryModeSelector
-                      selectedType={hasSelectedEntryType ? chainState.entryType : null}
+                      selectedType={hasSelectedEntryType ? valueSourceType : null}
                       onSelect={handleEntryTypeChange}
                     />
                   ) : (
@@ -948,21 +1218,21 @@ export function ScalarFieldBuilder({
                       data-testid="scalar-entry-question-selected"
                     >
                       <p className="text-xs font-medium text-slate-100">
-                        {selectedEntryOption?.label ?? 'Not selected'}
+                        {valueSourceLabel}
                       </p>
                       <p className="mt-0.5 text-[11px] leading-snug text-slate-300">
-                        {selectedEntryOption?.description ?? 'Choose a source, static value, or external input'}
+                        {SCALAR_ENTRY_OPTIONS.find((option) => option.type === valueSourceType)?.description ?? 'Choose a source field, static value, constant, external source, or leave unmapped'}
                       </p>
                     </div>
                   )}
                 </div>
 
-                {hasSelectedEntryType && (chainState.entryType === 'source' || chainState.entryType === 'static') && (
+                {hasSelectedEntryType && (valueSourceType === 'source' || valueSourceType === 'static') && (
                   <div className="h-px bg-slate-700/60" />
                 )}
 
                 {/* Source entry */}
-                {hasSelectedEntryType && chainState.entryType === 'source' && (
+                {hasSelectedEntryType && valueSourceType === 'source' && (
                   <div className="space-y-2" data-testid="scalar-source-field-section">
                     <ChainSourceCard
                       sourcePath={chainState.sourcePath}
@@ -976,7 +1246,7 @@ export function ScalarFieldBuilder({
                 )}
 
                 {/* Static entry */}
-                {hasSelectedEntryType && chainState.entryType === 'static' && (
+                {hasSelectedEntryType && valueSourceType === 'static' && (
                   <StaticValueInput
                     initialValue={
                       chainState.staticValue !== undefined
@@ -989,6 +1259,56 @@ export function ScalarFieldBuilder({
                     onAddLogic={() => { setAddLogicPickerOpen(true); }}
                     showAddLogicButton={false}
                   />
+                )}
+
+                {hasSelectedEntryType && valueSourceType === 'constant' && (
+                  <div className="space-y-2" data-testid="scalar-constant-section">
+                    <label htmlFor="scalar-constant-name" className="text-xs text-slate-300">Constant name</label>
+                    <input
+                      id="scalar-constant-name"
+                      type="text"
+                      value={constantName}
+                      onChange={(e) => {
+                        const nextName = e.target.value;
+                        setConstantName(nextName);
+                        if (mode === 'builder') {
+                          handleExpressionChange(nextName.trim().length > 0 ? `constant("${nextName.trim()}")` : '');
+                        }
+                      }}
+                      placeholder="e.g. TAX_RATE"
+                      data-testid="scalar-constant-input"
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-slate-500">References <span className="font-mono">constant(&quot;name&quot;)</span> in DSL.</p>
+                  </div>
+                )}
+
+                {hasSelectedEntryType && valueSourceType === 'external' && (
+                  <div className="space-y-2" data-testid="scalar-external-section">
+                    <label htmlFor="scalar-external-name" className="text-xs text-slate-300">External source key</label>
+                    <input
+                      id="scalar-external-name"
+                      type="text"
+                      value={externalName}
+                      onChange={(e) => {
+                        const nextName = e.target.value;
+                        setExternalName(nextName);
+                        if (mode === 'builder') {
+                          handleExpressionChange(nextName.trim().length > 0 ? `external("${nextName.trim()}")` : '');
+                        }
+                      }}
+                      placeholder="e.g. lookupTable"
+                      data-testid="scalar-external-input"
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-slate-500">References <span className="font-mono">external(&quot;name&quot;)</span> in DSL.</p>
+                  </div>
+                )}
+
+                {hasSelectedEntryType && valueSourceType === 'unmapped' && (
+                  <div className="rounded border border-amber-800/60 bg-amber-950/20 px-3 py-2 text-xs text-amber-300" data-testid="scalar-unmapped-section">
+                    This field is intentionally left unmapped. You can return later and configure it.
+                  </div>
                 )}
 
                 {/* Logic section */}
@@ -1026,12 +1346,13 @@ export function ScalarFieldBuilder({
             state={suggestState}
             targetPath={selectedTargetPath}
             targetType={selectedTargetType}
+            currentExpression={currentExpression || null}
             onGenerate={(instruction) => {
               generateSuggestion({
+                mappingId,
                 instruction,
                 targetPath: selectedTargetPath,
                 targetType: selectedTargetType,
-                sourceContext: formatSourceContext(parsedSourceSchema),
               });
             }}
             onAccept={(expr) => {
@@ -1041,6 +1362,25 @@ export function ScalarFieldBuilder({
               dismissSuggest();
             }}
             onDismiss={dismissSuggest}
+          />
+        </div>
+      )}
+
+      {(smartFix.state.status !== 'idle' || smartFixApplyConflict !== null) && (
+        <div className="px-4 pb-3">
+          <SmartFixInline
+            state={smartFix.state}
+            targetPath={selectedTargetPath}
+            targetType={selectedTargetType}
+            currentExpression={currentExpression || null}
+            localStaleMessage={smartFixApplyConflict}
+            onAccept={handleSmartFixAccept}
+            onRetry={smartFix.retry}
+            onRerunLatest={handleSmartFixRerunLatest}
+            onDismiss={() => {
+              setSmartFixApplyConflict(null);
+              smartFix.dismiss();
+            }}
           />
         </div>
       )}
@@ -1123,15 +1463,33 @@ export function ScalarFieldBuilder({
           </button>
           <button
             type="button"
-            disabled
-            aria-disabled="true"
-            title={AI_FIX_TOOLTIP}
-            aria-label={`Fix — ${AI_FIX_TOOLTIP}`}
+            disabled={!canRunSmartFix || smartFix.state.status === 'loading'}
+            aria-disabled={!canRunSmartFix || smartFix.state.status === 'loading'}
+            title={canRunSmartFix ? AI_FIX_TOOLTIP : 'Fix requires rule diagnostics'}
+            aria-label={canRunSmartFix ? `Fix — ${AI_FIX_TOOLTIP}` : 'Fix — rule diagnostics required'}
             data-testid="ai-fix-btn"
-            className="flex cursor-not-allowed items-center gap-1 rounded border border-slate-700 px-2 py-1 text-xs text-slate-600 opacity-50"
+            onClick={() => {
+              const input = buildSmartFixInput();
+              if (input === null) {
+                return;
+              }
+              setSmartFixApplyConflict(null);
+              smartFix.run(input);
+            }}
+            className={[
+              'flex items-center gap-1 rounded border px-2 py-1 text-xs transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+              !canRunSmartFix || smartFix.state.status === 'loading'
+                ? 'cursor-not-allowed border-slate-700 text-slate-600 opacity-50'
+                : 'cursor-pointer border-slate-600 text-slate-400 hover:border-blue-500/60 hover:text-blue-300',
+            ].join(' ')}
           >
-            <Wrench size={12} aria-hidden="true" />
-            Fix
+            {smartFix.state.status === 'loading' ? (
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Wrench size={12} aria-hidden="true" />
+            )}
+            {smartFix.state.status === 'loading' ? 'Fixing…' : 'Fix'}
           </button>
 
           {/* Reset draft button — clears expression; confirmation for non-trivial */}

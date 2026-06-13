@@ -1,15 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ProjectOverviewPage } from '../ProjectOverviewPage';
 
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
-
-import { ProjectOverviewPage } from '../ProjectOverviewPage';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -21,7 +21,7 @@ const SCHEMA_DETAIL: SchemaDetail = {
     name: 'Schema One',
     format: 'json-schema',
     fieldCount: 5,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
@@ -48,7 +48,8 @@ const PROJECT_DETAIL: ProjectDetail = {
   name: 'My Project',
   description: 'A test project',
   slug: 'my-project',
-  schemaRefs: [{ schemaId: 'schema-1', type: 'local' }],
+  schemaRefs: [{ schemaId: 'schema-1', type: 'published' }],
+  linkedSchemaIds: ['schema-1'],
   tags: ['alpha'],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
@@ -83,6 +84,11 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    getCurrentDeployments: vi.fn().mockResolvedValue({
+      DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
+      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+    }),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -116,6 +122,9 @@ function renderPage(
             <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
             <Route path="/" element={<div data-testid="home-page">Home</div>} />
             <Route path="/projects/:projectId/mappings/new" element={<div data-testid="create-mapping-page" />} />
+            <Route path="/projects/:projectId/deployments" element={<div data-testid="project-deployments-page" />} />
+            <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page" />} />
+            <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div data-testid="mapping-deployment-page" />} />
           </Routes>
         </BreadcrumbProvider>
       </MemoryRouter>
@@ -146,7 +155,7 @@ describe('ProjectOverviewPage', () => {
     expect(screen.getByTestId('project-overview-skeleton')).toBeInTheDocument();
   });
 
-  it('renders all four sections when loaded', async () => {
+  it('renders header + full-width mappings when loaded', async () => {
     renderPage(adapter);
 
     await waitFor(() => {
@@ -156,11 +165,14 @@ describe('ProjectOverviewPage', () => {
     // Header — project name as inline-editable h1 (role="button", aria-label="Project name")
     expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
 
-    // Section — schemas (heading)
-    expect(screen.getByRole('heading', { name: /schemas/i })).toBeInTheDocument();
-
     // Section — mappings (heading)
     expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
+
+    // No right rail / deployment activity / schema management section in FS-086 T-01
+    expect(screen.queryByTestId('project-overview-right-rail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('deployment-activity-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schemas-right-rail-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('project-schema-management-section')).not.toBeInTheDocument();
 
     // Header — overflow menu trigger (replaces ProjectActionsSection)
     expect(screen.getByRole('button', { name: /more project actions/i })).toBeInTheDocument();
@@ -214,32 +226,6 @@ describe('ProjectOverviewPage', () => {
     expect(getProject).toHaveBeenCalledTimes(2);
   });
 
-  it('clicking Upload Schema opens upload dialog and does not navigate to create mapping', async () => {
-    const user = userEvent.setup();
-    renderPage(adapter);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('button', { name: /upload schema/i }));
-
-    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
-    expect(screen.queryByTestId('create-mapping-page')).not.toBeInTheDocument();
-  });
-
-  it('clicking Add Schema opens upload dialog', async () => {
-    const user = userEvent.setup();
-    renderPage(adapter);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole('button', { name: /add schema/i }));
-
-    expect(screen.getByTestId('schema-upload-dialog')).toBeInTheDocument();
-  });
 
   it('clicking Create Mapping navigates to create mapping route', async () => {
     const user = userEvent.setup();
@@ -249,18 +235,168 @@ describe('ProjectOverviewPage', () => {
       expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
     });
 
-    const createButtons = screen.getAllByRole('button', { name: /create mapping/i });
-    await user.click(createButtons[0]);
+    const createButton = screen.getByRole('button', { name: /create mapping/i });
+    expect(createButton).toHaveClass('border-slate-700');
+    expect(createButton).toHaveClass('bg-slate-800');
+    expect(createButton).toHaveClass('hover:bg-slate-700');
+
+    await user.click(createButton);
 
     expect(screen.getByTestId('create-mapping-page')).toBeInTheDocument();
+  });
+
+  it('renders mappings as the only overview content column', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-right-rail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('deployment-activity-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schemas-right-rail-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('project-schema-management-section')).not.toBeInTheDocument();
+  });
+
+  it('does not render deployment activity card in overview', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('heading', { name: 'Deployment Activity' })).not.toBeInTheDocument();
+  });
+
+  it('opens linked schemas dialog from summary trigger with compact metadata', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('linked-schemas-trigger'));
+
+    const dialog = screen.getByTestId('linked-schemas-dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'Linked Schemas' })).toBeInTheDocument();
+    expect(within(dialog).getByText('1 schema linked to this project')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Schema One/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Uploaded · JSON · 5 fields · Used by 1 mapping/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/JSON Schema/)).not.toBeInTheDocument();
+  });
+
+  it('linked schemas dialog closes on Escape and returns focus to trigger', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    const trigger = screen.getByTestId('linked-schemas-trigger');
+    await user.click(trigger);
+    expect(screen.getByTestId('linked-schemas-dialog')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByTestId('linked-schemas-dialog')).not.toBeInTheDocument();
+    });
+    expect(trigger).toHaveFocus();
+  });
+
+  it('linked schemas dialog empty state remains informational and read-only', async () => {
+    const user = userEvent.setup();
+    const noSchemasAdapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        linkedSchemaIds: [],
+        schemaRefs: [],
+      }),
+    });
+
+    renderPage(noSchemasAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('linked-schemas-trigger'));
+    expect(screen.getByTestId('linked-schemas-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('linked-schemas-add-schema')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schema-upload-dialog')).not.toBeInTheDocument();
+  });
+
+  it('does not render default schema management section in overview', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('project-schema-management-section')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Schemas' })).not.toBeInTheDocument();
+  });
+
+  it('AE-05: overview rows enforce status-based actions and Deploy navigates (no inline deploy)', async () => {
+    const user = userEvent.setup();
+
+    const readyMapping: MappingMetadata = {
+      ...MAPPING_META,
+      mappingId: 'mapping-ready',
+      name: 'Ready Mapping',
+      status: 'ready',
+    };
+
+    const draftMapping: MappingMetadata = {
+      ...MAPPING_META,
+      mappingId: 'mapping-draft',
+      name: 'Draft Mapping',
+      status: 'draft',
+    };
+
+    const hasErrorsMapping: MappingMetadata = {
+      ...MAPPING_META,
+      mappingId: 'mapping-errors',
+      name: 'Error Mapping',
+      status: 'has-errors',
+    };
+
+    const statusAdapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        mappings: [readyMapping, draftMapping, hasErrorsMapping],
+      }),
+    });
+
+    renderPage(statusAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
+    });
+
+    // Ready: row is open target + Deploy icon visible
+    const readyDeploy = screen.getByRole('button', { name: /deploy mapping ready mapping/i });
+    expect(readyDeploy).toBeInTheDocument();
+
+    // Draft: Deploy icon present but disabled
+    expect(screen.getByRole('button', { name: /deploy mapping draft mapping \(disabled\)/i })).toBeDisabled();
+
+    // Has errors: Deploy icon present but disabled
+    expect(screen.getByRole('button', { name: /deploy mapping error mapping \(disabled\)/i })).toBeDisabled();
+
+    await user.click(readyDeploy);
+    expect(screen.getByTestId('mapping-deployment-page')).toBeInTheDocument();
   });
 });
 
 // ---------------------------------------------------------------------------
-// T-02 layout acceptance checks (FS-050 AE-04, AE-06, AE-16)
+// Layout acceptance checks (FS-085)
 // ---------------------------------------------------------------------------
 
-describe('ProjectOverviewPage — T-02 layout (AE-04, AE-06, AE-16)', () => {
+describe('ProjectOverviewPage — layout checks', () => {
   let adapter: ApiAdapter;
 
   beforeEach(() => {
@@ -281,7 +417,7 @@ describe('ProjectOverviewPage — T-02 layout (AE-04, AE-06, AE-16)', () => {
     expect(nameButton).toHaveTextContent('My Project');
   });
 
-  it('AE-04 / AE-16: Create Mapping and Add Schema buttons are visible in the header', async () => {
+  it('AE-04 / AE-16: only Create Mapping button is visible in header primary actions', async () => {
     renderPage(adapter);
 
     await waitFor(() => {
@@ -289,7 +425,47 @@ describe('ProjectOverviewPage — T-02 layout (AE-04, AE-06, AE-16)', () => {
     });
 
     expect(screen.getByTestId('header-create-mapping-btn')).toBeInTheDocument();
-    expect(screen.getByTestId('header-add-schema-btn')).toBeInTheDocument();
+    expect(screen.queryByTestId('header-add-schema-btn')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add schema/i })).not.toBeInTheDocument();
+  });
+
+  it('linked schemas dialog is read-only (no unlink or add schema actions)', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('linked-schemas-trigger'));
+
+    expect(screen.queryByTestId('linked-schema-unlink-schema-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('linked-schemas-add-schema')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('schema-upload-dialog')).not.toBeInTheDocument();
+  });
+
+  it('AE-02: header shows compact summary line and hides tag UI', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-header-summary-line')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('project-header-summary-line')).toHaveTextContent('1 mapping · 1 linked schema · 0 errors');
+    expect(screen.queryByText('Add tag…')).not.toBeInTheDocument();
+  });
+
+  it('AE-03: legacy overview sections are not rendered in default layout', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    });
+
+    // Summary strip was removed from the default overview composition.
+    expect(screen.queryByTestId('project-summary-row')).not.toBeInTheDocument();
+    // Legacy "continue" panel is removed from the mappings-first redesign.
+    expect(screen.queryByText(/continue where you left off/i)).not.toBeInTheDocument();
   });
 
   it('AE-16: overflow menu trigger is visible', async () => {
@@ -335,20 +511,26 @@ describe('ProjectOverviewPage — T-02 layout (AE-04, AE-06, AE-16)', () => {
     expect(screen.queryByTestId('project-overflow-menu')).not.toBeInTheDocument();
   });
 
-  it('AE-06: mappings section precedes schemas section in DOM order', async () => {
+  it('AE-06: mappings section is rendered and schema management section is absent by default', async () => {
     renderPage(adapter);
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
     });
 
-    const mappingsHeading = screen.getByRole('heading', { name: /mappings/i });
-    const schemasHeading = screen.getByRole('heading', { name: /schemas/i });
+    expect(screen.queryByTestId('project-schema-management-section')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Schemas' })).not.toBeInTheDocument();
+  });
 
-    // compareDocumentPosition: DOCUMENT_POSITION_FOLLOWING = 4
-    // If mappings comes before schemas, schemas.compareDocumentPosition(mappings) returns PRECEDING (2)
-    const position = schemasHeading.compareDocumentPosition(mappingsHeading);
-    expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  it('AE-10: overview no longer renders right rail or two-column content grid', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('project-overview-content-grid')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-right-rail')).not.toBeInTheDocument();
   });
 
   it('data-testid="page-project-overview" is preserved', async () => {
@@ -362,6 +544,33 @@ describe('ProjectOverviewPage — T-02 layout (AE-04, AE-06, AE-16)', () => {
 // ---------------------------------------------------------------------------
 
 describe('ProjectOverviewPage — breadcrumb label registration', () => {
+  it('AE-07: breadcrumb follows Home / Projects / {projectName} with non-clickable Projects segment', async () => {
+    const adapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        name: 'Order Processing',
+      }),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+
+    renderPage(adapter, 'proj-1', '/projects/proj-1', { withBreadcrumbs: true });
+
+    const breadcrumbNav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+
+    // Structural hierarchy always starts with Home / Projects / ...
+    expect(within(breadcrumbNav).getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(within(breadcrumbNav).getByText('Projects')).toBeInTheDocument();
+    expect(within(breadcrumbNav).queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(within(breadcrumbNav).getByText('Order Processing')).toBeInTheDocument();
+    });
+
+    // Current page segment must not be clickable
+    expect(within(breadcrumbNav).queryByRole('link', { name: 'Order Processing' })).not.toBeInTheDocument();
+  });
+
   it('AE-01: breadcrumb shows project name once data loads', async () => {
     const adapter = createMockAdapter({
       getProject: vi.fn().mockResolvedValue({

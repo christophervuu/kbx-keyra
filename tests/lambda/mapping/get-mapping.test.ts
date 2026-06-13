@@ -47,16 +47,26 @@ describe('get-mapping handler', () => {
   it('existing mapping returns 200 with full config from S3', async () => {
     sharedMocks.getItem.mockResolvedValueOnce({ mappingId: 'map-1', configS3Key: 'mappings/map-1/config.json' });
     sharedMocks.getObject.mockResolvedValueOnce(
-      JSON.stringify({ id: 'map-1', projectId: 'proj-1', name: 'Invoice Map', version: 2, engineVersion: '1.0.0', config: {}, rules: [] }),
+      JSON.stringify({
+        id: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        businessContext: 'Map invoice records to shipment orchestration payloads.',
+        version: 2,
+        engineVersion: '1.0.0',
+        config: {},
+        rules: [],
+      }),
     );
 
     const { handler } = await importHandler();
     const result = await handler({ body: null, pathParameters: { id: 'map-1' } });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as { id: string; version: number };
+    const parsed = JSON.parse(result.body) as { id: string; version: number; businessContext?: string };
     expect(parsed.id).toBe('map-1');
     expect(parsed.version).toBe(2);
+    expect(parsed.businessContext).toBe('Map invoice records to shipment orchestration payloads.');
   });
 
   it('missing mapping returns 404', async () => {

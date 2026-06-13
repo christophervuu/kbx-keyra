@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { MoreVertical } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+
+import type { UsageMapping } from '../hooks/use-schema-usage';
 
 import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -7,64 +10,26 @@ import { useAdapter } from '@/lib/api';
 import type { SchemaDetail } from '@/lib/types';
 import { PATHS } from '@/routes/paths';
 
-import type { UsageMapping } from '../hooks/use-schema-usage';
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface SchemaActionsProps {
   schema: SchemaDetail;
-  /** Called to activate edit mode (wired to useSchemaEditor.startEditing) */
-  onEdit: () => void;
-  /** Called to open Replace-file flow (T-08) */
-  onReplace: () => void;
-  /** Called to open View-Raw modal (T-08) */
+  /** Called to open View-Raw modal */
   onViewRaw: () => void;
   /** Mappings referencing this schema — used for remove-blocking check */
   usageMappings: UsageMapping[];
+  /** Called to activate edit mode */
+  onEdit: () => void;
   /** Whether edit mode is currently active */
   isEditing: boolean;
-  /** Called after scope is successfully updated to 'global' */
-  onScopePromoted?: () => void;
-}
-
-// ---------------------------------------------------------------------------
-// Tooltip wrapper
-// ---------------------------------------------------------------------------
-
-function PlaceholderButton({
-  label,
-  tooltip,
-  testId,
-}: {
-  label: string;
-  tooltip: string;
-  testId: string;
-}) {
-  return (
-    <div className="relative group">
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled
-        aria-label={label}
-        data-testid={testId}
-        className="opacity-50 cursor-not-allowed"
-        title={tooltip}
-      >
-        {label}
-      </Button>
-      {/* Tooltip on hover */}
-      <div
-        role="tooltip"
-        data-testid={`${testId}-tooltip`}
-        className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 hidden w-56 -translate-x-1/2 rounded bg-slate-700 px-2 py-1 text-center text-xs text-slate-200 shadow-lg group-hover:block"
-      >
-        {tooltip}
-      </div>
-    </div>
-  );
+  /** Controls whether top-level Edit Schema action is shown */
+  showEditButton?: boolean;
+  /** Renders section chrome (title/padding) when true */
+  withSectionChrome?: boolean;
+  /** Optional className applied to root wrapper */
+  className?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,57 +39,62 @@ function PlaceholderButton({
 /**
  * Context-dependent action buttons for the Schema Detail page.
  *
- * Visibility rules:
- * - CDM schemas: Re-sync (placeholder), View Raw
- * - Non-CDM schemas: Edit (json-schema only), Auto-describe (placeholder),
- *   Sync to GitHub (placeholder), Replace file, Remove, View Raw
- * - Project-scoped schemas: additionally Promote to Global
- *
- * Confirmation modals are shown for Promote and Remove.
- * Remove is blocked when mappings reference the schema.
+ * Visibility rules (FS-090 T-08):
+ * - User schemas: top-level Edit Schema + overflow(View raw, Delete schema)
+ * - CDM schemas: overflow(View raw) only
  */
 export function SchemaActions({
   schema,
-  onEdit,
-  onReplace,
   onViewRaw,
   usageMappings,
+  onEdit,
   isEditing,
-  onScopePromoted,
+  showEditButton = true,
+  withSectionChrome = true,
+  className = '',
 }: SchemaActionsProps) {
   const adapter = useAdapter();
   const navigate = useNavigate();
 
   const { metadata } = schema;
-  const isCdm = metadata.origin === 'cdm';
+  const isCdm = metadata.origin === 'cdm' || metadata.ownership === 'cdm' || metadata.readonly;
   const isJsonSchema = metadata.format === 'json-schema';
-  const isProjectScoped = metadata.scope === 'project';
+  const canEdit = showEditButton && !isCdm && isJsonSchema && !isEditing;
+  const canRemove = !isCdm;
 
   // --- Modal states ---
-  const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [showRemoveBlocked, setShowRemoveBlocked] = useState(false);
-  const [isPromoting, setIsPromoting] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
-  const [promoteError, setPromoteError] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // --- Promote to Global ---
-  async function handlePromoteConfirm() {
-    setIsPromoting(true);
-    setPromoteError(null);
-    try {
-      await adapter.updateSchema(metadata.schemaId, { scope: 'global' });
-      setShowPromoteConfirm(false);
-      onScopePromoted?.();
-    } catch (err) {
-      setPromoteError(err instanceof Error ? err.message : 'Failed to promote schema');
-    } finally {
-      setIsPromoting(false);
+  useEffect(() => {
+    if (!isMenuOpen) return undefined;
+
+    function onPointerDown(event: MouseEvent) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
     }
+
+    window.addEventListener('mousedown', onPointerDown);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [isMenuOpen]);
+
+  function handleViewRaw() {
+    setIsMenuOpen(false);
+    onViewRaw();
   }
 
   // --- Remove ---
   function handleRemoveClick() {
+    if (!canRemove) return;
+    setIsMenuOpen(false);
+
     if (usageMappings.length > 0) {
       setShowRemoveBlocked(true);
     } else {
@@ -133,6 +103,8 @@ export function SchemaActions({
   }
 
   async function handleRemoveConfirm() {
+    if (!canRemove) return;
+
     setIsRemoving(true);
     try {
       await adapter.deleteSchema(metadata.schemaId);
@@ -144,127 +116,82 @@ export function SchemaActions({
     }
   }
 
+  const actionsContent = (
+    <div className="flex flex-wrap items-center gap-2">
+      {canEdit && (
+        <Button
+          variant="secondary"
+          size="sm"
+          data-testid="action-edit"
+          onClick={onEdit}
+        >
+          Edit Schema
+        </Button>
+      )}
+
+      <div className="relative" ref={menuRef}>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="More schema actions"
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen}
+          aria-controls="schema-actions-menu"
+          data-testid="action-overflow-trigger"
+          onClick={() => setIsMenuOpen((open) => !open)}
+        >
+          <MoreVertical size={14} aria-hidden="true" />
+        </Button>
+
+        {isMenuOpen && (
+          <div
+            id="schema-actions-menu"
+            role="menu"
+            data-testid="action-overflow-menu"
+            className="absolute right-0 z-20 mt-1 min-w-44 rounded-md border border-slate-700 bg-slate-900 p-1 shadow-lg"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="action-view-raw"
+              className="block w-full rounded px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800"
+              onClick={handleViewRaw}
+            >
+              View raw
+            </button>
+
+            {canRemove && (
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="action-remove"
+                className="block w-full rounded px-3 py-2 text-left text-sm text-red-300 hover:bg-red-900/40"
+                onClick={handleRemoveClick}
+              >
+                Delete schema
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <section
       data-testid="schema-detail-actions"
       aria-label="Schema actions"
-      className="px-6 py-4"
+      className={className}
     >
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
-        Actions
-      </h2>
+      {withSectionChrome ? (
+        <>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+            Actions
+          </h2>
 
-      <div className="flex flex-wrap gap-2">
-        {/* --- CDM: Re-sync placeholder --- */}
-        {isCdm && (
-          <PlaceholderButton
-            label="Re-sync from GitHub"
-            tooltip="Re-sync available when backend is connected"
-            testId="action-resync"
-          />
-        )}
-
-        {/* --- Non-CDM actions --- */}
-        {!isCdm && (
-          <>
-            {/* Edit (json-schema only, not while editing) */}
-            {isJsonSchema && !isEditing && (
-              <Button
-                variant="secondary"
-                size="sm"
-                data-testid="action-edit"
-                onClick={onEdit}
-              >
-                Edit
-              </Button>
-            )}
-
-            {/* Auto-describe placeholder */}
-            <PlaceholderButton
-              label="Auto-describe fields"
-              tooltip="AI-generated field descriptions available in a future release"
-              testId="action-auto-describe"
-            />
-
-            {/* Sync to GitHub placeholder */}
-            <PlaceholderButton
-              label="Sync to GitHub"
-              tooltip="GitHub sync available when backend is connected"
-              testId="action-sync-github"
-            />
-
-            {/* Replace file (T-08) */}
-            <Button
-              variant="secondary"
-              size="sm"
-              data-testid="action-replace"
-              onClick={onReplace}
-            >
-              Replace file
-            </Button>
-
-            {/* Promote to Global (project-scoped only) */}
-            {isProjectScoped && (
-              <Button
-                variant="secondary"
-                size="sm"
-                data-testid="action-promote"
-                onClick={() => setShowPromoteConfirm(true)}
-              >
-                Promote to Global
-              </Button>
-            )}
-
-            {/* Remove */}
-            <Button
-              variant="danger"
-              size="sm"
-              data-testid="action-remove"
-              onClick={handleRemoveClick}
-            >
-              Remove
-            </Button>
-          </>
-        )}
-
-        {/* View Raw (all schemas) */}
-        <Button
-          variant="ghost"
-          size="sm"
-          data-testid="action-view-raw"
-          onClick={onViewRaw}
-        >
-          View Raw
-        </Button>
-      </div>
-
-      {/* ---- Promote confirmation ---- */}
-      <ConfirmDialog
-        open={showPromoteConfirm}
-        title="Promote schema to Global?"
-        message={
-          <span>
-            This will make the schema available to all projects. This action cannot be
-            undone.
-            {promoteError && (
-              <span
-                role="alert"
-                data-testid="promote-error"
-                className="mt-2 block text-red-400"
-              >
-                {promoteError}
-              </span>
-            )}
-          </span>
-        }
-        confirmLabel={isPromoting ? 'Promoting…' : 'Promote'}
-        cancelLabel="Cancel"
-        onConfirm={() => void handlePromoteConfirm()}
-        onCancel={() => {
-          setShowPromoteConfirm(false);
-          setPromoteError(null);
-        }}
-      />
+          {actionsContent}
+        </>
+      ) : actionsContent}
 
       {/* ---- Remove confirmation (no blockers) ---- */}
       <ConfirmDialog

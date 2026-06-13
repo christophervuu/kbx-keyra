@@ -12,9 +12,10 @@ This is a living document. Update it when the project structure changes. Do not 
 src/        Backend and shared source code
 ui/         Frontend source code (React / TypeScript / Vite)
 tests/      Test files
-scripts/    Local tooling/runner scripts
+scripts/    Local tooling/runner scripts (includes UI backend-only guardrail and no-browser-secret policy checks, FS-075 deterministic Phase 2 gate runner, FS-075 prompt eval runner for PR/release threshold modes, FS-091 cutover-readiness report runner, and FS-082 runtime bootstrap verification runbook)
 specs/      Product and DSL reference specifications
 forge/      Workflow artifacts only — no application code lives here
+.github/    CI workflow definitions (includes FS-075 Phase 2 acceptance gate workflow)
 docker-compose.test.yml  Persistence integration local stack (DynamoDB Local + LocalStack S3)
 template.yaml            AWS SAM template (Phase 1 infrastructure scaffold)
 samconfig.toml           AWS SAM deploy configuration environments
@@ -36,14 +37,25 @@ src/
     registry/         Function registration and lookup mechanism
     functions/        Built-in DSL function implementations (grouped by category)
   lambda/             AWS Lambda function handlers (current Phase 0 implementation)
-    ai/               AI lambdas (showcase slices)
+    ai/               AI lambdas (showcase + canonical Phase 2 slices)
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
+      smart-fix.ts    AI smart-fix lambda handler: rule-level diagnostic correction with context guardrails, stale apply guard metadata, and validation-aware suggestion response (FS-071 T-01)
+      validate-mappings.ts AI validate-mappings lambda handler: single-mapping AI quality review with backend-owned mapping/schema context assembly, optional bounded sample-data input (JSON/XML text <=1 MB), canonical advisory report parsing/enum enforcement, and normalized error envelopes (FS-072 T-01)
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
-    schema/           Schema ingestion/query lambdas (FS-056)
+    schema/           Schema ingestion/query + CDM integration lambdas (FS-056, FS-076)
       create-schema.ts  POST /schemas handler (FS-057 T-05)
+      update-schema.ts  PUT /schemas/:id handler for schema metadata/content updates used by Schema Detail save flow
+      add-schema-sample.ts POST /schemas/:id/samples handler for sample persistence + diff preview + confirmation-gated schema mutation (FS-090 T-06)
+      get-schema-sample.ts GET /schemas/:id/samples/:sampleId handler for raw/parsed sample payload retrieval
+      delete-schema-sample.ts DELETE /schemas/:id/samples/:sampleId handler for persisted sample deletion (metadata + payload blob)
       get-schema.ts     GET /schemas/:id handler (FS-057 T-05)
       list-schemas.ts   GET /schemas handler (FS-057 T-05)
+      list-cdm-schemas.ts GET /schemas/cdm handler for one-level CommonDataModels directory listing (FS-076 T-02)
+      link-cdm-schema.ts POST /schemas/cdm/link handler for CDM schema link + project attach with persisted source metadata (FS-076 T-03)
+      sync-all-cdm-schemas.ts POST /schemas/cdm/sync handler for recursive CDM bulk sync/import across subfolders with summary reporting and exclusion policy enforcement
+      sync-cdm-schema.ts POST/GET /schemas/:id/sync-cdm handler for explicit CDM re-sync and lightweight status-refresh sync-state computation (FS-076 T-04)
+      cdm-path.ts       Shared CDM path normalization/root-guard helpers for list/link handlers (FS-076 T-03)
       delete-schema.ts  DELETE /schemas/:id handler with reference guard (FS-057 T-05)
       ingest-schema.ts Ingestion entrypoint handler (inline + Step Functions delegation) (FS-056 T-06)
       query-schema-nodes.ts Query endpoint handler (POST /schemas/:id/query) for DynamoDB-backed substring search (FS-057 T-06)
@@ -75,12 +87,22 @@ src/
       save-version.ts   Backward-compatible shim exporting create-version handler
       index.ts          Mapping lambda barrel exports
     deployment/       Deployment policy lambdas (FS-064 T-02)
+      cdm-deploy-guard.ts Reusable CDM deploy-context validation guard for deploy/promote handlers (FS-079 T-01)
       deploy-mapping.ts POST /mappings/:mappingId/deploy handler (revision/version deploy with environment policy enforcement)
       promote-deployment.ts POST /mappings/:mappingId/promote handler (version-backed promotion only)
       rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)
+      runtime-deploy.ts Internal runtime POST /internal/deploy handler (FS-082 T-04) — validates runtime deploy payload, persists immutable runtime snapshot, updates active pointer, appends history
+      runtime-rollback.ts Internal runtime POST /internal/rollback handler (FS-082 T-04) — validates snapshot presence in runtime history, repoints active pointer, appends rollback event
       list-deployments.ts GET /mappings/:mappingId/deployments handler (optional environment filter)
       get-current-deployments.ts GET /mappings/:mappingId/deployments/current handler
+      runtime-relay.ts Shared runtime artifact relay module for control-plane deploy/promote (artifact identity/hash construction, payload-size guard, runtime relay client abstraction) (FS-081 T-03)
+      environment-config.ts Runtime environment configuration loader/validator (persisted settings canonical + env fallback), including endpoint/timeouts/retry policy schema (FS-083 T-02)
+      runtime-api-client.ts Typed runtime internal API client contracts (deploy/rollback/preview/status), requestId propagation, timeout handling, and error envelope normalization (FS-083 T-02)
+      orchestration-retry.ts Shared control-plane orchestration retry/reconciliation helper (retry/backoff/jitter, timeout status polling, and terminal status mapping) (FS-083 T-05)
       index.ts          Deployment lambda barrel exports
+    runtime/          Runtime execution/status lambdas (FS-082 T-05)
+      execute.ts        Internal runtime POST /internal/execute handler — resolves active snapshot from runtime-local DynamoDB/S3 only and executes mapping
+      status.ts         Internal runtime GET /internal/health and GET /internal/status/{mappingId} handler — reports readiness plus active snapshot/history summary
     shared/           Shared Lambda handler utilities (FS-057 T-01)
       index.ts         Shared lambda utilities barrel export
       types.ts         Shared API Gateway event/response types
@@ -100,6 +122,10 @@ src/
       prompt-renderer.ts Prompt template placeholder renderer
       model-client.ts   GitHub Models client wrapper (OpenAI SDK)
       output-parser.ts  Model output JSON parsing into AIResponse shape
+      error-normalization.ts Shared AI error normalization to canonical backend envelope semantics
+      routing.ts        Shared invocation profile and Tier 1/Tier 2 routing resolution (defaults, allowlisted overrides, registry fallback)
+      invocation-guards.ts Shared payload/prompt/profile validation helpers for invokeAI limit/contract enforcement
+      telemetry.ts      Shared AI invocation telemetry session + structured event emission helpers
       invoke-ai.ts      AI runtime orchestration entry point
     persistence/      Shared Phase 1 persistence contracts and client setup (FS-058 T-01)
       index.ts          Persistence barrel exports (types, clients, config)
@@ -111,9 +137,11 @@ src/
       mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate) with revision/version compatibility fields
       schema-metadata.ts SchemaMetadata table CRUD + status transition update operation
       schema-nodes.ts   SchemaNodes partition query/batch-write/delete operations with retry/backoff
+      sync-activity.ts  CDM re-sync activity logger — writes outcome to SyncActivity DynamoDB table (FS-077 T-05)
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
       deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory) with immutable snapshot writes (FS-064 T-01)
+      deployment-orchestrations.ts Control-plane orchestration persistence operations (create/get/updateStatus) for deploy/promote lifecycle transitions (FS-083 T-03)
       s3/               Shared S3 content helpers for schemas and mappings
         index.ts          S3 helper barrel exports
         schema-content.ts Schema original/processed content put/get/delete helpers
@@ -125,6 +153,9 @@ src/
     schema/           Schema ingestion shared contracts and utilities (FS-056 T-01)
       index.ts          Schema module barrel exports
       types.ts          Schema ingestion/query interfaces and unions
+      retriever.ts      Runtime schema retriever abstraction (`RAG_RETRIEVER`: dynamodb only after FS-091 T-08 cutover)
+      retrieval-parity.ts Shared Top-K parity metric helpers (Jaccard@K, NDCG@K delta) and gate evaluation utilities (FS-091 T-07)
+      cutover-readiness.ts Retrieval latency/quality gate evaluation helpers for FS-091 cutover decisions (p95 tier targets + acceptance-rate safety checks)
       constants.ts      Ingestion threshold and batch sizing constants
       embedding-text.ts Canonical embedding text generation utility
       parser/           Pure schema parsing module (JSON Schema + XSD) (FS-056 T-02)
@@ -132,19 +163,20 @@ src/
         parse-json-schema.ts JSON Schema parser → SchemaNode[]
         parse-xsd.ts      XSD parser → SchemaNode[]
         utils.ts          Shared parse result + node accumulation helpers
+      cdm/              CDM relative $ref dependency resolver (FS-077 T-02)
+        index.ts          CDM resolver barrel exports
+        dependency-resolver.ts Relative $ref resolver with folder allowlist, depth/cycle guards, and FETCH_FAILED/UNRESOLVED_REF/CYCLE_DETECTED errors
+      diff/             Schema node field-level diff utility (FS-077 T-04)
+        index.ts          Diff barrel export
+        diff-summary.ts   Pure computeSchemaDiff(): added/removed/modified via path + structural fingerprint (type, isArray, depth)
       dynamo/           DynamoDB metadata/node writer module (FS-056 T-04)
         index.ts          Dynamo writer barrel exports
-        metadata-writer.ts SchemaMetadata put/update/get operations
+        metadata-writer.ts SchemaMetadata put/update/get operations + updateSyncMetadata for CDM sync outcome fields (FS-077 T-05)
         node-writer.ts    SchemaNodes batch writer with retry/backoff
         node-reader.ts    SchemaNodes parent-path query helpers (parent chain + children)
       s3/               S3 schema content storage module (FS-056 T-03)
         index.ts          S3 storage barrel exports
         schema-storage.ts Original/processed schema S3 put/get helpers + domain errors
-      opensearch/       OpenSearch indexing module (FS-056 T-05)
-        index.ts          OpenSearch barrel exports
-        mapping.ts        Schema nodes index mapping definition
-        indexer.ts        Index ensure/bulk index/delete-by-query operations
-        query.ts          OpenSearch schema-node BM25 query module with filters
   # [planned — not yet implemented in this repository]
   # types/            Shared types across backend
 ```
@@ -207,16 +239,21 @@ ui/
           ReplaceFileDialog.tsx    Two-step dialog: confirm message → file picker (.json/.xsd) → parse → adapter.updateSchema → onReplaced callback; inline error on parse failure (FS-015 T-08)
           SchemaLibraryCard.tsx    Clickable card for a single schema in the library: name, origin badge (emoji+color), scope badge, field count, format, sync status indicator, project usage count with tooltip; keyboard nav + react-router navigation (FS-016 T-02)
           SchemaLibrarySearch.tsx  Controlled search input: placeholder, clear button, optional "Showing X of Y" count, aria-label (FS-016 T-03)
-          SchemaLibraryFiltersPanel.tsx  Multi-select filter toggles for origin/format/scope using pill-style ToggleButtons; fieldset/legend/aria-label groups (FS-016 T-03)
-          SchemaLibrarySortControl.tsx  Sort field <select> + direction toggle button; aria-label="Sort schemas" (FS-016 T-03)
+          SchemaLibraryFiltersPanel.tsx  Multi-select filter toggles for ownership/data-format/status using pill-style ToggleButtons; fieldset/legend/aria-label groups (FS-089 T-03)
+          SchemaLibrarySortControl.tsx  Explicit direction sort select (e.g., Name A-Z, Name Z-A); aria-label="Sort schemas" (FS-089 T-03)
+          SchemaLibraryViewToggle.tsx  Card/List icon toggle control with button-group accessibility (FS-089 T-03)
+          SchemaLibraryList.tsx  List/table renderer for Schema Library list mode with keyboard navigation to detail pages (FS-089 T-03)
+          SchemaLibraryListActions.tsx  Actions-cell renderer for list rows (currently View action) with row-click safety (FS-089 T-05)
+          SchemaStatusBadge.tsx  Shared schema status badge primitive (ready/processing/needs_review/error) reused across card/list renderers (FS-089 T-04)
           ActiveFilterChips.tsx    Renders active filter values as removable chips with × buttons; Clear all button; hidden when no filters active (FS-016 T-03)
           SchemaLibraryNoResults.tsx   Centered empty state shown when filters yield zero results; "Clear filters" button (FS-016 T-03)
           SchemaLibrarySkeleton.tsx    6-card animate-pulse skeleton grid; role="status" + sr-only "Loading schemas" (FS-016 T-04)
           SchemaLibraryEmptyState.tsx  Zero-schemas empty state: Database icon, "No schemas available" heading + subtext (FS-016 T-04)
-          SchemaLibraryPage.tsx        Assembled Schema Library page: wires useSchemaLibrary hook to search/filter/sort controls + card grid; handles loading/error/empty/no-results/loaded states (FS-016 T-04)
+          SchemaLibraryPage.tsx        Assembled Schema Library page: wires useSchemaLibrary hook to search/filter/sort controls + card/list toggle, with localStorage view-mode persistence (`keyra.schemas.viewMode`); handles loading/error/empty/no-results/loaded states (FS-089 T-03)
           MappingStatusIcon.tsx    Mapping status icon (mapped/unmapped/warning) with aria-labels
           SchemaDetailPage.tsx     Schema Detail feature page: metadata display, inline editing (non-CDM), edit mode tree controls, save/cancel toolbar, loading/error/not-found states (FS-015 T-02/T-04/T-05)
           SchemaGitStatus.tsx      Git/repository status section: upload-source "local only" notice, GitHub source card with repo/branch/path/SHA/timestamp, synced/not-synced/local-changes indicator (FS-015 T-03)
+          SchemaSamplePayloadsSection.tsx  Sample Payloads section for Schema Detail: sample list with inference provenance badge and add-sample flow actions (apply all, save-only, deferred review-one-by-one path) wired to add-schema-sample API (FS-090 T-07)
           SchemaUsageSection.tsx   Usage section: lists referencing projects (links to Project Overview) and mappings (links to Mapping Editor) with role badges; empty state; loading skeleton (FS-015 T-06)
           SchemaSearchInput.tsx    Search input with clear button (debounced, result count)
           SchemaTreeNodeIcon.tsx   Type→icon mapping component (color-coded Lucide icons)
@@ -233,6 +270,7 @@ ui/
             SchemaActions.test.tsx        Component tests (12 tests: CDM vs non-CDM visibility, Edit hidden while editing, placeholder tooltips, Promote flow, Remove blocked/confirm/delete) (FS-015 T-07)
             SchemaT08Features.test.tsx    Component tests: InferredSchemaBanner (4 tests), ViewRawModal (5 tests), ReplaceFileDialog (5 tests) (FS-015 T-08)
             SchemaLibraryCard.test.tsx   Component tests: name, origin badges (3 origins × color), scope badges, field count, format, sync status (5 variants), project count, click/Enter/Space navigation, tabIndex, aria-label, tooltip (FS-016 T-02)
+            SchemaLibraryList.test.tsx   Component tests: list columns, CDM badge/disambiguator, field/status formatting, actions, row navigation (FS-089 T-05)
             SchemaLibraryControls.test.tsx  Component tests: SchemaLibrarySearch (9), SchemaLibraryFiltersPanel (10), SchemaLibrarySortControl (8), ActiveFilterChips (10), SchemaLibraryNoResults (3) (FS-016 T-03)
             SchemaLibraryPage.test.tsx   Integration tests: data-testid, loading skeleton, error+retry, empty state, loaded cards, no-results, search/filter/sort interactions (FS-016 T-04)
         hooks/            Feature-specific React hooks
@@ -326,11 +364,12 @@ ui/
           MappingRow.tsx            Single table row: name link, source→target, rules, coverage%, filled status badge (AE-08), condensed "Not deployed" deploy badge (AE-07), deploy nav link (AE-14), Test Lab link (AE-17), duplicate/delete actions (FS-013 T-06, FS-050 T-04)
           MappingListSection.tsx    Mappings-first section (text-xl font-semibold heading), sortable table, RecentlyEditedCard (AE-09/AE-10), Create Mapping button, empty state with subtext CTA, inline delete confirmation (FS-013 T-06, FS-050 T-04)
           ProjectActionsSection.tsx Section D — primary actions (retired from page render in FS-050 T-02; actions absorbed into ProjectHeader; file retained for backward compat)
-          ProjectHeader.tsx         Consolidated project header: inline-editable h1 (InlineEditableText), metadata row (description/dates/tags), "Create Mapping" + "Add Schema" primary action buttons, OverflowMenu (Open Deployments / Project Settings / Duplicate / Export / Delete) (FS-050 T-02)
+          ProjectHeader.tsx         Consolidated project header: inline-editable h1 (InlineEditableText), metadata row (description/dates/tags), clickable summary-linked schema count trigger, "Create Mapping" + "Add Schema" primary action buttons, OverflowMenu (Open Deployments / Project Settings / Duplicate / Export / Delete) (FS-050 T-02, FS-086 T-02)
+          LinkedSchemasDialog.tsx   Lightweight linked-schemas modal/dialog opened from ProjectHeader summary trigger; compact schema rows (name/origin/format/field count/usage), Add Schema CTA, focus trap + Escape close + backdrop dismiss + focus return (FS-086 T-02)
           ProjectSummaryRow.tsx     Compact horizontal metrics row: mapping count, schema count, error count (red when >0), scaffold deployment placeholders with muted styling + aria-label, "View Deployments" link (FS-050 T-03)
-          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states; section order: Header → Summary Row → Mappings → Schemas (FS-050 T-02)
+          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states; default section order: Header → Mappings; linked schemas available via LinkedSchemasDialog trigger in header summary (FS-050 T-02, FS-086 T-01/T-02)
           CreateProjectPage.tsx     Create Project form: name/description/tags fields, slug derivation, createProject() call, navigate to new project on success (FS-013 T-09)
-          CreateMappingPage.tsx     Create Mapping 3-step wizard: name → source schema → target schema; skip option; createMapping() call; navigate to editor on success (FS-013 T-10)
+          CreateMappingPage.tsx     Create Mapping single-page setup workspace: Mapping Details (required name + optional business context), Source/Target schema cards with in-page add-schema actions, simple Schema Summary, Start From (blank/auto-map), validation-gated create, create-time auto-map orchestration with non-blocking failure notice and editor handoff (FS-088 T-01..T-07)
           SchemaUploadDialog.tsx    Modal dialog: file picker (.json/.xsd/.xml), format detection, field count, inferred warning, scope selection, createSchema() + addSchemaRef() on confirm; handles 202 ingesting response with polling UI (FS-013 T-11, FS-059 T-07)
           ProjectOverviewSkeleton.tsx  Animated pulse skeleton: header area + summary row + mappings table + schemas grid; role="status" + sr-only "Loading project..." (FS-013 T-13, FS-050 T-06 AE-15)
           ProjectErrorState.tsx     Error state: alert icon, "Failed to load project", optional error detail, Retry button (FS-013 T-13)
@@ -347,7 +386,7 @@ ui/
             ProjectActionsSection.test.tsx      Component tests (16 tests: button variants, disabled states, delete confirm counts, plural/singular, confirm/cancel callbacks, settings link route)
             ProjectOverviewPage.test.tsx        Component tests (30+ tests: AE-01–AE-06, AE-15, AE-16 layout checks, breadcrumb integration, overflow menu, section order)
             CreateProjectPage.test.tsx          Component tests (10 tests: fields, required indicator, validation, createProject call, navigation, cancel, submit error, tag parsing)
-            CreateMappingPage.test.tsx          Component tests (12 tests: step navigation, name validation, schema dropdowns, skip option, schema refs, navigate to editor, cancel, submit error)
+            CreateMappingPage.test.tsx          Component tests for FS-088 single-page behavior: section order/layout, required-field validation, schema card/summary rendering, in-page add-schema auto-select flows, Start From/CTA branching, blank/create-to-editor flow, auto-map create trigger path, and unsupported auto-map notice handling (FS-088 T-08)
             SchemaUploadDialog.test.tsx         Component tests (11 tests + 6 polling tests: open/closed, file input extensions, upload disabled before file, format badge, inferred warning, empty file error, FileReader error, createSchema+addSchemaRef, cancel, scope radios; 202 processing indicator, ready/error/timeout polling states) (FS-013 T-11, FS-059 T-07)
             ProjectStateComponents.test.tsx     Component tests (19 tests: AE-15 skeleton layout/role/sr-only/section testids/no-tab-bar, error state heading/detail/retry/role, not-found heading/message/link)
             ProjectSummaryRow.test.tsx          Component tests (11 tests: AE-05 counts, AE-18 neutral error styling, scaffold placeholders, deployments link)
@@ -458,8 +497,10 @@ ui/
           UnsavedDiffPanel.tsx         FS-040 T-05 collapsible per-field diff panel: trigger button with unsaved badge, expanded view shows last-saved vs current draft (syntax-highlighted), status badge (no-mapping/new/modified/removed/unchanged), "Revert to saved" action for modified/removed states
           UnsavedDiffPanel.test.tsx    FS-040 T-05 component tests (trigger, expand/collapse, status badges, revert button visibility, ARIA)
           ExplanationPanel.tsx         FS-041 inline AI explanation panel: success state (Lightbulb icon + explanation text + dismiss), error state (AlertTriangle icon + error message + Try again button); role=status/alert; aria-live=polite; data-testid=explanation-panel
+          AiSuggestionReviewPrimitives.tsx FS-074 shared AI suggestion review primitives: generated-state label copy and reusable current-vs-generated comparison block used across Suggest/SmartFix/Workspace cards
           SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
           SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
+          SmartFixInline.tsx          FS-071 inline Smart Fix panel: original/suggested expression review, explanation, validation diagnostics, explicit Accept/Edit/Dismiss actions, stale mismatch re-run CTA, retry/error states
           AutoMapWorkspace.tsx         FS-048 center-panel Auto-Map workspace shell with loading/error/empty/success states, sticky header integration, toolbar/confirmation/no-source slots, and completion banner
           WorkspaceHeader.tsx          FS-048 workspace header (section path, summary counters, relative refresh timestamp, Back to Editor)
           WorkspaceSuggestionCard.tsx  FS-048 enriched suggestion card: lifecycle badges (`suggested|accepted|edited|dismissed|stale`), expand/collapse, diagnostics, stale warning, per-item actions
@@ -471,11 +512,6 @@ ui/
           RefreshConfirmBanner.tsx     FS-048 inline confirmation banner for Refresh All with countdown auto-dismiss
           RefreshConfirmBanner.test.tsx FS-048 component tests for countdown, confirm/cancel, and alertdialog semantics
           AutoMapWorkspace.test.tsx    FS-048 component tests for workspace shell states, slot rendering, and completion behavior
-          AutoMapReviewDrawer.tsx      FS-046 legacy right-side review drawer retained but no longer composed by MappingEditor (retired in FS-048)
-          AutoMapReviewDrawer.test.tsx FS-046 component tests (all drawer states, bulk actions visibility, completion banner, summary badges, close/retry callbacks)
-          AutoMapReviewDrawer.integration.test.tsx FS-046 integration tests (TestHarness composing hook + drawer + cards; accept/dismiss/undo/bulk-accept flows; 16 tests)
-          SuggestionReviewCard.tsx     FS-046 individual suggestion card: target path, new/replace badge, expression comparison, confidence/validation badges, Accept/Edit/Dismiss actions, Undo dismiss
-          SuggestionReviewCard.test.tsx FS-046 component tests (badge variants, action callbacks, undo dismiss, accessibility)
           ObjectTemplateBuilder.tsx  Key-value pair editor for map() object template: add/remove pairs, key text inputs, ArgumentSlot value slots in array context (T-07)
           ObjectTemplateBuilder.test.tsx Component tests (6 tests: empty state, pair rendering, add field, key change, remove field, argument slots)
           RawDslEditor.tsx           Raw DSL textarea + overlay syntax-highlighting editor; bracket matching; error decoration overlay with wavy underlines + ErrorTooltip; aria-invalid; optional autocomplete integration via AutocompleteState prop (T-02, T-03, T-04)
@@ -489,6 +525,8 @@ ui/
           RuleForm.test.tsx          Component tests (14 tests: add/edit modes, validation, callbacks)
           RuleList.tsx               Rule list container (DnD reorder, CRUD state, multi-select, bulk actions, copy/paste, summary bar, keyboard nav, aria-activedescendant, empty/missing states)
           RuleList.test.tsx          Component tests (107 tests: rendering, CRUD, DnD reorder, move buttons, multi-select, bulk ops, copy/paste, announcements)
+          AiValidationPanel.tsx      FS-072 AI validation report panel for Rules view: advisory labeling, structured summary + issues (category/severity/recommendation), run/retry/reset actions, and issue-to-rule link/fallback rendering
+          AiValidationPanel.test.tsx FS-072 component tests for advisory distinction, canonical category/severity rendering, resolvable rule-link navigation, and unresolvable-reference fallback
           RuleRow.tsx                Individual rule row (checkbox-first tab order, drag handle, move up/down, target, expression, type badge, validation icon, edit/copy/delete, isFocused ring, id for aria-activedescendant)
           SourceFieldPicker.tsx      Schema field picker: search input + autocomplete, removable field pills, type indicators, multi-select, static value toggle with type dropdown (T-05); FS-052 T-02: removed TYPE_ICON, uses SourceFieldOptionRow + SourceFieldChipBadge, wired PreviewContext for test data
           SourceFieldPicker.test.tsx Component tests (15 tests: field mode, static mode, multi-select, remove, empty schema); FS-052 T-02: added type badge + test data tests (5 new tests)
@@ -575,16 +613,18 @@ ui/
           use-linked-debug-selection.test.ts  Hook unit tests (select, clear, isPathSelected, isRuleSelected, auto-clear on executing, multiple runs)
           use-server-preview.ts          Server-side preview hook (FS-037 T-02): wraps adapter.previewOnServer() with 10s timeout, Phase 0 offline detection (isAvailable), stable execute callback via ref pattern
           use-server-preview.test.ts     Hook unit tests (idle state, success, timeout, Phase 0 offline error, sticky isAvailable=false, generic error, sequential calls, adapter call args)
-          use-explain-rule.ts            FS-041 Explain Rule hook: manages async lifecycle for adapter.explainRule(); idle/loading/success/error state; AbortController cleanup on unmount + re-invocation; user-friendly error mapping (offline, rate-limit, network, unexpected-response, generic)
+          use-explain-rule.ts            FS-041 Explain Rule hook: manages async lifecycle for adapter.explainRule(); idle/loading/success/error state; AbortController cleanup on unmount + re-invocation; user-friendly error mapping (offline, rate-limit, network, unexpected-response, FEATURE_NOT_ENABLED passthrough, generic)
           use-explain-rule.test.ts       FS-041 hook unit tests (idle state, loading, success, error, dismiss, re-explain, abort on re-invocation, offline error, cleanup on unmount)
-          use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping
+          use-suggest-expression.ts      FS-042 Suggest Expression hook: async lifecycle state (`idle|inputting|loading|success|error`), openInput/generate/dismiss/reset actions, abort-on-reinvoke/unmount/reset, user-friendly error mapping with FEATURE_NOT_ENABLED passthrough
           use-suggest-expression.test.ts FS-042 hook unit tests (state transitions, offline/network/rate-limit mapping, abort semantics, unmount cleanup)
-          use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, and metadata
+          use-smart-fix.ts               FS-071 Smart Fix hook: async lifecycle state (`idle|loading|success-valid|success-invalid|stale-mismatch|error`), run/retry/rerunOnLatest/dismiss/reset actions, stale-mismatch classification, and non-mutation request handling
+          use-smart-fix.test.ts          FS-071 hook unit tests (valid/invalid/stale/error transitions, retry + rerun-on-latest behavior, and dismiss/failure non-mutation guarantees)
+          use-ai-validation.ts           FS-072 AI Validation hook: async lifecycle state (`idle|loading|success|error`), manual run/retry/reset actions, optional sampleData passthrough, abort-on-reinvoke/unmount/reset, and normalized error mapping
+          use-ai-validation.test.ts      FS-072 hook unit tests (success/failure transitions, retry/reset behavior, optional sampleData wiring, and in-flight abort/non-mutation semantics)
+          use-auto-map-workspace.ts      FS-048 workspace lifecycle hook: trigger/hydrate persisted suggestions, lifecycle transitions, refresh merge strategy, filtering, bulk actions, stale marking, metadata, and FEATURE_NOT_ENABLED passthrough
           use-auto-map-workspace.test.ts FS-048 hook unit tests for generation, hydration, lifecycle actions, refresh paths, filtering, and summary derivation
           use-suggestion-preview.ts      FS-048 lazy per-expression preview hook (debounced evaluateExpression, source-data guard, error isolation)
           use-suggestion-preview.test.ts FS-048 hook unit tests for debounce, source-data absence, successful evaluation, and error fallback
-          use-auto-map-review.ts         FS-046 legacy drawer review hook retained for compatibility; no longer used by MappingEditor composition
-          use-auto-map-review.test.ts    FS-046 legacy hook tests retained
           use-deployment-context.ts      Deployment context hook (FS-037 T-03): loads DeploymentContext via adapter, derives per-environment status map, isModeAvailable() gates comparison modes by deploy status, refresh(), Phase 0 error → all env modes unavailable
           use-deployment-context.test.ts Hook unit tests (load success, environmentStatus map, isModeAvailable per mode, Phase 0 error handling, current-vs-saved always available, refresh, all-deployed)
           use-environment-comparison.ts  Comparison orchestration hook (FS-037 T-04): two-sided parallel execution via Promise.allSettled, client-side (working/saved config) and server-side (direct adapter call with 10s timeout), stale-run cancellation via runId ref, diff via computeDiff(), canRun gating
@@ -665,14 +705,17 @@ ui/
       use-optimistic-mutation.ts Shared optimistic mutation utility: snapshot capture, optimistic apply, rollback on failure, mutation-id guard for stale completion safety, surfaced AppError state (FS-059 T-06)
       use-optimistic-mutation.test.ts Unit tests: success confirmation, rollback + error surfacing, latest-only rollback under rapid overlapping mutations (FS-059 T-06)
     lib/
-      api/                ApiAdapter interface + LocalStorageAdapter + HybridAdapter + AI API client
+      api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter + deprecated HybridAdapter + AI API client helpers
                           types.ts              ApiAdapter contract
                           local-storage-adapter.ts  Phase 0 localStorage implementation
-                          hybrid-adapter.ts     FS-041/FS-042 HybridAdapter: extends LocalStorageAdapter, overrides explainRule() and suggestExpression() to call backend via HTTP
-                          http-adapter.ts       FS-055 HTTP CRUD adapter: extends LocalStorageAdapter and overrides schema/mapping/version/project CRUD to route through httpRequest
+                          http-adapter.ts       FS-055/FS-065 HTTP adapter: extends LocalStorageAdapter; routes canonical backend CRUD + retained AI methods + schema query through httpRequest; deferred non-core methods throw FEATURE_NOT_ENABLED
                           http-adapter.test.ts  FS-055 unit tests for HttpAdapter CRUD endpoint mapping, void handling, and error propagation
-                          errors.ts             FS-055 API error types including AdapterMethodNotImplementedError (`code: NOT_IMPLEMENTED`, `retryable: false`)
-                          ai-api-client.ts      FS-041/FS-042 HTTP client functions for AI endpoints: explainRuleHttp(apiUrl, input) + suggestExpressionHttp(apiUrl, input); endpoint-specific timeout, envelope parsing, error mapping
+                          errors.ts             FS-055/FS-065 API error types including FeatureNotEnabledError (`code: FEATURE_NOT_ENABLED`, `retryable: false`) with deprecated compatibility alias
+                          ai-api-client.ts      FS-041/FS-042 legacy HTTP client helper functions for AI endpoints; retained for deprecated HybridAdapter bridge only during one-cycle migration freeze
+                          hybrid-adapter.ts     Deprecated retained adapter: extends LocalStorageAdapter and routes explain/suggest/autoMapSection through ai-api-client; dev-only warning on instantiation; not bootstrap-selected
+                          __tests__/            API helper/adapter compatibility tests
+                            ai-api-client.test.ts  Unit tests for legacy AI helper HTTP wrappers
+                            hybrid-adapter.test.ts  Deprecated-path tests asserting warning-on-instantiation and helper delegation behavior
                           http-client.ts        FS-055 reusable HTTP utility: typed fetch wrapper with timeout, envelope parsing, error normalization, and retry/backoff policy
                           http-client.test.ts   FS-055 unit tests for HTTP utility success/error/retry/timeout/backoff/toAppError compatibility
                           retry.ts              FS-059 reusable retryWithBackoff utility (exponential backoff, jitter, abort signal support)
@@ -742,6 +785,8 @@ tests/
     ai/               AI lambda handler tests
       explain-rule.test.ts  Tests for ai explain-rule lambda request validation and status mapping
       suggest-expression.test.ts Tests for ai suggest-expression lambda request validation, mapping, and status handling
+      smart-fix.test.ts     Tests for ai smart-fix lambda request validation, context guardrails, stale snapshot conflict handling, and validation-aware response shaping (FS-071 T-01)
+      validate-mappings.test.ts Tests for ai validate-mappings lambda request validation, V1 single-mapping enforcement, sample-data constraints, structured report shape/enum enforcement, and normalized failure mapping (FS-072 T-01)
       auto-map.test.ts      Tests for ai auto-map lambda request validation, AI status mapping, and parse-level rule validation enrichment
       fixtures/       Local runner fixtures for AI handler requests and assertions
         auto-map-event.json Single-event API Gateway fixture for local auto-map invocation
@@ -755,13 +800,21 @@ tests/
           invalid-missing-instruction/ Invalid request fixture missing instruction (400)
           invalid-empty-source-context/ Invalid request fixture with empty sourceContext (400)
     schema/           Schema lambda handler tests (FS-056)
+      add-schema-sample.test.ts Add-sample endpoint tests for format validation, diff response, save-only persistence, and explicit apply-all mutation gating (FS-090 T-06)
+      get-schema-sample.test.ts Sample payload read endpoint tests (raw+parsed return and 404 behavior)
+      delete-schema-sample.test.ts Sample payload delete endpoint tests (metadata+blob removal and 404 behavior)
       create-schema.test.ts CRUD create tests (ready vs ingesting + validation) (FS-057 T-05)
+      update-schema.test.ts PUT schema update tests (metadata/content update, validation, and service-error mapping)
       get-schema.test.ts CRUD get tests (content fetch + 404) (FS-057 T-05)
       list-schemas.test.ts CRUD list tests (multiple + empty) (FS-057 T-05)
+      list-cdm-schemas.test.ts CDM browse tests (root guard + one-level navigation + read-only GitHub usage) (FS-076 T-02)
+      link-cdm-schema.test.ts CDM link tests (metadata persistence, idempotent duplicate link, path validation, no write-path GitHub usage) (FS-076 T-03)
+      sync-all-cdm-schemas.test.ts CDM bulk sync tests (recursive traversal, summary payload, and missing-token service-unavailable guard)
+      sync-cdm-schema.test.ts CDM sync tests: full re-ingestion pipeline (AE-01), changed/unchanged/status-refresh/failure, diffSummary shape, node-write failure, ingestion exception, missing state machine ARN (FS-076 T-04 + FS-077 T-06)
       delete-schema.test.ts CRUD delete tests (204 + 409 references + 404) (FS-057 T-05)
-      ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, parse errors, and OpenSearch warning behavior
+      ingest-schema.test.ts Tests for inline ingestion path, threshold delegation, validation, and parse errors
       query-schema-nodes.test.ts Query endpoint tests for validation, schema existence, and 50-result cap (FS-057 T-06)
-      process-batch.test.ts Tests for per-batch S3 read + Dynamo/OpenSearch write behavior
+      process-batch.test.ts Tests for per-batch S3 read + Dynamo write behavior
       orchestration-tasks.test.ts Tests for parse chunking, aggregation totals, and error metadata updates
     project/          Project lambda handler tests (FS-057 T-02)
       create-project.test.ts Create project validation/201 response tests
@@ -782,8 +835,14 @@ tests/
       get-version.test.ts Get mapping version tests (200 + revision pointer + 404)
       create-version.test.ts Create mapping version tests (201 from latest revision)
       save-version.test.ts Save mapping version shim tests (delegates to create-version flow)
+      save-deploy-separation.test.ts Save/update path regression tests asserting Save != Deploy (no deploy/promote orchestration writes) (FS-083 T-03)
+      preview-mapping.test.ts Server preview handler tests (runtime environment routing, local active-artifact execution, provenance metadata, not-deployed behavior) (FS-081 T-05)
     deployment/       Deployment lambda handler tests (FS-064 T-02)
       deployment-handlers.test.ts Unit tests for deploy/promote/rollback/list/current handlers and policy/error behavior
+      runtime-environment-config.test.ts Unit tests for deployment environment config parsing/validation and runtime API client contract/error normalization (FS-083 T-02)
+      orchestration-retry.test.ts Unit tests for retry classifier/backoff behavior and timeout reconciliation via runtime status polling (FS-083 T-05)
+    runtime/          Runtime lambda handler tests (FS-082 T-05)
+      runtime-handlers.test.ts Unit tests for /internal/execute and /internal/health|status/{mappingId} behavior/contracts
     shared/           Shared lambda utility tests (FS-057 T-01)
       response.test.ts Response/error envelope and CORS header tests
       request.test.ts  Request body/path/query parsing tests
@@ -800,6 +859,9 @@ tests/
       model-client.test.ts Model client wrapper request/error handling tests
       output-parser.test.ts Output parser JSON/error normalization tests
       invoke-ai.test.ts invokeAI orchestration unit tests (mocked adapters)
+      routing.test.ts   AI routing profile tests (tier defaults, allowlisted overrides, registry fallback behavior)
+      invocation-guards.test.ts Invocation guard tests (payload/prompt contract validation)
+      telemetry.test.ts AI telemetry contract tests (start/success/failure event shape + invariants)
       integration.test.ts AI runtime integration test with local adapters + mocked model
       fixtures/       AI runtime test fixtures (local prompt JSON and DSL reference files)
         local-runtime/ Local-mode fixture files for integration test
@@ -808,19 +870,23 @@ tests/
           dsl-reference.md  DSL reference fixture content
     schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
       types.test.ts    Type contract tests and inline threshold env parsing tests
+      retriever.test.ts Runtime schema retriever mode parsing/routing/shadow non-fatal behavior tests (FS-091 T-01)
+      retrieval-parity.test.ts Unit tests for parity metrics and FS-091 Jaccard/NDCG gate evaluation
+      cutover-readiness.test.ts Unit tests for p95 tier latency gates, acceptance-rate safety gate, and overall go/no-go evaluation
       embedding-text.test.ts Embedding text formatting tests (AE-11, AE-12)
       parser/          Schema parser tests (FS-056 T-02)
         parse-json-schema.test.ts JSON Schema parser unit and performance tests
         parse-xsd.test.ts XSD parser unit tests
+      cdm/             CDM dependency resolver tests (FS-077 T-02)
+        dependency-resolver.test.ts $ref resolution, allowlist, cycle/depth/limit guards
+      diff/            Schema node diff summary tests (FS-077 T-04)
+        diff-summary.test.ts added/removed/modified classification, large-schema stability, deterministic ordering
       dynamo/          Schema DynamoDB writer tests (FS-056 T-04)
         metadata-writer.test.ts SchemaMetadata writer operation tests
         node-writer.test.ts SchemaNodes batch chunk/retry tests
         node-reader.test.ts SchemaNodes parent-path reader tests
       s3/              Schema S3 storage tests (FS-056 T-03)
         schema-storage.test.ts S3 key/content-type/error behavior with mocked client
-      opensearch/      Schema OpenSearch module tests (FS-056 T-05)
-        indexer.test.ts OpenSearch indexer mapping/bulk/delete behavior tests
-        query.test.ts   OpenSearch query construction/filter/limit tests
     persistence/      Persistence module tests (FS-058 T-01)
       types.test.ts    Type-compatibility and converter-shape tests
       clients.test.ts  AWS client initialization tests (region + endpoint overrides)
@@ -839,6 +905,10 @@ tests/
         deployment-snapshot.test.ts Deployment snapshot helper tests (put + returned key)
     deployment/       Deployment shared utility tests (FS-064 T-03)
       staleness.test.ts Staleness computation tests (revision/version current+stale, not-deployed, latestVersion edge case)
+  scripts/            Repository script/config policy tests
+    check-ui-ai-guardrails.test.ts Static policy test for path-based UI AI guardrail scanner
+    run-fs091-cutover-readiness.test.ts FS-091 cutover readiness report runner contract test (go/no-go + rollback trigger outputs)
+    ui-eslint-ai-guardrails.test.ts Static policy test for UI ESLint restricted-import guardrail declarations
   integration/        Integration and performance test suites (Vitest)
     lambda/            Backend API integration tests against DynamoDB Local (FS-057 T-07)
       fs-057-api.test.ts End-to-end CRUD + error-envelope acceptance coverage using handler invocation

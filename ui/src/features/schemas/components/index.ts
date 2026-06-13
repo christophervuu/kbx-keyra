@@ -13,6 +13,7 @@ export { SchemaTreeView } from './SchemaTreeView';
 export type { SchemaTreeViewHandle } from './SchemaTreeView';
 export { SchemaUsageSection } from './SchemaUsageSection';
 export type { SchemaUsageSectionProps } from './SchemaUsageSection';
+export { SchemaSamplePayloadsSection } from './SchemaSamplePayloadsSection';
 export { InferredSchemaBanner } from './InferredSchemaBanner';
 export type { InferredSchemaBannerProps } from './InferredSchemaBanner';
 export { ViewRawModal } from './ViewRawModal';
@@ -21,12 +22,20 @@ export { ReplaceFileDialog } from './ReplaceFileDialog';
 export type { ReplaceFileDialogProps } from './ReplaceFileDialog';
 export { SchemaLibraryCard } from './SchemaLibraryCard';
 export type { SchemaLibraryCardProps } from './SchemaLibraryCard';
+export { SchemaStatusBadge } from './SchemaStatusBadge';
+export type { SchemaStatusBadgeProps } from './SchemaStatusBadge';
 export { SchemaLibrarySearch } from './SchemaLibrarySearch';
 export type { SchemaLibrarySearchProps } from './SchemaLibrarySearch';
 export { SchemaLibraryFiltersPanel } from './SchemaLibraryFiltersPanel';
 export type { SchemaLibraryFiltersPanelProps } from './SchemaLibraryFiltersPanel';
 export { SchemaLibrarySortControl } from './SchemaLibrarySortControl';
 export type { SchemaLibrarySortControlProps } from './SchemaLibrarySortControl';
+export { SchemaLibraryViewToggle } from './SchemaLibraryViewToggle';
+export type { SchemaLibraryViewToggleProps } from './SchemaLibraryViewToggle';
+export { SchemaLibraryList } from './SchemaLibraryList';
+export type { SchemaLibraryListProps } from './SchemaLibraryList';
+export { SchemaLibraryListActions } from './SchemaLibraryListActions';
+export type { SchemaLibraryListActionsProps } from './SchemaLibraryListActions';
 export { ActiveFilterChips } from './ActiveFilterChips';
 export type { ActiveFilterChipsProps } from './ActiveFilterChips';
 export { SchemaLibraryNoResults } from './SchemaLibraryNoResults';
@@ -34,3 +43,8 @@ export type { SchemaLibraryNoResultsProps } from './SchemaLibraryNoResults';
 export { SchemaLibrarySkeleton } from './SchemaLibrarySkeleton';
 export { SchemaLibraryEmptyState } from './SchemaLibraryEmptyState';
 export { SchemaLibraryPage } from './SchemaLibraryPage';
+export {
+  SchemaSyncStatusBadge,
+  getSchemaOriginLabel,
+  normalizeSchemaSyncStatusForDisplay,
+} from './SchemaPresentationPrimitives';

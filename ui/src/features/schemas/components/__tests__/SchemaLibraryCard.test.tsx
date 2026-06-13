@@ -26,10 +26,12 @@ function makeItem(overrides: Partial<SchemaLibraryItem> = {}): SchemaLibraryItem
     schemaId: 'schema-abc',
     name: 'Customer Schema',
     description: 'Holds customer data',
-    origin: 'local',
-    scope: 'project',
+    origin: 'uploaded',
+    ownership: 'user',
+    dataFormat: 'JSON',
+    status: 'ready',
     format: 'json-schema',
-    displayFormat: 'JSON Schema',
+    displayFormat: 'JSON',
     fieldCount: 12,
     syncStatus: 'local',
     projectCount: 2,
@@ -72,19 +74,14 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByTestId('field-count')).toHaveTextContent('1 field');
   });
 
-  it('renders the display format', () => {
-    renderCard(makeItem({ displayFormat: 'JSON Schema' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('JSON Schema');
+  it('renders JSON data format', () => {
+    renderCard(makeItem({ dataFormat: 'JSON' }));
+    expect(screen.getByTestId('data-format')).toHaveTextContent('JSON');
   });
 
-  it('renders XSD format', () => {
-    renderCard(makeItem({ displayFormat: 'XSD', format: 'xsd' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('XSD');
-  });
-
-  it('renders Inferred format', () => {
-    renderCard(makeItem({ displayFormat: 'Inferred' }));
-    expect(screen.getByTestId('display-format')).toHaveTextContent('Inferred');
+  it('renders XML data format', () => {
+    renderCard(makeItem({ dataFormat: 'XML', format: 'xsd' }));
+    expect(screen.getByTestId('data-format')).toHaveTextContent('XML');
   });
 
   it('renders project count', () => {
@@ -116,68 +113,69 @@ describe('SchemaLibraryCard', () => {
   // Origin badges
   // -------------------------------------------------------------------------
 
-  it('renders CDM origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'cdm' }));
+  it('renders CDM badge only for CDM ownership', () => {
+    renderCard(makeItem({ origin: 'cdm', ownership: 'cdm' }));
     expect(screen.getByText('CDM')).toBeInTheDocument();
   });
 
-  it('renders Published origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'published' }));
-    expect(screen.getByText('Published')).toBeInTheDocument();
+  it('does not render origin badge for user-owned schemas', () => {
+    renderCard(makeItem({ origin: 'uploaded', ownership: 'user' }));
+    expect(screen.queryByText('Uploaded')).not.toBeInTheDocument();
   });
 
-  it('renders Local origin badge with correct text', () => {
-    renderCard(makeItem({ origin: 'local' }));
-    expect(screen.getByText('Local')).toBeInTheDocument();
-  });
-
-  it('renders Unknown origin badge for malformed origin values', () => {
+  it('falls back to Unknown label for malformed origin values', () => {
     renderCard(
       makeItem({
         origin: 'legacy-origin' as unknown as SchemaLibraryItem['origin'],
+        ownership: 'cdm',
       }),
     );
     expect(screen.getByText('Unknown')).toBeInTheDocument();
   });
 
-  it('CDM badge has purple styling', () => {
-    renderCard(makeItem({ origin: 'cdm' }));
+  it('CDM badge has schema-detail purple styling', () => {
+    renderCard(makeItem({ origin: 'cdm', ownership: 'cdm' }));
     const badge = screen.getByText('CDM').closest('span');
-    expect(badge?.className).toContain('bg-purple-100');
-    expect(badge?.className).toContain('text-purple-800');
+    expect(badge?.className).toContain('border-purple-700');
+    expect(badge?.className).toContain('bg-purple-900/40');
+    expect(badge?.className).toContain('text-purple-200');
   });
 
-  it('Published badge has blue styling', () => {
-    renderCard(makeItem({ origin: 'published' }));
-    const badge = screen.getByText('Published').closest('span');
+  it('Uploaded badge has blue styling', () => {
+    renderCard(makeItem({ origin: 'uploaded', ownership: 'cdm' }));
+    const badge = screen.getByText('Uploaded').closest('span');
     expect(badge?.className).toContain('bg-blue-100');
     expect(badge?.className).toContain('text-blue-800');
   });
 
-  it('Local badge has green styling', () => {
-    renderCard(makeItem({ origin: 'local' }));
-    const badge = screen.getByText('Local').closest('span');
-    expect(badge?.className).toContain('bg-green-100');
-    expect(badge?.className).toContain('text-green-800');
+  it('renders disambiguator when present', () => {
+    renderCard(makeItem({ disambiguator: 'KBXT · v1 · a1b2' }));
+    expect(screen.getByTestId('schema-disambiguator')).toHaveTextContent('KBXT · v1 · a1b2');
   });
 
   // -------------------------------------------------------------------------
-  // Scope badges
+  // Status + sync metadata
   // -------------------------------------------------------------------------
 
-  it('renders Global scope badge', () => {
-    renderCard(makeItem({ scope: 'global' }));
-    expect(screen.getByText('Global')).toBeInTheDocument();
+  it('renders ready status badge', () => {
+    renderCard(makeItem({ status: 'ready' }));
+    expect(screen.getByTestId('schema-status-ready')).toBeInTheDocument();
   });
 
-  it('renders Project-Level scope badge', () => {
-    renderCard(makeItem({ scope: 'project' }));
-    expect(screen.getByText('Project-Level')).toBeInTheDocument();
+  it('renders ready status badge when schema status is needs_review', () => {
+    renderCard(makeItem({ status: 'needs_review' }));
+    expect(screen.getByTestId('schema-status-ready')).toBeInTheDocument();
   });
 
-  // -------------------------------------------------------------------------
-  // Sync status
-  // -------------------------------------------------------------------------
+  it('renders processing status badge', () => {
+    renderCard(makeItem({ status: 'processing' }));
+    expect(screen.getByTestId('schema-status-processing')).toBeInTheDocument();
+  });
+
+  it('renders error status badge', () => {
+    renderCard(makeItem({ status: 'error' }));
+    expect(screen.getByTestId('schema-status-error')).toBeInTheDocument();
+  });
 
   it('renders synced indicator', () => {
     renderCard(makeItem({ syncStatus: 'synced' }));
@@ -185,24 +183,51 @@ describe('SchemaLibraryCard', () => {
     expect(screen.getByTestId('sync-status-synced')).toHaveTextContent('Synced');
   });
 
-  it('renders not-synced indicator', () => {
-    renderCard(makeItem({ syncStatus: 'not-synced' }));
-    expect(screen.getByTestId('sync-status-not-synced')).toBeInTheDocument();
+  it('renders update-available indicator', () => {
+    renderCard(makeItem({ syncStatus: 'update-available' }));
+    expect(screen.getByTestId('sync-status-update-available')).toBeInTheDocument();
+    expect(screen.getByText('Update available')).toBeInTheDocument();
   });
 
-  it('renders local-changes indicator', () => {
-    renderCard(makeItem({ syncStatus: 'local-changes' }));
-    expect(screen.getByTestId('sync-status-local-changes')).toBeInTheDocument();
+  it('renders sync-failed indicator', () => {
+    renderCard(makeItem({ syncStatus: 'sync-failed' }));
+    expect(screen.getByTestId('sync-status-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
-  it('renders inferred indicator', () => {
+  it('renders ready indicator for inferred sync status', () => {
     renderCard(makeItem({ syncStatus: 'inferred' }));
-    expect(screen.getByTestId('sync-status-inferred')).toBeInTheDocument();
+    expect(screen.getByTestId('sync-status-ready')).toBeInTheDocument();
   });
 
   it('renders no sync indicator for local (upload-only)', () => {
     renderCard(makeItem({ syncStatus: 'local' }));
     expect(screen.queryByTestId('sync-status-local')).not.toBeInTheDocument();
+  });
+
+  it('renders contextual zero-field copy for ready status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'ready' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected');
+  });
+
+  it('renders contextual zero-field copy for processing status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'processing' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected yet');
+  });
+
+  it('renders contextual zero-field copy for needs review status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'needs_review' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected yet');
+  });
+
+  it('renders contextual zero-field copy for error status', () => {
+    renderCard(makeItem({ fieldCount: 0, status: 'error' }));
+    expect(screen.getByTestId('field-count')).toHaveTextContent('No fields detected (error)');
+  });
+
+  it('renders updated date row', () => {
+    renderCard(makeItem({ updatedAt: '2026-05-10T00:00:00Z' }));
+    expect(screen.getByTestId('updated-at')).toHaveTextContent('Updated');
   });
 
   // -------------------------------------------------------------------------

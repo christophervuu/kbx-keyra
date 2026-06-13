@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -70,58 +70,66 @@ describe('SchemaLibrarySearch', () => {
 describe('SchemaLibraryFiltersPanel', () => {
   const noop = vi.fn();
   const defaultProps = {
-    origins: [] as Array<'cdm' | 'published' | 'local'>,
-    formats: [] as Array<'JSON Schema' | 'XSD' | 'Inferred'>,
-    scopes: [] as Array<'global' | 'project'>,
-    onToggleOrigin: noop,
-    onToggleFormat: noop,
-    onToggleScope: noop,
+    ownerships: [] as Array<'cdm' | 'user'>,
+    dataFormats: [] as Array<'JSON' | 'XML'>,
+    statuses: [] as Array<'ready' | 'processing' | 'error'>,
+    onToggleOwnership: noop,
+    onToggleDataFormat: noop,
+    onToggleStatus: noop,
   };
 
-  it('renders all three origin options', () => {
+  it('renders ownership options only', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
+    const ownershipGroup = screen.getByRole('group', { name: 'Filter by ownership' });
+    expect(ownershipGroup).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'CDM' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Published' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Local' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'User' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Global' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Published' })).not.toBeInTheDocument();
   });
 
-  it('renders all three format options', () => {
+  it('renders data format options only', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
-    expect(screen.getByRole('button', { name: 'JSON Schema' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'XSD' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Inferred' })).toBeInTheDocument();
+    const formatGroup = screen.getByRole('group', { name: 'Filter by data format' });
+    expect(formatGroup).toBeInTheDocument();
+    expect(within(formatGroup).getByRole('button', { name: 'JSON' })).toBeInTheDocument();
+    expect(within(formatGroup).getByRole('button', { name: 'XML' })).toBeInTheDocument();
   });
 
-  it('renders both scope options', () => {
+  it('renders status options', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
-    expect(screen.getByRole('button', { name: 'Global' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Project-Level' })).toBeInTheDocument();
+    const statusGroup = screen.getByRole('group', { name: 'Filter by status' });
+    expect(statusGroup).toBeInTheDocument();
+    expect(within(statusGroup).getByRole('button', { name: 'Ready' })).toBeInTheDocument();
+    expect(within(statusGroup).getByRole('button', { name: 'Processing' })).toBeInTheDocument();
+    expect(within(statusGroup).queryByRole('button', { name: 'Needs review' })).not.toBeInTheDocument();
+    expect(within(statusGroup).getByRole('button', { name: 'Error' })).toBeInTheDocument();
   });
 
-  it('calls onToggleOrigin when origin button clicked', async () => {
-    const onToggleOrigin = vi.fn();
-    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleOrigin={onToggleOrigin} />);
+  it('calls onToggleOwnership when ownership button clicked', async () => {
+    const onToggleOwnership = vi.fn();
+    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleOwnership={onToggleOwnership} />);
     await userEvent.click(screen.getByRole('button', { name: 'CDM' }));
-    expect(onToggleOrigin).toHaveBeenCalledWith('cdm');
+    expect(onToggleOwnership).toHaveBeenCalledWith('cdm');
   });
 
-  it('calls onToggleFormat when format button clicked', async () => {
-    const onToggleFormat = vi.fn();
-    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleFormat={onToggleFormat} />);
-    await userEvent.click(screen.getByRole('button', { name: 'XSD' }));
-    expect(onToggleFormat).toHaveBeenCalledWith('XSD');
+  it('calls onToggleDataFormat when format button clicked', async () => {
+    const onToggleDataFormat = vi.fn();
+    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleDataFormat={onToggleDataFormat} />);
+    await userEvent.click(screen.getByRole('button', { name: 'XML' }));
+    expect(onToggleDataFormat).toHaveBeenCalledWith('XML');
   });
 
-  it('calls onToggleScope when scope button clicked', async () => {
-    const onToggleScope = vi.fn();
-    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleScope={onToggleScope} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Global' }));
-    expect(onToggleScope).toHaveBeenCalledWith('global');
+  it('calls onToggleStatus when status button clicked', async () => {
+    const onToggleStatus = vi.fn();
+    render(<SchemaLibraryFiltersPanel {...defaultProps} onToggleStatus={onToggleStatus} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Error' }));
+    expect(onToggleStatus).toHaveBeenCalledWith('error');
   });
 
-  it('active origin button has aria-pressed=true', () => {
-    render(<SchemaLibraryFiltersPanel {...defaultProps} origins={['published']} />);
-    expect(screen.getByRole('button', { name: 'Published' })).toHaveAttribute(
+  it('active ownership button has aria-pressed=true', () => {
+    render(<SchemaLibraryFiltersPanel {...defaultProps} ownerships={['user']} />);
+    expect(screen.getByRole('button', { name: 'User' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -133,16 +141,16 @@ describe('SchemaLibraryFiltersPanel', () => {
   });
 
   it('active button has filled styling', () => {
-    render(<SchemaLibraryFiltersPanel {...defaultProps} formats={['XSD']} />);
-    const btn = screen.getByRole('button', { name: 'XSD' });
+    render(<SchemaLibraryFiltersPanel {...defaultProps} dataFormats={['XML']} />);
+    const btn = screen.getByRole('button', { name: 'XML' });
     expect(btn.className).toContain('bg-blue-600');
   });
 
   it('filter groups have aria-label', () => {
     render(<SchemaLibraryFiltersPanel {...defaultProps} />);
-    expect(screen.getByRole('group', { name: 'Filter by origin' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Filter by format' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Filter by scope' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Filter by ownership' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Filter by data format' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Filter by status' })).toBeInTheDocument();
   });
 });
 
@@ -154,54 +162,30 @@ describe('SchemaLibrarySortControl', () => {
   it('renders all four sort field options', () => {
     render(<SchemaLibrarySortControl field="name" direction="asc" onSort={vi.fn()} />);
     const select = screen.getByTestId('sort-field-select');
-    expect(select).toHaveValue('name');
-    expect(screen.getByRole('option', { name: 'Name' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Field Count' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Last Modified' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Origin' })).toBeInTheDocument();
+    expect(select).toHaveValue('name:asc');
+    expect(screen.getByRole('option', { name: 'Name A-Z' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Name Z-A' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Status Ready-Error' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Format JSON-XML' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Used by High-Low' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Updated Newest' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Updated Oldest' })).toBeInTheDocument();
   });
 
   it('select shows the current sort field', () => {
-    render(<SchemaLibrarySortControl field="fieldCount" direction="asc" onSort={vi.fn()} />);
-    expect(screen.getByTestId('sort-field-select')).toHaveValue('fieldCount');
+    render(<SchemaLibrarySortControl field="fieldCount" direction="desc" onSort={vi.fn()} />);
+    expect(screen.getByTestId('sort-field-select')).toHaveValue('fieldCount:desc');
   });
 
   it('calls onSort with new field when select changes', async () => {
     const onSort = vi.fn();
     render(<SchemaLibrarySortControl field="name" direction="asc" onSort={onSort} />);
-    await userEvent.selectOptions(screen.getByTestId('sort-field-select'), 'updatedAt');
-    expect(onSort).toHaveBeenCalledWith('updatedAt');
-  });
-
-  it('direction button shows ↑ for ascending', () => {
-    render(<SchemaLibrarySortControl field="name" direction="asc" onSort={vi.fn()} />);
-    expect(screen.getByTestId('sort-direction-button')).toHaveTextContent('↑');
-  });
-
-  it('direction button shows ↓ for descending', () => {
-    render(<SchemaLibrarySortControl field="name" direction="desc" onSort={vi.fn()} />);
-    expect(screen.getByTestId('sort-direction-button')).toHaveTextContent('↓');
-  });
-
-  it('direction button has ascending aria-label', () => {
-    render(<SchemaLibrarySortControl field="name" direction="asc" onSort={vi.fn()} />);
-    expect(screen.getByTestId('sort-direction-button')).toHaveAttribute(
-      'aria-label',
-      'Sort ascending',
-    );
-  });
-
-  it('clicking direction button calls onSort with current field (toggling direction)', async () => {
-    const onSort = vi.fn();
-    render(<SchemaLibrarySortControl field="name" direction="asc" onSort={onSort} />);
-    await userEvent.click(screen.getByTestId('sort-direction-button'));
-    expect(onSort).toHaveBeenCalledWith('name');
+    await userEvent.selectOptions(screen.getByTestId('sort-field-select'), 'name:desc');
+    expect(onSort).toHaveBeenCalledWith('name', 'desc');
   });
 
   it('has wrapper aria-label="Sort schemas"', () => {
     render(<SchemaLibrarySortControl field="name" direction="asc" onSort={vi.fn()} />);
-    expect(screen.getByRole('group', { hidden: true })).toBeFalsy; // fallback check
-    // The wrapper div has aria-label; verify it's present in DOM
     const wrapper = document.querySelector('[aria-label="Sort schemas"]');
     expect(wrapper).toBeInTheDocument();
   });
@@ -213,12 +197,12 @@ describe('SchemaLibrarySortControl', () => {
 
 describe('ActiveFilterChips', () => {
   const emptyProps = {
-    origins: [] as Array<'cdm' | 'published' | 'local'>,
-    formats: [] as Array<'JSON Schema' | 'XSD' | 'Inferred'>,
-    scopes: [] as Array<'global' | 'project'>,
-    onRemoveOrigin: vi.fn(),
-    onRemoveFormat: vi.fn(),
-    onRemoveScope: vi.fn(),
+    ownerships: [] as Array<'cdm' | 'user'>,
+    dataFormats: [] as Array<'JSON' | 'XML'>,
+    statuses: [] as Array<'ready' | 'processing' | 'error'>,
+    onRemoveOwnership: vi.fn(),
+    onRemoveDataFormat: vi.fn(),
+    onRemoveStatus: vi.fn(),
     onClearAll: vi.fn(),
   };
 
@@ -227,60 +211,53 @@ describe('ActiveFilterChips', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders chips for active origin filters', () => {
-    render(<ActiveFilterChips {...emptyProps} origins={['cdm', 'local']} />);
+  it('renders chips for active ownership filters', () => {
+    render(<ActiveFilterChips {...emptyProps} ownerships={['cdm', 'user']} />);
     const chips = screen.getAllByTestId('filter-chip');
     expect(chips).toHaveLength(2);
   });
 
-  it('renders chips for active format filters', () => {
-    render(<ActiveFilterChips {...emptyProps} formats={['XSD']} />);
-    expect(screen.getByTestId('filter-chip')).toHaveTextContent('XSD');
+  it('renders chips for active data format filters', () => {
+    render(<ActiveFilterChips {...emptyProps} dataFormats={['XML']} />);
+    expect(screen.getByTestId('filter-chip')).toHaveTextContent('XML');
   });
 
-  it('renders chips for active scope filters', () => {
-    render(<ActiveFilterChips {...emptyProps} scopes={['global']} />);
-    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Global');
+  it('renders chips for active status filters', () => {
+    render(<ActiveFilterChips {...emptyProps} statuses={['needs_review' as 'ready' | 'processing' | 'error']} />);
+    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Ready');
   });
 
-  it('renders "Project-Level" label for project scope', () => {
-    render(<ActiveFilterChips {...emptyProps} scopes={['project']} />);
-    expect(screen.getByTestId('filter-chip')).toHaveTextContent('Project-Level');
+  it('× button on ownership chip calls onRemoveOwnership', async () => {
+    const onRemoveOwnership = vi.fn();
+    render(<ActiveFilterChips {...emptyProps} ownerships={['cdm']} onRemoveOwnership={onRemoveOwnership} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove CDM filter' }));
+    expect(onRemoveOwnership).toHaveBeenCalledWith('cdm');
   });
 
-  it('× button on origin chip calls onRemoveOrigin', async () => {
-    const onRemoveOrigin = vi.fn();
-    render(<ActiveFilterChips {...emptyProps} origins={['cdm']} onRemoveOrigin={onRemoveOrigin} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Cdm filter' }));
-    expect(onRemoveOrigin).toHaveBeenCalledWith('cdm');
-  });
-
-  it('× button on format chip calls onRemoveFormat', async () => {
-    const onRemoveFormat = vi.fn();
+  it('× button on data format chip calls onRemoveDataFormat', async () => {
+    const onRemoveDataFormat = vi.fn();
     render(
-      <ActiveFilterChips {...emptyProps} formats={['JSON Schema']} onRemoveFormat={onRemoveFormat} />,
+      <ActiveFilterChips {...emptyProps} dataFormats={['JSON']} onRemoveDataFormat={onRemoveDataFormat} />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Remove JSON Schema filter' }));
-    expect(onRemoveFormat).toHaveBeenCalledWith('JSON Schema');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove JSON filter' }));
+    expect(onRemoveDataFormat).toHaveBeenCalledWith('JSON');
   });
 
-  it('× button on scope chip calls onRemoveScope', async () => {
-    const onRemoveScope = vi.fn();
-    render(
-      <ActiveFilterChips {...emptyProps} scopes={['global']} onRemoveScope={onRemoveScope} />,
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Global filter' }));
-    expect(onRemoveScope).toHaveBeenCalledWith('global');
+  it('× button on status chip calls onRemoveStatus', async () => {
+    const onRemoveStatus = vi.fn();
+    render(<ActiveFilterChips {...emptyProps} statuses={['error']} onRemoveStatus={onRemoveStatus} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Error filter' }));
+    expect(onRemoveStatus).toHaveBeenCalledWith('error');
   });
 
   it('shows Clear all button when filters are active', () => {
-    render(<ActiveFilterChips {...emptyProps} origins={['local']} />);
+    render(<ActiveFilterChips {...emptyProps} ownerships={['user']} />);
     expect(screen.getByTestId('clear-all-button')).toBeInTheDocument();
   });
 
   it('Clear all button calls onClearAll', async () => {
     const onClearAll = vi.fn();
-    render(<ActiveFilterChips {...emptyProps} origins={['local']} onClearAll={onClearAll} />);
+    render(<ActiveFilterChips {...emptyProps} ownerships={['user']} onClearAll={onClearAll} />);
     await userEvent.click(screen.getByTestId('clear-all-button'));
     expect(onClearAll).toHaveBeenCalled();
   });

@@ -20,7 +20,12 @@ const ORIGINAL_ENV = {
   MAPPING_VERSIONS_TABLE: getEnvStore().MAPPING_VERSIONS_TABLE,
   DEPLOYMENTS_TABLE: getEnvStore().DEPLOYMENTS_TABLE,
   DEPLOYMENT_CURRENT_TABLE: getEnvStore().DEPLOYMENT_CURRENT_TABLE,
+  ACTIVE_SNAPSHOTS_TABLE: getEnvStore().ACTIVE_SNAPSHOTS_TABLE,
+  DEPLOYMENT_HISTORY_TABLE: getEnvStore().DEPLOYMENT_HISTORY_TABLE,
   STORAGE_BUCKET: getEnvStore().STORAGE_BUCKET,
+  RUNTIME_ARTIFACTS_BUCKET: getEnvStore().RUNTIME_ARTIFACTS_BUCKET,
+  SNAPSHOTS_PREFIX: getEnvStore().SNAPSHOTS_PREFIX,
+  SCHEMAS_PREFIX: getEnvStore().SCHEMAS_PREFIX,
 };
 
 function setEnvValue(key: keyof typeof ORIGINAL_ENV, value: string | undefined): void {
@@ -52,7 +57,12 @@ describe('persistence config', () => {
     setEnvValue('MAPPING_VERSIONS_TABLE', ORIGINAL_ENV.MAPPING_VERSIONS_TABLE);
     setEnvValue('DEPLOYMENTS_TABLE', ORIGINAL_ENV.DEPLOYMENTS_TABLE);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', ORIGINAL_ENV.DEPLOYMENT_CURRENT_TABLE);
+    setEnvValue('ACTIVE_SNAPSHOTS_TABLE', ORIGINAL_ENV.ACTIVE_SNAPSHOTS_TABLE);
+    setEnvValue('DEPLOYMENT_HISTORY_TABLE', ORIGINAL_ENV.DEPLOYMENT_HISTORY_TABLE);
     setEnvValue('STORAGE_BUCKET', ORIGINAL_ENV.STORAGE_BUCKET);
+    setEnvValue('RUNTIME_ARTIFACTS_BUCKET', ORIGINAL_ENV.RUNTIME_ARTIFACTS_BUCKET);
+    setEnvValue('SNAPSHOTS_PREFIX', ORIGINAL_ENV.SNAPSHOTS_PREFIX);
+    setEnvValue('SCHEMAS_PREFIX', ORIGINAL_ENV.SCHEMAS_PREFIX);
   });
 
   it('builds S3 keys using expected patterns', async () => {
@@ -66,8 +76,12 @@ describe('persistence config', () => {
     expect(config.deploymentSnapshotKey('mapping-1', 'DEV', '2026-06-01T00:00:00.000Z')).toBe(
       'deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json',
     );
-    expect(config.deploymentHistorySortKey('QA', '2026-06-01T00:00:00.000Z')).toBe('QA#2026-06-01T00:00:00.000Z');
+    expect(config.deploymentHistorySortKey('PREPROD', '2026-06-01T00:00:00.000Z')).toBe('PREPROD#2026-06-01T00:00:00.000Z');
     expect(config.deploymentCurrentKey('mapping-1', 'PROD')).toBe('mapping-1#PROD');
+    expect(config.runtimeSnapshotKey('mapping-1', 'snapshot-1')).toBe('runtime/snapshots/mapping-1/snapshot-1.json');
+    expect(config.runtimeSchemaPayloadKey('mapping-1', 'snapshot-1', 'source', 'schema-1')).toBe(
+      'runtime/schemas/mapping-1/snapshot-1/source-schema-1.json',
+    );
   });
 
   it('uses defaults when table and bucket env vars are unset', async () => {
@@ -79,7 +93,12 @@ describe('persistence config', () => {
     setEnvValue('MAPPING_VERSIONS_TABLE', undefined);
     setEnvValue('DEPLOYMENTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', undefined);
+    setEnvValue('ACTIVE_SNAPSHOTS_TABLE', undefined);
+    setEnvValue('DEPLOYMENT_HISTORY_TABLE', undefined);
     setEnvValue('STORAGE_BUCKET', undefined);
+    setEnvValue('RUNTIME_ARTIFACTS_BUCKET', undefined);
+    setEnvValue('SNAPSHOTS_PREFIX', undefined);
+    setEnvValue('SCHEMAS_PREFIX', undefined);
     vi.resetModules();
 
     const config = await importConfigModule();
@@ -94,7 +113,14 @@ describe('persistence config', () => {
       deployments: 'keyra-deployments',
       deploymentCurrent: 'keyra-deployment-current',
     });
+    expect(config.RUNTIME_TABLE_NAMES).toEqual({
+      activeSnapshots: 'keyra-active-snapshots',
+      deploymentHistory: 'keyra-deployment-history',
+    });
     expect(config.BUCKET_NAME).toBe('keyra-storage');
+    expect(config.RUNTIME_BUCKET_NAME).toBe('keyra-storage');
+    expect(config.SNAPSHOTS_PREFIX).toBe('runtime/snapshots/');
+    expect(config.SCHEMAS_PREFIX).toBe('runtime/schemas/');
   });
 
   it('uses env overrides when provided', async () => {
@@ -106,7 +132,12 @@ describe('persistence config', () => {
     setEnvValue('MAPPING_VERSIONS_TABLE', 'mapping-versions-dev');
     setEnvValue('DEPLOYMENTS_TABLE', 'deployments-dev');
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', 'deployment-current-dev');
+    setEnvValue('ACTIVE_SNAPSHOTS_TABLE', 'active-snapshots-dev');
+    setEnvValue('DEPLOYMENT_HISTORY_TABLE', 'deployment-history-dev');
     setEnvValue('STORAGE_BUCKET', 'storage-dev');
+    setEnvValue('RUNTIME_ARTIFACTS_BUCKET', 'runtime-storage-dev');
+    setEnvValue('SNAPSHOTS_PREFIX', 'snapshots/dev/');
+    setEnvValue('SCHEMAS_PREFIX', 'schemas/dev/');
     vi.resetModules();
 
     const config = await importConfigModule();
@@ -121,6 +152,13 @@ describe('persistence config', () => {
       deployments: 'deployments-dev',
       deploymentCurrent: 'deployment-current-dev',
     });
+    expect(config.RUNTIME_TABLE_NAMES).toEqual({
+      activeSnapshots: 'active-snapshots-dev',
+      deploymentHistory: 'deployment-history-dev',
+    });
     expect(config.BUCKET_NAME).toBe('storage-dev');
+    expect(config.RUNTIME_BUCKET_NAME).toBe('runtime-storage-dev');
+    expect(config.SNAPSHOTS_PREFIX).toBe('snapshots/dev/');
+    expect(config.SCHEMAS_PREFIX).toBe('schemas/dev/');
   });
 });

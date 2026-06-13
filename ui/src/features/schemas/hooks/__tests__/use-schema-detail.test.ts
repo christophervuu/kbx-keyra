@@ -37,6 +37,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getSchema: vi.fn().mockResolvedValue(SCHEMA_DETAIL),
     createSchema: vi.fn(),
     updateSchema: vi.fn().mockResolvedValue({ ...SCHEMA_DETAIL.metadata }),
+    markSchemaReviewed: vi.fn().mockResolvedValue({ ...SCHEMA_DETAIL.metadata, status: 'ready' }),
     deleteSchema: vi.fn(),
     getMapping: vi.fn(),
     createMapping: vi.fn(),
@@ -112,6 +113,54 @@ describe('useSchemaDetail optimistic metadata updates', () => {
 
     expect(result.current.schema?.metadata.name).toBe('Schema Updated');
     expect(result.current.mutationError).toBeNull();
+  });
+
+  it('runs CDM status-only refresh on load and uses refreshed metadata sync status', async () => {
+    const cdmInitial: SchemaDetail = {
+      ...SCHEMA_DETAIL,
+      metadata: {
+        ...SCHEMA_DETAIL.metadata,
+        schemaId: 'schema-cdm-1',
+        origin: 'cdm',
+        source: {
+          type: 'github',
+          repo: 'KBXT/KBX-Canonicals',
+          branch: 'main',
+          path: 'JSONSchemas/CommonDataModels/Encounter.json',
+          commitSha: 'sha-old',
+        },
+        syncStatus: 'synced',
+      },
+    };
+    const cdmRefreshed: SchemaDetail = {
+      ...cdmInitial,
+      metadata: {
+        ...cdmInitial.metadata,
+        syncStatus: 'update-available',
+      },
+    };
+
+    const getSchema = vi
+      .fn()
+      .mockResolvedValueOnce(cdmInitial)
+      .mockResolvedValueOnce(cdmRefreshed);
+    const syncCdmSchema = vi.fn().mockResolvedValue({
+      schemaId: 'schema-cdm-1',
+      synced: false,
+      commitSha: 'sha-old',
+      message: 'Update available from CDM source.',
+    });
+
+    const adapter = createMockAdapter({ getSchema, syncCdmSchema });
+
+    const { result } = renderHook(() => useSchemaDetail('schema-cdm-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(syncCdmSchema).toHaveBeenCalledWith('schema-cdm-1', { statusOnly: true });
+    expect(result.current.schema?.metadata.syncStatus).toBe('update-available');
   });
 
   it('rolls back metadata and surfaces mutationError on failure', async () => {

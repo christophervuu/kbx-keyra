@@ -68,6 +68,15 @@ function mapRevisionToConfigVersion(config: MappingConfig, revision: number): Ma
   };
 }
 
+function normalizeOptionalBusinessContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 async function putMappingConfig(configS3Key: string, config: MappingConfig): Promise<void> {
   await s3Client.send(
     new PutObjectCommand({
@@ -144,6 +153,8 @@ export async function create(input: MappingCreateInput): Promise<MappingItem> {
   const mappingId = createMappingId();
   const timestamp = nowIso();
   const configS3Key = mappingConfigKey(mappingId);
+  const businessContext = normalizeOptionalBusinessContext(input.businessContext)
+    ?? normalizeOptionalBusinessContext(input.config.businessContext);
   const sourceSchemaId = input.config.sourceSchemaRef?.schemaId ?? input.sourceSchemaId;
   const targetSchemaId = input.config.targetSchemaRef?.schemaId ?? input.targetSchemaId;
   const ruleCount = input.ruleCount ?? input.config.rules.length;
@@ -152,6 +163,7 @@ export async function create(input: MappingCreateInput): Promise<MappingItem> {
     mappingId,
     projectId: input.projectId,
     name: input.name,
+    ...(businessContext ? { businessContext } : {}),
     revision: 1,
     version: 1,
     latestVersion: null,

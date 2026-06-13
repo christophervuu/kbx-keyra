@@ -1,5 +1,6 @@
-import { FlaskConical, Pencil, Copy, Trash2, Rocket } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Copy, FlaskConical, Rocket, Trash2 } from 'lucide-react';
+import type { MouseEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
 import type { MappingRowData } from '../types';
 
@@ -22,53 +23,28 @@ function MappingStatusBadge({ status }: { status: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Deploy badge — individual environment badge
-// ---------------------------------------------------------------------------
-
-const deployBadgeConfig: Record<DeployStatus, { cls: string; label: string }> = {
-  deployed: { cls: 'bg-green-900/60 text-green-300', label: 'Deployed' },
-  stale: { cls: 'bg-amber-900/60 text-amber-300', label: 'Stale' },
-  'not-deployed': { cls: 'bg-slate-700 text-slate-400', label: 'Not deployed' },
-  deploying: { cls: 'bg-blue-900/60 text-blue-300', label: 'Deploying' },
-};
-
-function EnvDeployBadge({
-  env,
-  status,
-  deployPath,
-}: {
-  env: string;
-  status: DeployStatus;
-  deployPath: string;
-}) {
-  const { cls, label } = deployBadgeConfig[status];
-  return (
-    <Link
-      to={deployPath}
-      aria-label={`${env}: ${label}`}
-      className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${cls}`}
-    >
-      {env}
-    </Link>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Deploy cells — condensed or individual (AE-07)
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true when all three deploy statuses are 'not-deployed'.
- * In that case we render a single condensed cell spanning 3 columns.
- */
-function allNotDeployed(
+function getDeploymentDisplay(
   devDeploy: DeployStatus,
   qaDeploy: DeployStatus,
   prodDeploy: DeployStatus,
-): boolean {
-  return devDeploy === 'not-deployed' && qaDeploy === 'not-deployed' && prodDeploy === 'not-deployed';
+): string {
+  // Deterministic precedence (T-03):
+  // 1) deploying in any env
+  // 2) stale in any env (normalized copy: Changed since deploy)
+  // 3) highest deployed env by PROD > QA > DEV
+  // 4) not deployed
+  if (devDeploy === 'deploying' || qaDeploy === 'deploying' || prodDeploy === 'deploying') {
+    return 'Deploying';
+  }
+  if (devDeploy === 'stale' || qaDeploy === 'stale' || prodDeploy === 'stale') {
+    return 'Changed since deploy';
+  }
+  if (prodDeploy === 'deployed') return 'PROD deployed';
+  if (qaDeploy === 'deployed') return 'QA deployed';
+  if (devDeploy === 'deployed') return 'DEV deployed';
+  return 'Not deployed';
 }
+
 
 // ---------------------------------------------------------------------------
 // Props
@@ -88,15 +64,17 @@ export interface MappingRowProps {
 /**
  * A single row in the mapping table.
  *
- * Deploy badge rendering (AE-07):
- * - All environments not-deployed → single condensed "Not deployed" cell (colSpan=3)
- * - Any environment differs → individual DEV/QA/PROD cells with status badges
+ * Deployment rendering (T-03):
+ * - single compact deployment column with deterministic display copy
  *
- * Status badge (AE-08): filled backgrounds (green/red/slate).
- * Test Lab action (AE-17): link to test-lab route.
- * Deploy badge click (AE-14): navigates to deployment page.
+ * Actions are icon-based and status-aware:
+ * - row click opens mapping editor
+ * - Deploy icon is always visible
+ * - Deploy icon is enabled for ready mappings and disabled otherwise
  */
 export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: MappingRowProps) {
+  const navigate = useNavigate();
+
   const editorPath = `/projects/${projectId}/mappings/${mapping.mappingId}`;
   const deployPath = `/projects/${projectId}/mappings/${mapping.mappingId}/deploy`;
   const testLabPath = `/projects/${projectId}/mappings/${mapping.mappingId}/test-lab`;
@@ -109,90 +87,73 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
       ? '—'
       : `${Math.round(mapping.coverage * 100)}%`;
 
-  const condensed = allNotDeployed(mapping.devDeploy, mapping.qaDeploy, mapping.prodDeploy);
+  const deploymentDisplay = getDeploymentDisplay(mapping.devDeploy, mapping.qaDeploy, mapping.prodDeploy);
+  const canDeploy = mapping.status === 'ready';
+
+  function handleRowClick(event: MouseEvent<HTMLTableRowElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest('a, button')) return;
+    navigate(editorPath);
+  }
 
   return (
-    <tr className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
+    <tr
+      className="cursor-pointer border-t border-slate-700 transition-colors hover:bg-slate-800/50"
+      onClick={handleRowClick}
+    >
       {/* Name */}
       <td className="px-3 py-2.5">
         <Link
           to={editorPath}
-          className="font-medium text-blue-400 hover:text-blue-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+          className="rounded font-medium text-blue-400 hover:text-blue-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           {mapping.name}
         </Link>
       </td>
 
       {/* Source → Target */}
-      <td className="px-3 py-2.5 text-sm text-slate-300">
-        <span>{sourceName}</span>
+      <td className="px-3 py-2.5 text-sm text-slate-300 whitespace-nowrap" data-testid="source-target-cell">
+        <span className="inline-block max-w-[220px] truncate align-bottom" title={sourceName}>{sourceName}</span>
         <span className="mx-1 text-slate-500">→</span>
-        <span>{targetName}</span>
+        <span className="inline-block max-w-[220px] truncate align-bottom" title={targetName}>{targetName}</span>
       </td>
 
       {/* Rules */}
-      <td className="px-3 py-2.5 text-right text-sm text-slate-300">
+      <td className="px-3 py-2.5 text-center text-sm text-slate-300" data-testid="rules-cell">
         {mapping.ruleCount}
       </td>
 
       {/* Coverage */}
-      <td className="px-3 py-2.5 text-right text-sm text-slate-300">
+      <td className="px-3 py-2.5 text-center text-sm text-slate-300" data-testid="coverage-cell">
         {coverageDisplay}
       </td>
 
       {/* Status */}
-      <td className="px-3 py-2.5">
+      <td className="px-3 py-2.5 text-center" data-testid="status-cell">
         <MappingStatusBadge status={mapping.status} />
       </td>
 
-      {/* Deploy columns — condensed or individual (AE-07) */}
-      {condensed ? (
-        <td
-          colSpan={3}
-          className="px-3 py-2.5"
-          data-testid="deploy-condensed"
+      {/* Deployment (single compact column) */}
+      <td className="px-3 py-2.5 text-center" data-testid="deployment-cell">
+        <Link
+          to={deployPath}
+          aria-label={`Deployment state: ${deploymentDisplay}`}
+          className="rounded whitespace-nowrap text-xs text-slate-300 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
-          <Link
-            to={deployPath}
-            aria-label="Not deployed — click to view deployment"
-            className="whitespace-nowrap text-xs text-slate-500 hover:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-          >
-            ○ Not deployed
-          </Link>
-        </td>
-      ) : (
-        <>
-          <td className="px-3 py-2.5">
-            <EnvDeployBadge env="DEV" status={mapping.devDeploy} deployPath={deployPath} />
-          </td>
-          <td className="px-3 py-2.5">
-            <EnvDeployBadge env="QA" status={mapping.qaDeploy} deployPath={deployPath} />
-          </td>
-          <td className="px-3 py-2.5">
-            <EnvDeployBadge env="PROD" status={mapping.prodDeploy} deployPath={deployPath} />
-          </td>
-        </>
-      )}
+          {deploymentDisplay}
+        </Link>
+      </td>
 
       {/* Last modified */}
-      <td className="px-3 py-2.5 text-sm text-slate-400">
+      <td className="px-3 py-2.5 text-center text-sm text-slate-400" data-testid="last-modified-cell">
         <time dateTime={mapping.updatedAt}>
           {new Date(mapping.updatedAt).toLocaleDateString()}
         </time>
       </td>
 
       {/* Actions */}
-      <td className="px-3 py-2.5">
+      <td className="px-3 py-2.5 whitespace-nowrap">
         <div className="flex items-center gap-1">
-          {/* Edit */}
-          <Link
-            to={editorPath}
-            aria-label={`Edit mapping ${mapping.name}`}
-            className="inline-flex items-center justify-center rounded px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          >
-            <Pencil size={13} aria-hidden="true" />
-          </Link>
-          {/* Test Lab (AE-17) */}
           <Link
             to={testLabPath}
             aria-label={`Test mapping ${mapping.name} in Test Lab`}
@@ -201,15 +162,22 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
           >
             <FlaskConical size={13} aria-hidden="true" />
           </Link>
-          {/* Deploy */}
-          <Link
-            to={deployPath}
-            aria-label={`Deploy mapping ${mapping.name}`}
-            className="inline-flex items-center justify-center rounded px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={canDeploy ? `Deploy mapping ${mapping.name}` : `Deploy mapping ${mapping.name} (disabled)`}
+            aria-disabled={!canDeploy}
+            disabled={!canDeploy}
+            onClick={() => {
+              if (!canDeploy) return;
+              navigate(deployPath);
+            }}
+            className={canDeploy ? 'text-blue-300 hover:text-blue-200' : 'cursor-not-allowed text-slate-600 hover:text-slate-600'}
           >
             <Rocket size={13} aria-hidden="true" />
-          </Link>
-          {/* Duplicate */}
+          </Button>
+
           <Button
             variant="ghost"
             size="sm"
@@ -218,7 +186,7 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
           >
             <Copy size={13} aria-hidden="true" />
           </Button>
-          {/* Delete */}
+
           <Button
             variant="ghost"
             size="sm"

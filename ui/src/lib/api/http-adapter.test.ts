@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AdapterMethodNotImplementedError } from './errors';
+import { FeatureNotEnabledError } from './errors';
 import { HttpAdapter } from './http-adapter';
 import { httpRequest } from './http-client';
 
 import { toAppError } from '@/lib/state/app-error';
 import type {
+  AutoMapSectionResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -118,7 +119,11 @@ describe('HttpAdapter (CRUD)', () => {
   });
 
   it('createMapping maps to POST /mappings with body', async () => {
-    const input: CreateMappingInput = { projectId: 'p-1', name: 'Map A' };
+    const input: CreateMappingInput = {
+      projectId: 'p-1',
+      name: 'Map A',
+      businessContext: 'Transform invoice payload into shipment orchestration output.',
+    };
     vi.mocked(httpRequest).mockResolvedValueOnce({ mappingId: 'm-1', name: 'Map A' });
     const adapter = new HttpAdapter(API_URL);
 
@@ -491,11 +496,11 @@ describe('HttpAdapter (CRUD)', () => {
     vi.mocked(httpRequest).mockResolvedValueOnce([]);
     const adapter = new HttpAdapter(API_URL);
 
-    await adapter.listDeployments('m-1', { environment: 'QA' });
+    await adapter.listDeployments('m-1', { environment: 'PREPROD' });
 
     expect(httpRequest).toHaveBeenCalledWith({
       baseUrl: API_URL,
-      path: '/mappings/m-1/deployments?environment=QA',
+      path: '/mappings/m-1/deployments?environment=PREPROD',
       method: 'GET',
     });
   });
@@ -513,15 +518,15 @@ describe('HttpAdapter (CRUD)', () => {
           configHash: 'dev-hash',
           configS3Key: 'deployments/m-1/DEV/2026-06-01T00:00:00.000Z.json',
         },
-        QA: {
-          mappingIdEnvironment: 'm-1#QA',
+        PREPROD: {
+          mappingIdEnvironment: 'm-1#PREPROD',
           mappingId: 'm-1',
-          environment: 'QA',
+          environment: 'PREPROD',
           deployedAt: '2026-06-01T00:00:00.000Z',
           sourceType: 'version',
           sourceNumber: 1,
-          configHash: 'qa-hash',
-          configS3Key: 'deployments/m-1/QA/2026-06-01T00:00:00.000Z.json',
+          configHash: 'preprod-hash',
+          configS3Key: 'deployments/m-1/PREPROD/2026-06-01T00:00:00.000Z.json',
         },
         PROD: null,
       })
@@ -553,8 +558,110 @@ describe('HttpAdapter (CRUD)', () => {
     });
 
     expect(result.DEV.status).toBe('stale');
+    expect(result.PREPROD.status).toBe('stale');
     expect(result.QA.status).toBe('stale');
     expect(result.PROD.status).toBe('not-deployed');
+  });
+
+  it('listCdmSchemas maps to GET /schemas/cdm', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listCdmSchemas();
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm',
+      method: 'GET',
+    });
+  });
+
+  it('listCdmSchemas maps optional path as encoded query parameter', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listCdmSchemas('JSONSchemas/CommonDataModels/Patient Folder');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm?path=JSONSchemas%2FCommonDataModels%2FPatient%20Folder',
+      method: 'GET',
+    });
+  });
+
+  it('linkCdmSchema maps to POST /schemas/cdm/link with projectId + path payload', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.linkCdmSchema({
+      projectId: 'project-1',
+      repo: 'KBXT/KBX-Canonicals',
+      branch: 'main',
+      path: 'JSONSchemas/CommonDataModels/Encounter.json',
+      name: 'Encounter',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm/link',
+      method: 'POST',
+      body: {
+        projectId: 'project-1',
+        path: 'JSONSchemas/CommonDataModels/Encounter.json',
+        branch: 'main',
+        name: 'Encounter',
+      },
+    });
+  });
+
+  it('syncAllCdmSchemas maps to POST /schemas/cdm/sync', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      rootPath: 'JSONSchemas-bundled/CommonDataModels',
+      scannedFiles: 14,
+      imported: 14,
+      skipped: 0,
+      failed: 0,
+      excludedSchemaIds: [],
+      errors: [],
+      message: 'CDM sync completed.',
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.syncAllCdmSchemas();
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/cdm/sync',
+      method: 'POST',
+      body: {},
+    });
+  });
+
+  it('syncCdmSchema maps to POST /schemas/:id/sync-cdm', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1', synced: true });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.syncCdmSchema('schema-cdm-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/schema-cdm-1/sync-cdm',
+      method: 'POST',
+      body: {},
+    });
+  });
+
+  it('syncCdmSchema maps statusOnly=true to GET /schemas/:id/sync-cdm', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ schemaId: 'schema-cdm-1', synced: false, message: 'Update available from CDM source.' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.syncCdmSchema('schema-cdm-1', { statusOnly: true });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/schema-cdm-1/sync-cdm',
+      method: 'GET',
+    });
   });
 
   it('propagates errors from httpRequest unchanged', async () => {
@@ -565,17 +672,47 @@ describe('HttpAdapter (CRUD)', () => {
     await expect(adapter.listProjects()).rejects.toBe(error);
   });
 
+  it('previewOnServer maps to POST /mappings/:id/preview', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      output: { ok: true },
+      diagnostics: [],
+      metadata: {
+        environment: 'DEV',
+        artifactId: 'artifact-dev-1',
+        artifactHash: 'hash-dev-1',
+        deployedAt: '2026-06-04T00:00:00.000Z',
+        sourceType: 'version',
+        sourceNumber: 1,
+        engineVersion: '1.0.0',
+      },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.previewOnServer('m-1', {
+      environment: 'DEV',
+      sourceData: { a: 1 },
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/preview',
+      method: 'POST',
+      body: {
+        environment: 'DEV',
+        sourceData: { a: 1 },
+      },
+    });
+  });
+
   it.each([
     ['listTemplates', (a: HttpAdapter) => a.listTemplates()],
     ['getTemplate', (a: HttpAdapter) => a.getTemplate('t-1')],
     ['getDeploymentContext', (a: HttpAdapter) => a.getDeploymentContext('m-1')],
     ['deploy', (a: HttpAdapter) => a.deploy('m-1', 'DEV')],
-    ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'QA')],
+    ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'PREPROD')],
     ['rollback', (a: HttpAdapter) => a.rollback('m-1', 'DEV', 1)],
     ['getDeploymentDiff', (a: HttpAdapter) => a.getDeploymentDiff('m-1', 1, 2)],
-    ['listCdmSchemas', (a: HttpAdapter) => a.listCdmSchemas()],
-    ['linkCdmSchema', (a: HttpAdapter) => a.linkCdmSchema({ repo: 'r', branch: 'b', path: '/a.xsd' })],
-    ['syncCdmSchema', (a: HttpAdapter) => a.syncCdmSchema('s-1')],
     ['listPublishedSchemas', (a: HttpAdapter) => a.listPublishedSchemas()],
     [
       'publishSchemaToGitHub',
@@ -585,39 +722,531 @@ describe('HttpAdapter (CRUD)', () => {
       'linkPublishedSchema',
       (a: HttpAdapter) => a.linkPublishedSchema({ repo: 'r', branch: 'b', path: '/a.xsd' }),
     ],
-    ['autoMap', (a: HttpAdapter) => a.autoMap({ projectId: 'p-1', mappingId: 'm-1' })],
-    ['autoMapSection', (a: HttpAdapter) => a.autoMapSection({ projectId: 'p-1', mappingId: 'm-1' })],
-    [
-      'suggestExpression',
-      (a: HttpAdapter) =>
-        a.suggestExpression({ instruction: 'copy', targetPath: 'Order.Total', targetType: 'string' }),
-    ],
-    ['explainRule', (a: HttpAdapter) => a.explainRule({ targetPath: 'Order.Total', expression: 'source("x")' })],
-    ['smartFix', (a: HttpAdapter) => a.smartFix({ mappingId: 'm-1', diagnostics: [] })],
-    ['validateMappings', (a: HttpAdapter) => a.validateMappings({ mappingIds: ['m-1'] })],
-    ['querySchemaNodes', (a: HttpAdapter) => a.querySchemaNodes('s-1', 'name')],
     ['listActivity', (a: HttpAdapter) => a.listActivity()],
-    [
-      'previewOnServer',
-      (a: HttpAdapter) => a.previewOnServer('m-1', { environment: 'DEV', sourceData: {} }),
-    ],
-  ])('%s throws AdapterMethodNotImplementedError', async (_methodName, invoke) => {
+  ])('%s throws FeatureNotEnabledError', async (_methodName, invoke) => {
     const adapter = new HttpAdapter(API_URL);
 
-    await expect(invoke(adapter)).rejects.toBeInstanceOf(AdapterMethodNotImplementedError);
+    await expect(invoke(adapter)).rejects.toBeInstanceOf(FeatureNotEnabledError);
     await expect(invoke(adapter)).rejects.toMatchObject({
-      code: 'NOT_IMPLEMENTED',
+      code: 'FEATURE_NOT_ENABLED',
       retryable: false,
     });
   });
 
-  it('toAppError compatibility for AdapterMethodNotImplementedError', () => {
-    const appError = toAppError(new AdapterMethodNotImplementedError('deploy'));
+  it('toAppError compatibility for FeatureNotEnabledError', () => {
+    const appError = toAppError(new FeatureNotEnabledError('deploy'));
 
     expect(appError).toMatchObject({
-      message: '"deploy" is not yet available in HTTP mode.',
-      code: 'NOT_IMPLEMENTED',
+      message: '"deploy" is not enabled in this mode.',
+      code: 'FEATURE_NOT_ENABLED',
       retryable: false,
+    });
+  });
+
+  it('autoMap maps to POST /ai/auto-map', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ rules: [], diagnostics: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.autoMap({ projectId: 'p-1', mappingId: 'm-1' });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: { projectId: 'p-1', mappingId: 'm-1' },
+    });
+  });
+
+  it('autoMap forwards additive scoped fields (visibleTargetPaths/sourceSchemaId/businessContext)', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ rules: [], diagnostics: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.autoMap({
+      projectId: 'p-1',
+      mappingId: 'm-1',
+      mode: 'section',
+      sectionPath: 'Order.Header',
+      sourceSchemaId: 'schema-source-1',
+      businessContext: 'Invoice to order mapping',
+      visibleTargetPaths: ['Order.Header.DocumentType', 'Order.Header.CurrencyCode'],
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        mode: 'section',
+        sectionPath: 'Order.Header',
+        sourceSchemaId: 'schema-source-1',
+        businessContext: 'Invoice to order mapping',
+        visibleTargetPaths: ['Order.Header.DocumentType', 'Order.Header.CurrencyCode'],
+      },
+    });
+  });
+
+  it('autoMap preserves optional diagnostics/warnings/retrievalMeta', async () => {
+    const payload = {
+      rules: [],
+      diagnostics: [],
+      warnings: ['Low confidence coverage'],
+      retrievalMeta: { source: 'opensearch', degraded: false },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.autoMap({ projectId: 'p-1', mappingId: 'm-1' })).resolves.toEqual(payload);
+  });
+
+  it('autoMapSection maps to POST /ai/auto-map', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ suggestions: [] });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.autoMapSection({
+      projectId: 'p-1',
+      mappingId: 'm-1',
+      sectionPath: 'Order.Header',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        sectionPath: 'Order.Header',
+      },
+    });
+  });
+
+  it('autoMapSection forwards mode and preserves retrieval/validation metadata', async () => {
+    const payload: AutoMapSectionResult = {
+      suggestions: [],
+      retrievalMeta: {
+        mode: 'whole',
+        noContext: true,
+        noContextReason: 'No relevant source context found for target scope',
+      },
+      validationMeta: {
+        validationPassCount: 0,
+        validationFailCount: 0,
+      },
+      dedupMeta: {
+        duplicatesCollapsed: 0,
+      },
+      scopeMeta: {
+        mode: 'whole',
+        visibleTargetPaths: ['Order.Header.DocumentType'],
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.autoMapSection({
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        mode: 'whole',
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        mode: 'whole',
+      },
+    });
+  });
+
+  it('suggestExpression maps to POST /ai/suggest-expression', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      expression: 'source("x")',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 8,
+        includedNodeCount: 8,
+        truncated: false,
+        approxTokenCount: 42,
+        byteLength: 240,
+      },
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.suggestExpression({
+      mappingId: 'm-1',
+      instruction: 'copy',
+      targetPath: 'Order.Total',
+      targetType: 'string',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/suggest-expression',
+      method: 'POST',
+      body: {
+        mappingId: 'm-1',
+        instruction: 'copy',
+        targetPath: 'Order.Total',
+        targetType: 'string',
+      },
+    });
+  });
+
+  it('suggestExpression preserves invalid validation payloads for review gating', async () => {
+    const payload = {
+      expression: 'concat(source("Invoice.Total"), source("Invoice.CurrencyCode"))',
+      explanation: 'Combines total and currency for display',
+      validation: {
+        valid: false,
+        diagnostics: [
+          {
+            code: 'TYPE_MISMATCH',
+            severity: 'error',
+            message: 'Expression returns string but target type is number',
+            path: 'Order.Total',
+          },
+        ],
+      },
+      readyToApply: false,
+      context: {
+        sourceNodeCount: 130,
+        includedNodeCount: 100,
+        truncated: true,
+        approxTokenCount: 7700,
+        byteLength: 64000,
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.suggestExpression({
+        mappingId: 'm-1',
+        instruction: 'format total with currency',
+        targetPath: 'Order.Total',
+        targetType: 'number',
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/suggest-expression',
+      method: 'POST',
+      body: {
+        mappingId: 'm-1',
+        instruction: 'format total with currency',
+        targetPath: 'Order.Total',
+        targetType: 'number',
+      },
+    });
+  });
+
+  it('suggestExpression preserves normalized app errors from httpRequest', async () => {
+    const normalizedError = Object.assign(new Error('Invalid request body'), {
+      code: 'VALIDATION_ERROR',
+      statusCode: 400,
+      retryable: false,
+    });
+    vi.mocked(httpRequest).mockRejectedValueOnce(normalizedError);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.suggestExpression({
+        mappingId: 'm-1',
+        instruction: 'copy amount',
+        targetPath: 'Order.Total',
+        targetType: 'number',
+      }),
+    ).rejects.toBe(normalizedError);
+  });
+
+  it('AE-01/AE-05: explainRule maps to POST /ai/explain-rule and preserves structured response', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      explanation: 'Maps source x to Order.Total.',
+      confidence: 'medium',
+      limitations: ['Assumes source field x exists.'],
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = { targetPath: 'Order.Total', expression: 'source("x")' };
+    const result = await adapter.explainRule(input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/explain-rule',
+      method: 'POST',
+      body: { targetPath: 'Order.Total', expression: 'source("x")' },
+    });
+    expect(result).toEqual({
+      explanation: 'Maps source x to Order.Total.',
+      confidence: 'medium',
+      limitations: ['Assumes source field x exists.'],
+    });
+  });
+
+  it('AE-03: explainRule call does not mutate caller input object', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ explanation: 'ok' });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = { targetPath: 'Order.Total', expression: 'source("x")' };
+    const before = JSON.parse(JSON.stringify(input)) as typeof input;
+
+    await adapter.explainRule(input);
+
+    expect(input).toEqual(before);
+  });
+
+  it('smartFix maps to POST /ai/smart-fix with rule-scoped request payload', async () => {
+    const payload = {
+      originalExpression: 'source("Invoice.Total")',
+      suggestedExpression: 'default(source("Invoice.Total"), 0)',
+      explanation: 'Defaults missing Invoice.Total to 0 to prevent null propagation.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      diagnosticsScopeApplied: 'all' as const,
+      context: {
+        truncated: false,
+        approxTokenCount: 312,
+        byteLength: 2012,
+        totalDiagnosticCount: 2,
+        includedDiagnosticCount: 2,
+        sourceNodeCount: 120,
+        includedSourceNodeCount: 56,
+        targetNodeCount: 80,
+        includedTargetNodeCount: 37,
+      },
+      applyGuard: {
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.smartFix({
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        targetType: 'number',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [
+          { code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch', path: 'Order.Total' },
+          { code: 'KEYRA-W003', severity: 'warning', message: 'Null propagated', path: 'Order.Total' },
+        ],
+        diagnosticScope: 'all',
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      }),
+    ).resolves.toEqual(payload);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/smart-fix',
+      method: 'POST',
+      body: {
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        targetType: 'number',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [
+          { code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch', path: 'Order.Total' },
+          { code: 'KEYRA-W003', severity: 'warning', message: 'Null propagated', path: 'Order.Total' },
+        ],
+        diagnosticScope: 'all',
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      },
+    });
+  });
+
+  it('smartFix preserves invalid suggestion responses for edit-to-valid gating', async () => {
+    const payload = {
+      originalExpression: 'source("Invoice.Total")',
+      suggestedExpression: 'concat(source("Invoice.Total"), "USD")',
+      explanation: 'Converts amount to a formatted currency string.',
+      validation: {
+        valid: false,
+        diagnostics: [
+          {
+            code: 'TYPE_MISMATCH',
+            severity: 'error',
+            message: 'Expression returns string but target type is number',
+            path: 'Order.Total',
+          },
+        ],
+      },
+      readyToApply: false,
+      diagnosticsScopeApplied: 'single' as const,
+      context: {
+        truncated: true,
+        approxTokenCount: 7900,
+        byteLength: 64000,
+        totalDiagnosticCount: 14,
+        includedDiagnosticCount: 8,
+        sourceNodeCount: 450,
+        includedSourceNodeCount: 120,
+        targetNodeCount: 310,
+        includedTargetNodeCount: 88,
+      },
+      applyGuard: {
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      },
+    };
+    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.smartFix({
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        targetType: 'number',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [
+          { code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch', path: 'Order.Total' },
+          { code: 'KEYRA-W003', severity: 'warning', message: 'Null propagated', path: 'Order.Total' },
+        ],
+        diagnosticScope: 'single',
+        selectedDiagnosticIndex: 0,
+        ruleVersion: 12,
+        ruleHash: 'fnv1a-91e713ad',
+      }),
+    ).resolves.toEqual(payload);
+  });
+
+  it('smartFix preserves stale mismatch errors for re-run gating', async () => {
+    const normalizedError = Object.assign(new Error('Rule snapshot is stale. Re-run fix on latest rule before applying.'), {
+      code: 'CONFLICT',
+      statusCode: 409,
+      retryable: false,
+    });
+    vi.mocked(httpRequest).mockRejectedValueOnce(normalizedError);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.smartFix({
+        mappingId: 'm-1',
+        ruleIndex: 0,
+        targetPath: 'Order.Total',
+        failingExpression: 'source("Invoice.Total")',
+        diagnostics: [{ code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch' }],
+      }),
+    ).rejects.toBe(normalizedError);
+  });
+
+  it.each([
+    [
+      'smartFix',
+      (adapter: HttpAdapter) =>
+        adapter.smartFix({
+          mappingId: 'm-1',
+          ruleIndex: 0,
+          targetPath: 'Order.Total',
+          failingExpression: 'source("Invoice.Total")',
+          diagnostics: [{ code: 'KEYRA-E005', severity: 'error', message: 'Type mismatch' }],
+        }),
+    ],
+    ['validateMappings', (adapter: HttpAdapter) => adapter.validateMappings({ mappingId: 'm-1' })],
+  ])('%s surfaces FEATURE_NOT_ENABLED when backend capability is gated', async (_method, invoke) => {
+    const featureGated = new FeatureNotEnabledError('gated');
+    vi.mocked(httpRequest).mockRejectedValueOnce(featureGated);
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(invoke(adapter)).rejects.toMatchObject({
+      code: 'FEATURE_NOT_ENABLED',
+      retryable: false,
+    });
+  });
+
+  it('validateMappings maps to POST /ai/validate-mappings', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      summary: {
+        totalIssues: 0,
+        bySeverity: { info: 0, warning: 0, error: 0 },
+        byCategory: { correctness: 0, completeness: 0, maintainability: 0, risk: 0 },
+      },
+      issues: [],
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.validateMappings({ mappingId: 'm-1' });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/validate-mappings',
+      method: 'POST',
+      body: { mappingId: 'm-1' },
+    });
+  });
+
+  it('validateMappings passes optional sampleData payload', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      summary: {
+        totalIssues: 1,
+        bySeverity: { info: 0, warning: 1, error: 0 },
+        byCategory: { correctness: 0, completeness: 1, maintainability: 0, risk: 0 },
+      },
+      issues: [
+        {
+          id: 'issue-1',
+          category: 'completeness',
+          severity: 'warning',
+          affectedRules: [{ ruleIndex: 0, targetPath: 'Order.Header.CurrencyCode' }],
+          description: 'Missing fallback behavior.',
+          recommendation: 'Add explicit fallback.',
+        },
+      ],
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.validateMappings({
+      mappingId: 'm-1',
+      sampleData: {
+        contentType: 'application/json',
+        content: '{"InvoiceCurrency":null}',
+      },
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/validate-mappings',
+      method: 'POST',
+      body: {
+        mappingId: 'm-1',
+        sampleData: {
+          contentType: 'application/json',
+          content: '{"InvoiceCurrency":null}',
+        },
+      },
+    });
+  });
+
+  it('querySchemaNodes maps to POST /schemas/:id/query', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.querySchemaNodes('s-1', 'postal');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/schemas/s-1/query',
+      method: 'POST',
+      body: { query: 'postal' },
     });
   });
 });

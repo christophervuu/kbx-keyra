@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
 
-import { useIngestionPolling } from '@/features/schemas/hooks/use-ingestion-polling';
-
-import { useAdapter } from '@/lib/api';
-import { Button } from '@/components/Button';
-import type { SchemaRef } from '@/lib/types/domain';
 import { detectSchemaFormat } from '../lib/detect-schema-format';
 import type { DetectedFormat } from '../lib/detect-schema-format';
-import { parseJsonSchema, parseXsd, parseInferredSchema } from '@/features/schemas';
+
+import { Button } from '@/components/Button';
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
+import { useIngestionPolling } from '@/features/schemas/hooks/use-ingestion-polling';
+import { useAdapter } from '@/lib/api';
+import type { SchemaRef } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,7 +20,7 @@ function stripExtension(filename: string): string {
 
 function formatLabel(fmt: DetectedFormat): string {
   switch (fmt) {
-    case 'json-schema': return 'JSON Schema';
+    case 'json-schema': return 'JSON';
     case 'xsd': return 'XSD';
     case 'sample-json': return 'Sample JSON';
     case 'sample-xml': return 'Sample XML';
@@ -35,8 +35,49 @@ function isInferred(fmt: DetectedFormat): boolean {
 function defaultPasteName(fmt: DetectedFormat): string {
   switch (fmt) {
     case 'json-schema': return 'Pasted JSON Schema';
+    case 'xsd': return 'Pasted XSD Schema';
     case 'sample-json': return 'Pasted Sample JSON';
+    case 'sample-xml': return 'Pasted Sample XML';
     default: return 'Pasted Schema';
+  }
+}
+
+function toCreateSchemaMetadata(fmt: DetectedFormat): {
+  format: 'json-schema' | 'xsd';
+  sourceKind: 'json_schema' | 'xsd' | 'inferred_from_json' | 'inferred_from_xml';
+  status: 'ready' | 'needs_review';
+  origin: 'uploaded' | 'inferred';
+} {
+  switch (fmt) {
+    case 'json-schema':
+      return {
+        format: 'json-schema',
+        sourceKind: 'json_schema',
+        status: 'ready',
+        origin: 'uploaded',
+      };
+    case 'xsd':
+      return {
+        format: 'xsd',
+        sourceKind: 'xsd',
+        status: 'ready',
+        origin: 'uploaded',
+      };
+    case 'sample-xml':
+      return {
+        format: 'xsd',
+        sourceKind: 'inferred_from_xml',
+        status: 'needs_review',
+        origin: 'inferred',
+      };
+    case 'sample-json':
+    default:
+      return {
+        format: 'json-schema',
+        sourceKind: 'inferred_from_json',
+        status: 'needs_review',
+        origin: 'inferred',
+      };
   }
 }
 
@@ -50,8 +91,6 @@ function getFocusable(container: HTMLElement): HTMLElement[] {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type SchemaScope = 'global' | 'project-level';
 
 type InputMode = 'file' | 'paste';
 
@@ -104,6 +143,7 @@ function parseContentInfo(
         detection.format === 'sample-json'
           ? JSON.stringify(detection.parsedContent)
           : text,
+        detection.format === 'sample-json' ? 'json' : 'xml',
       );
       fieldCount = parsed.nodes.length;
     }
@@ -208,7 +248,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   // Shared state
   const [schemaName, setSchemaName] = useState('');
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
-  const [scope, setScope] = useState<SchemaScope>('project-level');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -224,6 +263,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         clearTimeout(pasteDebounceRef.current);
         pasteDebounceRef.current = null;
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- dialog close must clear stale draft state before next open
       setInputMode('file');
       setFileInfo(null);
       setFileError(null);
@@ -232,7 +272,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       setPasteError(null);
       setSchemaName('');
       setNameManuallyEdited(false);
-      setScope('project-level');
       setUploading(false);
       setUploadError(null);
       polling.reset();
@@ -287,7 +326,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
   // File selection
   // -------------------------------------------------------------------------
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     setFileInfo(null);
     setFileError(null);
@@ -342,8 +381,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
       } else {
         setPasteError(result.error);
       }
-    } else if (result.info.format === 'xsd' || result.info.format === 'sample-xml') {
-      setPasteError('Could not determine format. Paste valid JSON Schema or sample JSON data.');
     } else {
       setPasteInfo(result.info);
       if (!nameManuallyEdited) {
@@ -368,7 +405,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     }
   }
 
-  function handlePasteTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+  function handlePasteTextChange(e: ChangeEvent<HTMLTextAreaElement>) {
     const text = e.target.value;
     setPasteText(text);
     // Clear previous analysis when content changes
@@ -424,14 +461,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
     setUploading(true);
 
     try {
-      const adapterFormat =
-        activeInfo.format === 'json-schema'
-          ? 'json-schema'
-          : activeInfo.format === 'xsd'
-            ? 'xsd'
-            : activeInfo.format === 'sample-xml'
-              ? 'xsd'
-              : 'json-schema'; // inferred sample data retains engine-compatible format
+      const mapped = toCreateSchemaMetadata(activeInfo.format);
 
       const content =
         activeInfo.format === 'xsd' || activeInfo.format === 'sample-xml'
@@ -442,23 +472,26 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
 
       const created = await adapter.createSchema({
         name: schemaName.trim(),
-        format: adapterFormat,
-        origin: scope === 'global' ? 'library' : 'local',
+        format: mapped.format,
+        origin: mapped.origin,
+        ownership: 'user',
+        readonly: false,
+        sourceKind: mapped.sourceKind,
+        status: mapped.status,
         content: content,
-        fieldCount: activeInfo.fieldCount,
         inferred: activeInfo.isInferredFlag,
         source: { type: 'upload' },
       });
 
       if (created.status === 'ingesting') {
         // 202 async ingestion path — start polling
-        const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
+        const ref: SchemaRef = { schemaId: created.schemaId, type: 'published' };
         pendingSchemaRefRef.current = ref;
         polling.startPolling(created.schemaId);
         // Don't close yet — wait for polling to resolve
       } else {
         // 201 immediate success path
-        const ref: SchemaRef = { schemaId: created.schemaId, type: 'local' };
+        const ref: SchemaRef = { schemaId: created.schemaId, type: 'published' };
         await onSchemaCreated(ref);
         onClose();
       }
@@ -603,7 +636,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
                 value={pasteText}
                 onChange={handlePasteTextChange}
                 onBlur={handlePasteBlur}
-                placeholder="Paste JSON Schema or sample JSON data..."
+                placeholder="Paste JSON Schema, XSD, sample JSON, or sample XML..."
                 rows={6}
                 className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-xs text-slate-300 placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 data-testid="paste-input"
@@ -642,37 +675,6 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
             data-testid="schema-name-input"
           />
         </div>
-
-        {/* Scope selection */}
-        <fieldset className="mb-4">
-          <legend className="mb-2 text-xs font-medium text-slate-400">Schema Scope</legend>
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="schema-scope"
-                value="global"
-                checked={scope === 'global'}
-                onChange={() => setScope('global')}
-                className="accent-blue-500"
-                data-testid="scope-global"
-              />
-              Global — available to all projects
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="schema-scope"
-                value="project-level"
-                checked={scope === 'project-level'}
-                onChange={() => setScope('project-level')}
-                className="accent-blue-500"
-                data-testid="scope-project-level"
-              />
-              Project-Level — only available in this project
-            </label>
-          </div>
-        </fieldset>
 
         {/* Polling: processing state */}
         {isPolling && (

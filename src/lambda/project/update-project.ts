@@ -7,6 +7,7 @@ import {
   notFound,
   parseBody,
   parsePathParam,
+  query,
   updateItem,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
@@ -23,6 +24,7 @@ interface ProjectRecord {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: string;
@@ -39,12 +41,19 @@ interface ProjectMetadata {
   readonly updatedAt: string;
 }
 
+interface MappingRecord {
+  readonly mappingId: string;
+  readonly sourceSchemaId?: string;
+  readonly targetSchemaId?: string;
+}
+
 function getEnvValue(key: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.[key];
 }
 
 const PROJECTS_TABLE = getEnvValue('PROJECTS_TABLE');
+const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
 
 function getProjectsTableOrThrow(): string {
   const table = PROJECTS_TABLE?.trim();
@@ -55,16 +64,54 @@ function getProjectsTableOrThrow(): string {
   return table;
 }
 
+function getMappingsTableOrThrow(): string {
+  const table = MAPPINGS_TABLE?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: MAPPINGS_TABLE');
+  }
+
+  return table;
+}
+
 function toProjectMetadata(project: ProjectRecord): ProjectMetadata {
+  const schemaCount = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds.length
+    : project.schemaRefs.length;
+
   return {
     projectId: project.projectId,
     name: project.name,
     description: project.description,
     slug: project.slug,
     mappingCount: 0,
-    schemaCount: project.schemaRefs.length,
+    schemaCount,
     updatedAt: project.updatedAt,
   };
+}
+
+function normalizeLinkedSchemaIds(input: { linkedSchemaIds?: unknown; schemaRefs?: readonly SchemaRef[] }): readonly string[] {
+  const values = Array.isArray(input.linkedSchemaIds)
+    ? input.linkedSchemaIds
+    : (input.schemaRefs ?? []).map((schemaRef) => schemaRef.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -95,20 +142,72 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ...(typeof body.description === 'string' ? { description: body.description } : {}),
       ...(typeof body.slug === 'string' ? { slug: body.slug } : {}),
       ...(Array.isArray(body.schemaRefs) ? { schemaRefs: body.schemaRefs as SchemaRef[] } : {}),
+      ...(Array.isArray(body.linkedSchemaIds)
+        ? { linkedSchemaIds: body.linkedSchemaIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '') }
+        : {}),
       ...(Array.isArray(body.tags) ? { tags: body.tags as string[] } : {}),
       updatedAt: new Date().toISOString(),
     };
+
+    const finalSchemaRefs = updated.schemaRefs ?? [];
+    const finalLinkedSchemaIds = normalizeLinkedSchemaIds({
+      linkedSchemaIds: updated.linkedSchemaIds,
+      schemaRefs: finalSchemaRefs,
+    });
+
+    const currentLinkedSchemaIds = normalizeLinkedSchemaIds({
+      linkedSchemaIds: existing.linkedSchemaIds,
+      schemaRefs: existing.schemaRefs,
+    });
+    const removedLinkedSchemaIds = currentLinkedSchemaIds.filter((id) => !finalLinkedSchemaIds.includes(id));
+
+    if (removedLinkedSchemaIds.length > 0) {
+      const mappings = await query<MappingRecord>({
+        TableName: getMappingsTableOrThrow(),
+        IndexName: 'projectId-index',
+        KeyConditionExpression: '#projectId = :projectId',
+        ExpressionAttributeNames: {
+          '#projectId': 'projectId',
+        },
+        ExpressionAttributeValues: {
+          ':projectId': projectId,
+        },
+      });
+
+      const dependentMappings = mappings
+        .filter((mapping) =>
+          removedLinkedSchemaIds.includes(mapping.sourceSchemaId ?? '')
+          || removedLinkedSchemaIds.includes(mapping.targetSchemaId ?? ''),
+        )
+        .map((mapping) => ({
+          mappingId: mapping.mappingId,
+          sourceSchemaId: mapping.sourceSchemaId,
+          targetSchemaId: mapping.targetSchemaId,
+        }));
+
+      if (dependentMappings.length > 0) {
+        return errorResponse(
+          ERROR_CODES.CONFLICT,
+          'Cannot unlink schema while mappings in this project still reference it',
+          409,
+          false,
+          undefined,
+          { dependentMappings },
+        );
+      }
+    }
 
     await updateItem({
       TableName: getProjectsTableOrThrow(),
       Key: { projectId },
       UpdateExpression:
-        'SET #name = :name, #description = :description, #slug = :slug, #schemaRefs = :schemaRefs, #tags = :tags, #updatedAt = :updatedAt',
+        'SET #name = :name, #description = :description, #slug = :slug, #schemaRefs = :schemaRefs, #linkedSchemaIds = :linkedSchemaIds, #tags = :tags, #updatedAt = :updatedAt',
       ExpressionAttributeNames: {
         '#name': 'name',
         '#description': 'description',
         '#slug': 'slug',
         '#schemaRefs': 'schemaRefs',
+        '#linkedSchemaIds': 'linkedSchemaIds',
         '#tags': 'tags',
         '#updatedAt': 'updatedAt',
       },
@@ -116,7 +215,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         ':name': updated.name,
         ':description': updated.description,
         ':slug': updated.slug,
-        ':schemaRefs': updated.schemaRefs,
+        ':schemaRefs': finalSchemaRefs,
+        ':linkedSchemaIds': finalLinkedSchemaIds,
         ':tags': updated.tags,
         ':updatedAt': updated.updatedAt,
       },

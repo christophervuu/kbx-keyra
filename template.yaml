@@ -3,6 +3,54 @@ Transform: AWS::Serverless-2016-10-31
 Description: KeyRa Phase 1 infrastructure scaffold (FS-062 T-01/T-04)
 
 Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - preprod
+      - prod
+    Description: Runtime bootstrap environment name (FS-082).
+
+  ServiceName:
+    Type: String
+    Default: keyra-runtime
+    Description: Runtime bootstrap service name used in resource naming.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues:
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 180
+      - 365
+    Description: CloudWatch LogGroup retention in days.
+
+  ArtifactsBucketName:
+    Type: String
+    Default: ''
+    Description: Optional explicit runtime artifacts bucket name override.
+
+  ApiStageName:
+    Type: String
+    Default: internal
+    Description: Stage name for runtime internal HttpApi.
+
+  SnapshotsPrefix:
+    Type: String
+    Default: runtime/snapshots/
+    Description: Prefix for immutable runtime snapshot objects.
+
+  SchemasPrefix:
+    Type: String
+    Default: runtime/schemas/
+    Description: Prefix for runtime-local schema payload objects.
+
   Stage:
     Type: String
     Default: dev
@@ -22,13 +70,40 @@ Parameters:
     Default: kbx-keyra-dev-local
     Description: Legacy scaffold parameter from T-01 (superseded by StorageBucket resource naming).
 
-  OpenSearchEndpoint:
+  PromptRegistryTableName:
     Type: String
-    Default: https://example-opensearch.local
-    Description: OpenSearch endpoint for schema-node indexing and query.
+    Default: integrations-keyra-promptregistry
+    Description: Prompt registry DynamoDB table used by shared AI runtime.
+
+  DslAssetBucketName:
+    Type: String
+    Default: integrations-keyra
+    Description: S3 bucket containing shared AI DSL reference assets.
+
+  DslAssetKey:
+    Type: String
+    Default: prompt-assets/dsl/keyra-dsl-reference.md
+    Description: S3 key for the shared AI DSL reference asset.
+
+  GitHubModelsEndpoint:
+    Type: String
+    Default: https://models.github.ai/inference
+    Description: GitHub Models endpoint used by AI runtime model client.
+
+  GitHubToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: GitHub token used by AI runtime model client.
+
+  AutoMapStepFunctionsArn:
+    Type: String
+    Default: ''
+    Description: Optional Step Functions ARN for auto-map large workload handoff.
 
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
+  HasArtifactsBucketName: !Not [!Equals [!Ref ArtifactsBucketName, '']]
 
 Globals:
   Function:
@@ -46,12 +121,12 @@ Globals:
         MAPPING_VERSIONS_TABLE: !Ref MappingVersionsTable
         DEPLOYMENTS_TABLE: !Ref DeploymentsTable
         DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
+        DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
         STORAGE_BUCKET: !Ref StorageBucket
         # Compatibility aliases used by existing handlers/tests.
         SCHEMAS_TABLE: !Ref SchemaMetadataTable
         CONTENT_BUCKET: !Ref StorageBucket
         SCHEMA_BUCKET: !Ref StorageBucket
-        OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
 
 Resources:
   ProjectsTable:
@@ -214,6 +289,20 @@ Resources:
         - AttributeName: mappingIdEnvironment
           KeyType: HASH
 
+  DeploymentOrchestrationsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: integrations-keyra-deployment-orchestrations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: orchestrationId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orchestrationId
+          KeyType: HASH
+
   StorageBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -247,6 +336,26 @@ Resources:
         AllowOrigin: "'*'"
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"
+
+  KeyraApiGatewayResponseDefault4xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref KeyraApi
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
+  KeyraApiGatewayResponseDefault5xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref KeyraApi
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
   CreateProjectFunction:
     Type: AWS::Serverless::Function
@@ -434,7 +543,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}
+            Path: /mappings/{mappingId}
             Method: get
 
   UpdateMappingFunction:
@@ -454,6 +563,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MappingRevisionsTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -461,7 +572,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}
+            Path: /mappings/{mappingId}
             Method: put
 
   DeleteMappingFunction:
@@ -488,7 +599,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}
+            Path: /mappings/{mappingId}
             Method: delete
 
   DuplicateMappingFunction:
@@ -515,7 +626,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/duplicate
+            Path: /mappings/{mappingId}/duplicate
             Method: post
 
   ListMappingsFunction:
@@ -565,7 +676,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/versions
+            Path: /mappings/{mappingId}/versions
             Method: get
 
   GetVersionFunction:
@@ -592,7 +703,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/versions/{version}
+            Path: /mappings/{mappingId}/versions/{version}
             Method: get
 
   SaveVersionFunction:
@@ -621,7 +732,39 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/versions
+            Path: /mappings/{mappingId}/versions
+            Method: post
+
+  PreviewMappingFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-previewmapping
+      CodeUri: .
+      Handler: src/lambda/mapping/preview-mapping.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/preview
             Method: post
 
   DeployMappingFunction:
@@ -649,6 +792,8 @@ Resources:
             TableName: !Ref DeploymentsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -656,7 +801,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/deploy
+            Path: /mappings/{mappingId}/deploy
             Method: post
 
   PromoteDeploymentFunction:
@@ -684,6 +829,8 @@ Resources:
             TableName: !Ref DeploymentsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -691,7 +838,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/promote
+            Path: /mappings/{mappingId}/promote
             Method: post
 
   RollbackDeploymentFunction:
@@ -719,6 +866,8 @@ Resources:
             TableName: !Ref DeploymentsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeploymentOrchestrationsTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
       Events:
@@ -726,7 +875,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/rollback
+            Path: /mappings/{mappingId}/rollback
             Method: post
 
   ListDeploymentsFunction:
@@ -753,7 +902,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/deployments
+            Path: /mappings/{mappingId}/deployments
             Method: get
 
   GetCurrentDeploymentsFunction:
@@ -780,8 +929,212 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref KeyraApi
-            Path: /mappings/{id}/deployments/current
+            Path: /mappings/{mappingId}/deployments/current
             Method: get
+
+  ExplainRuleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-explainrule
+      CodeUri: .
+      Handler: src/lambda/ai/explain-rule.handler
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/explain-rule
+            Method: post
+
+  SuggestExpressionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-suggestexpression
+      CodeUri: .
+      Handler: src/lambda/ai/suggest-expression.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/suggest-expression
+            Method: post
+
+  SmartFixFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-smartfix
+      CodeUri: .
+      Handler: src/lambda/ai/smart-fix.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/smart-fix
+            Method: post
+
+  ValidateMappingsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-validatemappings
+      CodeUri: .
+      Handler: src/lambda/ai/validate-mappings.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/validate-mappings
+            Method: post
+
+  AutoMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-automap
+      CodeUri: .
+      Handler: src/lambda/ai/auto-map.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          PROMPT_REGISTRY_TABLE: !Ref PromptRegistryTableName
+          DSL_ASSET_BUCKET: !Ref DslAssetBucketName
+          DSL_ASSET_KEY: !Ref DslAssetKey
+          GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
+          GITHUB_TOKEN: !Ref GitHubToken
+          AUTO_MAP_STEP_FUNCTIONS_ARN: !Ref AutoMapStepFunctionsArn
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptRegistryTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref DslAssetBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: '*'
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map
+            Method: post
 
   CreateSchemaFunction:
     Type: AWS::Serverless::Function
@@ -841,6 +1194,152 @@ Resources:
             Path: /schemas
             Method: get
 
+  ListCdmSchemasFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listcdmschemas
+      CodeUri: .
+      Handler: src/lambda/schema/list-cdm-schemas.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/cdm
+            Method: get
+
+  LinkCdmSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-linkcdmschema
+      CodeUri: .
+      Handler: src/lambda/schema/link-cdm-schema.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_REPO_ID: '1052821334'
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/cdm/link
+            Method: post
+
+  SyncAllCdmSchemasFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-syncallcdmschemas
+      CodeUri: .
+      Handler: src/lambda/schema/sync-all-cdm-schemas.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_REPO_ID: '1052821334'
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/cdm/sync
+            Method: post
+
+  SyncCdmSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-synccdmschema
+      CodeUri: .
+      Handler: src/lambda/schema/sync-cdm-schema.handler
+      Environment:
+        Variables:
+          CDM_REPO_OWNER: KBXT
+          CDM_REPO_NAME: KBX-Canonicals
+          CDM_REPO_BRANCH: main
+          CDM_REPO_ID: '1052821334'
+          CDM_ROOT_PATH: JSONSchemas-bundled/CommonDataModels
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiPostEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/sync-cdm
+            Method: post
+        ApiGetEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/sync-cdm
+            Method: get
+
   GetSchemaFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -867,6 +1366,121 @@ Resources:
             RestApiId: !Ref KeyraApi
             Path: /schemas/{id}
             Method: get
+
+  UpdateSchemaFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-updateschema
+      CodeUri: .
+      Handler: src/lambda/schema/update-schema.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}
+            Method: put
+
+  AddSchemaSampleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-addschemasample
+      CodeUri: .
+      Handler: src/lambda/schema/add-schema-sample.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaNodesTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/samples
+            Method: post
+
+  GetSchemaSampleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getschemasample
+      CodeUri: .
+      Handler: src/lambda/schema/get-schema-sample.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/samples/{sampleId}
+            Method: get
+
+  DeleteSchemaSampleFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-deleteschemasample
+      CodeUri: .
+      Handler: src/lambda/schema/delete-schema-sample.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SchemaMetadataTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /schemas/{id}/samples/{sampleId}
+            Method: delete
 
   DeleteSchemaFunction:
     Type: AWS::Serverless::Function
@@ -914,19 +1528,11 @@ Resources:
       CodeUri: .
       Handler: src/lambda/schema/query-schema-nodes.handler
       MemorySize: 512
-      Environment:
-        Variables:
-          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref SchemaMetadataTable
         - DynamoDBReadPolicy:
             TableName: !Ref SchemaNodesTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -966,10 +1572,6 @@ Resources:
               Action:
                 - states:StartExecution
               Resource: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:kbx-keyra-schema-ingestion'
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
       Events:
         ApiEvent:
           Type: Api
@@ -1001,11 +1603,6 @@ Resources:
             TableName: !Ref SchemaNodesTable
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
-        - Statement:
-            - Effect: Allow
-              Action:
-                - aoss:APIAccessAll
-              Resource: '*'
 
   OrchestrationTasksFunction:
     Type: AWS::Serverless::Function
@@ -1033,48 +1630,6 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
 
-  SchemaNodesEncryptionPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: kbx-keyra-sn-enc
-      Type: encryption
-      Description: Encryption policy for schema nodes collection.
-      Policy: >-
-        {"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"]}],"AWSOwnedKey":true}
-
-  SchemaNodesNetworkPolicy:
-    Type: AWS::OpenSearchServerless::SecurityPolicy
-    Properties:
-      Name: kbx-keyra-sn-net
-      Type: network
-      Description: Network policy allowing public access for Phase 1.
-      Policy: >-
-        [{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"]},{"ResourceType":"dashboard","Resource":["collection/integrations-keyra-schema-nodes"]}],"AllowFromPublic":true}]
-
-  SchemaNodesCollection:
-    Type: AWS::OpenSearchServerless::Collection
-    DependsOn:
-      - SchemaNodesEncryptionPolicy
-      - SchemaNodesNetworkPolicy
-    Properties:
-      Name: integrations-keyra-schema-nodes
-      Type: SEARCH
-      Description: Schema node index for keyword and structural queries.
-
-  SchemaNodesAccessPolicy:
-    Type: AWS::OpenSearchServerless::AccessPolicy
-    Properties:
-      Name: kbx-keyra-sn-acc
-      Type: data
-      Description: Data access policy for schema query/index Lambda roles.
-      Policy: !Sub
-        - >-
-          [{"Rules":[{"ResourceType":"collection","Resource":["collection/integrations-keyra-schema-nodes"],"Permission":["aoss:CreateCollectionItems","aoss:UpdateCollectionItems","aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/integrations-keyra-schema-nodes/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument"]}],"Principal":["${QuerySchemaNodesFunctionRoleArn}","${IngestSchemaFunctionRoleArn}","${ProcessBatchFunctionRoleArn}","${OrchestrationTasksFunctionRoleArn}"]}]
-        - QuerySchemaNodesFunctionRoleArn: !GetAtt QuerySchemaNodesFunctionRole.Arn
-          IngestSchemaFunctionRoleArn: !GetAtt IngestSchemaFunctionRole.Arn
-          ProcessBatchFunctionRoleArn: !GetAtt ProcessBatchFunctionRole.Arn
-          OrchestrationTasksFunctionRoleArn: !GetAtt OrchestrationTasksFunctionRole.Arn
-
   SchemaIngestionStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
@@ -1091,6 +1646,256 @@ Resources:
             FunctionName: !Ref OrchestrationTasksFunction
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
+
+  RuntimeBootstrapApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-api'
+      StageName: !Ref ApiStageName
+
+  RuntimeActiveSnapshotsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${EnvironmentName}-${ServiceName}-active-snapshots'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mappingId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mappingId
+          KeyType: HASH
+
+  RuntimeDeploymentHistoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${EnvironmentName}-${ServiceName}-deployment-history'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mappingId
+          AttributeType: S
+        - AttributeName: eventAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mappingId
+          KeyType: HASH
+        - AttributeName: eventAt
+          KeyType: RANGE
+
+  RuntimeArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If
+        - HasArtifactsBucketName
+        - !Ref ArtifactsBucketName
+        - !Sub '${EnvironmentName}-${ServiceName}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  RuntimeDeployHandlerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-deploy'
+      CodeUri: .
+      Handler: src/lambda/deployment/runtime-deploy.handler
+      Environment:
+        Variables:
+          ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
+          DEPLOYMENT_HISTORY_TABLE: !Ref RuntimeDeploymentHistoryTable
+          RUNTIME_ARTIFACTS_BUCKET: !Ref RuntimeArtifactsBucket
+          SNAPSHOTS_PREFIX: !Ref SnapshotsPrefix
+          SCHEMAS_PREFIX: !Ref SchemasPrefix
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RuntimeActiveSnapshotsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RuntimeDeploymentHistoryTable
+        - S3CrudPolicy:
+            BucketName: !Ref RuntimeArtifactsBucket
+      Events:
+        InternalDeploy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RuntimeBootstrapApi
+            Path: /internal/deploy
+            Method: post
+
+  RuntimeExecuteFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-execute'
+      CodeUri: .
+      Handler: src/lambda/runtime/execute.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
+          DEPLOYMENT_HISTORY_TABLE: !Ref RuntimeDeploymentHistoryTable
+          RUNTIME_ARTIFACTS_BUCKET: !Ref RuntimeArtifactsBucket
+          SNAPSHOTS_PREFIX: !Ref SnapshotsPrefix
+          SCHEMAS_PREFIX: !Ref SchemasPrefix
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RuntimeActiveSnapshotsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref RuntimeDeploymentHistoryTable
+        - S3ReadPolicy:
+            BucketName: !Ref RuntimeArtifactsBucket
+      Events:
+        InternalExecute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RuntimeBootstrapApi
+            Path: /internal/execute
+            Method: post
+
+  RuntimeStatusFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-status'
+      CodeUri: .
+      Handler: src/lambda/runtime/status.handler
+      Environment:
+        Variables:
+          ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
+          DEPLOYMENT_HISTORY_TABLE: !Ref RuntimeDeploymentHistoryTable
+          RUNTIME_ARTIFACTS_BUCKET: !Ref RuntimeArtifactsBucket
+          SNAPSHOTS_PREFIX: !Ref SnapshotsPrefix
+          SCHEMAS_PREFIX: !Ref SchemasPrefix
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RuntimeActiveSnapshotsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref RuntimeDeploymentHistoryTable
+        - S3ReadPolicy:
+            BucketName: !Ref RuntimeArtifactsBucket
+      Events:
+        InternalHealth:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RuntimeBootstrapApi
+            Path: /internal/health
+            Method: get
+        InternalStatus:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RuntimeBootstrapApi
+            Path: /internal/status/{mappingId}
+            Method: get
+
+  RuntimeRollbackHandlerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-${ServiceName}-rollback'
+      CodeUri: .
+      Handler: src/lambda/deployment/runtime-rollback.handler
+      Environment:
+        Variables:
+          ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
+          DEPLOYMENT_HISTORY_TABLE: !Ref RuntimeDeploymentHistoryTable
+          RUNTIME_ARTIFACTS_BUCKET: !Ref RuntimeArtifactsBucket
+          SNAPSHOTS_PREFIX: !Ref SnapshotsPrefix
+          SCHEMAS_PREFIX: !Ref SchemasPrefix
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RuntimeDeploymentHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RuntimeActiveSnapshotsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RuntimeDeploymentHistoryTable
+      Events:
+        InternalRollback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref RuntimeBootstrapApi
+            Path: /internal/rollback
+            Method: post
+
+  RuntimeDeployHandlerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EnvironmentName}-${ServiceName}-deploy'
+      RetentionInDays: !Ref LogRetentionDays
+
+  RuntimeExecuteLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EnvironmentName}-${ServiceName}-execute'
+      RetentionInDays: !Ref LogRetentionDays
+
+  RuntimeStatusLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EnvironmentName}-${ServiceName}-status'
+      RetentionInDays: !Ref LogRetentionDays
+
+  RuntimeRollbackLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EnvironmentName}-${ServiceName}-rollback'
+      RetentionInDays: !Ref LogRetentionDays
 
 # T-07 will add remaining resources in this section:
 
@@ -1139,6 +1944,34 @@ Outputs:
     Description: DeploymentCurrent table ARN.
     Value: !GetAtt DeploymentCurrentTable.Arn
 
-  OpenSearchCollectionEndpoint:
-    Description: OpenSearch Serverless collection endpoint.
-    Value: !GetAtt SchemaNodesCollection.CollectionEndpoint
+  RuntimeApiUrl:
+    Description: Runtime bootstrap internal HttpApi URL.
+    Value: !Sub 'https://${RuntimeBootstrapApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}'
+
+  RuntimeApiId:
+    Description: Runtime bootstrap internal HttpApi id.
+    Value: !Ref RuntimeBootstrapApi
+
+  ActiveSnapshotsTableName:
+    Description: Runtime active snapshots table name.
+    Value: !Ref RuntimeActiveSnapshotsTable
+
+  DeploymentHistoryTableName:
+    Description: Runtime deployment history table name.
+    Value: !Ref RuntimeDeploymentHistoryTable
+
+  RuntimeArtifactsBucketName:
+    Description: Runtime artifacts bucket name.
+    Value: !Ref RuntimeArtifactsBucket
+
+  DeployHandlerFunctionArn:
+    Description: Runtime deploy/rollback handler function ARN.
+    Value: !GetAtt RuntimeDeployHandlerFunction.Arn
+
+  RuntimeExecuteFunctionArn:
+    Description: Runtime execute function ARN.
+    Value: !GetAtt RuntimeExecuteFunction.Arn
+
+  StatusFunctionArn:
+    Description: Runtime status/health function ARN.
+    Value: !GetAtt RuntimeStatusFunction.Arn

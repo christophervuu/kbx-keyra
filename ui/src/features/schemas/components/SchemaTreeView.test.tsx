@@ -156,6 +156,24 @@ describe('SchemaTreeView', () => {
       render(<SchemaTreeView schema={AE01_SCHEMA} />);
       expect(screen.getByText('(2 fields)')).toBeInTheDocument();
     });
+
+    it('applies mapping-editor badge color classes by type', () => {
+      const schema = makeSchema([
+        makeNode({ path: 's', fieldName: 's', type: 'string' }),
+        makeNode({ path: 'n', fieldName: 'n', type: 'number' }),
+        makeNode({ path: 'b', fieldName: 'b', type: 'boolean' }),
+        makeNode({ path: 'a', fieldName: 'a', type: 'array', isArray: true }),
+        makeNode({ path: 'o', fieldName: 'o', type: 'object' }),
+      ]);
+
+      render(<SchemaTreeView schema={schema} />);
+
+      expect(screen.getByTestId('schema-node-type-label-s')).toHaveClass('bg-blue-900/60', 'text-blue-300');
+      expect(screen.getByTestId('schema-node-type-label-n')).toHaveClass('bg-green-900/60', 'text-green-300');
+      expect(screen.getByTestId('schema-node-type-label-b')).toHaveClass('bg-purple-900/60', 'text-purple-300');
+      expect(screen.getByTestId('schema-node-type-label-a')).toHaveClass('bg-amber-900/60', 'text-amber-300');
+      expect(screen.getByTestId('schema-node-type-label-o')).toHaveClass('bg-slate-700/80', 'text-slate-300');
+    });
   });
 
   describe('ARIA roles', () => {
@@ -185,20 +203,31 @@ describe('SchemaTreeView', () => {
     });
   });
 
-  describe('Type icons', () => {
-    it('renders distinct icons for different types', () => {
+  describe('Type labels', () => {
+    it('renders explicit type labels (STR/NUM/BOOL/ARR/OBJ/ANY/UNI/NULL)', () => {
       const schema = makeSchema([
-        makeNode({ path: 'a', fieldName: 'a', type: 'string' }),
-        makeNode({ path: 'b', fieldName: 'b', type: 'number' }),
-        makeNode({ path: 'c', fieldName: 'c', type: 'boolean' }),
-        makeNode({ path: 'd', fieldName: 'd', type: 'object' }),
-        makeNode({ path: 'e', fieldName: 'e', type: 'array', isArray: true }),
+        makeNode({ path: 's', fieldName: 's', type: 'string' }),
+        makeNode({ path: 'n', fieldName: 'n', type: 'number' }),
+        makeNode({ path: 'b', fieldName: 'b', type: 'boolean' }),
+        makeNode({ path: 'a', fieldName: 'a', type: 'array', isArray: true }),
+        makeNode({ path: 'o', fieldName: 'o', type: 'object' }),
+        makeNode({ path: 'u1', fieldName: 'u1', type: 'union', unionTypes: ['string', 'number'] }),
+        makeNode({ path: 'u2', fieldName: 'u2', type: 'union', unionTypes: ['string'] }),
+        makeNode({ path: 'x', fieldName: 'x', type: 'any' }),
+        makeNode({ path: 'z', fieldName: 'z', type: 'null' }),
       ]);
-      const { container } = render(<SchemaTreeView schema={schema} />);
-      // All icons are rendered as SVGs with aria-hidden
-      const icons = container.querySelectorAll('svg[aria-hidden="true"]');
-      // At least 5 type icons (one per node)
-      expect(icons.length).toBeGreaterThanOrEqual(5);
+
+      render(<SchemaTreeView schema={schema} />);
+
+      expect(screen.getByTestId('schema-node-type-label-s')).toHaveTextContent('STR');
+      expect(screen.getByTestId('schema-node-type-label-n')).toHaveTextContent('NUM');
+      expect(screen.getByTestId('schema-node-type-label-b')).toHaveTextContent('BOOL');
+      expect(screen.getByTestId('schema-node-type-label-a')).toHaveTextContent('ARR');
+      expect(screen.getByTestId('schema-node-type-label-o')).toHaveTextContent('OBJ');
+      expect(screen.getByTestId('schema-node-type-label-u1')).toHaveTextContent('UNI');
+      expect(screen.getByTestId('schema-node-type-label-u2')).toHaveTextContent('STR');
+      expect(screen.getByTestId('schema-node-type-label-x')).toHaveTextContent('ANY');
+      expect(screen.getByTestId('schema-node-type-label-z')).toHaveTextContent('NULL');
     });
   });
 
@@ -275,24 +304,19 @@ describe('SchemaTreeView', () => {
     });
   });
 
-  describe('Inferred schema banner', () => {
-    it('shows inferred warning banner when schema.inferred is true', () => {
+  describe('Inferred banner placement', () => {
+    it('does not render redundant inferred warning above tree search', () => {
       const schema = makeSchema(
         [makeNode({ path: 'x', fieldName: 'x', type: 'string' })],
         { inferred: true },
       );
       render(<SchemaTreeView schema={schema} />);
-      expect(screen.getByText('Schema inferred from sample data')).toBeInTheDocument();
-    });
-
-    it('does not show banner when schema.inferred is false', () => {
-      render(<SchemaTreeView schema={AE01_SCHEMA} />);
       expect(screen.queryByText('Schema inferred from sample data')).not.toBeInTheDocument();
     });
   });
 
   describe('Union type indicator', () => {
-    it('shows union member types inline', () => {
+    it('shows union member types inline for multi-type unions only', () => {
       const schema = makeSchema([
         makeNode({
           path: 'value',
@@ -300,9 +324,16 @@ describe('SchemaTreeView', () => {
           type: 'union',
           unionTypes: ['string', 'number'],
         }),
+        makeNode({
+          path: 'value2',
+          fieldName: 'value2',
+          type: 'union',
+          unionTypes: ['string'],
+        }),
       ]);
       render(<SchemaTreeView schema={schema} />);
       expect(screen.getByText('(string | number)')).toBeInTheDocument();
+      expect(screen.queryByText('(string)')).not.toBeInTheDocument();
     });
   });
 
@@ -561,15 +592,17 @@ describe('SchemaTreeView', () => {
       );
     });
 
-    it('visually highlights the selected node', () => {
+    it('visually highlights the selected node across full row width', () => {
       render(<SchemaTreeView schema={AE01_SCHEMA} />);
 
       const treeitems = screen.getAllByRole('treeitem');
       const nameItem = treeitems.find((el) => el.textContent?.includes('name') && !el.textContent?.includes('address'));
       fireEvent.click(nameItem!);
 
-      // After click, should have the selected styling class
+      // After click, should have selection + full-width row styling
       expect(nameItem).toHaveAttribute('aria-selected', 'true');
+      expect(nameItem).toHaveClass('w-full');
+      expect(nameItem).toHaveClass('bg-blue-950/60');
     });
 
     it('sets aria-selected="true" on selected node', () => {
@@ -767,9 +800,30 @@ describe('SchemaTreeView', () => {
       expect(screen.getByRole('button', { name: /collapse all/i })).toBeInTheDocument();
     });
 
-    it('renders expand to depth selector', () => {
+    it('does not render expand to depth selector', () => {
       render(<SchemaTreeView schema={NESTED_SCHEMA} />);
-      expect(screen.getByLabelText('Expand to depth')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Expand to depth')).not.toBeInTheDocument();
+    });
+
+    it('does not render Show issues only toggle', () => {
+      render(<SchemaTreeView schema={NESTED_SCHEMA} />);
+      expect(screen.queryByTestId('schema-tree-show-issues-toggle')).not.toBeInTheDocument();
+    });
+
+    it('orders controls as search, expand, collapse', () => {
+      render(<SchemaTreeView schema={NESTED_SCHEMA} />);
+
+      const controlsRow = screen.getByTestId('schema-tree-controls-row');
+      const searchInput = screen.getByLabelText('Search schema fields');
+      const expandButton = screen.getByTestId('schema-tree-expand-button');
+      const collapseButton = screen.getByTestId('schema-tree-collapse-button');
+
+      expect(controlsRow).toContainElement(searchInput);
+      expect(controlsRow).toContainElement(expandButton);
+      expect(controlsRow).toContainElement(collapseButton);
+
+      expect(searchInput.compareDocumentPosition(expandButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(expandButton.compareDocumentPosition(collapseButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('Expand All expands all expandable nodes', () => {
@@ -806,44 +860,6 @@ describe('SchemaTreeView', () => {
       expect(screen.getByText('other')).toBeInTheDocument();
     });
 
-    it('Expand to depth 2 expands depth 0 and 1 but not depth 2+', () => {
-      render(<SchemaTreeView schema={NESTED_SCHEMA} />);
-
-      // First collapse all to start fresh
-      fireEvent.click(screen.getByRole('button', { name: /collapse all/i }));
-      expect(screen.queryByText('child')).not.toBeInTheDocument();
-
-      // Select depth 2
-      const depthSelect = screen.getByLabelText('Expand to depth');
-      fireEvent.change(depthSelect, { target: { value: '2' } });
-
-      // Depth 0 nodes (root, other) expanded → their children visible
-      expect(screen.getByText('child')).toBeInTheDocument();
-      expect(screen.getByText('sibling')).toBeInTheDocument();
-      expect(screen.getByText('deep')).toBeInTheDocument();
-      // Depth 1 nodes (root.child, other.deep) expanded → their children visible
-      expect(screen.getByText('leaf')).toBeInTheDocument();
-      expect(screen.getByText('deeper')).toBeInTheDocument();
-    });
-
-    it('Expand to depth 1 expands only depth 0', () => {
-      render(<SchemaTreeView schema={NESTED_SCHEMA} />);
-
-      // Expand all first
-      fireEvent.click(screen.getByRole('button', { name: /expand all/i }));
-      expect(screen.getByText('leaf')).toBeInTheDocument();
-
-      // Select depth 1
-      const depthSelect = screen.getByLabelText('Expand to depth');
-      fireEvent.change(depthSelect, { target: { value: '1' } });
-
-      // Depth 0 nodes expanded → children visible
-      expect(screen.getByText('child')).toBeInTheDocument();
-      expect(screen.getByText('deep')).toBeInTheDocument();
-      // Depth 1 nodes NOT expanded → their children hidden
-      expect(screen.queryByText('leaf')).not.toBeInTheDocument();
-      expect(screen.queryByText('deeper')).not.toBeInTheDocument();
-    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1052,15 +1068,17 @@ describe('SchemaTreeView', () => {
       expect(screen.getByText('street')).toBeInTheDocument();
     });
 
-    it('focused node has focus ring class', () => {
+    it('focused node does not render row focus ring class', () => {
       render(<SchemaTreeView schema={AE01_SCHEMA} />);
       const tree = screen.getByRole('tree');
       fireEvent.focus(tree);
 
-      // First node should be focused
+      // First node should be focused, but no row outline classes are applied
       const firstNode = document.getElementById('schema-tree-node-name');
-      expect(firstNode?.className).toContain('ring-2');
-      expect(firstNode?.className).toContain('ring-blue-400');
+      expect(firstNode?.className).not.toContain('ring-1');
+      expect(firstNode?.className).not.toContain('ring-2');
+      expect(firstNode?.className).not.toContain('ring-blue-400');
+      expect(firstNode?.className).not.toContain('ring-slate-500/60');
     });
 
     it('aria-activedescendant updates correctly on navigation', () => {

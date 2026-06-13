@@ -19,9 +19,21 @@ export const TABLE_NAMES = {
   mappingVersions: getEnvValueOrDefault('MAPPING_VERSIONS_TABLE', 'keyra-mapping-versions'),
   deployments: getEnvValueOrDefault('DEPLOYMENTS_TABLE', 'keyra-deployments'),
   deploymentCurrent: getEnvValueOrDefault('DEPLOYMENT_CURRENT_TABLE', 'keyra-deployment-current'),
+  deploymentOrchestrations: getEnvValueOrDefault('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'keyra-deployment-orchestrations'),
+} as const;
+
+export const RUNTIME_TABLE_NAMES = {
+  activeSnapshots: getEnvValueOrDefault('ACTIVE_SNAPSHOTS_TABLE', 'keyra-active-snapshots'),
+  deploymentHistory: getEnvValueOrDefault('DEPLOYMENT_HISTORY_TABLE', 'keyra-deployment-history'),
 } as const;
 
 export const BUCKET_NAME = getEnvValueOrDefault('STORAGE_BUCKET', 'keyra-storage');
+export const RUNTIME_BUCKET_NAME = getEnvValueOrDefault(
+  'RUNTIME_ARTIFACTS_BUCKET',
+  getEnvValueOrDefault('STORAGE_BUCKET', 'keyra-storage'),
+);
+export const SNAPSHOTS_PREFIX = getEnvValueOrDefault('SNAPSHOTS_PREFIX', 'runtime/snapshots/');
+export const SCHEMAS_PREFIX = getEnvValueOrDefault('SCHEMAS_PREFIX', 'runtime/schemas/');
 
 export function schemaOriginalKey(schemaId: string, ext: string): string {
   return `schemas/${schemaId}/original.${ext}`;
@@ -53,4 +65,22 @@ export function deploymentHistorySortKey(environment: string, deployedAt: string
 
 export function deploymentCurrentKey(mappingId: string, environment: string): string {
   return `${mappingId}#${environment}`;
+}
+
+function normalizePrefix(prefix: string): string {
+  return prefix.endsWith('/') ? prefix : `${prefix}/`;
+}
+
+export function runtimeSnapshotKey(mappingId: string, snapshotId: string, prefix: string = SNAPSHOTS_PREFIX): string {
+  return `${normalizePrefix(prefix)}${mappingId}/${snapshotId}.json`;
+}
+
+export function runtimeSchemaPayloadKey(
+  mappingId: string,
+  snapshotId: string,
+  schemaRole: string,
+  schemaId: string,
+  prefix: string = SCHEMAS_PREFIX,
+): string {
+  return `${normalizePrefix(prefix)}${mappingId}/${snapshotId}/${schemaRole}-${schemaId}.json`;
 }

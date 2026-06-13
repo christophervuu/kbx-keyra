@@ -10,13 +10,15 @@
  * Click-to-stage: fires `onStageField(path)` when a leaf is clicked.
  */
 
-import { Search, X } from 'lucide-react';
-import { memo, useState } from 'react';
-import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Search, X } from 'lucide-react';
+import { memo, useContext, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 
+import { PreviewContext } from '../context/preview-context';
 import { useDragSource } from '../hooks/use-drag-source';
-import { useTreeSearch } from '@/features/schemas/hooks/use-tree-search';
+import { resolveFieldTestValue } from '../lib/source-field-display';
 
+import { useTreeSearch } from '@/features/schemas/hooks/use-tree-search';
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -73,12 +75,14 @@ const TYPE_ABBREV: Record<string, string> = {
 
 interface LeafFieldRowProps {
   node: SchemaTreeNode;
+  sampleValue?: string;
   onStageField: (path: string) => void;
   isHighlighted?: boolean;
 }
 
 const LeafFieldRow = memo(function LeafFieldRow({
   node,
+  sampleValue,
   onStageField,
   isHighlighted = false,
 }: LeafFieldRowProps) {
@@ -102,7 +106,7 @@ const LeafFieldRow = memo(function LeafFieldRow({
       aria-label={`Stage source field ${node.path}`}
       style={{ paddingLeft: node.depth * 16 + 8 }}
       className={[
-        'group flex min-h-[32px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
+        'group flex min-h-[44px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isDragging ? 'opacity-50' : '',
@@ -118,17 +122,26 @@ const LeafFieldRow = memo(function LeafFieldRow({
         aria-hidden="true"
       />
 
-      {/* Field name */}
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200" title={node.path}>
-        {node.fieldName}
-      </span>
-
-      {/* Type badge */}
-      <span
-        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
-        aria-label={`type: ${node.type}`}
-      >
-        {TYPE_ABBREV[node.type] ?? node.type}
+      {/* Field name + sample preview (target-row parity) */}
+      <span className="min-w-0 flex-1" data-testid={`source-field-content-${node.path}`}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={`inline-flex min-w-[2rem] shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
+            aria-label={`type: ${node.type}`}
+          >
+            {TYPE_ABBREV[node.type] ?? node.type}
+          </span>
+          <span className="truncate font-mono text-xs text-slate-200" title={node.path}>
+            {node.fieldName}
+          </span>
+        </span>
+        <p
+          className="ml-[2.6rem] truncate text-[11px] text-slate-500"
+          data-testid={`source-field-subline-${node.path}`}
+          title={sampleValue ?? '—'}
+        >
+          {sampleValue ?? '—'}
+        </p>
       </span>
     </div>
   );
@@ -159,7 +172,7 @@ function ContainerNodeRow({
       aria-expanded={isExpanded}
       style={{ paddingLeft: node.depth * 16 + 4 }}
       className={[
-        'flex min-h-[32px] w-full items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-left text-sm',
+        'flex min-h-[44px] w-full items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-left text-sm',
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isHighlighted ? 'bg-blue-950/30' : '',
@@ -172,14 +185,16 @@ function ContainerNodeRow({
       ) : (
         <ChevronRight size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
       )}
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200" title={node.path}>
-        {node.fieldName}
-      </span>
       <span
-        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
+        className={`inline-flex min-w-[2rem] shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_COLORS[node.type] ?? 'bg-slate-700/80 text-slate-300'}`}
         aria-label={`type: ${node.type}`}
       >
         {TYPE_ABBREV[node.type] ?? node.type}
+      </span>
+      <span className="min-w-0 flex-1" data-testid={`source-container-content-${node.path}`}>
+        <span className="block truncate font-mono text-xs text-slate-200" title={node.path}>
+          {node.fieldName}
+        </span>
       </span>
     </button>
   );
@@ -194,6 +209,7 @@ interface RenderNodeProps {
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onStageField: (path: string) => void;
+  sourceData: unknown;
   visiblePaths: Set<string> | null;
   matchingPaths: Set<string>;
 }
@@ -203,9 +219,11 @@ function renderNode({
   expandedPaths,
   onToggle,
   onStageField,
+  sourceData,
   visiblePaths,
   matchingPaths,
-}: RenderNodeProps): React.ReactNode[] {
+}: RenderNodeProps): ReactNode[] {
+  const rows: ReactNode[] = [];
   // When search is active, only render nodes in the visible set
   if (visiblePaths !== null && !visiblePaths.has(node.path)) {
     return [];
@@ -215,7 +233,7 @@ function renderNode({
   const isExpanded = expandedPaths.has(node.path);
   const isHighlighted = matchingPaths.has(node.path);
 
-  const rows: React.ReactNode[] = [
+  rows.push(
     isContainer ? (
       <ContainerNodeRow
         key={node.path}
@@ -228,11 +246,12 @@ function renderNode({
       <LeafFieldRow
         key={node.path}
         node={node}
+        sampleValue={resolveFieldTestValue(sourceData, node.path)}
         onStageField={onStageField}
         isHighlighted={isHighlighted}
       />
     ),
-  ];
+  );
 
   if (isContainer && isExpanded && node.children.length > 0) {
     for (const child of node.children) {
@@ -242,6 +261,7 @@ function renderNode({
           expandedPaths,
           onToggle,
           onStageField,
+          sourceData,
           visiblePaths,
           matchingPaths,
         }),
@@ -265,10 +285,13 @@ export function SourceSchemaPanel({
   onStageField,
   className = '',
 }: SourceSchemaPanelProps) {
+  void sourceSchemaName;
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
-  const allNodes: SchemaTreeNode[] = parsedSourceSchema?.nodes ?? [];
+  const previewCtx = useContext(PreviewContext);
+  const sourceData = previewCtx?.sourceData ?? null;
 
+  const allNodes = useMemo<SchemaTreeNode[]>(() => parsedSourceSchema?.nodes ?? [], [parsedSourceSchema]);
   const {
     query,
     setQuery,
@@ -286,6 +309,11 @@ export function SourceSchemaPanel({
       return next;
     });
   };
+
+  const handleStageField = (path: string) => {
+    onStageField(path);
+  };
+
 
   if (!parsedSourceSchema || parsedSourceSchema.nodes.length === 0) {
     return (
@@ -312,25 +340,6 @@ export function SourceSchemaPanel({
       className={`flex flex-col overflow-hidden ${className}`}
       aria-label="Source schema fields"
     >
-      {/* Panel header */}
-      <div className="shrink-0 border-b border-slate-800 px-2 h-8">
-        <div className="flex h-full items-center gap-2">
-          <span
-            data-testid="source-header-badge"
-            className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-sky-900/50 text-sky-300"
-          >
-            SRC
-          </span>
-          <h2
-            className="min-w-0 truncate text-xs font-semibold text-slate-300"
-            data-testid="source-header-name"
-            title={sourceSchemaName ?? 'No source schema'}
-          >
-            {sourceSchemaName ?? 'No source schema'}
-          </h2>
-        </div>
-      </div>
-
       {/* Search header */}
       <div className="shrink-0 border-b border-slate-800 px-2 py-1.5">
         <div className="relative flex items-center">
@@ -389,13 +398,15 @@ export function SourceSchemaPanel({
               node,
               expandedPaths: effectiveExpandedPaths,
               onToggle: handleToggle,
-              onStageField,
+              onStageField: handleStageField,
+              sourceData,
               visiblePaths,
               matchingPaths,
             }),
           )
         )}
       </div>
+
     </div>
   );
 }

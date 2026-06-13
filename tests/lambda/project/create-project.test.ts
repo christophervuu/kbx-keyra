@@ -53,6 +53,21 @@ describe('create-project handler', () => {
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(1);
   });
 
+  it('normalizes linkedSchemaIds from schemaRefs fallback for metadata counts', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'My Project',
+      slug: 'my-project',
+      schemaRefs: [{ schemaId: 'schema-1', type: 'local' }],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+    const parsed = JSON.parse(result.body) as { schemaCount: number };
+
+    expect(result.statusCode).toBe(201);
+    expect(parsed.schemaCount).toBe(1);
+  });
+
   it('missing name returns 400 validation error', async () => {
     sharedMocks.requireFields.mockReturnValue({
       ok: false,

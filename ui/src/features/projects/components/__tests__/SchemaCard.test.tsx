@@ -9,8 +9,8 @@ const SCHEMA: SchemaCardData = {
   schemaId: 'schema-1',
   name: 'Customer Schema',
   format: 'json-schema',
-  origin: 'local',
-  scope: 'project-level',
+  origin: 'uploaded',
+  sourceType: 'upload',
   fieldCount: 12,
   syncStatus: 'synced',
   isInferred: false,
@@ -36,9 +36,9 @@ describe('SchemaCard', () => {
     expect(screen.getByText('Customer Schema')).toBeInTheDocument();
   });
 
-  it('renders JSON Schema format badge', () => {
+  it('renders JSON format badge', () => {
     renderCard();
-    expect(screen.getByText('JSON Schema')).toBeInTheDocument();
+    expect(screen.getByText('JSON')).toBeInTheDocument();
   });
 
   it('renders XSD format badge for xsd format', () => {
@@ -51,9 +51,9 @@ describe('SchemaCard', () => {
     expect(screen.getByText('12 fields')).toBeInTheDocument();
   });
 
-  it('renders inferred warning when isInferred is true', () => {
+  it('does not render inferred warning when isInferred is true', () => {
     renderCard({ isInferred: true });
-    expect(screen.getByText('Inferred from sample data')).toBeInTheDocument();
+    expect(screen.queryByText('Inferred from sample data')).not.toBeInTheDocument();
   });
 
   it('does not render inferred warning when isInferred is false', () => {
@@ -71,14 +71,29 @@ describe('SchemaCard', () => {
     expect(onView).toHaveBeenCalledWith('schema-1');
   });
 
-  it('calls onRemove with schemaId when Remove button clicked', async () => {
+  it('calls onRemove with schemaId when Unlink button clicked', async () => {
     const onRemove = vi.fn();
     const user = userEvent.setup();
     render(
       <SchemaCard schema={SCHEMA} usageCount={0} onView={vi.fn()} onRemove={onRemove} />,
     );
-    await user.click(screen.getByRole('button', { name: /remove schema customer schema/i }));
+    await user.click(screen.getByRole('button', { name: /unlink schema customer schema/i }));
     expect(onRemove).toHaveBeenCalledWith('schema-1');
+  });
+
+  it('shows Unlink action for CDM schemas', () => {
+    renderCard({ origin: 'cdm' });
+    expect(screen.getByRole('button', { name: /unlink schema customer schema/i })).toBeInTheDocument();
+  });
+
+  it('shows Re-sync action for CDM github schemas', () => {
+    renderCard({ origin: 'cdm', sourceType: 'github' });
+    expect(screen.getByRole('button', { name: /re-sync schema customer schema/i })).toBeInTheDocument();
+  });
+
+  it('hides Re-sync action for upload-backed schemas', () => {
+    renderCard({ origin: 'uploaded', sourceType: 'upload' });
+    expect(screen.queryByRole('button', { name: /re-sync schema customer schema/i })).not.toBeInTheDocument();
   });
 
   // AE-13: color-coded origin badges
@@ -91,56 +106,45 @@ describe('SchemaCard', () => {
     expect(badge).toHaveClass('text-blue-800');
   });
 
-  it('AE-13: Published origin shows purple badge', () => {
-    renderCard({ origin: 'published' });
-    const badge = screen.getByTestId('origin-badge-published');
-    expect(badge).toHaveTextContent('Published');
+  it('AE-13: Uploaded origin shows purple badge', () => {
+    renderCard({ origin: 'uploaded' });
+    const badge = screen.getByTestId('origin-badge-uploaded');
+    expect(badge).toHaveTextContent('Uploaded');
     expect(badge).toHaveClass('bg-purple-100');
     expect(badge).toHaveClass('text-purple-800');
   });
 
-  it('AE-13: Local origin shows gray badge', () => {
-    renderCard({ origin: 'local' });
-    const badge = screen.getByTestId('origin-badge-local');
-    expect(badge).toHaveTextContent('Local');
-    expect(badge).toHaveClass('bg-gray-100');
-    expect(badge).toHaveClass('text-gray-700');
-  });
-
-  // AE-13: scope badges
-  it('AE-13: global scope shows "Global" badge', () => {
-    renderCard({ scope: 'global' });
-    expect(screen.getByTestId('scope-badge-global')).toHaveTextContent('Global');
-  });
-
-  it('AE-13: project scope shows "Project" badge', () => {
-    renderCard({ scope: 'project-level' });
-    expect(screen.getByTestId('scope-badge-project')).toHaveTextContent('Project');
+  it('AE-13: Inferred origin shows uploaded badge presentation', () => {
+    renderCard({ origin: 'inferred' });
+    const badge = screen.getByTestId('origin-badge-inferred');
+    expect(badge).toHaveTextContent('Uploaded');
+    expect(badge).toHaveClass('bg-purple-100');
+    expect(badge).toHaveClass('text-purple-800');
   });
 
   // AE-13: sync status indicators
-  it('AE-13: shows "Synced" indicator for synced non-local schema', () => {
+  it('AE-13: shows "Synced" indicator for synced schema', () => {
     renderCard({ origin: 'cdm', syncStatus: 'synced' });
     expect(screen.getByTestId('sync-status-synced')).toBeInTheDocument();
     expect(screen.getByText('Synced')).toBeInTheDocument();
   });
 
-  it('AE-13: shows "Not synced" indicator for not-synced non-local schema', () => {
-    renderCard({ origin: 'cdm', syncStatus: 'not-synced' });
-    expect(screen.getByTestId('sync-status-not-synced')).toBeInTheDocument();
-    expect(screen.getByText('Not synced')).toBeInTheDocument();
+  it('AE-13: shows "Update available" indicator for update-available schema', () => {
+    renderCard({ origin: 'cdm', syncStatus: 'update-available' });
+    expect(screen.getByTestId('sync-status-update-available')).toBeInTheDocument();
+    expect(screen.getByText('Update available')).toBeInTheDocument();
   });
 
-  it('AE-13: shows "Local changes" indicator for local-changes non-local schema', () => {
-    renderCard({ origin: 'published', syncStatus: 'local-changes' });
-    expect(screen.getByTestId('sync-status-local-changes')).toBeInTheDocument();
-    expect(screen.getByText('Local changes')).toBeInTheDocument();
+  it('AE-13: shows "Sync failed" indicator for sync-failed schema', () => {
+    renderCard({ origin: 'cdm', syncStatus: 'sync-failed' });
+    expect(screen.getByTestId('sync-status-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
-  it('AE-13: no sync indicator for local-origin schemas', () => {
-    renderCard({ origin: 'local', syncStatus: 'not-synced' });
-    expect(screen.queryByTestId(/sync-status/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Not synced')).not.toBeInTheDocument();
+  it('AE-13: shows sync indicator for uploaded schemas when sync metadata exists', () => {
+    renderCard({ origin: 'uploaded', syncStatus: 'sync-failed' });
+    expect(screen.getByTestId('sync-status-sync-failed')).toBeInTheDocument();
+    expect(screen.getByText('Sync failed')).toBeInTheDocument();
   });
 
   // Usage count

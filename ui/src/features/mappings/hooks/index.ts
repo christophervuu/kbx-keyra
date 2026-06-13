@@ -53,12 +53,16 @@ export type {
   SuggestExpressionState,
   UseSuggestExpressionReturn,
 } from './use-suggest-expression';
-// FS-046 auto-map review hook
-export { useAutoMapReview } from './use-auto-map-review';
+export { useSmartFix } from './use-smart-fix';
 export type {
-  UseAutoMapReviewParams,
-  UseAutoMapReviewResult,
-} from './use-auto-map-review';
+  SmartFixState,
+  UseSmartFixReturn,
+} from './use-smart-fix';
+export { useAiValidation } from './use-ai-validation';
+export type {
+  AiValidationState,
+  UseAiValidationReturn,
+} from './use-ai-validation';
 // FS-048 auto-map workspace hook
 export { useAutoMapWorkspace } from './use-auto-map-workspace';
 export type {
@@ -66,8 +70,9 @@ export type {
   UseAutoMapWorkspaceResult,
   SuggestionFilter,
   SuggestionWorkspaceItem,
+  BatchAcceptResult,
+  BatchAcceptSkipEntry,
 } from './use-auto-map-workspace';
 // FS-048 suggestion preview hook
 export { useSuggestionPreview } from './use-suggestion-preview';
 export type { UseSuggestionPreviewResult } from './use-suggestion-preview';
-

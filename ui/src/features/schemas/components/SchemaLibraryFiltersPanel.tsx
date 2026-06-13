@@ -1,20 +1,20 @@
-// SchemaLibraryFiltersPanel — Multi-select filter toggles for origin, format, scope (FS-016 T-03)
+// SchemaLibraryFiltersPanel — Multi-select filter toggles for origin and format (FS-016 T-03)
 
-import type { SchemaOrigin } from '@/lib/types';
+import type { ReactNode } from 'react';
 
-import type { DisplayFormat } from '../types';
+import type { FilterDataFormat, FilterOwnership, FilterStatus } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface SchemaLibraryFiltersPanelProps {
-  origins: SchemaOrigin[];
-  formats: DisplayFormat[];
-  scopes: Array<'global' | 'project'>;
-  onToggleOrigin: (origin: SchemaOrigin) => void;
-  onToggleFormat: (format: DisplayFormat) => void;
-  onToggleScope: (scope: 'global' | 'project') => void;
+  ownerships: FilterOwnership[];
+  dataFormats: FilterDataFormat[];
+  statuses: FilterStatus[];
+  onToggleOwnership: (ownership: FilterOwnership) => void;
+  onToggleDataFormat: (format: FilterDataFormat) => void;
+  onToggleStatus: (status: FilterStatus) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ function ToggleButton({ label, active, onClick }: ToggleButtonProps) {
 
 interface FilterGroupProps {
   label: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 function FilterGroup({ label, children }: FilterGroupProps) {
@@ -74,62 +74,61 @@ function FilterGroup({ label, children }: FilterGroupProps) {
 // SchemaLibraryFiltersPanel
 // ---------------------------------------------------------------------------
 
-const ORIGIN_OPTIONS: Array<{ value: SchemaOrigin; label: string }> = [
+const OWNERSHIP_OPTIONS: Array<{ value: FilterOwnership; label: string }> = [
   { value: 'cdm', label: 'CDM' },
-  { value: 'published', label: 'Published' },
-  { value: 'local', label: 'Local' },
+  { value: 'user', label: 'User' },
 ];
 
-const FORMAT_OPTIONS: Array<{ value: DisplayFormat; label: string }> = [
-  { value: 'JSON Schema', label: 'JSON Schema' },
-  { value: 'XSD', label: 'XSD' },
-  { value: 'Inferred', label: 'Inferred' },
+const FORMAT_OPTIONS: Array<{ value: FilterDataFormat; label: string }> = [
+  { value: 'JSON', label: 'JSON' },
+  { value: 'XML', label: 'XML' },
 ];
 
-const SCOPE_OPTIONS: Array<{ value: 'global' | 'project'; label: string }> = [
-  { value: 'global', label: 'Global' },
-  { value: 'project', label: 'Project-Level' },
+const STATUS_OPTIONS: Array<{ value: FilterStatus; label: string }> = [
+  { value: 'ready', label: 'Ready' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'error', label: 'Error' },
 ];
 
 export function SchemaLibraryFiltersPanel({
-  origins,
-  formats,
-  scopes,
-  onToggleOrigin,
-  onToggleFormat,
-  onToggleScope,
+  ownerships,
+  dataFormats,
+  statuses,
+  onToggleOwnership,
+  onToggleDataFormat,
+  onToggleStatus,
 }: SchemaLibraryFiltersPanelProps) {
   return (
     <div className="flex flex-wrap gap-4">
-      <FilterGroup label="Origin">
-        {ORIGIN_OPTIONS.map(({ value, label }) => (
+      <FilterGroup label="Ownership">
+        {OWNERSHIP_OPTIONS.map(({ value, label }) => (
           <ToggleButton
             key={value}
             label={label}
-            active={origins.includes(value)}
-            onClick={() => onToggleOrigin(value)}
+            active={ownerships.includes(value)}
+            onClick={() => onToggleOwnership(value)}
           />
         ))}
       </FilterGroup>
 
-      <FilterGroup label="Format">
+      <FilterGroup label="Data format">
         {FORMAT_OPTIONS.map(({ value, label }) => (
           <ToggleButton
             key={value}
             label={label}
-            active={formats.includes(value)}
-            onClick={() => onToggleFormat(value)}
+            active={dataFormats.includes(value)}
+            onClick={() => onToggleDataFormat(value)}
           />
         ))}
       </FilterGroup>
 
-      <FilterGroup label="Scope">
-        {SCOPE_OPTIONS.map(({ value, label }) => (
+      <FilterGroup label="Status">
+        {STATUS_OPTIONS.map(({ value, label }) => (
           <ToggleButton
             key={value}
             label={label}
-            active={scopes.includes(value)}
-            onClick={() => onToggleScope(value)}
+            active={statuses.includes(value)}
+            onClick={() => onToggleStatus(value)}
           />
         ))}
       </FilterGroup>

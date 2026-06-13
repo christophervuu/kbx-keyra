@@ -13,9 +13,137 @@ The runtime handles:
 1. **Prompt Registry access** — loading versioned prompt records from DynamoDB with in-memory caching
 2. **DSL asset resolution** — loading the DSL reference from S3 for prompt injection
 3. **Prompt rendering** — replacing template placeholders in system and user messages
-4. **Model invocation** — calling GitHub Models via the OpenAI SDK with structured output support
-5. **Output parsing** — validating and normalizing structured AI responses
-6. **Orchestration** — a single `invokeAI()` entry point that wires steps 1–5 into a reusable pipeline
+4. **Centralized routing/limits** — resolving feature invocation profile (tier/model/timeout/token cap) from shared defaults with allowlisted overrides
+5. **Invocation guards** — validating payload and prompt contract before model invocation
+6. **Model invocation** — calling GitHub Models via the OpenAI SDK with structured output support
+7. **Output parsing** — validating and normalizing structured AI responses
+8. **Telemetry** — emitting standardized start/success/failure invocation events
+9. **Error normalization** — mapping AI/runtime/provider errors to canonical backend envelope semantics for handlers
+10. **Orchestration** — a single `invokeAI()` entry point that wires all steps into a reusable pipeline
+
+---
+
+## FS-066 Shared Foundation Standard
+
+FS-066 established the Phase 2 shared AI foundation on top of FS-065 reconciliation. This is the canonical runtime model for backend AI invocation.
+
+### Implemented shared contracts
+
+- **Centralized tier routing** (`src/lib/ai/routing.ts`)
+  - Tier defaults are fixed:
+    - Tier 1: `openai/gpt-4.1-mini`, `timeoutMs=20000`, `maxOutputTokens=1200`
+    - Tier 2: `openai/gpt-4.1`, `timeoutMs=45000`, `maxOutputTokens=2500`
+  - Feature defaults are centralized by prompt/feature (`explain-rule`, `nl-to-rule`, `smart-fix`, `validate-mappings`, `auto-map`)
+  - Feature overrides are permitted only through the shared allowlist table (`AI_FEATURE_OVERRIDE_ALLOWLIST`)
+  - Registry metadata can refine model/tokens when valid; invalid/missing values fall back to code defaults
+
+- **Invocation guard contract** (`src/lib/ai/invocation-guards.ts`)
+  - Validates promptId/variables/profile before invocation
+  - Enforces positive finite timeout/token limits and non-empty model
+  - Validates prompt record contract (temperature in [0,2], non-empty system/user templates)
+
+- **Limit enforcement contract** (`src/lib/ai/invoke-ai.ts`)
+  - Fails fast when prompt `maxTokens` exceeds resolved profile max output tokens (`LIMIT_EXCEEDED`)
+  - Fails invocation when completion usage exceeds resolved max output tokens (`LIMIT_EXCEEDED`)
+  - Normalizes provider `413` model errors to `LIMIT_EXCEEDED`
+
+- **Telemetry contract** (`src/lib/ai/telemetry.ts`)
+  - Event types: `ai.invoke.start`, `ai.invoke.success`, `ai.invoke.failure`
+  - Stable fields: `invocationId`, `timestamp`, `promptId`, `requestId?`, `correlationId?`, `feature?`, `tier?`, `model?`, `timeoutMs?`, `maxOutputTokens?`, `durationMs?`, `errorCode?`
+
+- **Error normalization contract** (`src/lib/ai/error-normalization.ts`)
+  - Handler-facing mapper from AI/runtime/provider errors to canonical backend envelope semantics:
+    - `VALIDATION_ERROR|LIMIT_EXCEEDED -> VALIDATION_ERROR (400, non-retryable)`
+    - `PROMPT_NOT_FOUND -> RESOURCE_NOT_FOUND (404, non-retryable)`
+    - `INVALID_MODEL_OUTPUT -> INVALID_MODEL_OUTPUT (500, non-retryable)`
+    - `TIMEOUT -> TIMEOUT (504, retryable)`
+    - `MODEL_RATE_LIMITED|provider 5xx/429 -> SERVICE_UNAVAILABLE (503, retryable)`
+    - `REGISTRY_ERROR|ASSET_ERROR -> SERVICE_UNAVAILABLE (503, retryable)`
+    - remaining config/parse/model/internal classes -> `INTERNAL_ERROR (500)`
+
+## FS-067 Prompt Registry + Structured Output Contracts
+
+FS-067 hardened prompt selection and structured-output contracts across all AI handlers.
+
+### Canonical prompt identity contract
+
+- Canonical prompt IDs are centralized in `src/lib/ai/prompt-ids.ts` and consumed by runtime/handlers.
+- Canonical IDs include:
+  - `explain-rule`
+  - `natural-language-to-dsl`
+  - `smart-fix`
+  - `ai-validation`
+  - `auto-map`
+  - `field-description`
+- Backward compatibility alias:
+  - `nl-to-rule -> natural-language-to-dsl` (one release-cycle compatibility path).
+
+### Deterministic prompt selection + rollback contract
+
+- Authoritative rollback selector: **environment-scoped active pointer record**.
+- Runtime environment selector variable:
+  - `PROMPT_REGISTRY_ACTIVE_POINTER_ENV`
+- Selection behavior:
+  1. If active-pointer env is configured and pointer exists, select the pointed version deterministically.
+  2. Otherwise select latest `status=active` version.
+  3. Otherwise fall back to latest version record.
+- Invalid pointer configuration (for example pointer version missing) is a deterministic registry failure (no silent fallback).
+- Prompt status fields are retained as historical metadata and are not authoritative when pointer selection is configured.
+- Invocation diagnostics include selected prompt metadata (`promptVersion`, `promptSelectionSource`, `promptSelectionEnvironment`).
+
+### Shared structured response contract
+
+- Runtime response schema contracts are centralized in `src/lib/ai/response-contracts.ts`.
+- `invokeAI()` uses shared contract lookup first, then prompt-record schema fallback when needed.
+- Output parser enforces strict JSON parse + schema validation before success results are returned.
+- Invalid/malformed model output returns `INVALID_MODEL_OUTPUT` (never a success payload).
+
+## FS-065 Reconciliation Status (Canonical Model)
+
+FS-065 reconciled AI showcase-era integration paths onto a single canonical production flow.
+
+### Keep
+
+- Backend AI handlers under `src/lambda/ai/` remain thin wrappers over `invokeAI()`.
+- UI backend mode consumption remains adapter-based and must route through `HttpAdapter`.
+
+### Replace
+
+- AI method placeholders using `NOT_IMPLEMENTED` were replaced by explicit feature gating semantics where methods are intentionally deferred (`FEATURE_NOT_ENABLED`, non-retryable).
+- Schema query dependency behavior moved from transitional fallbacks to the DynamoDB-only retriever contract codified in FS-091 (OpenSearch decommissioned in serving paths).
+
+### Retire / Non-canonical
+
+- `HybridAdapter` is retired and must not be reintroduced as a production path.
+- Legacy UI shortcut/review-loop surfaces retired in FS-065 are non-canonical and prohibited for new work.
+
+### Interim infrastructure posture
+
+- AI routes may remain outside the full Phase 1 IaC route set temporarily.
+- This does **not** change the canonical consumption requirement: UI backend mode must call backend AI routes through `HttpAdapter` only.
+
+---
+
+## Canonical End-to-End AI Flow
+
+```text
+UI hook/component
+  -> ApiAdapter method
+  -> HttpAdapter (when VITE_API_URL is set)
+  -> API Gateway route
+  -> Lambda handler (src/lambda/ai/*)
+  -> invokeAI() shared runtime
+  -> Prompt registry + DSL asset + model client + output parser
+  -> standardized JSON response back to UI
+```
+
+Canonical route mappings currently implemented in `HttpAdapter`:
+
+- `autoMap` / `autoMapSection` -> `POST /ai/auto-map`
+- `suggestExpression` -> `POST /ai/suggest-expression`
+- `explainRule` -> `POST /ai/explain-rule`
+- `smartFix` -> `POST /ai/smart-fix`
+- `validateMappings` -> `POST /ai/validate-mappings`
 
 ---
 
@@ -38,7 +166,7 @@ src/
     ai/
       explain-rule.ts       First consumer Lambda — thin handler shell
       suggest-expression.ts Second consumer Lambda — NL to rule handler
-      auto-map.ts           Auto-map Lambda handler for section-level suggestion generation
+      auto-map.ts           Auto-map Lambda handler for section/whole retrieval-backed suggestion generation
 ```
 
 ---
@@ -59,11 +187,12 @@ The adapter selection is driven by runtime configuration (`config.ts`), not by c
 
 Lambda handlers in `src/lambda/ai/` are minimal:
 
-1. Parse the API Gateway event body
+1. Parse and validate API Gateway request input
 2. Call `invokeAI(promptId, variables)` from the shared runtime
-3. Return the structured response or error
+3. Normalize failures using shared error mapper (`normalizeAIError`)
+4. Return canonical backend response envelope via shared response helpers
 
-Handlers do not contain prompt logic, caching logic, or model configuration.
+Handlers do not contain prompt logic, routing policy, limit policy, caching logic, or direct model-client orchestration.
 
 ### Environment-Driven Configuration
 
@@ -81,6 +210,9 @@ The in-memory representation of a row from the PromptRegistry DynamoDB table. Ma
 interface PromptRecord {
   promptId: string;
   version: number;
+  status?: 'active' | 'inactive' | 'deprecated';
+  selectionSource?: 'active-pointer' | 'latest-active' | 'latest-version';
+  selectionEnvironment?: string;
   systemMessage: string;
   userMessageTemplate: string;
   model: string;
@@ -109,7 +241,7 @@ interface AIResult<T = unknown> {
 interface AIError {
   success: false;
   error: {
-    code: string;          // e.g., 'PROMPT_NOT_FOUND', 'MODEL_ERROR', 'PARSE_ERROR'
+    code: string;          // e.g., 'PROMPT_NOT_FOUND', 'MODEL_ERROR', 'INVALID_MODEL_OUTPUT'
     message: string;
     details?: unknown;
   };
@@ -142,17 +274,25 @@ interface DslAssetLoader {
 - **SK**: `version` (number)
 - **Access**: Query PK = promptId, ScanIndexForward = false, Limit = 1 to retrieve the highest version
 
+### Selection policy
+
+- Runtime selection is deterministic and data/config-driven.
+- Authoritative rollback path is active-pointer selection (`recordType=active-pointer`) scoped by environment.
+- Pointer environment is provided by `PROMPT_REGISTRY_ACTIVE_POINTER_ENV`.
+- Without a pointer, runtime resolves latest active, then latest version fallback.
+- Selection metadata is attached to the selected record for telemetry/diagnostics.
+
 ### Caching
 
 - In-memory `Map<string, { record: PromptRecord; fetchedAt: number }>` cache
 - TTL: 5 minutes (300,000 ms)
 - Cache key: `promptId`
-- On cache miss or expiry: query DynamoDB, update cache
+- On cache miss or expiry: query adapter selection path, update cache
 - Cache is per-Lambda-instance (cold start resets cache)
 
 ### Local Adapter
 
-Reads prompt records from local JSON files under a configurable directory. File naming convention: `{promptId}.json`. Each file contains a single `PromptRecord` object. This allows local development without DynamoDB access.
+Reads prompt records from local JSON files under a configurable directory. File naming convention: `{promptId}.json`. Files may contain a single `PromptRecord` or an array of prompt versions + optional active-pointer record. This allows local development without DynamoDB access while preserving selection semantics.
 
 ---
 
@@ -188,7 +328,7 @@ Template rendering replaces `{{placeholder}}` tokens in `systemMessage` and `use
    - `{{dslReference}}` — the full DSL reference text loaded by the DSL asset loader
 
 2. **Request-scoped placeholders** — provided by the caller:
-   - `{{targetPath}}`, `{{expression}}`, `{{instruction}}`, `{{sourceContext}}`, etc.
+   - `{{targetPath}}`, `{{targetType}}`, `{{expression}}`, `{{instruction}}`, etc.
    - Variable names are prompt-specific and defined in `userMessageTemplate`
 
 ### Rendering Rules
@@ -240,13 +380,16 @@ const response = await client.chat.completions.create({
 
 ### Error Handling
 
-Model errors (rate limits, invalid requests, network failures) are caught and normalized into `AIError` with appropriate error codes.
+Model client maps provider/runtime failures into shared AI error codes with provider diagnostics in `details` where available.
 
-Implemented error mapping:
-- `429` → `MODEL_RATE_LIMITED`
-- `401` / `403` → `MODEL_ERROR` (authentication context)
-- `400` → `MODEL_ERROR` (request validation context)
-- Other/network failures → `MODEL_ERROR`
+Implemented model-client mapping:
+- timeout-like failures -> `TIMEOUT`
+- `429` -> `MODEL_RATE_LIMITED`
+- `401` / `403` -> `MODEL_ERROR` (auth context)
+- `400` -> `MODEL_ERROR` (request validation context)
+- other/network failures -> `MODEL_ERROR`
+
+Handler responses must not return raw provider error payloads directly; they normalize through `normalizeAIError(...)` into canonical backend envelope codes/status/retryability.
 
 ---
 
@@ -262,18 +405,29 @@ invokeAI(promptId, variables, options?)
   ├── 1. Load prompt record (via PromptRegistryAdapter)
   │       └── Cache hit? Return cached. Miss? Query DynamoDB.
   │
-  ├── 2. Load DSL reference (via DslAssetLoader)
+  ├── 2. Resolve invocation profile (routing defaults + allowlisted overrides + valid registry metadata)
+  │       └── tier/model/timeoutMs/maxOutputTokens
+  │
+  ├── 3. Validate invocation payload and prompt contract (invocation-guards)
+  │
+  ├── 4. Enforce prompt/profile token-limit invariants
+  │
+  ├── 5. Load DSL reference (via DslAssetLoader)
   │       └── Cache hit? Return cached. Miss? Read from S3.
   │
-  ├── 3. Render messages (via prompt-renderer)
+  ├── 6. Render messages (via prompt-renderer)
   │       ├── System message: inject {{dslReference}} + any system-level vars
   │       └── User message: inject request-scoped vars ({{expression}}, etc.)
   │
-  ├── 4. Invoke model (via model-client)
+  ├── 7. Invoke model (via model-client)
   │       └── GitHub Models → structured output → raw response
   │
-  └── 5. Parse output (via output-parser)
-          └── Validate against responseSchema → AIResult<T> or AIError
+  ├── 8. Enforce completion-token usage cap (when usage available)
+  │
+  ├── 9. Parse output (via output-parser)
+  │       └── Validate against shared response contract / responseSchema → AIResult<T> or AIError
+  │
+  └── 10. Emit telemetry start/success/failure events around full invocation lifecycle
 ```
 
 ### Dependency Injection
@@ -323,13 +477,153 @@ export async function handler(event: APIGatewayProxyEvent) {
 }
 ```
 
-Implemented status mapping in `explain-rule` and `suggest-expression` handlers:
-- `PROMPT_NOT_FOUND` → `404`
-- `MODEL_RATE_LIMITED` → `429`
-- `VALIDATION_ERROR` → `400`
-- all other runtime errors → `500`
+AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`) use shared failure normalization and canonical envelope responses through `errorResponse(...)`.
 
-The `suggest-expression` handler keeps the same response/error mapping conventions while validating a different required-field set (`instruction`, `targetPath`, `targetType`, `sourceContext`) and invoking promptId `nl-to-rule`.
+`suggest-expression` validates (`mappingId`, `instruction`, `targetPath`, `targetType`) and routes through canonical prompt ID resolution (`nl-to-rule` alias -> `natural-language-to-dsl`).
+
+### Suggest Expression canonical contract (FS-070)
+
+`src/lambda/ai/suggest-expression.ts` is a canonical thin handler over `invokeAI('nl-to-rule', ...)` and enforces these production constraints:
+
+- Request contract uses mapping/target identity, not UI-provided schema blobs:
+  - required: `mappingId`, `instruction`, `targetPath`, `targetType`
+  - optional: `targetDescription`
+- Backend owns context retrieval/assembly from persisted mapping/schema data before invocation.
+- Context assembly is bounded with deterministic truncation/summarization:
+  - ~64KB raw text or ~8k token-equivalent, whichever is reached first.
+- On successful model output parse, candidate expressions are validated before response success:
+  - syntax validity
+  - function compatibility
+  - target-type compatibility
+- Success payload includes review-state metadata:
+  - `expression`, optional `explanation`
+  - `validation: { valid, diagnostics[] }`
+  - `readyToApply`
+  - `context` metadata (`sourceNodeCount`, `includedNodeCount`, `truncated`, `approxTokenCount`, `byteLength`)
+- Validation-invalid outcomes are returned as suggestion results with diagnostics and `readyToApply: false` (not transport failures).
+
+### Explain Rule canonical contract (FS-069)
+
+`src/lambda/ai/explain-rule.ts` is a canonical thin handler over `invokeAI('explain-rule', ...)` and enforces these production constraints:
+
+- Validates required request fields (`targetPath`, non-empty `expression`)
+- Rejects completely unparsable expressions before invocation (no meaningful DSL fragment)
+- Uses prompt-registry + structured-output path via `invokeAI()`; success is gated by shared contract validation (`response-contracts.ts` + `output-parser.ts`)
+- Normalizes success data to concise explanation output (1–2 sentences target, hard token clamp) with optional metadata passthrough (`confidence`, `limitations[]`)
+- Remains read-only assistance: explain invocation never mutates mapping rules or persistence state
+
+### Smart Fix canonical contract (FS-071)
+
+`src/lambda/ai/smart-fix.ts` is a canonical thin handler over `invokeAI('smart-fix', ...)` and enforces these production constraints:
+
+- Request contract is rule-scoped and diagnostic-driven:
+  - required: `mappingId`, `ruleIndex`, `targetPath`, `failingExpression`, `diagnostics[]`
+  - optional: `targetType`, `diagnosticScope`, `selectedDiagnosticIndex`, `ruleVersion`, `ruleHash`
+- Backend owns mapping/schema retrieval and context assembly prior to invocation.
+- Context assembly is bounded with deterministic truncation:
+  - ~64KB raw text or ~8k token-equivalent
+  - truncation priority: latest/high-severity diagnostics first, then lower-priority context.
+- Handler invokes Smart Fix prompt via shared runtime and validates structured output contract before success.
+- On success, candidate corrected expression is engine-validated before response success payload is returned.
+- Success payload includes review/apply metadata:
+  - `originalExpression`, `suggestedExpression`, `explanation`
+  - `validation: { valid, diagnostics[] }`
+  - `readyToApply`
+  - `diagnosticsScopeApplied`
+  - `context` usage/truncation metadata
+  - `applyGuard: { ruleVersion, ruleHash }`
+- Validation-invalid outcomes are returned as suggestion results with `readyToApply: false` (not transport failures).
+- Stale snapshot protection is hard-gated at handler contract level:
+  - rule version/hash mismatches map to canonical `CONFLICT` response for UI rerun flows.
+
+### Validate Mappings canonical contract (FS-072)
+
+`src/lambda/ai/validate-mappings.ts` is a canonical thin handler over `invokeAI('ai-validation', ...)` and enforces these production constraints:
+
+- Request contract is single-mapping, backend-context-driven:
+  - required: `mappingId`
+  - optional: `sampleData: { contentType, content }`
+- V1 scope is **single mapping only**. Batch input is rejected with canonical `VALIDATION_ERROR`.
+- Backend owns mapping/schema retrieval and AI prompt context assembly prior to invocation.
+- Optional sample-data contract is strictly validated before invocation:
+  - content types: JSON/XML text only (`application/json`, `application/xml`, `text/xml`)
+  - size cap: **1 MB max**
+  - payloads over cap are rejected (no silent truncation)
+- Handler invokes AI Validation prompt through shared runtime and requires structured-output success before response success.
+- Structured report contract is enforced as:
+  - `summary` (high-level counts/signal)
+  - `issues[]` where each issue includes `category`, `severity`, `affectedRules[]`, `description`, `recommendation`
+  - optional generation metadata (`generatedAt`, prompt/model traces when available)
+- Canonical V1 issue taxonomy is enforced at the backend boundary:
+  - `category`: `correctness | completeness | maintainability | risk`
+  - `severity`: `info | warning | error`
+- Rule references must be stable and UI-linkable (`ruleIndex`, `targetPath`, or both) via `affectedRules[]`.
+- Invalid or schema-nonconforming model output is rejected as `INVALID_MODEL_OUTPUT` (never a partial success payload).
+- Feature semantics are advisory-only: AI validation augments deterministic validation but never replaces authoritative engine diagnostics.
+- Trigger semantics are manual-only in V1; runtime/handler does not introduce auto-refresh behavior on rule edits.
+
+### Cross-feature suggestion-review hardening contract (FS-074)
+
+FS-074 adds system-level guardrails for all suggestion-producing AI handlers (`explain-rule`, `suggest-expression`, `smart-fix`, `auto-map`, and advisory recommendation-bearing validation flows).
+
+Canonical guarantees:
+
+- Handler/runtime outputs are **review artifacts only**; generated content is never treated as an implicit mutation instruction.
+- Success/error/retry/refresh request lifecycles must remain non-mutating; mapping state changes only through explicit UI review actions that invoke mapping mutation APIs separately.
+- Validation-invalid suggestion outcomes remain successful review payloads with apply gating metadata (for example `readyToApply: false` + diagnostics) rather than transport errors.
+- Stale-guard metadata (for example `ruleVersion`/`ruleHash`) is first-class apply-protection context; stale conflicts resolve as explicit conflict/block outcomes, not silent apply fallthrough.
+- Explain Rule remains read-only assistance with no rule-mutation path.
+
+Telemetry and traceability requirements:
+
+- Runtime baseline telemetry (`ai.invoke.start|success|failure`) remains required for all handler invocations.
+- Feature-level review audit events (`suggestion_generated`, `suggestion_viewed`, `suggestion_edited`, `suggestion_accepted`, `suggestion_dismissed`, `apply_blocked_invalid`, `apply_blocked_stale`) are required at integration boundaries.
+- Correlation continuity is mandatory across feature event -> API envelope -> runtime telemetry using shared identifiers (`requestId`, optional `correlationId`).
+
+### FS-075 verification/governance addendum
+
+FS-075 codifies the runtime-facing verification boundary for Phase 2 acceptance:
+
+- Deterministic acceptance gate is mandatory in CI and must pass before merge/release (`npm run test:phase2:deterministic-gate`).
+- Prompt/runtime drift checks are mandatory and mode-scoped:
+  - PR mode: warning-budget policy (`npm run test:phase2:prompt-eval:pr`)
+  - Release mode: strict policy (`npm run test:phase2:prompt-eval:release`)
+- Golden corpus/versioning contract is tuple-scoped (`promptId + model/runtime tuple`) and is the canonical drift key.
+- Runtime outputs remain suggestion-only under all generate/refresh/retry/failure paths; acceptance gate policy treats any implicit commit instruction or behavior as a hard failure condition.
+
+### Auto-Map canonical contract (FS-073)
+
+`src/lambda/ai/auto-map.ts` is a canonical thin handler over shared runtime invocation and enforces these production constraints:
+
+- Single endpoint + mode contract:
+  - route: `POST /ai/auto-map`
+  - request includes `mode: 'section' | 'whole'`
+  - section mode scopes generation to a target section path; whole mode scopes generation to full target coverage for the mapping
+- Backend owns context retrieval. Client-provided full-schema context blobs are non-canonical.
+- Retrieval path is DynamoDB-only over ingested schema nodes using lexical candidate generation (`fieldName`/`path`/`embeddingText` signals), deterministic caps, and optional bounded in-Lambda embedding rerank.
+- No direct full-schema prompting path exists as a fallback.
+- Large-schema strategy is chunked generation with bounded parallelism:
+  - default chunk target: 50–100 target fields per chunk
+  - in-Lambda parallel chunk invocation cap: max 4
+  - over-budget workloads are delegated to Step Functions orchestration
+- Chunk outputs are merged and deduplicated to one target-unique suggestion set.
+- Dedup precedence is deterministic:
+  1. validation status (`valid` over invalid/parse-failed)
+  2. confidence (`high` > `medium` > `low`)
+  3. target-type-aware tie-break (scalar-preferred), then stable lexical fallback
+- Every candidate suggestion is validation-enriched before success response:
+  - normalized `validation` object is attached per suggestion/rule
+  - invalid candidates remain reviewable outcomes (not silent drops) unless superseded by deterministic dedup rules
+- Minimum Auto-Map telemetry/metadata contract includes:
+  - request/run identity: `requestId`, `mappingId`, `mode`
+  - chunking: `chunkCount`, `chunkIds`
+  - retrieval: `retrievalCandidatesCount`, `retrievalSelectedCount`
+  - validation: `validationPassCount`, `validationFailCount`
+  - dedup: conflict counters + `dedupDecisions` (winner/loser + reason)
+  - per-rule lineage: `sourceChunkRef`
+  - timing/model traces: stage durations + model/prompt version when available
+- No-context retrieval is a success outcome, not an error:
+  - returns zero suggestions with explicit no-context reason metadata for workspace empty-state rendering
 
 Lambda handlers do not:
 - Read from DynamoDB directly
@@ -347,6 +641,7 @@ Lambda handlers do not:
 |---|---|---|
 | `PROMPT_REGISTRY_TABLE` | DynamoDB table name | `integrations-keyra-promptregistry` |
 | `PROMPT_REGISTRY_LOCAL_DIR` | Local directory for prompt JSON files | (none — uses DynamoDB if unset) |
+| `PROMPT_REGISTRY_ACTIVE_POINTER_ENV` | Environment selector for active-pointer prompt version resolution | (none — pointer override disabled) |
 | `DSL_ASSET_BUCKET` | S3 bucket for DSL reference | `integrations-keyra` |
 | `DSL_ASSET_KEY` | S3 object key for DSL reference | `prompt-assets/dsl/keyra-dsl-reference.md` |
 | `DSL_ASSET_LOCAL_PATH` | Local file path for DSL reference | (none — uses S3 if unset) |
@@ -383,8 +678,28 @@ console.log(result);
 - The AI runtime has **zero dependency on UI code** (`ui/`).
 - Lambda handlers import from `src/lib/ai/` — not from each other.
 - All AI calls go through API Gateway -> Lambda. The UI never calls GitHub Models directly.
+- Browser-side provider invocation is prohibited by dual policy guardrails: UI ESLint restricted imports and path-based static scanning (`scripts/check-ui-ai-guardrails.ts`).
 - AI output is **suggestion-only** — no auto-commit to mapping state.
-- Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix). Step Functions are reserved for future long-running operations like large-schema auto-map.
+- Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix).
+- Auto-Map may use Step Functions for over-budget large-schema workloads while keeping `invokeAI()` as the per-chunk execution unit.
+- Backend mode UI integration must use `HttpAdapter` as the only canonical production adapter path.
+- Deprecated shortcut patterns (including HybridAdapter-style alternate routing) are non-canonical.
+
+---
+
+## Schema Query Dependency Contract (AI-adjacent)
+
+Some AI UX flows depend on schema search/query context. The canonical backend contract for schema-node retrieval is:
+
+- Primary and only serving path: **DynamoDB retriever** via `searchSchemaNodes(...)` runtime abstraction.
+- Runtime mode policy after FS-091 cutover: `RAG_RETRIEVER=dynamodb`.
+- Decommission posture: `opensearch` and `shadow` serving modes are removed and fail closed.
+- Retrieval control policy is deterministic and bounded by environment defaults:
+  - DEV: `lexicalCap=120`, `rerankCap=80`, `topK=12`, `contextExpansionCap=24`
+  - QA: `lexicalCap=150`, `rerankCap=100`, `topK=15`, `contextExpansionCap=30`
+  - PROD: `lexicalCap=180`, `rerankCap=120`, `topK=18`, `contextExpansionCap=36`
+- Tuning scope decision (FS-091 Rev 2): global defaults with environment overrides only (no per-project/per-schema tuning presets in this phase).
+- Canonical cutover parity metrics used for rollout evidence: average `Jaccard@10 >= 0.70` and average `NDCG@10 delta >= -0.10`.
 
 ---
 
@@ -406,7 +721,7 @@ console.log(result);
 
 ## Future Considerations
 
-- **RAG integration**: Auto-map and smart-fix will add OpenSearch retrieval to the orchestration pipeline. This will be an additional step between prompt loading and rendering — the architecture is designed to accommodate it.
-- **Step Functions**: Large auto-map operations may use Step Functions for parallel chunk processing. The shared runtime's `invokeAI()` will remain the per-chunk execution unit.
+- **Retrieval evolution**: Auto-Map retrieval is canonical and DynamoDB-only in serving paths. Future work may tune ranking heuristics, retrieval signals, or storage split (hybrid S3 embedding fallback trigger) while preserving the same handler/runtime boundaries.
+- **Step Functions scaling**: Auto-Map over-budget workloads may be delegated to Step Functions; `invokeAI()` remains the per-chunk execution unit.
 - **Prompt authoring UI**: A future admin interface may write to the PromptRegistry table. The runtime only reads from it.
 - **Batch field descriptions**: `describe-fields` may need chunking logic for large schemas. This is Lambda-specific logic, not shared runtime logic.

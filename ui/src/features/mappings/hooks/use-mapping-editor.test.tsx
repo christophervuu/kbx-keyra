@@ -95,7 +95,7 @@ const MOCK_INFERRED_TARGET_SCHEMA: SchemaDetail = {
     schemaId: 'target-schema-1',
     name: 'Inferred Target Schema',
     format: 'json-schema',
-    fieldCount: 2,
+    fieldCount: 3,
     origin: 'local',
     status: 'ready',
     inferred: true,
@@ -103,7 +103,7 @@ const MOCK_INFERRED_TARGET_SCHEMA: SchemaDetail = {
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
   },
-  content: JSON.stringify({ A: { B: 'text' } }),
+  content: JSON.stringify({ A: { B: 'text', C: 123 } }),
 };
 
 // ---------------------------------------------------------------------------
@@ -139,6 +139,9 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    deployMapping: vi.fn(),
+    promoteDeployment: vi.fn(),
+    rollbackDeployment: vi.fn(),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -273,6 +276,31 @@ describe('useMappingEditor', () => {
       expect(result.current.parsedTargetSchema).not.toBeNull();
       expect(result.current.parsedTargetSchema?.inferred).toBe(true);
       expect(result.current.parsedTargetSchema?.nodes.length ?? 0).toBeGreaterThan(0);
+    });
+
+    it('uses inferred-schema reconstruction for engine validation payloads', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_INFERRED_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') return Promise.resolve(MOCK_INFERRED_TARGET_SCHEMA);
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      await waitFor(() => {
+        expect(result.current.validation.result).not.toBeNull();
+      });
+
+      expect(result.current.validation.result?.valid).toBe(true);
+      expect(result.current.validation.result?.diagnostics.some((d) => d.severity === 'error')).toBe(false);
     });
 
     it('transitions to error state on config load failure', async () => {
@@ -476,6 +504,33 @@ describe('useMappingEditor', () => {
       });
 
       expect(adapter.saveMapping).not.toHaveBeenCalled();
+    });
+
+    it('save updates mapping only and does not trigger deployment orchestration APIs (Save != Deploy)', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateRule(0, {
+          target: 'A.B',
+          expression: 'static("saved-only")',
+        });
+      });
+
+      await act(async () => {
+        await result.current.actions.save();
+      });
+
+      expect(adapter.saveMapping).toHaveBeenCalled();
+      expect(adapter.deployMapping).not.toHaveBeenCalled();
+      expect(adapter.promoteDeployment).not.toHaveBeenCalled();
+      expect(adapter.rollbackDeployment).not.toHaveBeenCalled();
     });
   });
 
@@ -2005,6 +2060,191 @@ describe('useMappingEditor', () => {
 
       expect(adapter.createVersion).not.toHaveBeenCalled();
       expect(result.current.currentVersion).toBeNull();
+    });
+  });
+
+  describe('AI validation orchestration', () => {
+    it('runs AI validation manually and exposes structured report state', async () => {
+      const report = {
+        summary: {
+          totalIssues: 1,
+          bySeverity: { info: 0, warning: 1, error: 0 },
+          byCategory: {
+            correctness: 0,
+            completeness: 1,
+            maintainability: 0,
+            risk: 0,
+          },
+        },
+        issues: [
+          {
+            id: 'issue-1',
+            category: 'completeness',
+            severity: 'warning',
+            affectedRules: [{ ruleIndex: 0, targetPath: 'A.B' }],
+            description: 'Missing fallback',
+            recommendation: 'Use default() fallback',
+          },
+        ],
+      } as const;
+
+      const adapter = createMockAdapter({
+        validateMappings: vi.fn().mockResolvedValue(report),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.runAiValidation();
+      });
+
+      expect(result.current.aiValidation.status).toBe('loading');
+
+      await waitFor(() => {
+        expect(result.current.aiValidation.status).toBe('success');
+      });
+
+      expect(result.current.aiValidation.report).toEqual(report);
+      expect(adapter.validateMappings).toHaveBeenCalledWith({ mappingId: 'mapping-1' });
+    });
+
+    it('passes optional sampleData to validateMappings request', async () => {
+      const adapter = createMockAdapter({
+        validateMappings: vi.fn().mockResolvedValue({
+          summary: {
+            totalIssues: 0,
+            bySeverity: { info: 0, warning: 0, error: 0 },
+            byCategory: {
+              correctness: 0,
+              completeness: 0,
+              maintainability: 0,
+              risk: 0,
+            },
+          },
+          issues: [],
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.runAiValidation({
+          sampleData: {
+            contentType: 'application/json',
+            content: '{"invoice":{"id":"123"}}',
+          },
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.aiValidation.status).toBe('success');
+      });
+
+      expect(adapter.validateMappings).toHaveBeenCalledWith({
+        mappingId: 'mapping-1',
+        sampleData: {
+          contentType: 'application/json',
+          content: '{"invoice":{"id":"123"}}',
+        },
+      });
+    });
+
+    it('failure is non-destructive to mapping/rule state and supports retry/reset', async () => {
+      const validateMappings = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Could not reach AI Validation service.'))
+        .mockResolvedValueOnce({
+          summary: {
+            totalIssues: 0,
+            bySeverity: { info: 0, warning: 0, error: 0 },
+            byCategory: {
+              correctness: 0,
+              completeness: 0,
+              maintainability: 0,
+              risk: 0,
+            },
+          },
+          issues: [],
+        });
+
+      const adapter = createMockAdapter({ validateMappings });
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      const rulesBefore = result.current.rules;
+
+      act(() => {
+        result.current.actions.runAiValidation();
+      });
+
+      await waitFor(() => {
+        expect(result.current.aiValidation.status).toBe('error');
+      });
+
+      expect(result.current.rules).toEqual(rulesBefore);
+
+      act(() => {
+        result.current.actions.retryAiValidation();
+      });
+
+      await waitFor(() => {
+        expect(result.current.aiValidation.status).toBe('success');
+      });
+
+      act(() => {
+        result.current.actions.resetAiValidation();
+      });
+
+      expect(result.current.aiValidation).toEqual({
+        status: 'idle',
+        report: null,
+        error: null,
+      });
+    });
+
+    it('does not auto-trigger AI validation after mapping edits', async () => {
+      const adapter = createMockAdapter({
+        validateMappings: vi.fn().mockResolvedValue({
+          summary: {
+            totalIssues: 0,
+            bySeverity: { info: 0, warning: 0, error: 0 },
+            byCategory: {
+              correctness: 0,
+              completeness: 0,
+              maintainability: 0,
+              risk: 0,
+            },
+          },
+          issues: [],
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateRule(0, {
+          target: 'A.B',
+          expression: 'static("changed")',
+        });
+      });
+
+      expect(adapter.validateMappings).not.toHaveBeenCalled();
+      expect(result.current.aiValidation.status).toBe('idle');
     });
   });
 });

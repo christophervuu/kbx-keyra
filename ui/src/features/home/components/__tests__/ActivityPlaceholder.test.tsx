@@ -12,15 +12,32 @@ describe('ActivityPlaceholder', () => {
     expect(screen.getByTestId('activity-placeholder')).toBeInTheDocument();
   });
 
-  it('renders "Recent Activity" heading', () => {
+  it('renders "Recent activity" heading', () => {
     render(<ActivityPlaceholder />);
     expect(screen.getByRole('heading', { name: /recent activity/i })).toBeInTheDocument();
   });
 
-  it('renders placeholder text', () => {
+  it('renders empty placeholder text', () => {
     render(<ActivityPlaceholder />);
     expect(
-      screen.getByText(/activity feed will appear here when event tracking is available/i),
+      screen.getByText(/recent activity is not yet available/i),
     ).toBeInTheDocument();
+  });
+
+  it('renders item rows when activity items are provided', () => {
+    render(
+      <ActivityPlaceholder
+        items={[
+          {
+            type: 'project',
+            id: 'proj-1',
+            name: 'Alpha Project',
+            timestamp: new Date().toISOString(),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /alpha project/i })).toBeInTheDocument();
   });
 });

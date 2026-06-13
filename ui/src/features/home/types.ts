@@ -28,6 +28,7 @@ export interface ProjectListItem {
   readonly name: string;
   readonly description: string;
   readonly mappingCount: number;
+  readonly schemaCount?: number;
   readonly updatedAt: string;
   readonly worstStatus: ProjectWorstStatus;
   readonly devDeploy: DeployStatus;

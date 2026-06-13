@@ -4,19 +4,29 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useAdapter } from '@/lib/api';
-import type { SchemaMetadata, SchemaOrigin } from '@/lib/types/domain';
-
+import { parseInferredSchema, parseJsonSchema, parseXsd } from '../lib';
 import { filterSchemas, sortSchemas } from '../lib/schema-filters';
 import type {
   DisplayFormat,
+  FilterDataFormat,
+  FilterOwnership,
+  FilterStatus,
   SchemaLibraryFilters,
   SchemaLibraryItem,
   SchemaLibrarySort,
+  SchemaLibraryViewMode,
   SortDirection,
   SortField,
   SyncStatus,
 } from '../types';
+
+import { useAdapter } from '@/lib/api';
+import {
+  normalizeSchemaOwnership,
+  normalizeSchemaStatus,
+  schemaDataFormatFromSourceKind,
+  type SchemaMetadata,
+} from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Derivation helpers
@@ -25,7 +35,7 @@ import type {
 function deriveSyncStatus(schema: SchemaMetadata): SyncStatus {
   if (schema.inferred === true) return 'inferred';
   if (schema.source.type === 'github') {
-    return schema.source.commitSha != null ? 'synced' : 'not-synced';
+    return schema.syncStatus ?? 'synced';
   }
   // source.type === 'upload'
   return 'local';
@@ -34,7 +44,55 @@ function deriveSyncStatus(schema: SchemaMetadata): SyncStatus {
 function deriveDisplayFormat(schema: SchemaMetadata): DisplayFormat {
   if (schema.inferred === true) return 'Inferred';
   if (schema.format === 'xsd') return 'XSD';
-  return 'JSON Schema';
+  return 'JSON';
+}
+
+function deriveDataFormat(schema: SchemaMetadata): FilterDataFormat {
+  if (schema.dataFormat != null) {
+    return schema.dataFormat.toUpperCase() as FilterDataFormat;
+  }
+
+  const sourceKind = schema.sourceKind
+    ?? (schema.inferred ? (schema.format === 'xsd' ? 'inferred_from_xml' : 'inferred_from_json') : undefined)
+    ?? (schema.format === 'xsd' ? 'xsd' : 'json_schema');
+
+  return schemaDataFormatFromSourceKind(sourceKind).toUpperCase() as FilterDataFormat;
+}
+
+function deriveOwnership(schema: SchemaMetadata): FilterOwnership {
+  return normalizeSchemaOwnership({
+    ownership: schema.ownership,
+    origin: schema.origin,
+  });
+}
+
+function deriveStatus(schema: SchemaMetadata): FilterStatus {
+  const normalized = normalizeSchemaStatus({
+    status: schema.status,
+    inferred: schema.inferred,
+    reviewedAt: schema.reviewedAt,
+  });
+
+  if (normalized === 'processing' || normalized === 'needs_review' || normalized === 'error') {
+    return normalized;
+  }
+
+  return 'ready';
+}
+
+const VIEW_MODE_STORAGE_KEY = 'keyra.schemas.viewMode';
+
+function readStoredViewMode(): SchemaLibraryViewMode {
+  try {
+    const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (stored === 'card' || stored === 'list') {
+      return stored;
+    }
+  } catch {
+    // ignore localStorage unavailability
+  }
+
+  return 'card';
 }
 
 // ---------------------------------------------------------------------------
@@ -43,9 +101,9 @@ function deriveDisplayFormat(schema: SchemaMetadata): DisplayFormat {
 
 const DEFAULT_FILTERS: SchemaLibraryFilters = {
   search: '',
-  origins: [],
-  formats: [],
-  scopes: [],
+  ownerships: [],
+  dataFormats: [],
+  statuses: [],
 };
 
 const DEFAULT_SORT: SchemaLibrarySort = {
@@ -68,11 +126,13 @@ export interface UseSchemaLibraryResult {
   filters: SchemaLibraryFilters;
   sort: SchemaLibrarySort;
   setSearch: (term: string) => void;
-  toggleOriginFilter: (origin: SchemaOrigin) => void;
-  toggleFormatFilter: (format: DisplayFormat) => void;
-  toggleScopeFilter: (scope: 'global' | 'project') => void;
+  toggleOwnershipFilter: (ownership: FilterOwnership) => void;
+  toggleDataFormatFilter: (format: FilterDataFormat) => void;
+  toggleStatusFilter: (status: FilterStatus) => void;
   /** If direction is omitted and the same field is already selected, toggles direction. */
   setSort: (field: SortField, direction?: SortDirection) => void;
+  viewMode: SchemaLibraryViewMode;
+  setViewMode: (mode: SchemaLibraryViewMode) => void;
   clearFilters: () => void;
   retry: () => void;
 }
@@ -89,6 +149,7 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
   const [items, setItems] = useState<SchemaLibraryItem[]>([]);
   const [filters, setFilters] = useState<SchemaLibraryFilters>(DEFAULT_FILTERS);
   const [sort, setSort_] = useState<SchemaLibrarySort>(DEFAULT_SORT);
+  const [viewMode, setViewModeState] = useState<SchemaLibraryViewMode>(readStoredViewMode);
   const [fetchKey, setFetchKey] = useState(0);
 
   // ---------------------------------------------------------------------------
@@ -133,6 +194,41 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
           }
         }
 
+        // Best-effort field-count backfill for schemas whose list metadata is stale.
+        // This keeps Schema Library counts aligned with Schema Detail for ready/reviewed schemas.
+        const parsedCountBySchemaId = new Map<string, number>();
+        const countBackfillCandidates = schemas.filter((schema) => {
+          const metadataFieldCount = schema.fieldCount > 0
+            ? schema.fieldCount
+            : (schema as { totalFieldCount?: number }).totalFieldCount ?? 0;
+          const normalizedStatus = deriveStatus(schema);
+          return metadataFieldCount <= 0 && normalizedStatus !== 'processing';
+        });
+
+        await Promise.all(
+          countBackfillCandidates.map(async (schema) => {
+            try {
+              const detail = await adapter.getSchema(schema.schemaId);
+              const content = detail.content;
+
+              const parsed = schema.inferred
+                ? parseInferredSchema(
+                  typeof content === 'string' ? content : JSON.stringify(content),
+                  schema.format === 'xsd' ? 'xml' : 'json',
+                )
+                : schema.format === 'xsd'
+                  ? parseXsd(typeof content === 'string' ? content : JSON.stringify(content))
+                  : parseJsonSchema(content);
+
+              if (parsed.totalFieldCount > 0) {
+                parsedCountBySchemaId.set(schema.schemaId, parsed.totalFieldCount);
+              }
+            } catch {
+              // Non-fatal: keep metadata fallback when parse/load fails.
+            }
+          }),
+        );
+
         // Enrich each schema into a SchemaLibraryItem
         const enriched: SchemaLibraryItem[] = schemas.map((schema) => {
           const usage = usageMap.get(schema.schemaId);
@@ -140,11 +236,17 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
             schemaId: schema.schemaId,
             name: schema.name,
             description: schema.description,
+            disambiguator: schema.disambiguator,
             origin: schema.origin,
-            scope: schema.scope,
+            ownership: deriveOwnership(schema),
+            dataFormat: deriveDataFormat(schema),
+            status: deriveStatus(schema),
             format: schema.format,
             displayFormat: deriveDisplayFormat(schema),
-            fieldCount: schema.fieldCount,
+            fieldCount: parsedCountBySchemaId.get(schema.schemaId)
+              ?? (schema.fieldCount > 0
+                ? schema.fieldCount
+                : (schema as { totalFieldCount?: number }).totalFieldCount ?? 0),
             syncStatus: deriveSyncStatus(schema),
             projectCount: usage?.count ?? 0,
             projectNames: usage?.names ?? [],
@@ -185,30 +287,30 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     setFilters((f) => ({ ...f, search: term }));
   }, []);
 
-  const toggleOriginFilter = useCallback((origin: SchemaOrigin) => {
+  const toggleOwnershipFilter = useCallback((ownership: FilterOwnership) => {
     setFilters((f) => ({
       ...f,
-      origins: f.origins.includes(origin)
-        ? f.origins.filter((o) => o !== origin)
-        : [...f.origins, origin],
+      ownerships: f.ownerships.includes(ownership)
+        ? f.ownerships.filter((o) => o !== ownership)
+        : [...f.ownerships, ownership],
     }));
   }, []);
 
-  const toggleFormatFilter = useCallback((format: DisplayFormat) => {
+  const toggleDataFormatFilter = useCallback((format: FilterDataFormat) => {
     setFilters((f) => ({
       ...f,
-      formats: f.formats.includes(format)
-        ? f.formats.filter((fmt) => fmt !== format)
-        : [...f.formats, format],
+      dataFormats: f.dataFormats.includes(format)
+        ? f.dataFormats.filter((fmt) => fmt !== format)
+        : [...f.dataFormats, format],
     }));
   }, []);
 
-  const toggleScopeFilter = useCallback((scope: 'global' | 'project') => {
+  const toggleStatusFilter = useCallback((status: FilterStatus) => {
     setFilters((f) => ({
       ...f,
-      scopes: f.scopes.includes(scope)
-        ? f.scopes.filter((s) => s !== scope)
-        : [...f.scopes, scope],
+      statuses: f.statuses.includes(status)
+        ? f.statuses.filter((value) => value !== status)
+        : [...f.statuses, status],
     }));
   }, []);
 
@@ -229,6 +331,16 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
+  const setViewMode = useCallback((mode: SchemaLibraryViewMode) => {
+    setViewModeState(mode);
+
+    try {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+    } catch {
+      // ignore localStorage write failures
+    }
+  }, []);
+
   const retry = useCallback(() => {
     setFetchKey((k) => k + 1);
   }, []);
@@ -242,10 +354,12 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     filters,
     sort,
     setSearch,
-    toggleOriginFilter,
-    toggleFormatFilter,
-    toggleScopeFilter,
+    toggleOwnershipFilter,
+    toggleDataFormatFilter,
+    toggleStatusFilter,
     setSort,
+    viewMode,
+    setViewMode,
     clearFilters,
     retry,
   };

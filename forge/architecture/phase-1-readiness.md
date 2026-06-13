@@ -19,7 +19,7 @@ Scope:
 - Capture adapter contract boundaries and current behavior
 - Enumerate Phase 0 simplifications that require Phase 1 resolution
 - Make frontend-imposed backend constraints explicit
-- Document AI transition path (`HybridAdapter` showcase slice → full backend integration)
+- Document AI transition path (legacy showcase adapter paths → canonical `HttpAdapter` backend integration)
 - Document engine integration points across browser and backend runtime
 
 Out of scope:
@@ -35,7 +35,7 @@ Source of truth: `ui/src/lib/api/types.ts` (`ApiAdapter`).
 
 Columns:
 - **Signature**: method contract at UI boundary
-- **Current (Phase 0)**: `LocalStorageAdapter`/`HybridAdapter` behavior
+- **Current adapters in codebase**: `LocalStorageAdapter` and `HttpAdapter` behavior
 - **Phase 1 requirement**: what backend must provide
 - **Category**: CRUD / compute / AI / deployment / integration
 - **Complexity notes**: pagination, consistency, latency, etc.
@@ -90,7 +90,7 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `getDeploymentContext(mappingId): Promise<DeploymentContext>` | local simulated env records | deployment-context endpoint | deployment | env model currently fixed `DEV/QA/PROD` |
+| `getDeploymentContext(mappingId): Promise<DeploymentContext>` | local simulated env records | deployment-context endpoint | deployment | FS-081 runtime model is `DEV/PREPROD/PROD`; `SANDBOX` is control-plane context |
 | `deploy(mappingId, environment): Promise<DeploymentRecord>` | local simulated record create | real deploy orchestration | deployment | async/long-running behavior not modeled in adapter yet |
 | `promote(mappingId, from, to): Promise<DeploymentRecord>` | local simulated promotion | promotion API | deployment | policy/approval concerns deferred |
 | `rollback(mappingId, environment, targetVersion): Promise<DeploymentRecord>` | local simulated rollback | rollback API | deployment | auditability requirements likely in Phase 1 |
@@ -100,9 +100,9 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `listCdmSchemas(path?)` | throws offline-mode error | backend integration/proxy for CDM listing | integration | pagination/filter semantics TBD |
-| `linkCdmSchema(input)` | throws offline-mode error | schema-link endpoint | integration | idempotency expectations TBD |
-| `syncCdmSchema(schemaId)` | throws offline-mode error | sync endpoint | integration | sync status lifecycle contract required |
+| `listCdmSchemas(path?)` | `HttpAdapter` -> `GET /schemas/cdm` in backend mode; local throws deterministic offline-unavailable error | maintain root-scoped CDM listing behavior | integration | fixed root `JSONSchemas/CommonDataModels`; one-directory-level per request (client-driven navigation) |
+| `linkCdmSchema(input)` | `HttpAdapter` -> `POST /schemas/cdm/link` in backend mode; local throws deterministic offline-unavailable error | maintain schema-link endpoint with canonical source metadata persistence | integration | idempotent duplicate-link success for same project + repo/branch/path |
+| `syncCdmSchema(schemaId)` | `HttpAdapter` -> `POST /schemas/:id/sync-cdm` for explicit re-sync; supports `GET /schemas/:id/sync-cdm` via `statusOnly` option for lightweight status-refresh | preserve manual-only re-sync + passive update-available detection path | integration | sync states: `synced`, `update-available`, `sync-failed`; status-refresh does not mutate content |
 | `listPublishedSchemas(path?)` | throws offline-mode error | published schema list endpoint | integration | branching/path scope unresolved |
 | `publishSchemaToGitHub(schemaId, input)` | throws offline-mode error | publish endpoint | integration | commit strategy and conflict behavior TBD |
 | `linkPublishedSchema(input)` | throws offline-mode error | link endpoint | integration | not-found/auth failure normalization needed |
@@ -111,18 +111,18 @@ Columns:
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `autoMap(input)` | offline throw in local adapter | backend AI endpoint + adapter impl | AI | full-section vs whole-mapping semantics need definition |
-| `autoMapSection(input)` | HTTP in `HybridAdapter`; offline throw in local | keep/extend backend AI section endpoint | AI | currently showcase-integrated path |
-| `suggestExpression(input)` | HTTP in `HybridAdapter`; offline throw in local | production-grade endpoint + standardized errors | AI | user-facing error mapping exists in UI |
-| `explainRule(input)` | HTTP in `HybridAdapter`; offline throw in local | production-grade endpoint + standardized errors | AI | parity with existing showcase behavior needed |
-| `smartFix(input)` | offline throw in local | backend AI endpoint + adapter impl | AI | currently no HTTP override |
-| `validateMappings(input)` | offline throw in local | backend validation/report endpoint | AI/compute | contract shape exists, behavior not implemented |
+| `autoMap(input)` | `HttpAdapter` canonical path uses `POST /ai/auto-map`; offline throws deterministic `Not available in offline mode` error in local adapter | preserve canonical backend invocation path + standardized envelope | AI | response includes required `rules`; optional `diagnostics`/`warnings`/`retrievalMeta`; route-shared semantics with `autoMapSection` |
+| `autoMapSection(input)` | `HttpAdapter` -> `POST /ai/auto-map`; offline throws deterministic `Not available in offline mode` error in local | keep backend section endpoint behavior on canonical path | AI | shared route with `autoMap` |
+| `suggestExpression(input)` | `HttpAdapter` -> `POST /ai/suggest-expression`; offline throws deterministic `Not available in offline mode` error in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization) |
+| `explainRule(input)` | `HttpAdapter` -> `POST /ai/explain-rule`; offline throws deterministic `Not available in offline mode` error in local | keep production-grade endpoint + standardized errors | AI | now aligned to shared invocation foundation (routing/limits/telemetry/error normalization); structured explain output supports optional `confidence`/`limitations`; UI semantics are generated-assistance and read-only (no mapping mutation) |
+| `smartFix(input)` | `HttpAdapter` canonical path uses `POST /ai/smart-fix`; offline throws deterministic `Not available in offline mode` error in local | backend capability may return standardized `FEATURE_NOT_ENABLED` during rollout | AI | no local/provider shortcut fallback |
+| `validateMappings(input)` | `HttpAdapter` canonical path uses `POST /ai/validate-mappings`; offline throws deterministic `Not available in offline mode` error in local | backend capability may return standardized `FEATURE_NOT_ENABLED` during rollout | AI/compute | contract shape remains stable; no hybrid fallback path |
 
 ### 2.9 Schema Search / Activity / Server Preview
 
 | Signature | Current (Phase 0) | Phase 1 requirement | Category | Complexity notes |
 |---|---|---|---|---|
-| `querySchemaNodes(schemaId, query): Promise<SchemaSearchResult[]>` | returns `[]` (intentional stub) | indexed search endpoint | compute | ranking/pagination contract not yet defined |
+| `querySchemaNodes(schemaId, query): Promise<SchemaSearchResult[]>` | `HttpAdapter` -> `POST /schemas/:id/query` in backend mode; local returns `[]` placeholder | indexed search endpoint with OpenSearch-first semantics | compute | temporary PK-scoped degraded fallback gate exists (`SCHEMA_QUERY_DEGRADED_FALLBACK`) |
 | `listActivity(projectId?, limit?): Promise<ActivityEntry[]>` | local list + optional filter/limit | activity feed endpoint | compute | retention/window rules unresolved |
 | `previewOnServer(mappingId, input): Promise<ServerPreviewResult>` | offline throw in local; compare hooks gate availability | server preview endpoint | compute/integration | latency/timeouts and execution budget are critical |
 
@@ -210,9 +210,9 @@ Frontend implementation currently constrains backend design in these ways:
    - Source: version APIs and editor/version-history flows  
    - Constraint: numeric version identity and retrievable full snapshots are part of current UI behavior.
 
-7. **Fixed environment enum in deploy workflows**  
+7. **Environment model migration in deploy workflows**  
    - Source: `Environment` usage and deployment methods  
-   - Constraint: backend environment model must remain compatible or require coordinated UI migration.
+   - Constraint: backend and UI must migrate runtime environment contracts from `DEV/QA/PROD` to `DEV/PREPROD/PROD`, with explicit `SANDBOX` control-plane context and legacy `QA -> PREPROD` normalization.
 
 8. **Latency-sensitive preview/validation UX**  
    - Source: debounced validation/preview hooks and test-lab workflows  
@@ -230,9 +230,15 @@ Frontend implementation currently constrains backend design in these ways:
 - `createAdapter()` now selects:
   - `LocalStorageAdapter` when `VITE_API_URL` is unset
   - `HttpAdapter` when set
-- `HttpAdapter` currently provides HTTP CRUD coverage for schemas/mappings/versions/projects via shared `httpRequest()` utility.
-- AI and other non-CRUD methods in `HttpAdapter` currently throw structured `AdapterMethodNotImplementedError` placeholders (`code: NOT_IMPLEMENTED`, `retryable: false`).
-- `HybridAdapter` remains in the repository for compatibility/reference but is deprecated and no longer bootstrap-selected.
+- `HttpAdapter` provides HTTP CRUD coverage plus canonical AI route mappings and schema query (`POST /schemas/:id/query`) via shared `httpRequest()` utility.
+- Phase 2 AI methods are route-complete on the canonical adapter path (`/ai/explain-rule`, `/ai/suggest-expression`, `/ai/auto-map`, `/ai/smart-fix`, `/ai/validate-mappings`).
+- Temporarily unavailable backend AI capability is surfaced as standardized `FEATURE_NOT_ENABLED` (no local/hybrid fallback).
+- `HybridAdapter` is retained for one release cycle as deprecated-only bridge (dev warning on instantiation); canonical bootstrap/runtime path remains `HttpAdapter` only, and guardrails block new callsites.
+- FS-066 standardized backend AI invocation via shared runtime contracts:
+  - centralized tier routing defaults + allowlisted override policy
+  - invocation guard checks and limit enforcement
+  - standardized telemetry fields (`ai.invoke.start|success|failure`)
+  - shared error normalization from AI/runtime/provider classes to canonical backend envelope codes/status
 
 ### Backend assets already present
 - Lambda handlers under `src/lambda/ai/`:
@@ -244,10 +250,11 @@ Frontend implementation currently constrains backend design in these ways:
 - Architecture reference: `forge/architecture/ai-runtime.md`.
 
 ### Phase 1 extension path
-1. Expand backend coverage from showcase methods to full AI contract (`autoMap`, `smartFix`, `validateMappings`, etc.)
-2. Introduce standardized error envelopes and auth-aware invocation path
-3. Introduce full HTTP adapter (or equivalent) while retaining `ApiAdapter` call-site stability
+1. Maintain canonical backend coverage through `HttpAdapter` for required AI methods (`autoMap`, `autoMapSection`, `suggestExpression`, `explainRule`, `smartFix`, `validateMappings`)
+2. Preserve FS-066 standardized invocation contracts (routing/limits/telemetry/error normalization) as additional AI endpoints are onboarded and as temporarily gated endpoints transition from `FEATURE_NOT_ENABLED` to full capability
+3. Retain a single production backend adapter path (`HttpAdapter`) while keeping `ApiAdapter` call-site stability
 4. Keep compatibility for current UI flows (`useSuggestExpression`, explain/auto-map workspace lifecycle)
+5. Keep browser-side guardrails in force so provider SDK/domain usage remains backend-only
 
 ### Compatibility considerations
 - Preserve current response shapes used by UI hooks/components
@@ -291,12 +298,18 @@ Frontend implementation currently constrains backend design in these ways:
 - Mapping engine architecture is strongly aligned after T-05 reconciliation.
 - UI routing and adapter bootstrap behavior align with implementation after T-06 updates.
 - Project structure now reflects actual repository shape after T-04 updates.
+- FS-076 CDM foundation is now implemented (read-only browse/link/manual re-sync + status-refresh), including persisted `repoId` metadata and `sourceRepoId` projection.
 
 ### Intentionally simplified / changed in Phase 0
 - XSD validation remains permissive stub.
 - Local-only adapter remains primary data plane.
-- AI/GitHub/deployment are partial or showcase-only integrations.
+- AI/GitHub/deployment remain partial in breadth, but retained AI paths are now canonically routed through `HttpAdapter`.
 - Template/search subsystems have placeholder behavior.
+
+FS-076 clarification for GitHub scope:
+
+- CDM integration is no longer placeholder in backend mode.
+- This implemented slice remains strictly read-only against GitHub (no write/publish behavior in CDM browse/link/sync flows).
 
 ### Still unresolved for Phase 1 planning
 - Pagination strategy for list-heavy surfaces.
@@ -323,6 +336,50 @@ Frontend implementation currently constrains backend design in these ways:
 
 ---
 
+## 9) Runtime Bootstrap Boundary Notes (FS-082)
+
+FS-082 clarifies the minimum runtime bootstrap contract needed before deployment lifecycle implementation can be considered phase-ready.
+
+### 9.1 Runtime bootstrap prerequisites
+
+Per runtime account (`DEV`, `PREPROD`, `PROD`), readiness now assumes:
+- internal runtime API (`/internal/deploy`, `/internal/rollback`, `/internal/execute`, `/internal/health`, `/internal/status/{mappingId}`)
+- local active-pointer table (`mappingId -> activeSnapshotId`)
+- local append-only deployment history table
+- local immutable runtime artifact/schema storage
+- generic runtime execute lambda decoupled from deploy mutation path
+
+### 9.2 Execution isolation requirement
+
+Readiness boundary now explicitly includes execution isolation:
+- runtime execution and preview resolve deployment state from runtime-local storage only
+- runtime execution cannot depend on SANDBOX deployment-state reads
+- deploy operation must copy required schema payloads into runtime-local storage
+
+### 9.3 MVP defaults relevant to phase planning
+
+- runtime API type: `HttpApi`
+- deploy transfer mode: direct request-body relay only
+- promote transfer mode: full artifact payload push on every promote (same as deploy)
+- deploy/promote payload hard cap: 5 MB raw JSON body (preflight reject + runtime defense-in-depth reject)
+- deployment history indexing: PK/SK only, no GSI until query need is concrete
+- default runtime log retention baseline: 30 days (including prod unless org policy overrides)
+
+### 9.4 Planning implication
+
+This bootstrap contract reduces ambiguity between FS-081 architecture and implementation-phase specs:
+- FS-081 defines cross-account deployment model and promotion/rollback semantics
+- FS-082 defines concrete per-environment runtime bootstrap substrate required to implement those semantics deterministically
+
+FS-083 adds orchestration-layer clarifications that must now be treated as readiness constraints:
+- control-plane orchestration status lifecycle must be explicit (`queued|in_progress|retrying|succeeded|failed|timed_out`)
+- ambiguous timeout outcomes must reconcile via runtime status polling (no callbacks/event bridge in MVP)
+- rollback is local-artifact-only (`ARTIFACT_NOT_PRESENT` on missing local artifact)
+- runtime endpoint config source is persisted control-plane settings with env-var fallback (bootstrap/local-dev)
+- QA historical values remain at-rest; domain/view layers normalize `QA -> PREPROD`
+
+---
+
 ## Cross-Reference Index
 
 - Architecture docs:
@@ -333,7 +390,6 @@ Frontend implementation currently constrains backend design in these ways:
 - Source contracts/implementations:
   - `ui/src/lib/api/types.ts`
   - `ui/src/lib/api/local-storage-adapter.ts`
-  - `ui/src/lib/api/hybrid-adapter.ts`
   - `ui/src/lib/api/bootstrap.ts`
   - `ui/src/lib/engine/index.ts`
   - `src/engine/validate/schema-tree.ts`

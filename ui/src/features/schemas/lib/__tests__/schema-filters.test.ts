@@ -12,10 +12,12 @@ function makeItem(overrides: Partial<SchemaLibraryItem>): SchemaLibraryItem {
     schemaId: 'schema-1',
     name: 'Test Schema',
     description: undefined,
-    origin: 'local',
-    scope: 'project',
+    origin: 'uploaded',
+    ownership: 'user',
+    dataFormat: 'JSON',
+    status: 'ready',
     format: 'json-schema',
-    displayFormat: 'JSON Schema',
+    displayFormat: 'JSON',
     fieldCount: 10,
     syncStatus: 'local',
     projectCount: 0,
@@ -28,9 +30,9 @@ function makeItem(overrides: Partial<SchemaLibraryItem>): SchemaLibraryItem {
 
 const EMPTY_FILTERS: SchemaLibraryFilters = {
   search: '',
-  origins: [],
-  formats: [],
-  scopes: [],
+  ownerships: [],
+  dataFormats: [],
+  statuses: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -75,42 +77,39 @@ describe('filterSchemas', () => {
     });
   });
 
-  describe('origin filter', () => {
+  describe('ownership filter', () => {
     const items = [
-      makeItem({ schemaId: '1', origin: 'local' }),
-      makeItem({ schemaId: '2', origin: 'published' }),
-      makeItem({ schemaId: '3', origin: 'cdm' }),
+      makeItem({ schemaId: '1', ownership: 'user' }),
+      makeItem({ schemaId: '2', ownership: 'user' }),
+      makeItem({ schemaId: '3', ownership: 'cdm' }),
     ];
 
-    it('single origin filter', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: ['local'] });
+    it('single ownership filter', () => {
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, ownerships: ['cdm'] });
       expect(result).toHaveLength(1);
-      expect(result[0].schemaId).toBe('1');
+      expect(result[0].schemaId).toBe('3');
     });
 
-    it('multiple origins use OR logic', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: ['local', 'cdm'] });
-      expect(result).toHaveLength(2);
-      const ids = result.map((r) => r.schemaId);
-      expect(ids).toContain('1');
-      expect(ids).toContain('3');
+    it('multiple ownership values use OR logic', () => {
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, ownerships: ['user', 'cdm'] });
+      expect(result).toHaveLength(3);
     });
 
-    it('empty origins array returns all', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, origins: [] });
+    it('empty ownerships array returns all', () => {
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, ownerships: [] });
       expect(result).toHaveLength(3);
     });
   });
 
-  describe('format filter', () => {
+  describe('data format filter', () => {
     const items = [
-      makeItem({ schemaId: '1', displayFormat: 'JSON Schema' }),
-      makeItem({ schemaId: '2', displayFormat: 'XSD' }),
-      makeItem({ schemaId: '3', displayFormat: 'Inferred' }),
+      makeItem({ schemaId: '1', dataFormat: 'JSON' }),
+      makeItem({ schemaId: '2', dataFormat: 'XML' }),
+      makeItem({ schemaId: '3', dataFormat: 'JSON' }),
     ];
 
     it('filters by single format', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, formats: ['XSD'] });
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, dataFormats: ['XML'] });
       expect(result).toHaveLength(1);
       expect(result[0].schemaId).toBe('2');
     });
@@ -121,47 +120,43 @@ describe('filterSchemas', () => {
     });
   });
 
-  describe('scope filter', () => {
+  describe('status filter', () => {
     const items = [
-      makeItem({ schemaId: '1', scope: 'global' }),
-      makeItem({ schemaId: '2', scope: 'project' }),
+      makeItem({ schemaId: '1', status: 'ready' }),
+      makeItem({ schemaId: '2', status: 'processing' }),
+      makeItem({ schemaId: '3', status: 'needs_review' }),
     ];
 
-    it('filters by scope', () => {
-      const result = filterSchemas(items, { ...EMPTY_FILTERS, scopes: ['global'] });
+    it('filters by status values', () => {
+      const result = filterSchemas(items, { ...EMPTY_FILTERS, statuses: ['needs_review'] });
       expect(result).toHaveLength(1);
-      expect(result[0].schemaId).toBe('1');
-    });
-
-    it('empty scopes array returns all', () => {
-      const result = filterSchemas(items, EMPTY_FILTERS);
-      expect(result).toHaveLength(2);
+      expect(result[0].schemaId).toBe('3');
     });
   });
 
   describe('combined filters (AND between categories)', () => {
     const items = [
-      makeItem({ schemaId: '1', name: 'Alpha', origin: 'local', displayFormat: 'JSON Schema', scope: 'global' }),
-      makeItem({ schemaId: '2', name: 'Beta', origin: 'published', displayFormat: 'JSON Schema', scope: 'global' }),
-      makeItem({ schemaId: '3', name: 'Gamma', origin: 'local', displayFormat: 'XSD', scope: 'project' }),
+      makeItem({ schemaId: '1', name: 'Alpha', ownership: 'user', dataFormat: 'JSON', status: 'ready' }),
+      makeItem({ schemaId: '2', name: 'Beta', ownership: 'cdm', dataFormat: 'JSON', status: 'processing' }),
+      makeItem({ schemaId: '3', name: 'Gamma', ownership: 'user', dataFormat: 'XML', status: 'error' }),
     ];
 
-    it('applies AND logic across search + origin + format', () => {
+    it('applies AND logic across search + ownership + format + status', () => {
       const result = filterSchemas(items, {
         search: 'alpha',
-        origins: ['local'],
-        formats: ['JSON Schema'],
-        scopes: [],
+        ownerships: ['user'],
+        dataFormats: ['JSON'],
+        statuses: ['ready'],
       });
       expect(result).toHaveLength(1);
       expect(result[0].schemaId).toBe('1');
     });
 
-    it('origin + scope combination', () => {
+    it('ownership + format combination', () => {
       const result = filterSchemas(items, {
         ...EMPTY_FILTERS,
-        origins: ['local'],
-        scopes: ['project'],
+        ownerships: ['user'],
+        dataFormats: ['XML'],
       });
       expect(result).toHaveLength(1);
       expect(result[0].schemaId).toBe('3');
@@ -170,8 +165,8 @@ describe('filterSchemas', () => {
     it('no match when categories conflict', () => {
       const result = filterSchemas(items, {
         ...EMPTY_FILTERS,
-        origins: ['cdm'],
-        formats: ['XSD'],
+        ownerships: ['cdm'],
+        dataFormats: ['XML'],
       });
       expect(result).toHaveLength(0);
     });
@@ -238,6 +233,50 @@ describe('sortSchemas', () => {
     });
   });
 
+  describe('sort by projectCount', () => {
+    const items = [
+      makeItem({ schemaId: '1', projectCount: 5 }),
+      makeItem({ schemaId: '2', projectCount: 1 }),
+      makeItem({ schemaId: '3', projectCount: 3 }),
+    ];
+
+    it('ascending', () => {
+      const sorted = sortSchemas(items, asc('projectCount'));
+      expect(sorted.map((i) => i.projectCount)).toEqual([1, 3, 5]);
+    });
+
+    it('descending', () => {
+      const sorted = sortSchemas(items, desc('projectCount'));
+      expect(sorted.map((i) => i.projectCount)).toEqual([5, 3, 1]);
+    });
+  });
+
+  describe('sort by dataFormat', () => {
+    const items = [
+      makeItem({ schemaId: '1', dataFormat: 'XML' }),
+      makeItem({ schemaId: '2', dataFormat: 'JSON' }),
+    ];
+
+    it('ascending (JSON then XML)', () => {
+      const sorted = sortSchemas(items, asc('dataFormat'));
+      expect(sorted.map((i) => i.dataFormat)).toEqual(['JSON', 'XML']);
+    });
+  });
+
+  describe('sort by status', () => {
+    const items = [
+      makeItem({ schemaId: '1', status: 'processing' }),
+      makeItem({ schemaId: '2', status: 'ready' }),
+      makeItem({ schemaId: '3', status: 'error' }),
+      makeItem({ schemaId: '4', status: 'needs_review' }),
+    ];
+
+    it('ascending (ready, needs_review, processing, error)', () => {
+      const sorted = sortSchemas(items, asc('status'));
+      expect(sorted.map((i) => i.status)).toEqual(['ready', 'needs_review', 'processing', 'error']);
+    });
+  });
+
   describe('sort by updatedAt', () => {
     const items = [
       makeItem({ schemaId: '1', updatedAt: '2024-03-01T00:00:00Z' }),
@@ -256,21 +295,21 @@ describe('sortSchemas', () => {
     });
   });
 
-  describe('sort by origin', () => {
+  describe('sort by ownership', () => {
     const items = [
-      makeItem({ schemaId: '1', origin: 'local' }),
-      makeItem({ schemaId: '2', origin: 'cdm' }),
-      makeItem({ schemaId: '3', origin: 'published' }),
+      makeItem({ schemaId: '1', ownership: 'user' }),
+      makeItem({ schemaId: '2', ownership: 'cdm' }),
+      makeItem({ schemaId: '3', ownership: 'user' }),
     ];
 
-    it('ascending (cdm=0, published=1, local=2)', () => {
-      const sorted = sortSchemas(items, asc('origin'));
-      expect(sorted.map((i) => i.origin)).toEqual(['cdm', 'published', 'local']);
+    it('ascending (cdm before user)', () => {
+      const sorted = sortSchemas(items, asc('ownership'));
+      expect(sorted.map((i) => i.ownership)).toEqual(['cdm', 'user', 'user']);
     });
 
     it('descending', () => {
-      const sorted = sortSchemas(items, desc('origin'));
-      expect(sorted.map((i) => i.origin)).toEqual(['local', 'published', 'cdm']);
+      const sorted = sortSchemas(items, desc('ownership'));
+      expect(sorted.map((i) => i.ownership)).toEqual(['user', 'user', 'cdm']);
     });
   });
 });

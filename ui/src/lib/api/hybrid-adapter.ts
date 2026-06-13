@@ -11,7 +11,8 @@ import type {
 } from '@/lib/types';
 
 /**
- * @deprecated HybridAdapter is deprecated. Use HttpAdapter via VITE_API_URL instead.
+ * @deprecated HybridAdapter is retained temporarily for one release cycle.
+ * Do not introduce new callsites; use HttpAdapter via VITE_API_URL.
  */
 export class HybridAdapter extends LocalStorageAdapter {
   private readonly apiUrl: string;

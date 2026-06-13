@@ -30,8 +30,8 @@ describe('list-schemas handler', () => {
     getEnvStore().SCHEMAS_TABLE = 'Schemas';
 
     sharedMocks.scan.mockReset().mockResolvedValue([
-      { schemaId: 's1', name: 'Schema 1' },
-      { schemaId: 's2', name: 'Schema 2' },
+      { schemaId: 's1', name: 'Schema 1', origin: 'local', syncStatus: 'local-changes' },
+      { schemaId: 's2', name: 'Schema 2', syncStatus: 'synced' },
     ]);
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable) => ({ statusCode, body: JSON.stringify({ error: { code, message, statusCode, retryable } }) }));
@@ -43,8 +43,23 @@ describe('list-schemas handler', () => {
     const result = await handler({ body: null });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as Array<{ schemaId: string }>;
-    expect(parsed).toHaveLength(2);
+    const parsed = JSON.parse(result.body) as Array<{
+      schemaId: string;
+      origin?: string;
+      ownership?: string;
+      readonly?: boolean;
+      syncStatus?: string;
+    }>;
+
+    const local = parsed.find((entry) => entry.schemaId === 's1');
+    const uploaded = parsed.find((entry) => entry.schemaId === 's2');
+    const seededCdm = parsed.filter((entry) => entry.origin === 'cdm');
+
+    expect(local?.origin).toBe('uploaded');
+    expect(local?.syncStatus).toBe('sync-failed');
+    expect(uploaded?.syncStatus).toBe('synced');
+    expect(seededCdm.length).toBeGreaterThan(0);
+    expect(seededCdm.every((entry) => entry.ownership === 'cdm' && entry.readonly === true)).toBe(true);
   });
 
   it('returns empty array when no schemas', async () => {
@@ -54,6 +69,8 @@ describe('list-schemas handler', () => {
     const result = await handler({ body: null });
 
     expect(result.statusCode).toBe(200);
-    expect(JSON.parse(result.body)).toEqual([]);
+    const parsed = JSON.parse(result.body) as Array<{ origin?: string; ownership?: string; readonly?: boolean }>;
+    expect(parsed.length).toBeGreaterThan(0);
+    expect(parsed.every((entry) => entry.origin === 'cdm' && entry.ownership === 'cdm' && entry.readonly === true)).toBe(true);
   });
 });

@@ -1,7 +1,6 @@
+import type { ExecutionResult } from '@keyra/engine';
 import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
-
-import type { ExecutionResult } from '@keyra/engine';
 
 import type { PreviewContextValue } from '../../../lib/types/domain';
 
@@ -39,6 +38,8 @@ export const PreviewSettersContext = createContext<PreviewContextSetters | null>
 
 export interface PreviewProviderProps {
   children: ReactNode;
+  /** Optional externally controlled source data (e.g. selected sample payload) */
+  sourceData?: unknown | null;
 }
 
 /**
@@ -48,15 +49,21 @@ export interface PreviewProviderProps {
  * Initial state: idle — no source data, not executing, no last result.
  * T-04 will wire `usePreviewExecution` into the setters to drive state updates.
  */
-export function PreviewProvider({ children }: PreviewProviderProps) {
-  const [sourceData, setSourceData] = useState<unknown | null>(null);
+export function PreviewProvider({ children, sourceData: controlledSourceData }: PreviewProviderProps) {
+  const [internalSourceData, setInternalSourceData] = useState<unknown | null>(controlledSourceData ?? null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastResult, setLastResult] = useState<ExecutionResult | null>(null);
+
+  const sourceData = controlledSourceData !== undefined ? controlledSourceData : internalSourceData;
 
   const value: PreviewContextValue = { sourceData, isExecuting, lastResult };
 
   const setters: PreviewContextSetters = {
-    setSourceData,
+    setSourceData: (value) => {
+      if (controlledSourceData === undefined) {
+        setInternalSourceData(value);
+      }
+    },
     setIsExecuting,
     setLastResult,
   };

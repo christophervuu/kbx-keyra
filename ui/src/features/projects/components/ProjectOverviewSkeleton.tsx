@@ -17,7 +17,7 @@ function SkeletonBlock({ className = '' }: { className?: string }) {
 
 /**
  * Animated loading skeleton mimicking the Project Overview page layout:
- * Header → Summary Row → Mappings → Schemas (FS-050 T-06 / AE-15).
+ * Header → Mappings (FS-086 T-01).
  */
 export function ProjectOverviewSkeleton() {
   return (
@@ -49,20 +49,6 @@ export function ProjectOverviewSkeleton() {
         </div>
       </div>
 
-      {/* Summary row — metric pills */}
-      <div
-        className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-slate-800 bg-slate-900/50 px-4 py-2.5"
-        data-testid="skeleton-summary-row"
-      >
-        <SkeletonBlock className="h-4 w-20" />
-        <SkeletonBlock className="h-4 w-20" />
-        <SkeletonBlock className="h-4 w-24" />
-        <SkeletonBlock className="h-4 w-28" />
-        <SkeletonBlock className="h-4 w-28" />
-        <div className="flex-1" aria-hidden="true" />
-        <SkeletonBlock className="h-4 w-28" />
-      </div>
-
       {/* Mappings area — heading + table header + rows */}
       <div data-testid="skeleton-mappings-area">
         <SkeletonBlock className="mb-4 h-6 w-36" />
@@ -73,16 +59,6 @@ export function ProjectOverviewSkeleton() {
           {[0, 1, 2, 3].map((i) => (
             <SkeletonBlock key={i} className="mt-px h-11 w-full rounded-none" />
           ))}
-        </div>
-      </div>
-
-      {/* Schemas area — heading + card grid */}
-      <div data-testid="skeleton-schemas-area">
-        <SkeletonBlock className="mb-4 h-5 w-28" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <SkeletonBlock className="h-28" />
-          <SkeletonBlock className="h-28" />
-          <SkeletonBlock className="h-28" />
         </div>
       </div>
     </div>

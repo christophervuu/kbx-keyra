@@ -21,6 +21,7 @@ interface ErrorDetails {
   statusCode?: unknown;
   retryable?: unknown;
   requestId?: unknown;
+  details?: unknown;
 }
 
 interface BackendErrorEnvelope {
@@ -46,6 +47,7 @@ export class HttpClientError extends Error {
   readonly code?: string;
   readonly requestId?: string;
   readonly retryable: boolean;
+  readonly details?: unknown;
 
   constructor(
     message: string,
@@ -54,6 +56,7 @@ export class HttpClientError extends Error {
       code?: string;
       requestId?: string;
       retryable: boolean;
+      details?: unknown;
       cause?: unknown;
     },
   ) {
@@ -63,6 +66,7 @@ export class HttpClientError extends Error {
     this.code = options.code;
     this.requestId = options.requestId;
     this.retryable = options.retryable;
+    this.details = options.details;
 
     if (options.cause !== undefined) {
       (this as Error & { cause?: unknown }).cause = options.cause;
@@ -105,13 +109,13 @@ async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
   const url = buildUrl(config.baseUrl, config.path);
   const requestInit: RequestInitLike = {
     method: config.method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
     signal: controller.signal,
   };
 
   if (config.method !== 'GET' && config.body !== undefined) {
+    requestInit.headers = {
+      'Content-Type': 'application/json',
+    };
     requestInit.body = JSON.stringify(config.body);
   }
 
@@ -137,11 +141,14 @@ async function sendRequest<T>(config: HttpRequestConfig): Promise<T> {
     }
 
     if (error instanceof TypeError) {
-      throw new HttpClientError('Network request failed.', {
-        code: 'NETWORK_ERROR',
-        retryable: true,
-        cause: error,
-      });
+      throw new HttpClientError(
+        'Network request failed. This may be a CORS or API authorization/config issue (for example: missing Access-Control-Allow-Origin on 4xx/5xx responses).',
+        {
+          code: 'NETWORK_ERROR',
+          retryable: true,
+          cause: error,
+        },
+      );
     }
 
     if (error instanceof Error) {
@@ -215,6 +222,7 @@ async function parseErrorResponse(response: Response): Promise<HttpClientError> 
       code: getErrorCode(backendEnvelope.error),
       requestId: getRequestId(backendEnvelope.error),
       retryable: envelopeRetryable,
+      details: backendEnvelope.error.details,
     });
   }
 
@@ -398,11 +406,14 @@ function normalizeHttpError(error: unknown): HttpClientError {
   }
 
   if (error instanceof TypeError) {
-    return new HttpClientError('Network request failed.', {
-      code: 'NETWORK_ERROR',
-      retryable: true,
-      cause: error,
-    });
+    return new HttpClientError(
+      'Network request failed. This may be a CORS or API authorization/config issue (for example: missing Access-Control-Allow-Origin on 4xx/5xx responses).',
+      {
+        code: 'NETWORK_ERROR',
+        retryable: true,
+        cause: error,
+      },
+    );
   }
 
   if (error instanceof Error) {

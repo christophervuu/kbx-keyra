@@ -34,8 +34,14 @@
     "test:integration:persistence": "RUN_PERSISTENCE_INTEGRATION=1 vitest run --passWithNoTests tests/integration/persistence",
     "test:integration:persistence:cross-session": "RUN_PERSISTENCE_INTEGRATION=1 vitest run --passWithNoTests tests/lambda/integration/persistence",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint . && pnpm run lint:ui:ai-guardrails",
+    "test": "vitest run --passWithNoTests",
+    "lint:ui:ai-guardrails": "tsx scripts/check-ui-ai-guardrails.ts",
+    "lint:ui:no-browser-secrets": "tsx scripts/check-ui-no-browser-secrets.ts",
+    "test:phase2:deterministic-gate": "tsx scripts/run-phase2-deterministic-gate.ts",
+    "test:phase2:prompt-eval:pr": "tsx scripts/run-phase2-prompt-eval.ts --mode=pr --sample=forge/active/FS-075/prompt-eval-sample-results.pr.json --report=forge/active/FS-075/prompt-eval-report.pr.json",
+    "test:phase2:prompt-eval:release": "tsx scripts/run-phase2-prompt-eval.ts --mode=release --sample=forge/active/FS-075/prompt-eval-sample-results.release.json --report=forge/active/FS-075/prompt-eval-report.release.json",
+    "bench:fs091:cutover": "tsx scripts/run-fs091-cutover-readiness.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.922.0",
@@ -43,7 +49,6 @@
     "@aws-sdk/client-sfn": "^3.1047.0",
     "@aws-sdk/credential-provider-node": "^3.972.41",
     "@aws-sdk/lib-dynamodb": "^3.922.0",
-    "@opensearch-project/opensearch": "^3.6.0",
     "fast-xml-parser": "^5.8.0",
     "openai": "^6.0.0"
   },

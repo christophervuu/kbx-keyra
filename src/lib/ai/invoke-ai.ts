@@ -4,7 +4,15 @@ import { createModelClient, type ModelClient } from './model-client.js';
 import { parseModelOutput } from './output-parser.js';
 import { createPromptRegistryAdapter } from './prompt-registry.js';
 import { renderPrompt } from './prompt-renderer.js';
+import { resolveInvocationProfile } from './routing.js';
+import { validateInvokePayload, validatePromptContract } from './invocation-guards.js';
+import { createTelemetrySession } from './telemetry.js';
+import { resolvePromptId } from './prompt-ids.js';
+import { getResponseSchemaContract } from './response-contracts.js';
 import type {
+  AIInvocationFailure,
+  AIInvocationResponse,
+  AIInvocationSuccess,
   AIResponse,
   DslAssetLoader,
   InvokeAIOptions,
@@ -49,37 +57,137 @@ export async function invokeAI<T = unknown>(
   promptId: string,
   variables: Record<string, string>,
   options?: InvokeAIOptions,
-): Promise<AIResponse<T>> {
+): Promise<AIInvocationResponse<T>> {
+  const telemetrySession = createTelemetrySession(options?.telemetry);
+  telemetrySession.emitStart(typeof promptId === 'string' ? promptId : String(promptId));
+
+  const emitAndReturnFailure = (
+    failure: AIInvocationFailure,
+    invocationOverride = failure.invocation,
+  ): AIInvocationFailure => {
+    telemetrySession.emitFailure(failure.promptId, failure.error.code, invocationOverride);
+    return failure;
+  };
+
+  if (typeof promptId !== 'string') {
+    const failure: AIInvocationFailure = {
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'promptId must be a string',
+      },
+      promptId: String(promptId),
+    };
+
+    return emitAndReturnFailure(failure);
+  }
+
   const config = loadConfig();
 
   const promptRegistry = options?.promptRegistry ?? getDefaultRegistry(config);
   const dslAssetLoader = options?.dslAssetLoader ?? getDefaultDslLoader(config);
   const modelClient = getDefaultModelClient(config);
 
+  if (promptId.trim().length === 0) {
+    const failure: AIInvocationFailure = {
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'promptId must be a non-empty string',
+      },
+      promptId,
+    };
+
+    return emitAndReturnFailure(failure);
+  }
+
+  const promptIdResolution = resolvePromptId(promptId);
+  const resolvedPromptId = promptIdResolution?.canonicalPromptId ?? promptId;
+
   let promptRecord: PromptRecord;
   try {
-    const loadedPrompt = await promptRegistry.getLatestPrompt(promptId);
+    const loadedPrompt = await promptRegistry.getLatestPrompt(resolvedPromptId);
     if (!loadedPrompt) {
-      return {
+      const failure: AIInvocationFailure = {
         success: false,
         error: {
           code: 'PROMPT_NOT_FOUND',
-          message: `No prompt found for promptId: ${promptId}`,
+          message: `No prompt found for promptId: ${resolvedPromptId}`,
         },
-        promptId,
+        promptId: resolvedPromptId,
       };
+
+      return emitAndReturnFailure(failure);
     }
 
     promptRecord = loadedPrompt;
   } catch (error) {
-    return {
+    const failure: AIInvocationFailure = {
       success: false,
       error: {
         code: 'REGISTRY_ERROR',
         message: `Failed to load prompt from registry: ${toErrorMessage(error)}`,
       },
-      promptId,
+      promptId: resolvedPromptId,
     };
+
+    return emitAndReturnFailure(failure);
+  }
+
+  const invocation = {
+    ...resolveInvocationProfile(resolvedPromptId, promptRecord),
+    promptVersion: promptRecord.version,
+    promptSelectionSource: promptRecord.selectionSource,
+    promptSelectionEnvironment: promptRecord.selectionEnvironment,
+  };
+
+  if (Number.isFinite(promptRecord.maxTokens) && promptRecord.maxTokens > invocation.maxOutputTokens) {
+    const failure: AIInvocationFailure = {
+      success: false,
+      error: {
+        code: 'LIMIT_EXCEEDED',
+        message:
+          `Prompt maxTokens (${promptRecord.maxTokens}) exceeds resolved maxOutputTokens ` +
+          `(${invocation.maxOutputTokens})`,
+        details: {
+          promptMaxTokens: promptRecord.maxTokens,
+          maxOutputTokens: invocation.maxOutputTokens,
+        },
+      },
+      promptId: resolvedPromptId,
+      invocation,
+    };
+
+    return emitAndReturnFailure(failure, invocation);
+  }
+
+  const payloadValidationError = validateInvokePayload({
+    promptId: resolvedPromptId,
+    variables,
+    profile: invocation,
+  });
+
+  if (payloadValidationError) {
+    const failure: AIInvocationFailure = {
+      ...payloadValidationError,
+      invocation,
+    };
+
+    return emitAndReturnFailure(failure, invocation);
+  }
+
+  const promptValidationError = validatePromptContract({
+    promptId: resolvedPromptId,
+    promptRecord,
+  });
+
+  if (promptValidationError) {
+    const failure: AIInvocationFailure = {
+      ...promptValidationError,
+      invocation,
+    };
+
+    return emitAndReturnFailure(failure, invocation);
   }
 
   let dslReference: string;
@@ -89,14 +197,17 @@ export async function invokeAI<T = unknown>(
     const message = toErrorMessage(error);
     const code = message.toLowerCase().includes('not found') ? 'ASSET_NOT_FOUND' : 'ASSET_ERROR';
 
-    return {
+    const failure: AIInvocationFailure = {
       success: false,
       error: {
         code,
         message: `Failed to load DSL asset: ${message}`,
       },
-      promptId,
+      promptId: resolvedPromptId,
+      invocation,
     };
+
+    return emitAndReturnFailure(failure, invocation);
   }
 
   const rendered = renderPrompt(promptRecord, {
@@ -105,48 +216,138 @@ export async function invokeAI<T = unknown>(
   });
 
   if (!config.githubToken) {
-    return {
+    const failure: AIInvocationFailure = {
       success: false,
       error: {
         code: 'CONFIG_ERROR',
         message: 'Missing required configuration: GITHUB_TOKEN',
       },
-      promptId,
+      promptId: resolvedPromptId,
+      invocation,
     };
+
+    return emitAndReturnFailure(failure, invocation);
   }
 
   let responseSchema: object;
-  try {
-    responseSchema = JSON.parse(promptRecord.responseSchema) as object;
-  } catch (error) {
-    return {
-      success: false,
-      error: {
-        code: 'REGISTRY_ERROR',
-        message: `Prompt response schema is invalid JSON: ${toErrorMessage(error)}`,
-      },
-      promptId,
-    };
+  const schemaContract = getResponseSchemaContract(resolvedPromptId);
+  if (schemaContract) {
+    responseSchema = schemaContract.schema;
+  } else {
+    try {
+      responseSchema = JSON.parse(promptRecord.responseSchema) as object;
+    } catch (error) {
+      const failure: AIInvocationFailure = {
+        success: false,
+        error: {
+          code: 'REGISTRY_ERROR',
+          message: `Prompt response schema is invalid JSON: ${toErrorMessage(error)}`,
+        },
+        promptId: resolvedPromptId,
+        invocation,
+      };
+
+      return emitAndReturnFailure(failure, invocation);
+    }
   }
 
   const modelResponse = await modelClient.invoke({
-    promptId,
-    model: promptRecord.model,
+    promptId: resolvedPromptId,
+    model: invocation.model,
     temperature: promptRecord.temperature,
-    maxTokens: promptRecord.maxTokens,
+    maxTokens: invocation.maxOutputTokens,
+    timeoutMs: invocation.timeoutMs,
     systemMessage: rendered.systemMessage,
     userMessage: rendered.userMessage,
     responseSchema,
   });
 
   if (!modelResponse.success) {
-    return modelResponse;
+    if (modelResponse.error.code === 'TIMEOUT') {
+      const failure: AIInvocationFailure = {
+        ...modelResponse,
+        invocation,
+      };
+
+      return emitAndReturnFailure(failure, invocation);
+    }
+
+    if (
+      modelResponse.error.code === 'MODEL_ERROR' &&
+      typeof modelResponse.error.details === 'object' &&
+      modelResponse.error.details !== null &&
+      'status' in modelResponse.error.details
+    ) {
+      const status = (modelResponse.error.details as { status?: unknown }).status;
+      if (status === 413) {
+        const failure: AIInvocationFailure = {
+          success: false,
+          error: {
+            code: 'LIMIT_EXCEEDED',
+            message: 'Model invocation exceeded configured token or payload limits',
+            details: modelResponse.error.details,
+          },
+          promptId: resolvedPromptId,
+          invocation,
+        };
+
+        return emitAndReturnFailure(failure, invocation);
+      }
+    }
+
+    const failure: AIInvocationFailure = {
+      ...modelResponse,
+      invocation,
+    };
+
+    return emitAndReturnFailure(failure, invocation);
   }
 
-  return parseModelOutput(
+  if (
+    modelResponse.data.usage?.completion_tokens !== undefined &&
+    modelResponse.data.usage.completion_tokens > invocation.maxOutputTokens
+  ) {
+    const failure: AIInvocationFailure = {
+      success: false,
+      error: {
+        code: 'LIMIT_EXCEEDED',
+        message:
+          `Model completion tokens (${modelResponse.data.usage.completion_tokens}) exceeded configured maxOutputTokens ` +
+          `(${invocation.maxOutputTokens})`,
+        details: {
+          completionTokens: modelResponse.data.usage.completion_tokens,
+          maxOutputTokens: invocation.maxOutputTokens,
+        },
+      },
+      promptId: resolvedPromptId,
+      invocation,
+    };
+
+    return emitAndReturnFailure(failure, invocation);
+  }
+
+  const parsed = parseModelOutput(
     modelResponse.data.content,
-    promptId,
-    promptRecord.model,
+    resolvedPromptId,
+    invocation.model,
+    responseSchema,
     modelResponse.data.usage,
   ) as AIResponse<T>;
+
+  if (!parsed.success) {
+    const failure: AIInvocationFailure = {
+      ...parsed,
+      invocation,
+    };
+
+    return emitAndReturnFailure(failure, invocation);
+  }
+
+  const success: AIInvocationSuccess<T> = {
+    ...parsed,
+    invocation,
+  };
+
+  telemetrySession.emitSuccess(resolvedPromptId, invocation);
+  return success;
 }

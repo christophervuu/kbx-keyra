@@ -1,6 +1,6 @@
 # Schema Ingestion Pipeline
 
-This document describes the architecture of the schema ingestion and indexing pipeline — the backend subsystem responsible for converting uploaded schemas into a queryable, indexed tree representation.
+This document describes the architecture of the schema ingestion and retrieval-preparation pipeline — the backend subsystem responsible for converting uploaded schemas into a queryable, retrieval-ready tree representation.
 
 ---
 
@@ -9,9 +9,10 @@ This document describes the architecture of the schema ingestion and indexing pi
 The schema ingestion pipeline is triggered when a user uploads a schema file (JSON Schema or XSD). It transforms raw schema content into:
 
 1. **SchemaMetadata** — a DynamoDB record tracking schema identity and lifecycle state
-2. **SchemaNodes** — a DynamoDB tree of individual field records with full structural metadata
+2. **SchemaNodes** — a DynamoDB tree of individual field records with structural + retrieval metadata
 3. **S3 content** — original file preservation and processed JSON content
-4. **OpenSearch documents** — indexed nodes supporting keyword search and (future) vector similarity
+
+After FS-091 cutover (T-08), OpenSearch is decommissioned from serving and ingestion paths. Retrieval is DynamoDB-only at runtime.
 
 The pipeline supports all schema sizes through a single conceptual flow with two execution paths:
 - **Inline** (< 500 fields): processed synchronously within a single Lambda invocation
@@ -27,6 +28,7 @@ src/
     schema/
       index.ts                   Barrel exports
       types.ts                   SchemaNode, SchemaMetadata, pipeline types
+      retriever.ts               Runtime schema retriever abstraction (Dynamo-only serving mode post-cutover)
       constants.ts               Thresholds and batch size constants
       embedding-text.ts          Embedding text generation utility
       parser/
@@ -38,30 +40,25 @@ src/
         index.ts                 DynamoDB barrel
         metadata-writer.ts       SchemaMetadata CRUD
         node-writer.ts           BatchWriteItem with retry
-        node-reader.ts           GSI queries (parent chain, children)
+        node-reader.ts           Parent-chain / children helpers
       s3/
         index.ts                 S3 barrel
         schema-storage.ts        Original + processed content storage
-      opensearch/
-        index.ts                 OpenSearch barrel
-        mapping.ts               Index mapping definition
-        indexer.ts               Bulk document indexing
-        query.ts                 Search query construction
   lambda/
     schema/
-      ingest-schema.ts           POST /schemas handler (inline + SFN dispatch)
-      query-schema-nodes.ts      POST /schemas/:id/query handler
-      process-batch.ts           Step Functions batch worker
-      orchestration-tasks.ts     Step Functions helper tasks (parse, aggregate, error)
+      ingest-schema.ts             POST /schemas handler (inline + SFN dispatch)
+      query-schema-nodes.ts        POST /schemas/:id/query handler
+      process-batch.ts             Step Functions batch worker
+      orchestration-tasks.ts       Step Functions helper tasks (parse, aggregate, error)
       step-functions/
         schema-ingestion.asl.json  State machine definition
 ```
 
 **Module boundary rules:**
-- `src/lib/schema/` has zero imports from `src/lambda/` — it is a pure library
-- Lambda handlers import from `src/lib/schema/` only
-- `src/lib/schema/` has no imports from `src/engine/` or `ui/`
-- AWS SDK clients are instantiated at module level for Lambda cold start efficiency
+- `src/lib/schema/` has zero imports from `src/lambda/` — it is a pure library.
+- Lambda handlers import from `src/lib/schema/` only.
+- `src/lib/schema/` has no imports from `src/engine/` or `ui/`.
+- AWS SDK clients are instantiated at module level for Lambda cold start efficiency.
 
 ---
 
@@ -79,9 +76,11 @@ ingestSchema Lambda
   ├─ Store original → S3
   ├─ Parse content → SchemaNode[]
   ├─ Count fields → confirm < 500
-  ├─ Generate embeddingText per node
+  ├─ Generate retrieval fields per node
+  │    ├─ embeddingText
+  │    ├─ lexical signals (fieldNameNormalized, pathTokens)
+  │    └─ optional per-node embedding vector
   ├─ BatchWrite SchemaNodes → DynamoDB (25-item chunks)
-  ├─ Bulk index → OpenSearch (500-doc batches)
   ├─ Store processed content → S3
   ├─ Update SchemaMetadata (status: "ready", fieldCount)
   └─ Return SchemaMetadata (201)
@@ -105,17 +104,17 @@ Step Functions State Machine:
   ├─ ParseSchema (Lambda)
   │   ├─ Read original from S3
   │   ├─ Parse → SchemaNode[]
+  │   ├─ Generate retrieval fields per node
   │   ├─ Chunk into batches of 500
   │   └─ Write batch manifests to S3
   │
   ├─ ProcessBatches (Map, max concurrency 10)
   │   └─ process-batch Lambda (per batch)
   │       ├─ Read batch from S3
-  │       ├─ BatchWrite → DynamoDB
-  │       └─ Bulk index → OpenSearch
+  │       └─ BatchWrite → DynamoDB
   │
   ├─ AggregateResults (Lambda)
-  │   ├─ Sum written/indexed counts
+  │   ├─ Sum written counts
   │   └─ Store processed content → S3
   │
   └─ UpdateMetadata (Lambda)
@@ -141,7 +140,10 @@ Step Functions State Machine:
 - **PK:** `schemaId`, **SK:** `path` (dot-notation)
 - **GSI `fieldName-index`:** PK=`fieldName`, SK=`schemaId#path`
 - **GSI `parentPath-index`:** PK=`schemaId`, SK=`parentPath`
-- Stores: field metadata, structural info, embeddingText
+- Stores structural fields + retrieval fields:
+  - `embeddingText`
+  - optional `embedding` (per-node vector retained in Dynamo for this phase)
+  - lexical signals such as `fieldNameNormalized` and `pathTokens`
 
 ### S3
 
@@ -149,82 +151,64 @@ Step Functions State Machine:
 - `schemas/{schemaId}/content.json` — processed JSON representation
 - `schemas/{schemaId}/batches/batch-{N}.json` — temporary batch files (Step Functions path)
 
-### OpenSearch Serverless
-
-- **Collection:** `keyra-schema-nodes`
-- **Document ID:** `{schemaId}#{path}`
-- **Fields:** schemaId (keyword), path (text+keyword), fieldName (text+keyword), embeddingText (text), embedding (knn_vector 1536), type (keyword), depth (integer), parentPath (keyword), isArray (boolean)
-
 ---
 
 ## 5) Key Design Decisions
 
 ### Threshold: 500 fields
 
-The product spec defines < 500 as inline-safe within API Gateway's 29-second timeout. This accounts for:
-- Parse time (~1s for 500 fields)
-- DynamoDB writes (20 batch calls × ~200ms = ~4s)
-- OpenSearch indexing (1 bulk call × ~1s)
-- S3 storage (~500ms)
-- Total: ~7s inline, well within 29s
+The product spec defines < 500 as inline-safe within API Gateway's 29-second timeout. This accounts for parse + retrieval-field generation + DynamoDB writes + S3 storage in one request lifecycle.
 
-### Batch Sizing
+### Batch sizing
 
 | Operation | Batch Size | Rationale |
 |-----------|-----------|-----------|
 | DynamoDB BatchWriteItem | 25 items | AWS hard limit per API call |
-| OpenSearch bulk | 500 documents | Balance between HTTP overhead and payload size |
-| Step Functions batch | 500 nodes | Match OpenSearch bulk size; keeps worker Lambda execution under 2 minutes |
+| Step Functions batch | 500 nodes | Keeps worker execution bounded while reducing per-batch overhead |
 
-### Embedding Text (Keyword-Only for Now)
+### Retrieval-preparation invariants
 
-The `embeddingText` field is generated during ingestion to support BM25 full-text search immediately. The `embedding` vector field is defined in the OpenSearch mapping but left empty until the AI/RAG spec introduces vector generation. This avoids re-indexing when embeddings are added.
+- Every ingested node must have deterministic retrieval text (`embeddingText`).
+- Lexical candidate generation fields are computed at ingestion time.
+- Per-node Dynamo embeddings are retained for this phase to support bounded rerank.
+- Tuning scope decision (FS-091 Rev 2): global defaults with environment-level overrides only (no per-project/per-schema tuning presets).
+- Guardrail decision (FS-091 Rev 2): if item-size/read-cost pressure becomes material, move embeddings to chunked S3 storage while keeping lexical metadata in DynamoDB.
 
-### Non-Blocking OpenSearch Failures
+### Decommission posture
 
-OpenSearch indexing failure does not prevent SchemaMetadata from reaching `ready` status. DynamoDB is the source of truth. OpenSearch is a derived index that can be rebuilt from DynamoDB at any time. This prevents transient OpenSearch issues from blocking user workflows.
-
-### Idempotent Operations
-
-- DynamoDB PutItem with same PK/SK is a natural upsert
-- OpenSearch index with explicit `_id` is a natural upsert
-- Worker Lambda can be safely retried by Step Functions without creating duplicates
+- OpenSearch indexing failures are no longer part of ingestion behavior because OpenSearch indexing is removed.
+- Ingestion completion depends on parse/storage/Dynamo persistence only.
 
 ---
 
 ## 6) Query Architecture
 
-The `querySchemaNodes` endpoint provides keyword-based schema node search:
+The `querySchemaNodes` endpoint provides DynamoDB-backed schema node search:
 
-1. **OpenSearch multi-match** on `fieldName` (boost 3×), `path` (boost 2×), `embeddingText` (boost 1×)
-2. **Scoped** to single schema via `schemaId` term filter
-3. **Optional filters** on `type`, `isArray`, `depth`
-4. **Enriched** with parent chain from DynamoDB `parentPath-index` GSI
+1. Lexical candidate retrieval from Dynamo-backed fields
+2. Deterministic candidate capping (`lexicalCap`)
+3. Optional bounded in-Lambda embedding rerank (`rerankCap`)
+4. Optional filters on `type`, `isArray`, `depth`
+5. Optional structural enrichment with parent chain/context
 
-### Query Contract
+### Query contract
 
 - **Route:** `POST /schemas/:id/query`
 - **Request body:**
   - `query: string` (required)
   - `filters?: { type?: string[]; isArray?: boolean; depth?: number }`
   - `includeParentChain?: boolean` (default `false`)
-  - `limit?: number` (default `20`, max `100`)
-- **Response shape:** `SchemaSearchResult[]` with
+  - `includeContextExpansion?: boolean` (default `false`)
+  - `limit?: number` (default `50`, max `50`)
+- **Response shape:** `SchemaSearchResult[]` including
   - `path`, `fieldName`, `type`, `depth`, `isArray`, `score`, `embeddingText`
-  - optional `parentChain` when `includeParentChain: true`
+  - optional `parentChain` when requested
 
-### Query Error Semantics
+### Query error semantics
 
 - `400` for invalid request body or missing `query`
-- `404` when schema metadata does not exist for the requested `schemaId`
+- `404` when schema metadata does not exist for `schemaId`
 - `500` for unexpected runtime failures in query path
-
-### Future: Hybrid Search
-
-When vector embeddings are populated:
-1. Add k-NN clause to query (script_score or knn query)
-2. Use reciprocal rank fusion to merge BM25 and k-NN scores
-3. Same endpoint, same response shape — only internal scoring changes
 
 ---
 
@@ -235,8 +219,6 @@ When vector embeddings are populated:
 | Invalid schema content | Set metadata `status: "error"`, return error details, no nodes written |
 | DynamoDB write throttling | Exponential backoff retry (max 5 attempts, base 100ms) |
 | DynamoDB write failure (after retries) | Set metadata `status: "error"` |
-| OpenSearch bulk partial failure | Log errors, report counts, proceed (non-blocking) |
-| OpenSearch complete failure | Log error, set warning flag, metadata still transitions to `ready` |
 | Step Functions task failure | Catch → HandleError state → set metadata `status: "error"` |
 | Step Functions timeout | Catch → HandleError state → set metadata `status: "error"` |
 
@@ -252,16 +234,24 @@ When vector embeddings are populated:
 | Query response (500-field schema) | < 500ms |
 | Parse only (23,000 fields, no I/O) | < 10 seconds |
 
+FS-091 cutover retrieval-latency gates (p95):
+- small `< 300ms`
+- medium `< 800ms`
+- large `< 1500ms`
+
+FS-091 cutover parity gates:
+- Top-K Jaccard overlap @10 average `>= 0.70`
+- NDCG@10 delta average `>= -0.10`
+
 ---
 
 ## 9) Future Extension Points
 
-- **Vector embeddings:** Call GitHub Models `text-embedding-3-small` during ingestion, populate `embedding` field
-- **Hybrid search:** Add k-NN + reciprocal rank fusion to query endpoint
-- **Re-ingestion:** Detect schema changes, re-parse, diff nodes, update incrementally
-- **Schema deletion:** Clean up DynamoDB nodes + OpenSearch docs + S3 content
-- **Webhook-triggered ingestion:** GitHub webhook → re-ingest CDM schemas automatically
-- **Schema inference:** Accept sample JSON/XML, infer schema structure, then run normal pipeline
+- Refine lexical signals/tokenization strategy for recall at scale
+- Hybrid embedding storage fallback (S3 chunk storage for vectors) under defined pressure triggers
+- Re-ingestion diff-aware partial updates for very large schemas
+- Webhook-triggered CDM ingestion automation
+- Schema inference improvements for sample JSON/XML
 
 ---
 
@@ -269,8 +259,8 @@ When vector embeddings are populated:
 
 Automated coverage for this subsystem is split across:
 
-- `tests/lib/schema/` — parser, storage, DynamoDB, OpenSearch modules
+- `tests/lib/schema/` — parser, storage, DynamoDB, retriever, parity/gate helpers
 - `tests/lambda/schema/` — ingest/query/worker/orchestration handlers
 - `tests/integration/schema-ingestion/` — end-to-end orchestration behavior and performance guardrails
 
-Integration coverage includes threshold behavior (50/499 inline, 500+ orchestrated), large-schema batching/chunking behavior, query filtering/enrichment, and benchmark assertions aligned to spec targets.
+Integration coverage includes threshold behavior (50/499 inline, 500+ orchestrated), large-schema batching/chunking behavior, query filtering/enrichment, and FS-091 cutover-readiness gate assertions.

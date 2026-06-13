@@ -1,0 +1,49 @@
+{
+  "generatedAt": "2026-06-10T18:30:00.000Z",
+  "sourceInputPath": "/Users/christophervuu/repos/kbx-keyra/forge/active/FS-091/benchmarks/cutover-input.json",
+  "summary": {
+    "goNoGo": "go",
+    "rollbackTriggers": []
+  },
+  "cutover": {
+    "latencyGates": [
+      {
+        "schemaSizeSegment": "small",
+        "targetP95Ms": 300,
+        "p95Ms": 230,
+        "samples": 6,
+        "passed": true
+      },
+      {
+        "schemaSizeSegment": "medium",
+        "targetP95Ms": 800,
+        "p95Ms": 650,
+        "samples": 6,
+        "passed": true
+      },
+      {
+        "schemaSizeSegment": "large",
+        "targetP95Ms": 1500,
+        "p95Ms": 1180,
+        "samples": 6,
+        "passed": true
+      }
+    ],
+    "parityGate": {
+      "averageJaccardAt10": 0.749,
+      "averageNdcgDeltaAt10": -0.026000000000000002,
+      "jaccardGatePassed": true,
+      "ndcgGatePassed": true,
+      "passed": true,
+      "sampledQueries": 10
+    },
+    "acceptanceRateGate": {
+      "baselineAcceptanceRate": 0.82,
+      "postCutoverAcceptanceRate": 0.76,
+      "drop": 0.05999999999999994,
+      "maxAllowedDrop": 0.1,
+      "passed": true
+    },
+    "passed": true
+  }
+}

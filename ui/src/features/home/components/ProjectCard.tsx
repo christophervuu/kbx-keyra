@@ -1,5 +1,6 @@
-// ProjectCard — Grid card for a single project (FS-014 T-05, FS-049 T-06)
+// ProjectCard — Dashboard project card (FS-084 T-02)
 
+import { FileCode2, GitBranch } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 
 import type { ProjectListItem, ProjectWorstStatus } from '../types';
@@ -84,6 +85,8 @@ export interface ProjectCardProps {
 export function ProjectCard({ project, onClick }: ProjectCardProps) {
   const mappingLabel =
     project.mappingCount === 1 ? '1 mapping' : `${project.mappingCount} mappings`;
+  const schemaCount = project.schemaCount ?? 0;
+  const schemaLabel = schemaCount === 1 ? '1 schema' : `${schemaCount} schemas`;
 
   const allNotDeployed =
     project.devDeploy === 'not-deployed' &&
@@ -94,6 +97,7 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
 
   return (
     <div
+      data-testid={`project-card-${project.projectId}`}
       role="article"
       aria-label={project.name}
       onClick={() => onClick(project.projectId)}
@@ -104,7 +108,7 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
         }
       }}
       tabIndex={0}
-      className={`flex cursor-pointer flex-col gap-3 rounded-lg border bg-slate-900 p-5 shadow-sm transition-shadow hover:border-blue-500 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+      className={`group flex cursor-pointer flex-col gap-3 rounded-lg border bg-slate-950 p-4 shadow-sm transition-colors hover:border-blue-500 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
         hasErrors
           ? 'border-l-2 border-l-red-500 border-slate-700'
           : 'border-slate-700'
@@ -123,26 +127,44 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
         ) : (
           <p className="text-sm italic text-slate-600">No description</p>
         )}
-        <span className="text-xs text-slate-500">{mappingLabel}</span>
+        <div className="flex items-center gap-4 text-xs text-slate-400">
+          <span className="inline-flex items-center gap-1">
+            <GitBranch size={12} aria-hidden="true" className="text-slate-500" />
+            {mappingLabel}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <FileCode2 size={12} aria-hidden="true" className="text-slate-500" />
+            {schemaLabel}
+          </span>
+        </div>
       </div>
 
       {/* Footer */}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+        <span className="text-xs text-slate-500">Edited {formatDate(project.updatedAt)}</span>
+
         {allNotDeployed ? (
-          <span className="text-xs text-slate-500" data-testid="deploy-condensed">
-            Not deployed
-          </span>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick(project.projectId);
+            }}
+            aria-label={`Open ${project.name}`}
+            className="rounded bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Open
+          </button>
         ) : (
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">DEV</span>
+            <span className="text-[10px] text-slate-500">DEV</span>
             <StatusBadge status={project.devDeploy} />
-            <span className="text-xs text-slate-500">QA</span>
+            <span className="text-[10px] text-slate-500">QA</span>
             <StatusBadge status={project.qaDeploy} />
-            <span className="text-xs text-slate-500">PROD</span>
+            <span className="text-[10px] text-slate-500">PROD</span>
             <StatusBadge status={project.prodDeploy} />
           </div>
         )}
-        <span className="text-xs text-slate-500">{formatDate(project.updatedAt)}</span>
       </div>
     </div>
   );
@@ -159,7 +181,7 @@ export interface ProjectCardGridProps {
 
 export function ProjectCardGrid({ projects, onProjectClick }: ProjectCardGridProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
       {projects.map((project) => (
         <ProjectCard
           key={project.projectId}

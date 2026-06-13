@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { MappingRowData } from '../../types';
@@ -48,6 +49,7 @@ describe('MappingRow', () => {
     renderRow();
     expect(screen.getByText('Schema A')).toBeInTheDocument();
     expect(screen.getByText('Schema B')).toBeInTheDocument();
+    expect(screen.getByTestId('source-target-cell')).toHaveClass('whitespace-nowrap');
   });
 
   it('renders "No schema" when sourceSchemaName is null', () => {
@@ -55,14 +57,16 @@ describe('MappingRow', () => {
     expect(screen.getAllByText('No schema').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders rule count', () => {
+  it('renders rule count centered in the Rules column', () => {
     renderRow();
     expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByTestId('rules-cell')).toHaveClass('text-center');
   });
 
-  it('renders coverage as percentage', () => {
+  it('renders coverage as percentage centered in the Coverage column', () => {
     renderRow();
     expect(screen.getByText('85%')).toBeInTheDocument();
+    expect(screen.getByTestId('coverage-cell')).toHaveClass('text-center');
   });
 
   it('renders "—" when ruleCount is 0 and coverage is 0', () => {
@@ -92,56 +96,115 @@ describe('MappingRow', () => {
     expect(badge).toHaveClass('bg-slate-600');
   });
 
-  // AE-07: condensed deploy badge when all not-deployed
-  it('AE-07: renders condensed "Not deployed" when all environments are not-deployed', () => {
+  it('renders compact "Not deployed" deployment value centered in the Deployment column', () => {
     renderRow();
-    expect(screen.getByTestId('deploy-condensed')).toBeInTheDocument();
-    expect(screen.getByText('○ Not deployed')).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-cell')).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-cell')).toHaveClass('text-center');
+    expect(screen.getByText('Not deployed')).toBeInTheDocument();
   });
 
-  it('AE-07: condensed "Not deployed" is a link to deployment page', () => {
+  it('deployment cell links to mapping deployment page', () => {
     renderRow();
-    const link = screen.getByRole('link', { name: /not deployed/i });
+    const link = screen.getByRole('link', { name: /deployment state: not deployed/i });
     expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
   });
 
-  it('AE-07: renders individual DEV/QA/PROD badges when any env differs', () => {
+  it('normalizes stale to "Changed since deploy" in deployment column', () => {
     renderRow({ ...MAPPING, devDeploy: 'deployed', qaDeploy: 'not-deployed', prodDeploy: 'not-deployed' });
-    expect(screen.queryByTestId('deploy-condensed')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /DEV: Deployed/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /QA: Not deployed/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /PROD: Not deployed/i })).toBeInTheDocument();
+    expect(screen.getByText('DEV deployed')).toBeInTheDocument();
   });
 
-  it('AE-07: individual deploy badges link to deployment page', () => {
+  it('shows "Changed since deploy" instead of stale', () => {
     renderRow({ ...MAPPING, devDeploy: 'stale', qaDeploy: 'not-deployed', prodDeploy: 'deployed' });
-    const devLink = screen.getByRole('link', { name: /DEV: Stale/i });
-    expect(devLink).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
+    expect(screen.getByText('Changed since deploy')).toBeInTheDocument();
+    expect(screen.queryByText(/stale/i)).not.toBeInTheDocument();
   });
 
-  // AE-14: deploy badge click navigates to deployment page
-  it('AE-14: condensed deploy label navigates to deployment page', () => {
-    renderRow();
-    const link = screen.getByRole('link', { name: /not deployed/i });
-    expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
+  it('shows Deploying when any env is deploying', () => {
+    renderRow({ ...MAPPING, devDeploy: 'deploying' });
+    expect(screen.getByText('Deploying')).toBeInTheDocument();
   });
 
-  // AE-17: Test Lab action
-  it('AE-17: Test Lab action link is present', () => {
-    renderRow();
-    const link = screen.getByTestId('test-lab-link-mapping-1');
-    expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/test-lab');
+  it('shows highest deployed env preference (PROD > QA > DEV)', () => {
+    renderRow({ ...MAPPING, devDeploy: 'deployed', qaDeploy: 'deployed', prodDeploy: 'deployed' });
+    expect(screen.getByText('PROD deployed')).toBeInTheDocument();
   });
 
-  it('AE-17: Test Lab link has accessible label', () => {
-    renderRow();
+  it('ready mappings show icon actions and no Open/More text buttons', () => {
+    renderRow({ ...MAPPING, status: 'ready' });
+    expect(screen.getByRole('button', { name: /deploy mapping my mapping/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /test mapping my mapping in test lab/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /duplicate mapping my mapping/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /delete mapping my mapping/i })).toBeInTheDocument();
+    expect(screen.queryByText(/^open$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /more actions for my mapping/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('status-cell')).toHaveClass('text-center');
+    expect(screen.getByTestId('last-modified-cell')).toHaveClass('text-center');
   });
 
-  it('calls onDuplicate with mappingId when Duplicate clicked', () => {
+  it('draft mappings show disabled Deploy action icon', () => {
+    renderRow({ ...MAPPING, status: 'draft' });
+    const deployButton = screen.getByRole('button', { name: /deploy mapping my mapping \(disabled\)/i });
+    expect(deployButton).toBeInTheDocument();
+    expect(deployButton).toBeDisabled();
+  });
+
+  it('has-errors mappings show disabled Deploy action icon', () => {
+    renderRow({ ...MAPPING, status: 'has-errors' });
+    const deployButton = screen.getByRole('button', { name: /deploy mapping my mapping \(disabled\)/i });
+    expect(deployButton).toBeInTheDocument();
+    expect(deployButton).toBeDisabled();
+  });
+
+  it('row click navigates to mapping editor route', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route
+            path="/"
+            element={(
+              <table>
+                <tbody>
+                  <MappingRow
+                    mapping={{ ...MAPPING, status: 'draft' }}
+                    projectId="proj-1"
+                    onDuplicate={vi.fn()}
+                    onDelete={vi.fn()}
+                  />
+                </tbody>
+              </table>
+            )}
+          />
+          <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByTestId('source-target-cell'));
+    expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
+  });
+
+  it('Test Lab icon links to Test Lab route', () => {
+    renderRow();
+    expect(screen.getByRole('link', { name: /test mapping my mapping in test lab/i })).toHaveAttribute(
+      'href',
+      '/projects/proj-1/mappings/mapping-1/test-lab',
+    );
+  });
+
+  it('Deploy icon is enabled for ready mappings', () => {
+    renderRow({ ...MAPPING, status: 'ready' });
+    const deployButton = screen.getByRole('button', { name: /deploy mapping my mapping/i });
+    expect(deployButton).toBeEnabled();
+  });
+
+  it('calls onDuplicate with mappingId when duplicate icon clicked', async () => {
     const onDuplicate = vi.fn();
-    const { container } = render(
+    const user = userEvent.setup();
+
+    render(
       <MemoryRouter>
         <table>
           <tbody>
@@ -155,14 +218,16 @@ describe('MappingRow', () => {
         </table>
       </MemoryRouter>,
     );
-    const btn = container.querySelector('[aria-label="Duplicate mapping My Mapping"]')!;
-    (btn as HTMLButtonElement).click();
+
+    await user.click(screen.getByRole('button', { name: /duplicate mapping my mapping/i }));
     expect(onDuplicate).toHaveBeenCalledWith('mapping-1');
   });
 
-  it('calls onDelete with mappingId when Delete clicked', () => {
+  it('calls onDelete with mappingId when delete icon clicked', async () => {
     const onDelete = vi.fn();
-    const { container } = render(
+    const user = userEvent.setup();
+
+    render(
       <MemoryRouter>
         <table>
           <tbody>
@@ -176,8 +241,8 @@ describe('MappingRow', () => {
         </table>
       </MemoryRouter>,
     );
-    const btn = container.querySelector('[aria-label="Delete mapping My Mapping"]')!;
-    (btn as HTMLButtonElement).click();
+
+    await user.click(screen.getByRole('button', { name: /delete mapping my mapping/i }));
     expect(onDelete).toHaveBeenCalledWith('mapping-1');
   });
 });

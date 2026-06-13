@@ -2,11 +2,43 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { AppLayout } from '@/components/layout/AppLayout';
 import { BreadcrumbProvider, useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
-import { NavBar } from '@/components/layout/NavBar';
+import { NavBar, SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/components/layout/NavBar';
+
+let storage: Record<string, string> = {};
+
+const localStorageMock = {
+  getItem: (key: string) => storage[key] ?? null,
+  setItem: (key: string, value: string) => {
+    storage[key] = value;
+  },
+  removeItem: (key: string) => {
+    delete storage[key];
+  },
+  clear: () => {
+    storage = {};
+  },
+};
+
+beforeEach(() => {
+  storage = {};
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock,
+    writable: true,
+  });
+});
+
+function resetSidebarPreference() {
+  try {
+    window.localStorage.removeItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
+  } catch {
+    // ignore localStorage unavailability in certain jsdom modes
+  }
+}
 
 function renderNavBar(path = '/') {
   return render(
@@ -38,6 +70,8 @@ function renderBreadcrumbs(path: string) {
             <Route path="/" element={<div />} />
             <Route path="/projects/:projectId" element={<div />} />
             <Route path="/projects/:projectId/mappings/:mappingId" element={<div />} />
+            <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div />} />
+            <Route path="/projects/:projectId/deployments" element={<div />} />
             <Route path="/schemas" element={<div />} />
             <Route path="/schemas/:schemaId" element={<div />} />
             <Route path="*" element={<div />} />
@@ -55,6 +89,7 @@ function renderAppLayout(path: string, content: ReactNode) {
         <Route element={<AppLayout />}>
           <Route path="/" element={content} />
           <Route path="/schemas" element={content} />
+          <Route path="/projects/:projectId/mappings/new" element={content} />
           <Route path="/projects/:projectId/mappings/:mappingId" element={content} />
           <Route path="*" element={<div data-testid="page-not-found">Not Found</div>} />
         </Route>
@@ -99,6 +134,10 @@ function renderBreadcrumbsWithLabel(
               path="/projects/:projectId"
               element={<PageWithLabel segmentValue={segmentValue} label={label} />}
             />
+            <Route
+              path="/projects/:projectId/mappings/new"
+              element={<PageWithLabel segmentValue={segmentValue} label={label} />}
+            />
             <Route path="*" element={<div />} />
           </Route>
         </Routes>
@@ -108,29 +147,35 @@ function renderBreadcrumbsWithLabel(
 }
 
 describe('NavBar', () => {
+  beforeEach(() => {
+    resetSidebarPreference();
+  });
+
   it('renders the app name', () => {
     renderNavBar();
 
-    expect(screen.getByText('KeyRa')).toBeInTheDocument();
+    expect(screen.getByText('Key')).toBeInTheDocument();
+    expect(screen.getByText('Ra')).toBeInTheDocument();
   });
 
-  it('renders all 4 primary nav links (AE-04)', () => {
+  it('renders all 4 primary nav links in expanded mode', () => {
     renderNavBar();
 
-    expect(screen.getByRole('link', { name: /Home/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Schemas/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Templates/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Settings/ })).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-home')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-schemas')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-templates')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-settings')).toBeInTheDocument();
   });
 
-  it('highlights the active link', () => {
+  it('highlights the active link with non-color active marker (AE-03)', () => {
     renderNavBar('/schemas');
 
-    const schemasLink = screen.getByRole('link', { name: /Schemas/ });
-    expect(schemasLink).toHaveClass('bg-slate-700');
+    const schemasLink = screen.getByTestId('sidebar-link-schemas');
+    expect(schemasLink).toHaveClass('border-l-blue-400');
+    expect(schemasLink).toHaveClass('font-semibold');
   });
 
-  it('navigates to correct route on click (AE-04)', async () => {
+  it('navigates to correct route on click', async () => {
     const user = userEvent.setup();
     renderNavBar('/');
 
@@ -139,10 +184,44 @@ describe('NavBar', () => {
     expect(screen.getByTestId('page-schemas')).toBeInTheDocument();
   });
 
-  it('has accessible navigation landmark', () => {
+  it('supports collapsing to icon-only mode and expanding back (AE-02)', async () => {
+    const user = userEvent.setup();
     renderNavBar();
 
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    const sidebar = screen.getByTestId('app-sidebar');
+    const toggle = screen.getByTestId('sidebar-toggle');
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByText('Workspace')).toBeInTheDocument();
+  });
+
+  it('persists collapse preference in localStorage (AE-08)', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderNavBar();
+
+    await user.click(screen.getByTestId('sidebar-toggle'));
+
+    unmount();
+    renderNavBar();
+
+    expect(screen.getByTestId('app-sidebar')).toHaveAttribute('data-collapsed', 'true');
+  });
+
+  it('has accessible navigation landmarks', () => {
+    renderNavBar();
+
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Sidebar navigation' })).toBeInTheDocument();
   });
 });
 
@@ -165,12 +244,48 @@ describe('Breadcrumbs', () => {
     renderBreadcrumbs('/projects/abc-123/mappings/map-456');
 
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByText('Projects')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'abc-123' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Mappings' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
+    expect(screen.getByText('Mappings')).toBeInTheDocument();
     // Last segment is plain text, not a link
     expect(screen.getByText('map-456')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'map-456' })).not.toBeInTheDocument();
+  });
+
+  it('renders create-mapping breadcrumbs as Home / {project-name} / Mappings / New', () => {
+    renderBreadcrumbsWithLabel('/projects/abc-123/mappings/new', 'abc-123', 'My Project');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'My Project' })).toHaveAttribute('href', '/projects/abc-123');
+    expect(screen.queryByText('Projects')).not.toBeInTheDocument();
+    expect(screen.getByText('Mappings')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
+    expect(screen.getByText('New')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'New' })).not.toBeInTheDocument();
+  });
+
+  it('renders breadcrumbs for mapping deployment hierarchy', () => {
+    renderBreadcrumbs('/projects/abc-123/mappings/map-456/deploy');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'abc-123' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'map-456' })).toBeInTheDocument();
+    expect(screen.getByText('Deployment')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Deployment' })).not.toBeInTheDocument();
+  });
+
+  it('renders breadcrumbs for project deployments hierarchy', () => {
+    renderBreadcrumbs('/projects/abc-123/deployments');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'abc-123' })).toBeInTheDocument();
+    expect(screen.getByText('Deployments')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Deployments' })).not.toBeInTheDocument();
   });
 
   it('last segment is not a link (AE-05)', () => {
@@ -181,21 +296,21 @@ describe('Breadcrumbs', () => {
     expect(lastSegment).toHaveAttribute('aria-current', 'page');
   });
 
-  it('breadcrumb links navigate to parent routes (AE-05)', async () => {
+  it('breadcrumb links navigate to valid parent routes (AE-05)', async () => {
     const user = userEvent.setup();
     renderBreadcrumbs('/projects/abc-123/mappings/map-456');
 
     const homeLink = screen.getByRole('link', { name: 'Home' });
     expect(homeLink).toHaveAttribute('href', '/');
 
-    const projectsLink = screen.getByRole('link', { name: 'Projects' });
-    expect(projectsLink).toHaveAttribute('href', '/projects');
+    // Projects remains structural/non-clickable until /projects route exists.
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
 
     const projectLink = screen.getByRole('link', { name: 'abc-123' });
     expect(projectLink).toHaveAttribute('href', '/projects/abc-123');
 
-    const mappingsLink = screen.getByRole('link', { name: 'Mappings' });
-    expect(mappingsLink).toHaveAttribute('href', '/projects/abc-123/mappings');
+    // Mappings is structural in this hierarchy and is intentionally non-clickable.
+    expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
 
     // Clicking home navigates
     await user.click(homeLink);
@@ -243,8 +358,9 @@ describe('Breadcrumbs', () => {
     );
 
     expect(screen.getByText('My Project')).toBeInTheDocument();
-    // "Projects" static segment still renders correctly
-    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    // "Projects" static segment still renders correctly as non-clickable
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
   });
 
   it('falls back to raw segment when context has no label for that segment', () => {
@@ -280,10 +396,14 @@ describe('Breadcrumbs', () => {
 });
 
 describe('AppLayout', () => {
-  it('renders NavBar, Breadcrumbs, and page content together', () => {
+  beforeEach(() => {
+    resetSidebarPreference();
+  });
+
+  it('renders sidebar, Breadcrumbs, and page content together', () => {
     renderAppLayout('/schemas', <div data-testid="page-content">Page</div>);
 
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
@@ -291,8 +411,15 @@ describe('AppLayout', () => {
   it('renders Not Found page within the shell (AE-10)', () => {
     renderAppLayout('/unknown/path', <div />);
 
-    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
     expect(screen.getByTestId('page-not-found')).toBeInTheDocument();
+  });
+
+  it('does not render top-nav landmark on primary routes (AE-01)', () => {
+    renderAppLayout('/', <div data-testid="page-content">Content</div>);
+
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
   });
 
   it('renders content in a main element', () => {
@@ -320,9 +447,27 @@ describe('AppLayout', () => {
     );
 
     expect(screen.getByTestId('inner-page')).toBeInTheDocument();
-    // "Schemas" appears in both the NavBar link and the breadcrumb — confirm
+    // "Schemas" appears in both the sidebar link and the breadcrumb — confirm
     // at least one instance is present in the breadcrumb nav
     const breadcrumbNav = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(breadcrumbNav).getByText('Schemas')).toBeInTheDocument();
+  });
+
+  it('keeps focused workspace routes usable with sidebar and no dual top-nav (AE-09)', () => {
+    renderAppLayout('/projects/p1/mappings/m1', <div data-testid="page-content">Editor</div>);
+
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('page-content')).toBeInTheDocument();
+  });
+
+  it('keeps create-mapping route in standard framed layout with breadcrumbs', () => {
+    renderAppLayout('/projects/p1/mappings/new', <div data-testid="page-content">Create Mapping</div>);
+
+    expect(screen.getByRole('complementary', { name: 'App sidebar' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
 });

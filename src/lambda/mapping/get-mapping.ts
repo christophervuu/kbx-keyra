@@ -17,6 +17,7 @@ interface MappingMetadata {
   readonly mappingId: string;
   readonly projectId: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
@@ -32,6 +33,7 @@ interface MappingConfig {
   readonly id?: string;
   readonly projectId?: string;
   readonly name: string;
+  readonly businessContext?: string;
   readonly version: number;
   readonly engineVersion: string;
   readonly sourceSchemaRef?: { readonly schemaId: string; readonly type: 'github' | 'local' | 'published'; readonly commitSha?: string };
@@ -72,9 +74,9 @@ function getContentBucketOrThrow(): string {
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const mappingId = parsePathParam(event, 'id');
+  const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: id', 400, false);
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: mappingId', 400, false);
   }
 
   try {

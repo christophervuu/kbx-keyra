@@ -108,12 +108,37 @@ function mapErrorCodeToMessage(code: unknown): string {
 }
 
 function isExplainRuleResult(value: unknown): value is ExplainRuleResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'explanation' in value &&
-    typeof (value as { explanation?: unknown }).explanation === 'string'
-  );
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const typed = value as {
+    explanation?: unknown;
+    confidence?: unknown;
+    limitations?: unknown;
+  };
+
+  if (typeof typed.explanation !== 'string') {
+    return false;
+  }
+
+  if (
+    typed.confidence !== undefined &&
+    typed.confidence !== 'high' &&
+    typed.confidence !== 'medium' &&
+    typed.confidence !== 'low'
+  ) {
+    return false;
+  }
+
+  if (
+    typed.limitations !== undefined &&
+    (!Array.isArray(typed.limitations) || typed.limitations.some((item) => typeof item !== 'string'))
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function mapSuggestHttpStatusToMessage(status: number): string {
@@ -141,14 +166,83 @@ function mapSuggestErrorCodeToMessage(code: unknown): string {
 }
 
 function isSuggestExpressionResult(value: unknown): value is SuggestExpressionResult {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const typed = value as {
+    expression?: unknown;
+    explanation?: unknown;
+    validation?: unknown;
+    readyToApply?: unknown;
+    context?: unknown;
+  };
+
+  if (typeof typed.expression !== 'string') {
+    return false;
+  }
+
+  if (typed.explanation !== undefined && typeof typed.explanation !== 'string') {
+    return false;
+  }
+
+  if (typeof typed.readyToApply !== 'boolean') {
+    return false;
+  }
+
+  if (typeof typed.validation !== 'object' || typed.validation === null) {
+    return false;
+  }
+
+  const validation = typed.validation as { valid?: unknown; diagnostics?: unknown };
+  if (typeof validation.valid !== 'boolean' || !Array.isArray(validation.diagnostics)) {
+    return false;
+  }
+
+  const diagnosticsAreValid = validation.diagnostics.every((diagnostic) => {
+    if (typeof diagnostic !== 'object' || diagnostic === null) {
+      return false;
+    }
+
+    const typedDiagnostic = diagnostic as {
+      code?: unknown;
+      severity?: unknown;
+      message?: unknown;
+      path?: unknown;
+    };
+
+    return (
+      typeof typedDiagnostic.code === 'string' &&
+      (typedDiagnostic.severity === 'error' ||
+        typedDiagnostic.severity === 'warning' ||
+        typedDiagnostic.severity === 'info') &&
+      typeof typedDiagnostic.message === 'string' &&
+      (typedDiagnostic.path === undefined || typeof typedDiagnostic.path === 'string')
+    );
+  });
+
+  if (!diagnosticsAreValid) {
+    return false;
+  }
+
+  if (typeof typed.context !== 'object' || typed.context === null) {
+    return false;
+  }
+
+  const context = typed.context as {
+    sourceNodeCount?: unknown;
+    includedNodeCount?: unknown;
+    truncated?: unknown;
+    approxTokenCount?: unknown;
+    byteLength?: unknown;
+  };
+
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    'expression' in value &&
-    typeof (value as { expression?: unknown }).expression === 'string' &&
-    (!('explanation' in value) ||
-      typeof (value as { explanation?: unknown }).explanation === 'string' ||
-      typeof (value as { explanation?: unknown }).explanation === 'undefined')
+    typeof context.sourceNodeCount === 'number' &&
+    typeof context.includedNodeCount === 'number' &&
+    typeof context.truncated === 'boolean' &&
+    typeof context.approxTokenCount === 'number' &&
+    typeof context.byteLength === 'number'
   );
 }
 
@@ -185,7 +279,14 @@ function isAutoMapSectionResult(value: unknown): value is AutoMapSectionResult {
     return false;
   }
 
-  return (value as { suggestions: unknown[] }).suggestions.every((suggestion) => {
+  const typedValue = value as {
+    suggestions: unknown[];
+    retrievalMeta?: unknown;
+    validationMeta?: unknown;
+    dedupMeta?: unknown;
+  };
+
+  const suggestionsValid = typedValue.suggestions.every((suggestion) => {
     if (typeof suggestion !== 'object' || suggestion === null) {
       return false;
     }
@@ -242,6 +343,78 @@ function isAutoMapSectionResult(value: unknown): value is AutoMapSectionResult {
       );
     });
   });
+
+  if (!suggestionsValid) {
+    return false;
+  }
+
+  if (typedValue.retrievalMeta !== undefined) {
+    const retrievalMeta = typedValue.retrievalMeta as {
+      mode?: unknown;
+      retrievalCandidatesCount?: unknown;
+      retrievalSelectedCount?: unknown;
+      chunkCount?: unknown;
+      noContext?: unknown;
+      noContextReason?: unknown;
+    };
+
+    if (typeof retrievalMeta !== 'object' || retrievalMeta === null) {
+      return false;
+    }
+
+    if (
+      retrievalMeta.mode !== undefined &&
+      retrievalMeta.mode !== 'section' &&
+      retrievalMeta.mode !== 'whole'
+    ) {
+      return false;
+    }
+
+    if (
+      (retrievalMeta.retrievalCandidatesCount !== undefined && typeof retrievalMeta.retrievalCandidatesCount !== 'number') ||
+      (retrievalMeta.retrievalSelectedCount !== undefined && typeof retrievalMeta.retrievalSelectedCount !== 'number') ||
+      (retrievalMeta.chunkCount !== undefined && typeof retrievalMeta.chunkCount !== 'number') ||
+      (retrievalMeta.noContext !== undefined && typeof retrievalMeta.noContext !== 'boolean') ||
+      (retrievalMeta.noContextReason !== undefined && typeof retrievalMeta.noContextReason !== 'string')
+    ) {
+      return false;
+    }
+  }
+
+  if (typedValue.validationMeta !== undefined) {
+    const validationMeta = typedValue.validationMeta as {
+      validationPassCount?: unknown;
+      validationFailCount?: unknown;
+    };
+
+    if (typeof validationMeta !== 'object' || validationMeta === null) {
+      return false;
+    }
+
+    if (
+      (validationMeta.validationPassCount !== undefined && typeof validationMeta.validationPassCount !== 'number') ||
+      (validationMeta.validationFailCount !== undefined && typeof validationMeta.validationFailCount !== 'number')
+    ) {
+      return false;
+    }
+  }
+
+  if (typedValue.dedupMeta !== undefined) {
+    const dedupMeta = typedValue.dedupMeta as { duplicatesCollapsed?: unknown };
+
+    if (typeof dedupMeta !== 'object' || dedupMeta === null) {
+      return false;
+    }
+
+    if (
+      dedupMeta.duplicatesCollapsed !== undefined &&
+      typeof dedupMeta.duplicatesCollapsed !== 'number'
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 type AIErrorEnvelope = {
@@ -313,7 +486,11 @@ export async function explainRuleHttp(
       throw new Error(MALFORMED_RESPONSE_MESSAGE);
     }
 
-    return { explanation: parsed.data.explanation };
+    return {
+      explanation: parsed.data.explanation,
+      confidence: parsed.data.confidence,
+      limitations: parsed.data.limitations,
+    };
   } catch (error) {
     if (
       typeof error === 'object' &&
@@ -346,21 +523,16 @@ export async function suggestExpressionHttp(
   const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
   const body: Record<string, unknown> = {
+    mappingId: input.mappingId,
     instruction: input.instruction,
     targetPath: input.targetPath,
+    targetType: input.targetType,
   };
-
-  if (input.targetType !== undefined && input.targetType !== null) {
-    body.targetType = input.targetType;
-  }
 
   if (input.targetDescription !== undefined && input.targetDescription !== null) {
     body.targetDescription = input.targetDescription;
   }
 
-  if (input.sourceContext !== undefined && input.sourceContext !== null) {
-    body.sourceContext = input.sourceContext;
-  }
 
   try {
     const response = await fetch(`${trimTrailingSlash(apiUrl)}/ai/suggest-expression`, {
@@ -396,6 +568,9 @@ export async function suggestExpressionHttp(
     return {
       expression: parsed.data.expression,
       explanation: parsed.data.explanation,
+      validation: parsed.data.validation,
+      readyToApply: parsed.data.readyToApply,
+      context: parsed.data.context,
     };
   } catch (error) {
     if (
@@ -435,6 +610,10 @@ export async function autoMapSectionHttp(
 
   if (input.sectionPath !== undefined && input.sectionPath !== null) {
     body.sectionPath = input.sectionPath;
+  }
+
+  if (input.mode !== undefined) {
+    body.mode = input.mode;
   }
 
   if (input.targetSection !== undefined && input.targetSection !== null) {
@@ -506,6 +685,9 @@ export async function autoMapSectionHttp(
     return {
       suggestions: parsed.data.suggestions,
       diagnostics: parsed.data.diagnostics,
+      retrievalMeta: parsed.data.retrievalMeta,
+      validationMeta: parsed.data.validationMeta,
+      dedupMeta: parsed.data.dedupMeta,
     };
   } catch (error) {
     if (

@@ -1,3 +1,4 @@
+import { getSeededCdmSchemaDetail, listSeededCdmMetadataFixtures } from './cdm-fixtures';
 import type { ApiAdapter } from './types';
 import type {
   CurrentDeployment,
@@ -6,12 +7,24 @@ import type {
   DeploymentSourceType,
 } from './types';
 
+import {
+  normalizeProjectLinkedSchemaIds,
+  normalizeSchemaOwnership,
+  normalizeSchemaOrigin,
+  normalizeSchemaReviewState,
+  normalizeSchemaSourceKind,
+  normalizeSchemaStatus,
+  schemaDataFormatFromSourceKind,
+} from '@/lib/types';
 import type {
   ActivityEntry,
+  AddSchemaSampleInput,
+  AddSchemaSampleResult,
   AutoMapInput,
   AutoMapResult,
   AutoMapSectionInput,
   AutoMapSectionResult,
+  CdmBulkSyncResult,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -38,7 +51,7 @@ import type {
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
-  SchemaOrigin,
+  SchemaSamplePayloadContent,
   SchemaSearchResult,
   SchemaSyncResult,
   ServerPreviewInput,
@@ -66,22 +79,92 @@ const STORAGE_KEYS = {
 
 const MAX_MAPPING_VERSIONS = 50;
 
-const VALID_SCHEMA_ORIGINS: readonly SchemaOrigin[] = ['cdm', 'published', 'local'];
+function normalizeSchemaSyncStatusForStorage(value: unknown): SchemaMetadata['syncStatus'] {
+  if (value === 'synced' || value === 'update-available' || value === 'sync-failed') {
+    return value;
+  }
 
-function normalizeSchemaOrigin(origin: unknown): SchemaOrigin {
-  return typeof origin === 'string' && VALID_SCHEMA_ORIGINS.includes(origin as SchemaOrigin)
-    ? (origin as SchemaOrigin)
-    : 'local';
+  return 'sync-failed';
 }
+
+function normalizeSchemaMetadataForRead(metadata: SchemaMetadata): SchemaMetadata {
+  const sourceKind = normalizeSchemaSourceKind({
+    sourceKind: metadata.sourceKind,
+    format: metadata.format,
+    inferred: metadata.inferred,
+  });
+  const ownership = normalizeSchemaOwnership({
+    ownership: metadata.ownership,
+    origin: metadata.origin,
+  });
+
+  return {
+    ...metadata,
+    origin: normalizeSchemaOrigin(metadata.origin),
+    ownership,
+    isCdm: metadata.isCdm ?? ownership === 'cdm',
+    readonly: metadata.readonly ?? ownership === 'cdm',
+    sourceKind,
+    dataFormat: metadata.dataFormat ?? schemaDataFormatFromSourceKind(sourceKind),
+    status: normalizeSchemaStatus({
+      status: metadata.status,
+      inferred: metadata.inferred,
+      reviewedAt: metadata.reviewedAt,
+    }),
+    ...(metadata.scope !== undefined ? { scope: metadata.scope } : {}),
+    description: metadata.description ?? '',
+      inferred: metadata.inferred ?? false,
+      reviewState: normalizeSchemaReviewState({
+        reviewState: metadata.reviewState,
+        inferred: metadata.inferred,
+        reviewedAt: metadata.reviewedAt,
+      }),
+      syncStatus: normalizeSchemaSyncStatusForStorage(metadata.syncStatus ?? 'sync-failed'),
+  };
+}
+
 
 interface StoredSchema {
   metadata: SchemaMetadata;
   detail: SchemaDetail;
+  samplePayloadContentById?: Record<string, SchemaSamplePayloadContent>;
 }
 
 interface StoredMapping {
   metadata: MappingMetadata;
   config: MappingConfig;
+}
+
+function normalizeOptionalBusinessContext(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function mergeWithSeededCdmMetadata(items: readonly SchemaMetadata[]): SchemaMetadata[] {
+  const byId = new Map(items.map((item) => [item.schemaId, item]));
+  const seeded = listSeededCdmMetadataFixtures().map((fixture) => {
+    const existing = byId.get(fixture.schemaId);
+    if (existing) {
+      return {
+        ...existing,
+        origin: 'cdm' as const,
+        ownership: 'cdm' as const,
+        isCdm: true,
+        readonly: true,
+      };
+    }
+
+    return fixture;
+  });
+
+  const seededIds = new Set(seeded.map((entry) => entry.schemaId));
+  const nonSeeded = items.filter((item) => !seededIds.has(item.schemaId));
+
+  return [...seeded, ...nonSeeded];
 }
 
 interface StoredRevisionEntry {
@@ -102,13 +185,23 @@ interface StoredVersionEntry {
 
 interface CurrentDeploymentsInput {
   readonly DEV?: CurrentDeployment | null;
-  readonly QA?: CurrentDeployment | null;
+  readonly PREPROD?: CurrentDeployment | null;
   readonly PROD?: CurrentDeployment | null;
 }
 
 const OFFLINE_MODE_MESSAGE = 'Not available in offline mode';
 
 export class LocalStorageAdapter implements ApiAdapter {
+  /**
+   * Canonical offline-mode behavior for unsupported integrations (AI, GitHub, server preview).
+   *
+   * Keep this centralized so all unsupported offline methods fail with the same deterministic
+   * semantics expected by UI error mappers and tests.
+   */
+  private offlineModeError(): Error {
+    return new Error(OFFLINE_MODE_MESSAGE);
+  }
+
   private deploymentKey(mappingId: string): string {
     return `keyra:deployments:${mappingId}`;
   }
@@ -233,15 +326,20 @@ export class LocalStorageAdapter implements ApiAdapter {
         deployment: currentDeployments.DEV ?? null,
         status: this.computeStaleness(currentDeployments.DEV ?? null, mapping),
       },
-      QA: {
-        environment: 'QA',
-        deployment: currentDeployments.QA ?? null,
-        status: this.computeStaleness(currentDeployments.QA ?? null, mapping),
+      PREPROD: {
+        environment: 'PREPROD',
+        deployment: currentDeployments.PREPROD ?? null,
+        status: this.computeStaleness(currentDeployments.PREPROD ?? null, mapping),
       },
       PROD: {
         environment: 'PROD',
         deployment: currentDeployments.PROD ?? null,
         status: this.computeStaleness(currentDeployments.PROD ?? null, mapping),
+      },
+      QA: {
+        environment: 'PREPROD',
+        deployment: currentDeployments.PREPROD ?? null,
+        status: this.computeStaleness(currentDeployments.PREPROD ?? null, mapping),
       },
     };
   }
@@ -268,7 +366,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   private getCurrentByEnvironment(
     mappingId: string,
-  ): { DEV: CurrentDeployment | null; QA: CurrentDeployment | null; PROD: CurrentDeployment | null } {
+  ): { DEV: CurrentDeployment | null; PREPROD: CurrentDeployment | null; PROD: CurrentDeployment | null } {
     const deployments = this.readDeployments(mappingId);
 
     const latestFor = (environment: Environment): CurrentDeployment | null => {
@@ -281,7 +379,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     return {
       DEV: latestFor('DEV'),
-      QA: latestFor('QA'),
+      PREPROD: latestFor('PREPROD'),
       PROD: latestFor('PROD'),
     };
   }
@@ -333,31 +431,26 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   // Schemas
   async listSchemas(): Promise<SchemaMetadata[]> {
-    return this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => ({
-      ...item.metadata,
-      origin: normalizeSchemaOrigin(item.metadata.origin),
-      scope: item.metadata.scope ?? 'global',
-      description: item.metadata.description ?? '',
-      inferred: item.metadata.inferred ?? false,
-      syncStatus: item.metadata.syncStatus ?? 'not-synced',
-    }));
+    const stored = this.readArray<StoredSchema>(STORAGE_KEYS.schemas).map((item) => normalizeSchemaMetadataForRead(item.metadata));
+    return mergeWithSeededCdmMetadata(stored).map((item) => normalizeSchemaMetadataForRead(item));
   }
 
   async getSchema(id: string): Promise<SchemaDetail> {
     const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
     const found = schemas.find((item) => item.metadata.schemaId === id);
     if (!found) {
+      const seeded = getSeededCdmSchemaDetail(id);
+      if (seeded) {
+        return {
+          ...seeded,
+          metadata: normalizeSchemaMetadataForRead(seeded.metadata),
+        };
+      }
+
       throw this.notFound('Schema', id);
     }
 
-    const metadata: SchemaMetadata = {
-      ...found.metadata,
-      origin: normalizeSchemaOrigin(found.metadata.origin),
-      scope: found.metadata.scope ?? 'global',
-      description: found.metadata.description ?? '',
-      inferred: found.metadata.inferred ?? false,
-      syncStatus: found.metadata.syncStatus ?? 'not-synced',
-    };
+    const metadata = normalizeSchemaMetadataForRead(found.metadata);
 
     return {
       ...found.detail,
@@ -376,12 +469,29 @@ export class LocalStorageAdapter implements ApiAdapter {
       format: input.format,
       fieldCount: 0,
       origin: normalizeSchemaOrigin(input.origin),
-      status: 'ready',
-      scope: input.scope ?? 'global',
+      ownership: normalizeSchemaOwnership({
+        ownership: input.ownership,
+        origin: input.origin,
+      }),
+      isCdm: normalizeSchemaOwnership({ ownership: input.ownership, origin: input.origin }) === 'cdm',
+      readonly: input.readonly,
+      sourceKind: normalizeSchemaSourceKind({ sourceKind: input.sourceKind, format: input.format, inferred: input.inferred }),
+      status: normalizeSchemaStatus({
+        status: input.status ?? 'ready',
+        inferred: input.inferred,
+        reviewedAt: input.reviewedAt,
+      }),
+      dataFormat: schemaDataFormatFromSourceKind(
+        normalizeSchemaSourceKind({ sourceKind: input.sourceKind, format: input.format, inferred: input.inferred }),
+      ),
+      ...(input.scope !== undefined ? { scope: input.scope } : {}),
       description: input.description ?? '',
       updatedBy: 'local-user',
       inferred: input.inferred ?? false,
-      syncStatus: input.syncStatus ?? 'not-synced',
+      reviewedAt: input.reviewedAt,
+      reviewedBy: input.reviewedBy,
+      disambiguator: input.disambiguator,
+      syncStatus: normalizeSchemaSyncStatusForStorage(input.syncStatus ?? 'sync-failed'),
       source: input.source ?? { type: 'upload' },
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -407,19 +517,12 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const current = schemas[index];
     const timestamp = this.nowIso();
-    const currentMetadata = {
-      ...current.metadata,
-      origin: normalizeSchemaOrigin(current.metadata.origin),
-      scope: current.metadata.scope ?? 'global',
-      description: current.metadata.description ?? '',
-      inferred: current.metadata.inferred ?? false,
-      syncStatus: current.metadata.syncStatus ?? 'not-synced',
-    };
+    const currentMetadata = normalizeSchemaMetadataForRead(current.metadata);
 
     const didUpdateContent = input.content !== undefined;
     const nextSyncStatus =
       didUpdateContent && currentMetadata.syncStatus === 'synced'
-        ? 'local-changes'
+        ? 'sync-failed'
         : currentMetadata.syncStatus;
 
     const nextMetadata: SchemaMetadata = {
@@ -429,6 +532,33 @@ export class LocalStorageAdapter implements ApiAdapter {
       ...(input.scope !== undefined ? { scope: input.scope } : {}),
       ...(input.format !== undefined ? { format: input.format } : {}),
       ...(input.fieldCount !== undefined ? { fieldCount: input.fieldCount } : {}),
+      ...(input.status !== undefined ? {
+        status: normalizeSchemaStatus({
+          status: input.status,
+          inferred: currentMetadata.inferred,
+          reviewedAt: input.reviewedAt ?? currentMetadata.reviewedAt,
+        }),
+      } : {}),
+      ...(input.reviewedAt !== undefined ? { reviewedAt: input.reviewedAt } : {}),
+      ...(input.reviewedBy !== undefined ? { reviewedBy: input.reviewedBy } : {}),
+      ...(input.disambiguator !== undefined ? { disambiguator: input.disambiguator } : {}),
+      reviewState: normalizeSchemaReviewState({
+        reviewState: currentMetadata.reviewState,
+        inferred: currentMetadata.inferred,
+        reviewedAt: input.reviewedAt ?? currentMetadata.reviewedAt,
+      }),
+      sourceKind: normalizeSchemaSourceKind({
+        sourceKind: currentMetadata.sourceKind,
+        format: input.format ?? currentMetadata.format,
+        inferred: currentMetadata.inferred,
+      }),
+      dataFormat: schemaDataFormatFromSourceKind(
+        normalizeSchemaSourceKind({
+          sourceKind: currentMetadata.sourceKind,
+          format: input.format ?? currentMetadata.format,
+          inferred: currentMetadata.inferred,
+        }),
+      ),
       syncStatus: nextSyncStatus,
       updatedAt: timestamp,
       updatedBy: 'local-user',
@@ -449,6 +579,149 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     this.writeArray(STORAGE_KEYS.schemas, schemas);
     return nextMetadata;
+  }
+
+  async markSchemaReviewed(id: string): Promise<SchemaMetadata> {
+    return this.updateSchema(id, {
+      status: 'ready',
+      reviewedAt: this.nowIso(),
+      reviewedBy: 'local-user',
+    });
+  }
+
+  async addSchemaSample(id: string, input: AddSchemaSampleInput): Promise<AddSchemaSampleResult> {
+    const detail = await this.getSchema(id);
+    const metadata = normalizeSchemaMetadataForRead(detail.metadata);
+
+    const sampleId = crypto.randomUUID();
+    const now = this.nowIso();
+    const sample = {
+      sampleId,
+      schemaId: id,
+      name: input.sampleName?.trim() || `Sample ${(metadata.samplePayloadCount ?? metadata.samplePayloads?.length ?? 0) + 1}`,
+      dataFormat: metadata.dataFormat ?? 'json',
+      contentRef: `local://schemas/${id}/samples/${sampleId}`,
+      usedForInference: false,
+      source: 'added_sample' as const,
+      createdAt: now,
+      compatibility: 'unknown' as const,
+    };
+
+    const nextSamples = [...(metadata.samplePayloads ?? []), sample];
+    const nextMetadata = await this.updateSchema(id, {
+      status: input.applySuggestedUpdates ? 'needs_review' : metadata.status,
+      fieldCount: metadata.fieldCount,
+    });
+
+    const mergedMetadata = {
+      ...nextMetadata,
+      samplePayloads: nextSamples,
+      samplePayloadCount: nextSamples.length,
+    };
+
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index >= 0) {
+      const raw = metadata.dataFormat === 'xml'
+        ? (typeof input.sampleContent === 'string' ? input.sampleContent : String(input.sampleContent))
+        : JSON.stringify(input.sampleContent);
+      const parsed = metadata.dataFormat === 'xml'
+        ? null
+        : input.sampleContent;
+
+      const patched = {
+        ...schemas[index],
+        metadata: mergedMetadata,
+        detail: {
+          ...schemas[index].detail,
+          metadata: mergedMetadata,
+        },
+        samplePayloadContentById: {
+          ...(schemas[index].samplePayloadContentById ?? {}),
+          [sampleId]: {
+            sampleId,
+            schemaId: id,
+            dataFormat: sample.dataFormat,
+            raw,
+            parsed,
+          },
+        },
+      };
+      schemas[index] = patched;
+      this.writeArray(STORAGE_KEYS.schemas, schemas);
+    }
+
+    return {
+      sample,
+      diff: {
+        additions: [],
+        typeConflicts: [],
+        requiredOptionalEvidence: [],
+      },
+      schemaUpdated: input.applySuggestedUpdates === true,
+      mode: input.applySuggestedUpdates ? 'apply_all' : 'save_only',
+      metadata: mergedMetadata,
+    };
+  }
+
+  async deleteSchemaSample(id: string, sampleId: string): Promise<SchemaMetadata> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const index = schemas.findIndex((item) => item.metadata.schemaId === id);
+    if (index < 0) {
+      throw this.notFound('Schema', id);
+    }
+
+    const current = schemas[index];
+    const existingSamples = current.metadata.samplePayloads ?? [];
+    const nextSamples = existingSamples.filter((sample) => sample.sampleId !== sampleId);
+
+    if (nextSamples.length === existingSamples.length) {
+      throw this.notFound('Schema sample', `${id}:${sampleId}`);
+    }
+
+    const nextMetadata: SchemaMetadata = {
+      ...normalizeSchemaMetadataForRead(current.metadata),
+      samplePayloads: nextSamples,
+      samplePayloadCount: nextSamples.length,
+      updatedAt: this.nowIso(),
+      updatedBy: 'local-user',
+    };
+
+    const nextContentById = { ...(current.samplePayloadContentById ?? {}) };
+    delete nextContentById[sampleId];
+
+    schemas[index] = {
+      ...current,
+      metadata: nextMetadata,
+      detail: {
+        ...current.detail,
+        metadata: nextMetadata,
+      },
+      samplePayloadContentById: nextContentById,
+    };
+
+    this.writeArray(STORAGE_KEYS.schemas, schemas);
+    return nextMetadata;
+  }
+
+  async getSchemaSamplePayload(id: string, sampleId: string): Promise<SchemaSamplePayloadContent> {
+    const schemas = this.readArray<StoredSchema>(STORAGE_KEYS.schemas);
+    const schema = schemas.find((item) => item.metadata.schemaId === id);
+    if (!schema) {
+      throw this.notFound('Schema', id);
+    }
+
+    const metadata = (schema.metadata.samplePayloads ?? []).find((sample) => sample.sampleId === sampleId);
+    if (!metadata) {
+      throw this.notFound('Schema sample', `${id}:${sampleId}`);
+    }
+
+    const cached = schema.samplePayloadContentById?.[sampleId];
+    if (cached) {
+      return cached;
+    }
+
+    throw this.notFound('Schema sample payload', `${id}:${sampleId}`);
   }
 
   async deleteSchema(id: string): Promise<void> {
@@ -478,11 +751,13 @@ export class LocalStorageAdapter implements ApiAdapter {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
     const mappingId = crypto.randomUUID();
     const timestamp = this.nowIso();
+    const businessContext = normalizeOptionalBusinessContext(input.businessContext);
 
     const config: MappingConfig = {
       id: mappingId,
       projectId: input.projectId,
       name: input.name,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       engineVersion: '2.0.0',
       ...(input.sourceSchemaRef !== undefined && { sourceSchemaRef: input.sourceSchemaRef }),
@@ -495,6 +770,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       mappingId,
       projectId: input.projectId,
       name: input.name,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       status: 'draft',
       sourceSchemaId: input.sourceSchemaRef?.schemaId ?? '',
@@ -519,6 +795,7 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const current = mappings[index];
     const timestamp = this.nowIso();
+    const businessContext = normalizeOptionalBusinessContext(config.businessContext);
 
     const nextConfig: MappingConfig = {
       ...config,
@@ -529,6 +806,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     const nextMetadata: MappingMetadata = {
       ...current.metadata,
       name: config.name,
+      ...(businessContext ? { businessContext } : {}),
       version: config.version,
       sourceSchemaId: config.sourceSchemaRef?.schemaId ?? current.metadata.sourceSchemaId,
       targetSchemaId: config.targetSchemaRef?.schemaId ?? current.metadata.targetSchemaId,
@@ -586,10 +864,54 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   async deleteMapping(id: string): Promise<void> {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
+    const mappingToDelete = mappings.find((item) => item.metadata.mappingId === id);
     const next = mappings.filter((item) => item.metadata.mappingId !== id);
     this.writeArray(STORAGE_KEYS.mappings, next);
     localStorage.removeItem(this.versionKey(id));
     localStorage.removeItem(this.revisionKey(id));
+
+    if (!mappingToDelete) {
+      return;
+    }
+
+    const projectId = mappingToDelete.metadata.projectId;
+    const projectMappings = next.filter((item) => item.metadata.projectId === projectId);
+    const referencedSchemaIds = new Set<string>();
+    for (const mapping of projectMappings) {
+      const sourceSchemaId = mapping.metadata.sourceSchemaId;
+      const targetSchemaId = mapping.metadata.targetSchemaId;
+      if (typeof sourceSchemaId === 'string' && sourceSchemaId.trim().length > 0) {
+        referencedSchemaIds.add(sourceSchemaId);
+      }
+      if (typeof targetSchemaId === 'string' && targetSchemaId.trim().length > 0) {
+        referencedSchemaIds.add(targetSchemaId);
+      }
+    }
+
+    const projects = this.readArray<Project>(STORAGE_KEYS.projects);
+    const projectIndex = projects.findIndex((item) => item.projectId === projectId);
+    if (projectIndex < 0) {
+      return;
+    }
+
+    const current = projects[projectIndex];
+    const currentRefs = current.schemaRefs ?? [];
+    const nextSchemaRefs = currentRefs.filter((ref) => referencedSchemaIds.has(ref.schemaId));
+    const nextLinkedSchemaIds = normalizeProjectLinkedSchemaIds({
+      linkedSchemaIds: current.linkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
+    }).filter((schemaId) => referencedSchemaIds.has(schemaId));
+
+    const nextProject: Project = {
+      ...current,
+      linkedSchemaIds: nextLinkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
+      updatedAt: this.nowIso(),
+    };
+
+    const nextProjects = [...projects];
+    nextProjects[projectIndex] = nextProject;
+    this.writeArray(STORAGE_KEYS.projects, nextProjects);
   }
 
   async listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]> {
@@ -845,11 +1167,14 @@ export class LocalStorageAdapter implements ApiAdapter {
 
     const nextId = crypto.randomUUID();
     const timestamp = this.nowIso();
+    const businessContext = normalizeOptionalBusinessContext(original.config.businessContext)
+      ?? normalizeOptionalBusinessContext(original.metadata.businessContext);
 
     const config: MappingConfig = {
       ...original.config,
       id: nextId,
       name: newName,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
     };
 
@@ -857,6 +1182,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       ...original.metadata,
       mappingId: nextId,
       name: newName,
+      ...(businessContext ? { businessContext } : {}),
       version: 1,
       ruleCount: config.rules.length,
       updatedAt: timestamp,
@@ -869,6 +1195,21 @@ export class LocalStorageAdapter implements ApiAdapter {
   }
 
   // Projects
+  private normalizeProject(project: Project): Project {
+    const schemaRefs = project.schemaRefs ?? [];
+    const linkedSchemaIds = normalizeProjectLinkedSchemaIds({
+      linkedSchemaIds: project.linkedSchemaIds,
+      schemaRefs,
+    });
+
+    return {
+      ...project,
+      linkedSchemaIds,
+      schemaRefs,
+      tags: project.tags ?? [],
+    };
+  }
+
   async listProjects(): Promise<ProjectMetadata[]> {
     return this.readArray<Project>(STORAGE_KEYS.projects).map((project) => ({
       projectId: project.projectId,
@@ -886,12 +1227,14 @@ export class LocalStorageAdapter implements ApiAdapter {
       throw this.notFound('Project', id);
     }
 
+    const normalizedProject = this.normalizeProject(project);
+
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings)
       .map((item) => item.metadata)
       .filter((item) => item.projectId === id);
 
     return {
-      ...project,
+      ...normalizedProject,
       mappings,
     };
   }
@@ -900,12 +1243,19 @@ export class LocalStorageAdapter implements ApiAdapter {
     const projects = this.readArray<Project>(STORAGE_KEYS.projects);
     const timestamp = this.nowIso();
 
+    const schemaRefs = input.schemaRefs ?? [];
+    const linkedSchemaIds = normalizeProjectLinkedSchemaIds({
+      linkedSchemaIds: input.linkedSchemaIds,
+      schemaRefs,
+    });
+
     const project: Project = {
       projectId: crypto.randomUUID(),
       name: input.name,
       description: input.description,
       slug: input.slug,
-      schemaRefs: input.schemaRefs ?? [],
+      linkedSchemaIds,
+      schemaRefs,
       tags: input.tags ?? [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -931,9 +1281,23 @@ export class LocalStorageAdapter implements ApiAdapter {
     }
 
     const current = projects[index];
+    const currentSchemaRefs = current.schemaRefs ?? [];
+    const nextSchemaRefs = input.schemaRefs ?? currentSchemaRefs;
+    const nextLinkedSchemaIds = input.linkedSchemaIds !== undefined || input.schemaRefs !== undefined
+      ? normalizeProjectLinkedSchemaIds({
+          linkedSchemaIds: input.linkedSchemaIds ?? current.linkedSchemaIds,
+          schemaRefs: nextSchemaRefs,
+        })
+      : normalizeProjectLinkedSchemaIds({
+          linkedSchemaIds: current.linkedSchemaIds,
+          schemaRefs: currentSchemaRefs,
+        });
+
     const next: Project = {
       ...current,
       ...input,
+      linkedSchemaIds: nextLinkedSchemaIds,
+      schemaRefs: nextSchemaRefs,
       updatedAt: this.nowIso(),
     };
 
@@ -1215,65 +1579,75 @@ export class LocalStorageAdapter implements ApiAdapter {
   // GitHub: CDM Repo (read-only)
   async listCdmSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async linkCdmSchema(input: LinkCdmSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
-  async syncCdmSchema(schemaId: string): Promise<SchemaSyncResult> {
+  async syncAllCdmSchemas(): Promise<CdmBulkSyncResult> {
+    throw this.offlineModeError();
+  }
+
+  async syncCdmSchema(
+    schemaId: string,
+    options?: {
+      statusOnly?: boolean;
+    },
+  ): Promise<SchemaSyncResult> {
     void schemaId;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    void options;
+    throw this.offlineModeError();
   }
 
   // GitHub: Non-CDM Repo (read-write)
   async listPublishedSchemas(path?: string): Promise<GitHubFile[]> {
     void path;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async publishSchemaToGitHub(schemaId: string, input: PublishSchemaInput): Promise<void> {
     void schemaId;
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async linkPublishedSchema(input: LinkPublishedSchemaInput): Promise<SchemaMetadata> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   // AI
   async autoMap(input: AutoMapInput): Promise<AutoMapResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async smartFix(input: SmartFixInput): Promise<SmartFixResult> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   async validateMappings(input: ValidateMappingsInput): Promise<ValidationReport> {
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 
   // Schema Search
@@ -1303,6 +1677,6 @@ export class LocalStorageAdapter implements ApiAdapter {
   ): Promise<ServerPreviewResult> {
     void mappingId;
     void input;
-    throw new Error(OFFLINE_MODE_MESSAGE);
+    throw this.offlineModeError();
   }
 }

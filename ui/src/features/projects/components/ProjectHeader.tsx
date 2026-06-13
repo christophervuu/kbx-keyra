@@ -1,8 +1,7 @@
-import { Copy, Download, MoreHorizontal, Plus, Settings, Trash2, Upload } from 'lucide-react';
+import { Copy, Download, MoreHorizontal, Plus, Settings, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { InlineEditableTags } from './InlineEditableTags';
 import { InlineEditableText } from './InlineEditableText';
 
 import { Button } from '@/components/Button';
@@ -34,11 +33,13 @@ export interface ProjectHeaderProps {
   project: ProjectDetail;
   mappingCount: number;
   schemaCount: number;
+  errorCount: number;
   onUpdateName: (name: string) => Promise<void>;
   onUpdateDescription: (description: string) => Promise<void>;
-  onUpdateTags: (tags: string[]) => Promise<void>;
   onCreateMapping: () => void;
-  onAddSchema: () => void;
+  onLinkedSchemasClick?: () => void;
+  linkedSchemasExpanded?: boolean;
+  linkedSchemasControlsId?: string;
   onDuplicateProject: () => Promise<void>;
   onDeleteProject: () => Promise<void>;
 }
@@ -227,18 +228,20 @@ function OverflowMenu({
  * ProjectActionsSection components (FS-050 T-02).
  *
  * Layout:
- *   Title row:    [Project name (h1, inline-editable)]  [Create Mapping] [Add Schema] [...]
+ *   Title row:    [Project name (h1, inline-editable)]  [Create Mapping] [...]
  *   Metadata row: [Description (inline-editable)]  [Created / Updated dates]  [Tags]
  */
 export function ProjectHeader({
   project,
   mappingCount,
   schemaCount,
+  errorCount,
   onUpdateName,
   onUpdateDescription,
-  onUpdateTags,
   onCreateMapping,
-  onAddSchema,
+  onLinkedSchemasClick,
+  linkedSchemasExpanded = false,
+  linkedSchemasControlsId,
   onDuplicateProject,
   onDeleteProject,
 }: ProjectHeaderProps) {
@@ -260,25 +263,16 @@ export function ProjectHeader({
 
         {/* Primary actions */}
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="primary"
-            size="sm"
+          <button
+            type="button"
             onClick={onCreateMapping}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             data-testid="header-create-mapping-btn"
           >
             <Plus size={14} aria-hidden="true" />
             Create Mapping
-          </Button>
+          </button>
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onAddSchema}
-            data-testid="header-add-schema-btn"
-          >
-            <Upload size={14} aria-hidden="true" />
-            Add Schema
-          </Button>
 
           <OverflowMenu
             projectId={project.projectId}
@@ -315,8 +309,25 @@ export function ProjectHeader({
           </span>
         </div>
 
-        {/* Tags */}
-        <InlineEditableTags tags={project.tags} onSave={onUpdateTags} />
+        {/* Compact summary */}
+        <p className="text-sm text-slate-400" data-testid="project-header-summary-line">
+          {mappingCount} mapping{mappingCount === 1 ? '' : 's'} ·{' '}
+          {onLinkedSchemasClick ? (
+            <button
+              type="button"
+              onClick={onLinkedSchemasClick}
+              className="rounded text-blue-400 underline decoration-blue-500/60 underline-offset-2 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              data-testid="linked-schemas-trigger"
+              aria-expanded={linkedSchemasExpanded}
+              aria-controls={linkedSchemasControlsId}
+            >
+              {schemaCount} linked schema{schemaCount === 1 ? '' : 's'}
+            </button>
+          ) : (
+            <>{schemaCount} schema{schemaCount === 1 ? '' : 's'}</>
+          )}{' '}
+          · {errorCount} error{errorCount === 1 ? '' : 's'}
+        </p>
       </div>
     </header>
   );

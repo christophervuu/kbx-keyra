@@ -30,7 +30,7 @@ const VERSIONS: MappingVersion[] = [
   { version: 1, revisionNumber: 2, createdAt: '2026-01-02T00:00:00Z', createdBy: 'alice' },
 ];
 
-// DEV = version-backed, QA = revision-backed, PROD = not-deployed
+// DEV = version-backed, PREPROD = revision-backed, PROD = not-deployed
 const CURRENT_WITH_MIXED: CurrentDeployments = {
   DEV: {
     environment: 'DEV',
@@ -40,19 +40,23 @@ const CURRENT_WITH_MIXED: CurrentDeployments = {
       deployedAt: '2026-01-02T10:00:00Z',
       sourceType: 'version',
       sourceNumber: 1,
+      artifactId: 'artifact-dev-1',
+      artifactHash: 'hash-dev-1-abcdef',
       configHash: 'abc',
       configS3Key: 's3://bucket/map-1/v1.json',
     },
     status: 'current',
   },
-  QA: {
-    environment: 'QA',
+  PREPROD: {
+    environment: 'PREPROD',
     deployment: {
       mappingId: 'map-1',
-      environment: 'QA',
+      environment: 'PREPROD',
       deployedAt: '2026-01-01T10:00:00Z',
       sourceType: 'revision',
       sourceNumber: 1,
+      artifactId: 'artifact-preprod-1',
+      artifactHash: 'hash-preprod-1-xyz',
       configHash: 'xyz',
       configS3Key: 's3://bucket/map-1/rev1.json',
     },
@@ -68,6 +72,8 @@ const HISTORY_RECORDS: DeploymentRecord[] = [
     environment: 'DEV',
     sourceType: 'version',
     sourceNumber: 1,
+    artifactId: 'artifact-dev-1',
+    artifactHash: 'hash-dev-1-abcdef',
     configS3Key: 's3://bucket/map-1/v1.json',
     configHash: 'abc',
     deployedAt: '2026-01-02T10:00:00Z',
@@ -79,6 +85,8 @@ const HISTORY_RECORDS: DeploymentRecord[] = [
     environment: 'DEV',
     sourceType: 'revision',
     sourceNumber: 2,
+    artifactId: 'artifact-dev-rev2',
+    artifactHash: 'hash-dev-rev2-def',
     configS3Key: 's3://bucket/map-1/rev2.json',
     configHash: 'def',
     deployedAt: '2026-01-01T09:00:00Z',
@@ -88,10 +96,12 @@ const HISTORY_RECORDS: DeploymentRecord[] = [
 
 const PROMOTE_RECORD: DeploymentRecord = {
   mappingId: 'map-1',
-  environmentDeployedAt: 'QA#2026-01-02T11:00:00Z',
-  environment: 'QA',
+  environmentDeployedAt: 'PREPROD#2026-01-02T11:00:00Z',
+  environment: 'PREPROD',
   sourceType: 'version',
   sourceNumber: 1,
+  artifactId: 'artifact-dev-1',
+  artifactHash: 'hash-dev-1-abcdef',
   configS3Key: 's3://bucket/map-1/v1.json',
   configHash: 'abc',
   deployedAt: '2026-01-02T11:00:00Z',
@@ -105,12 +115,28 @@ const ROLLBACK_RECORD: DeploymentRecord = {
   environment: 'DEV',
   sourceType: 'revision',
   sourceNumber: 2,
+  artifactId: 'artifact-dev-rev2',
+  artifactHash: 'hash-dev-rev2-def',
   configS3Key: 's3://bucket/map-1/rev2.json',
   configHash: 'def',
   deployedAt: '2026-01-02T12:00:00Z',
   deployedBy: 'alice',
   rollbackOf: 'DEV#2026-01-02T10:00:00Z',
 };
+
+function createDeployBlockedError(issues: unknown[]): Error {
+  const error = new Error('Promotion blocked: referenced CDM schema state is not deployable') as Error & {
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    details?: unknown;
+  };
+  error.code = 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE';
+  error.statusCode = 409;
+  error.retryable = false;
+  error.details = { issues };
+  return error;
+}
 
 // ---------------------------------------------------------------------------
 // Mock adapter factory
@@ -210,7 +236,7 @@ describe('T-06: Environment comparison panel', () => {
     renderPage(createMockAdapter());
     await waitFor(() => screen.getByTestId('environment-comparison-panel'));
     expect(screen.getByTestId('env-card-DEV')).toBeTruthy();
-    expect(screen.getByTestId('env-card-QA')).toBeTruthy();
+    expect(screen.getByTestId('env-card-PREPROD')).toBeTruthy();
     expect(screen.getByTestId('env-card-PROD')).toBeTruthy();
   });
 
@@ -220,10 +246,10 @@ describe('T-06: Environment comparison panel', () => {
     expect(screen.getByTestId('env-status-DEV').textContent).toBe('Current');
   });
 
-  it('QA card shows stale status', async () => {
+  it('PREPROD card shows stale status', async () => {
     renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('env-status-QA'));
-    expect(screen.getByTestId('env-status-QA').textContent).toBe('Stale');
+    await waitFor(() => screen.getByTestId('env-status-PREPROD'));
+    expect(screen.getByTestId('env-status-PREPROD').textContent).toBe('Stale');
   });
 
   it('PROD card shows not-deployed status', async () => {
@@ -238,10 +264,17 @@ describe('T-06: Environment comparison panel', () => {
     expect(screen.getByTestId('env-source-DEV').textContent).toBe('v1');
   });
 
-  it('QA source label shows revision number', async () => {
+  it('shows artifact identity on environment cards', async () => {
     renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('env-source-QA'));
-    expect(screen.getByTestId('env-source-QA').textContent).toBe('Rev 1');
+    await waitFor(() => screen.getByTestId('env-artifact-DEV'));
+    expect(screen.getByTestId('env-artifact-DEV').textContent).toContain('artifact-dev-1');
+    expect(screen.getByTestId('env-artifact-PREPROD').textContent).toContain('artifact-preprod-1');
+  });
+
+  it('PREPROD source label shows revision number', async () => {
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('env-source-PREPROD'));
+    expect(screen.getByTestId('env-source-PREPROD').textContent).toBe('Rev 1');
   });
 });
 
@@ -283,7 +316,7 @@ describe('T-06: Promote button visibility (AE-07)', () => {
   it('DEV promote button hidden when not-deployed', async () => {
     const noneDeployments: CurrentDeployments = {
       DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
-      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
       PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
     };
     renderPage(
@@ -311,7 +344,7 @@ describe('T-06: Promote button visibility (AE-07)', () => {
 
     expect(adapter.promoteDeployment).toHaveBeenCalledWith('map-1', {
       fromEnvironment: 'DEV',
-      toEnvironment: 'QA',
+      toEnvironment: 'PREPROD',
     });
   });
 
@@ -324,6 +357,35 @@ describe('T-06: Promote button visibility (AE-07)', () => {
 
     await waitFor(() => screen.getByTestId('deploy-success-banner'));
     expect(screen.getByTestId('deploy-success-banner').textContent).toContain('promoted');
+  });
+
+  it('shows schema-specific block messaging for promote guardrail failures', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      promoteDeployment: vi.fn().mockRejectedValue(
+        createDeployBlockedError([
+          {
+            schemaId: 'schema-target',
+            schemaName: 'Order Target',
+            referenceRole: 'target',
+            reason: 'metadata-incomplete',
+            remediationKey: 'relink-cdm-schema',
+          },
+        ]),
+      ),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('promote-btn-DEV'));
+    await user.click(screen.getByTestId('promote-btn-DEV'));
+
+    await waitFor(() => screen.getByTestId('cdm-block-list'));
+    expect(screen.getByTestId('cdm-block-issue-target-schema-target').textContent).toContain(
+      'Target schema: Order Target — Schema metadata is incomplete',
+    );
+    const cta = screen.getByTestId('cdm-remediation-cta-target-schema-target');
+    expect(cta.textContent).toContain('Open schema library to relink');
+    expect(cta.getAttribute('href')).toBe('/schemas');
   });
 });
 
@@ -340,6 +402,17 @@ describe('T-06: Deployment history', () => {
     await waitFor(() => screen.getByTestId('history-table-body'));
     // v1 entry
     expect(screen.getByTestId('history-table-body').textContent).toContain('v1');
+  });
+
+  it('history rows render artifact identity column values', async () => {
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('history-table-body'));
+    expect(
+      screen.getByTestId(`history-artifact-${HISTORY_RECORDS[0].environmentDeployedAt}`).textContent,
+    ).toContain('artifact-dev-1');
+    expect(
+      screen.getByTestId(`history-artifact-${HISTORY_RECORDS[1].environmentDeployedAt}`).textContent,
+    ).toContain('artifact-dev-rev2');
   });
 
   it('shows source label for revision entry', async () => {

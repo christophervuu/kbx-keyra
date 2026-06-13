@@ -34,12 +34,14 @@ const CURRENT_DEPLOYMENTS: CurrentDeployments = {
       deployedAt: '2026-01-03T00:00:00Z',
       sourceType: 'version',
       sourceNumber: 2,
+      artifactId: 'artifact-dev-2',
+      artifactHash: 'hash-dev-2-abcdef',
       configHash: 'abc',
       configS3Key: 's3://bucket/map-1/v2.json',
     },
     status: 'current',
   },
-  QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+  PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
   PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
 };
 
@@ -49,11 +51,27 @@ const DEPLOY_RECORD: DeploymentRecord = {
   environment: 'DEV',
   sourceType: 'revision',
   sourceNumber: 3,
+  artifactId: 'artifact-dev-3',
+  artifactHash: 'hash-dev-3-fedcba',
   configS3Key: 's3://bucket/map-1/rev3.json',
   configHash: 'def',
   deployedAt: '2026-01-03T01:00:00Z',
   deployedBy: 'alice',
 };
+
+function createDeployBlockedError(issues: unknown[]): Error {
+  const error = new Error('Deployment blocked: referenced CDM schema state is not deployable') as Error & {
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    details?: unknown;
+  };
+  error.code = 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE';
+  error.statusCode = 409;
+  error.retryable = false;
+  error.details = { issues };
+  return error;
+}
 
 // ---------------------------------------------------------------------------
 // Mock adapter factory
@@ -193,13 +211,13 @@ describe('DeploymentPage', () => {
     expect(verDeployBtn.disabled).toBe(false);
   });
 
-  it('QA: revision deploy buttons are disabled', async () => {
+  it('PREPROD: revision deploy buttons are disabled', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
 
-    await waitFor(() => screen.getByTestId('env-tab-QA'));
+    await waitFor(() => screen.getByTestId('env-tab-PREPROD'));
 
-    await user.click(screen.getByTestId('env-tab-QA'));
+    await user.click(screen.getByTestId('env-tab-PREPROD'));
 
     await waitFor(() => {
       const revDeployBtn = screen.getByTestId('deploy-revision-3') as HTMLButtonElement;
@@ -221,13 +239,13 @@ describe('DeploymentPage', () => {
     });
   });
 
-  it('QA: version deploy buttons are enabled', async () => {
+  it('PREPROD: version deploy buttons are enabled', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
 
-    await waitFor(() => screen.getByTestId('env-tab-QA'));
+    await waitFor(() => screen.getByTestId('env-tab-PREPROD'));
 
-    await user.click(screen.getByTestId('env-tab-QA'));
+    await user.click(screen.getByTestId('env-tab-PREPROD'));
 
     await waitFor(() => {
       const verDeployBtn = screen.getByTestId('deploy-version-2') as HTMLButtonElement;
@@ -298,6 +316,102 @@ describe('DeploymentPage', () => {
     expect(screen.getByTestId('deploy-error-banner').textContent).toContain('permission denied');
   });
 
+  it('renders schema-specific deploy-block reasons and remediation CTAs from backend issues', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockRejectedValue(
+        createDeployBlockedError([
+          {
+            schemaId: 'schema-source',
+            schemaName: 'Order Source',
+            referenceRole: 'source',
+            reason: 'unsynced',
+            remediationKey: 're-sync-schema',
+          },
+          {
+            schemaId: 'schema-target',
+            referenceRole: 'target',
+            reason: 'schema-missing',
+            remediationKey: 'relink-cdm-schema',
+          },
+        ]),
+      ),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+
+    await waitFor(() => screen.getByTestId('cdm-block-list'));
+    expect(screen.getByTestId('cdm-block-issue-source-schema-source').textContent).toContain(
+      'Source schema: Order Source — Not synced yet',
+    );
+    expect(screen.getByTestId('cdm-block-issue-target-schema-target').textContent).toContain(
+      'Target schema: schema-target — Schema is missing',
+    );
+
+    const sourceCta = screen.getByTestId('cdm-remediation-cta-source-schema-source');
+    expect(sourceCta.textContent).toContain('Open schema to re-sync');
+    expect(sourceCta.getAttribute('href')).toBe('/schemas/schema-source');
+
+    const targetCta = screen.getByTestId('cdm-remediation-cta-target-schema-target');
+    expect(targetCta.textContent).toContain('Open schema library to relink');
+    expect(targetCta.getAttribute('href')).toBe('/schemas');
+  });
+
+  it('clears prior deploy-block messaging after successful retry', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi
+        .fn()
+        .mockRejectedValueOnce(
+          createDeployBlockedError([
+            {
+              schemaId: 'schema-source',
+              referenceRole: 'source',
+              reason: 'update-failed',
+              remediationKey: 'retry-sync',
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(DEPLOY_RECORD),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('cdm-block-list'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-success-banner'));
+
+    expect(screen.queryByTestId('cdm-block-list')).toBeNull();
+  });
+
+  it('keeps generic error treatment for non-CDM deployment failures', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Conflict: duplicate deployment request'), {
+          code: 'CONFLICT',
+          statusCode: 409,
+          retryable: false,
+        }),
+      ),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+
+    await waitFor(() => screen.getByTestId('deploy-error-banner'));
+    expect(screen.getByTestId('deploy-error-banner').textContent).toContain('duplicate deployment request');
+    expect(screen.queryByTestId('cdm-block-list')).toBeNull();
+  });
+
   it('dismisses success banner on close', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
@@ -333,6 +447,12 @@ describe('DeploymentPage', () => {
     await waitFor(() => screen.getByTestId('back-to-editor-link'));
   });
 
+  it('environment selector displays Preprod label', async () => {
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('environment-selector'));
+    expect(screen.getByTestId('env-tab-PREPROD').textContent).toBe('Preprod');
+  });
+
   it('current deployment strip shows for active environment', async () => {
     renderPage(createMockAdapter());
 
@@ -341,5 +461,58 @@ describe('DeploymentPage', () => {
     const strip = screen.getByTestId('current-deploy-strip-DEV');
     expect(strip.textContent).toContain('v2');
     expect(strip.textContent).toContain('Current');
+    expect(strip.textContent).toContain('artifact-dev-2');
+    expect(strip.textContent).toContain('hash-dev-2-a');
+  });
+
+  it('shows operation details with orchestration + artifact after successful deploy', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockResolvedValue({
+        ...DEPLOY_RECORD,
+        orchestrationId: 'orc-deploy-1',
+      }),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-operation-details'));
+
+    const details = screen.getByTestId('deploy-operation-details');
+    expect(details.textContent).toContain('orc-deploy-1');
+    expect(details.textContent).toContain('succeeded');
+    expect(details.textContent).toContain('artifact-dev-3');
+  });
+
+  it('shows operation details with attempt/final status from failed deploy response details', async () => {
+    const user = userEvent.setup();
+    const deployErr = Object.assign(new Error('Runtime unavailable'), {
+      code: 'SERVICE_UNAVAILABLE',
+      retryable: true,
+      details: {
+        orchestrationId: 'orc-deploy-fail-1',
+        attemptCount: 3,
+        finalStatus: 'timed_out',
+        artifactId: 'artifact-dev-timeout',
+      },
+    });
+
+    const adapter = createMockAdapter({
+      deployMapping: vi.fn().mockRejectedValue(deployErr),
+    });
+
+    renderPage(adapter);
+    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+
+    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-operation-details'));
+
+    const details = screen.getByTestId('deploy-operation-details');
+    expect(details.textContent).toContain('orc-deploy-fail-1');
+    expect(details.textContent).toContain('timed out');
+    expect(details.textContent).toContain('Attempts: 3');
+    expect(details.textContent).toContain('artifact-dev-timeout');
   });
 });

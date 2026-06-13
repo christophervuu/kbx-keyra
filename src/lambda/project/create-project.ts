@@ -21,6 +21,7 @@ interface ProjectRecord {
   readonly name: string;
   readonly description: string;
   readonly slug: string;
+  readonly linkedSchemaIds?: readonly string[];
   readonly schemaRefs: readonly SchemaRef[];
   readonly tags: readonly string[];
   readonly createdAt: string;
@@ -63,15 +64,44 @@ function generateProjectId(): string {
 }
 
 function toProjectMetadata(project: ProjectRecord): ProjectMetadata {
+  const schemaCount = Array.isArray(project.linkedSchemaIds)
+    ? project.linkedSchemaIds.length
+    : project.schemaRefs.length;
+
   return {
     projectId: project.projectId,
     name: project.name,
     description: project.description,
     slug: project.slug,
     mappingCount: 0,
-    schemaCount: project.schemaRefs.length,
+    schemaCount,
     updatedAt: project.updatedAt,
   };
+}
+
+function normalizeLinkedSchemaIds(input: { linkedSchemaIds?: unknown; schemaRefs?: readonly SchemaRef[] }): readonly string[] {
+  const values = Array.isArray(input.linkedSchemaIds)
+    ? input.linkedSchemaIds
+    : (input.schemaRefs ?? []).map((schemaRef) => schemaRef.schemaId);
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -83,12 +113,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   const now = new Date().toISOString();
+  const schemaRefs = Array.isArray(body?.schemaRefs) ? (body.schemaRefs as SchemaRef[]) : [];
+  const linkedSchemaIds = normalizeLinkedSchemaIds({
+    linkedSchemaIds: body?.linkedSchemaIds,
+    schemaRefs,
+  });
   const project: ProjectRecord = {
     projectId: generateProjectId(),
     name: String(body?.name ?? ''),
     description: typeof body?.description === 'string' ? body.description : '',
     slug: String(body?.slug ?? ''),
-    schemaRefs: Array.isArray(body?.schemaRefs) ? (body.schemaRefs as SchemaRef[]) : [],
+    linkedSchemaIds,
+    schemaRefs,
     tags: Array.isArray(body?.tags) ? (body.tags as string[]) : [],
     createdAt: now,
     updatedAt: now,

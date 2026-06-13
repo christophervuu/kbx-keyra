@@ -4,6 +4,7 @@ import { useCallback, useContext, useState, type ReactNode } from 'react';
 import { WorkspaceHeader } from './WorkspaceHeader';
 import { WorkspaceSuggestionCard } from './WorkspaceSuggestionCard';
 import { PreviewContext } from '../context/preview-context';
+import type { BatchAcceptResult } from '../hooks';
 import { useExpressionPreview } from '../hooks/use-expression-preview';
 import type { AutoMapWorkspaceSummary, SuggestionWorkspaceItem } from '../types';
 
@@ -32,6 +33,8 @@ export interface AutoMapWorkspaceProps {
   onRefreshUnmapped?: () => void;
   /** Called to bulk-accept valid pending suggestions */
   onAcceptAllValid?: () => void;
+  batchAcceptResult?: BatchAcceptResult | null;
+  onClearBatchAcceptResult?: () => void;
   /** Called to exit the workspace and return to the editor */
   onExitWorkspace: () => void;
   /** Called when a suggestion is accepted */
@@ -233,17 +236,23 @@ function ErrorBody({
 interface EmptyBodyProps {
   onExitWorkspace: () => void;
   onRefreshAll: () => void;
+  noContextReason?: string | null;
 }
 
-function EmptyBody({ onExitWorkspace, onRefreshAll }: EmptyBodyProps) {
+function EmptyBody({ onExitWorkspace, onRefreshAll, noContextReason }: EmptyBodyProps) {
+  const isNoContext = typeof noContextReason === 'string' && noContextReason.trim() !== '';
   return (
     <div
       className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-12 text-center"
       data-testid="workspace-empty"
     >
-      <p className="text-sm font-medium text-slate-300">No suggestions generated</p>
-      <p className="text-xs text-slate-500">
-        No eligible target fields were found in this section, or all fields are already mapped.
+      <p className="text-sm font-medium text-slate-300">
+        {isNoContext ? 'No relevant source context found' : 'No suggestions generated'}
+      </p>
+      <p className="text-xs text-slate-500" data-testid="workspace-empty-reason">
+        {isNoContext
+          ? noContextReason
+          : 'No eligible target fields were found in this section, or all fields are already mapped.'}
       </p>
       <div className="flex gap-2">
         <button
@@ -352,6 +361,8 @@ export function AutoMapWorkspace({
   onRefreshAll,
   onRefreshUnmapped,
   onAcceptAllValid,
+  batchAcceptResult,
+  onClearBatchAcceptResult,
   onExitWorkspace,
   onAccept,
   onEdit,
@@ -464,6 +475,8 @@ export function AutoMapWorkspace({
         lastRefreshedAt={generatedAt}
         onExitWorkspace={onExitWorkspace}
         onAcceptAllValid={onAcceptAllValid}
+        batchAcceptResult={batchAcceptResult}
+        onClearBatchAcceptResult={onClearBatchAcceptResult}
         onRefreshUnmapped={onRefreshUnmapped}
         onRefreshAll={onRefreshAll}
         onToggleExpandAll={toggleExpandAll}
@@ -490,7 +503,11 @@ export function AutoMapWorkspace({
           onRestorePrevious={onRestorePrevious}
         />
       ) : status === 'success' && items.length === 0 ? (
-        <EmptyBody onExitWorkspace={onExitWorkspace} onRefreshAll={onRefreshAll} />
+        <EmptyBody
+          onExitWorkspace={onExitWorkspace}
+          onRefreshAll={onRefreshAll}
+          noContextReason={summary.noContextReason}
+        />
       ) : (
         /* Card list — scrollable */
         <div

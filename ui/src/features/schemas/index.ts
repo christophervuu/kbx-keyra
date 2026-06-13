@@ -17,7 +17,7 @@ export type {
 } from './types';
 
 // Parser and filter functions
-export { filterTree, parseInferredSchema, parseJsonSchema, parseXsd } from './lib';
+export { filterTree, parseInferredSchema, parseJsonSchema, parseXsd, treeToJsonSchema } from './lib';
 export type { TreeFilterResult } from './lib';
 
 // Hooks

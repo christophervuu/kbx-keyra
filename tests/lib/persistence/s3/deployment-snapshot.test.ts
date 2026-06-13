@@ -57,11 +57,114 @@ describe('persistence s3/deployment-snapshot', () => {
     expect(command.input.Bucket).toBe('keyra-storage');
     expect(command.input.Key).toBe('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
     expect(command.input.ContentType).toBe('application/json');
+    const payload = JSON.parse(command.input.Body);
+    expect(payload.config).toEqual(makeConfig());
+    expect(payload.metadata).toEqual({});
+  });
+
+  it('put stores snapshot metadata when provided', async () => {
+    s3SendMock.mockResolvedValue({});
+    const mod = await importModule();
+
+    await mod.put('mapping-1', 'DEV', '2026-06-01T00:00:00.000Z', makeConfig(), {
+      cdmSchemaTraceability: [
+        {
+          schemaId: 'schema-1',
+          schemaName: 'CDM Schema',
+          referenceRole: 'source',
+          repo: 'KBXT/KBX-Canonicals',
+          path: 'JSONSchemas/CommonDataModels/Order.json',
+          commitSha: 'abc123',
+        },
+      ],
+    });
+
+    const command = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Body: string };
+    };
+
+    const payload = JSON.parse(command.input.Body);
+    expect(payload.metadata.cdmSchemaTraceability).toEqual([
+      {
+        schemaId: 'schema-1',
+        schemaName: 'CDM Schema',
+        referenceRole: 'source',
+        repo: 'KBXT/KBX-Canonicals',
+        path: 'JSONSchemas/CommonDataModels/Order.json',
+        commitSha: 'abc123',
+      },
+    ]);
   });
 
   it('exports deploymentSnapshot object with expected operations', async () => {
     const mod = await importModule();
 
     expect(mod.deploymentSnapshot.put).toBe(mod.put);
+    expect(mod.deploymentSnapshot.putRuntimeSnapshot).toBe(mod.putRuntimeSnapshot);
+  });
+
+  it('putRuntimeSnapshot writes runtime snapshot when object is missing', async () => {
+    s3SendMock
+      .mockRejectedValueOnce({ name: 'NotFound', $metadata: { httpStatusCode: 404 } })
+      .mockResolvedValueOnce({});
+
+    const mod = await importModule();
+
+    const result = await mod.putRuntimeSnapshot({
+      mappingId: 'mapping-1',
+      snapshotId: 'snapshot-1',
+      payload: { config: makeConfig() },
+      contentHash: 'abc123',
+    });
+
+    expect(result).toEqual({
+      key: 'runtime/snapshots/mapping-1/snapshot-1.json',
+      status: 'created',
+    });
+
+    const putCommand = s3SendMock.mock.calls[1]?.[0] as {
+      input: { Bucket: string; Key: string; ContentType: string; Body: string };
+    };
+
+    expect(putCommand.input.Bucket).toBe('keyra-storage');
+    expect(putCommand.input.Key).toBe('runtime/snapshots/mapping-1/snapshot-1.json');
+    expect(putCommand.input.ContentType).toBe('application/json');
+  });
+
+  it('putRuntimeSnapshot returns idempotent when existing object hash matches', async () => {
+    s3SendMock.mockResolvedValueOnce({ ETag: '"abc123"' });
+
+    const mod = await importModule();
+
+    const result = await mod.putRuntimeSnapshot({
+      mappingId: 'mapping-1',
+      snapshotId: 'snapshot-1',
+      payload: { config: makeConfig() },
+      contentHash: 'abc123',
+    });
+
+    expect(result).toEqual({
+      key: 'runtime/snapshots/mapping-1/snapshot-1.json',
+      status: 'idempotent',
+    });
+
+    expect(s3SendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('putRuntimeSnapshot throws RuntimeSnapshotHashMismatchError on hash mismatch', async () => {
+    s3SendMock.mockResolvedValueOnce({ ETag: '"different"' });
+
+    const mod = await importModule();
+
+    await expect(
+      mod.putRuntimeSnapshot({
+        mappingId: 'mapping-1',
+        snapshotId: 'snapshot-1',
+        payload: { config: makeConfig() },
+        contentHash: 'abc123',
+      }),
+    ).rejects.toMatchObject({
+      name: 'RuntimeSnapshotHashMismatchError',
+    });
   });
 });

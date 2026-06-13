@@ -23,7 +23,11 @@ describe('explainRuleHttp', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         success: true,
-        data: { explanation: 'This rule maps negative invoices to credit memos.' },
+        data: {
+          explanation: 'This rule maps negative invoices to credit memos.',
+          confidence: 'high',
+          limitations: ['Assumes InvoiceAmount is numeric.'],
+        },
       }),
     });
 
@@ -31,6 +35,8 @@ describe('explainRuleHttp', () => {
 
     await expect(explainRuleHttp(apiUrl, input)).resolves.toEqual({
       explanation: 'This rule maps negative invoices to credit memos.',
+      confidence: 'high',
+      limitations: ['Assumes InvoiceAmount is numeric.'],
     });
 
     expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/explain-rule`, {
@@ -162,6 +168,46 @@ describe('explainRuleHttp', () => {
     );
   });
 
+  it('throws malformed response error when confidence is invalid', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            explanation: 'ok',
+            confidence: 'very-high',
+          },
+        }),
+      }),
+    );
+
+    await expect(explainRuleHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
+  });
+
+  it('throws malformed response error when limitations contains non-string values', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            explanation: 'ok',
+            limitations: ['good', 123],
+          },
+        }),
+      }),
+    );
+
+    await expect(explainRuleHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
+  });
+
   it('clears timeout on success and on error', async () => {
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
 
@@ -195,11 +241,11 @@ describe('explainRuleHttp', () => {
 describe('suggestExpressionHttp', () => {
   const apiUrl = 'https://example.execute-api.us-east-1.amazonaws.com/sandbox';
   const input = {
+    mappingId: 'mapping-1',
     instruction: 'default to USD if source currency is missing',
     targetPath: 'Order.Header.Currency',
     targetType: 'string',
     targetDescription: 'ISO currency code',
-    sourceContext: '- Invoice.Amount (number)\n- Invoice.CurrencyCode (string)',
   };
 
   beforeEach(() => {
@@ -219,6 +265,15 @@ describe('suggestExpressionHttp', () => {
         data: {
           expression: 'default(source("Invoice.CurrencyCode"), "USD")',
           explanation: 'Uses source currency and falls back to USD.',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 15,
+            includedNodeCount: 15,
+            truncated: false,
+            approxTokenCount: 120,
+            byteLength: 980,
+          },
         },
       }),
     });
@@ -228,17 +283,26 @@ describe('suggestExpressionHttp', () => {
     await expect(suggestExpressionHttp(apiUrl, input)).resolves.toEqual({
       expression: 'default(source("Invoice.CurrencyCode"), "USD")',
       explanation: 'Uses source currency and falls back to USD.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 15,
+        includedNodeCount: 15,
+        truncated: false,
+        approxTokenCount: 120,
+        byteLength: 980,
+      },
     });
 
     expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/suggest-expression`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mappingId: input.mappingId,
         instruction: input.instruction,
         targetPath: input.targetPath,
         targetType: input.targetType,
         targetDescription: input.targetDescription,
-        sourceContext: input.sourceContext,
       }),
       signal: expect.any(AbortSignal),
     });
@@ -253,6 +317,15 @@ describe('suggestExpressionHttp', () => {
           success: true,
           data: {
             expression: 'default(source("Invoice.CurrencyCode"), "USD")',
+            validation: { valid: true, diagnostics: [] },
+            readyToApply: true,
+            context: {
+              sourceNodeCount: 15,
+              includedNodeCount: 15,
+              truncated: false,
+              approxTokenCount: 120,
+              byteLength: 980,
+            },
           },
         }),
       }),
@@ -261,6 +334,15 @@ describe('suggestExpressionHttp', () => {
     await expect(suggestExpressionHttp(apiUrl, input)).resolves.toEqual({
       expression: 'default(source("Invoice.CurrencyCode"), "USD")',
       explanation: undefined,
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 15,
+        includedNodeCount: 15,
+        truncated: false,
+        approxTokenCount: 120,
+        byteLength: 980,
+      },
     });
   });
 
@@ -385,12 +467,23 @@ describe('suggestExpressionHttp', () => {
     );
   });
 
-  it('includes sourceContext when provided', async () => {
+  it('includes mappingId and targetType in request body', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue({
         success: true,
-        data: { expression: 'source("Invoice.CurrencyCode")' },
+        data: {
+          expression: 'source("Invoice.CurrencyCode")',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 2,
+            includedNodeCount: 2,
+            truncated: false,
+            approxTokenCount: 10,
+            byteLength: 80,
+          },
+        },
       }),
     });
 
@@ -400,7 +493,8 @@ describe('suggestExpressionHttp', () => {
 
     const requestInit = fetchMock.mock.calls[0][1] as globalThis.RequestInit;
     const parsedBody = JSON.parse(String(requestInit.body));
-    expect(parsedBody.sourceContext).toBe(input.sourceContext);
+    expect(parsedBody.mappingId).toBe(input.mappingId);
+    expect(parsedBody.targetType).toBe(input.targetType);
   });
 
   it('omits targetDescription when undefined', async () => {
@@ -408,22 +502,52 @@ describe('suggestExpressionHttp', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         success: true,
-        data: { expression: 'source("Invoice.CurrencyCode")' },
+        data: {
+          expression: 'source("Invoice.CurrencyCode")',
+          validation: { valid: true, diagnostics: [] },
+          readyToApply: true,
+          context: {
+            sourceNodeCount: 2,
+            includedNodeCount: 2,
+            truncated: false,
+            approxTokenCount: 10,
+            byteLength: 80,
+          },
+        },
       }),
     });
 
     vi.stubGlobal('fetch', fetchMock);
 
     await suggestExpressionHttp(apiUrl, {
+      mappingId: input.mappingId,
       instruction: input.instruction,
       targetPath: input.targetPath,
       targetType: input.targetType,
-      sourceContext: input.sourceContext,
     });
 
     const requestInit = fetchMock.mock.calls[0][1] as globalThis.RequestInit;
     const parsedBody = JSON.parse(String(requestInit.body));
     expect(parsedBody).not.toHaveProperty('targetDescription');
+  });
+
+  it('throws malformed response error when validation/ready/context metadata are missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            expression: 'source("Invoice.CurrencyCode")',
+          },
+        }),
+      }),
+    );
+
+    await expect(suggestExpressionHttp(apiUrl, input)).rejects.toThrow(
+      'Received an unexpected response from the server.',
+    );
   });
 });
 
@@ -432,6 +556,7 @@ describe('autoMapSectionHttp', () => {
   const input = {
     projectId: 'project-1',
     mappingId: 'mapping-1',
+    mode: 'section' as const,
     sectionPath: 'Order.Header',
     sourceContext: '- Invoice.InvoiceAmount (number)\n- Invoice.CurrencyCode (string)',
   };
@@ -444,6 +569,15 @@ describe('autoMapSectionHttp', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+
+  function successDataWithSuggestions(
+    overrides: Record<string, unknown> = {},
+  ): { suggestions: unknown[] } & Record<string, unknown> {
+    return {
+      suggestions: [],
+      ...overrides,
+    };
+  }
 
   it('returns AutoMapSectionResult on success', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
@@ -463,6 +597,20 @@ describe('autoMapSectionHttp', () => {
               },
             },
           ],
+          retrievalMeta: {
+            mode: 'section',
+            chunkCount: 1,
+            retrievalCandidatesCount: 5,
+            retrievalSelectedCount: 2,
+            noContext: false,
+          },
+          validationMeta: {
+            validationPassCount: 1,
+            validationFailCount: 0,
+          },
+          dedupMeta: {
+            duplicatesCollapsed: 0,
+          },
         },
       }),
     });
@@ -483,25 +631,80 @@ describe('autoMapSectionHttp', () => {
         },
       ],
       diagnostics: undefined,
+      retrievalMeta: {
+        mode: 'section',
+        chunkCount: 1,
+        retrievalCandidatesCount: 5,
+        retrievalSelectedCount: 2,
+        noContext: false,
+      },
+      validationMeta: {
+        validationPassCount: 1,
+        validationFailCount: 0,
+      },
+      dedupMeta: {
+        duplicatesCollapsed: 0,
+      },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(`${apiUrl}/ai/auto-map`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId: input.projectId,
-        mappingId: input.mappingId,
-        sectionPath: input.sectionPath,
-        sourceContext: input.sourceContext,
-      }),
-      signal: expect.any(AbortSignal),
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe(`${apiUrl}/ai/auto-map`);
+    const init = call?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(String(init.body))).toEqual({
+      projectId: input.projectId,
+      mappingId: input.mappingId,
+      sectionPath: input.sectionPath,
+      mode: input.mode,
+      sourceContext: input.sourceContext,
     });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('passes mode when provided and preserves no-context metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          suggestions: [],
+          retrievalMeta: {
+            mode: 'whole',
+            noContext: true,
+            noContextReason: 'No relevant source context found for target scope',
+          },
+        },
+      }),
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      autoMapSectionHttp(apiUrl, {
+        ...input,
+        mode: 'whole',
+      }),
+    ).resolves.toEqual({
+      suggestions: [],
+      diagnostics: undefined,
+      retrievalMeta: {
+        mode: 'whole',
+        noContext: true,
+        noContextReason: 'No relevant source context found for target scope',
+      },
+      validationMeta: undefined,
+      dedupMeta: undefined,
+    });
+
+    const calledBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(calledBody.mode).toBe('whole');
   });
 
   it('sends targetSection in request body when provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+      json: vi.fn().mockResolvedValue({ success: true, data: successDataWithSuggestions() }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -522,7 +725,7 @@ describe('autoMapSectionHttp', () => {
   it('omits targetSection from request body when undefined', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+      json: vi.fn().mockResolvedValue({ success: true, data: successDataWithSuggestions() }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -535,7 +738,7 @@ describe('autoMapSectionHttp', () => {
   it('omits sectionPath from request body when undefined (header mode)', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ success: true, data: { suggestions: [] } }),
+      json: vi.fn().mockResolvedValue({ success: true, data: successDataWithSuggestions() }),
     });
     vi.stubGlobal('fetch', fetchMock);
 

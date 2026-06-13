@@ -14,15 +14,51 @@ import type { SuggestExpressionInput, SuggestExpressionResult } from '@/lib/type
 // ---------------------------------------------------------------------------
 
 const MOCK_INPUT: SuggestExpressionInput = {
+  mappingId: 'mapping-1',
   instruction: 'default to USD if source currency is missing',
   targetPath: 'Order.Header.Currency',
   targetType: 'string',
-  sourceContext: '- Invoice.CurrencyCode (string)',
 };
 
 const MOCK_RESULT: SuggestExpressionResult = {
   expression: 'default(source("Invoice.CurrencyCode"), "USD")',
   explanation: 'Uses source currency and falls back to USD.',
+  validation: {
+    valid: true,
+    diagnostics: [],
+  },
+  readyToApply: true,
+  context: {
+    sourceNodeCount: 10,
+    includedNodeCount: 10,
+    truncated: false,
+    approxTokenCount: 64,
+    byteLength: 512,
+  },
+};
+
+const MOCK_INVALID_RESULT: SuggestExpressionResult = {
+  expression: 'concat(source("Invoice.CurrencyCode"), source("Invoice.Total"))',
+  explanation: 'Combines values for display',
+  validation: {
+    valid: false,
+    diagnostics: [
+      {
+        code: 'TYPE_MISMATCH',
+        severity: 'error',
+        message: 'Expression returns string but target expects number',
+        path: 'Order.Header.Currency',
+      },
+    ],
+  },
+  readyToApply: false,
+  context: {
+    sourceNodeCount: 120,
+    includedNodeCount: 100,
+    truncated: true,
+    approxTokenCount: 7800,
+    byteLength: 64000,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -56,6 +92,7 @@ describe('useSuggestExpression', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('returns initial idle state', () => {
@@ -68,6 +105,8 @@ describe('useSuggestExpression', () => {
       status: 'idle',
       result: null,
       error: null,
+      suggestionState: null,
+      readyToApply: false,
     });
   });
 
@@ -85,6 +124,8 @@ describe('useSuggestExpression', () => {
       status: 'inputting',
       result: null,
       error: null,
+      suggestionState: null,
+      readyToApply: false,
     });
   });
 
@@ -111,6 +152,8 @@ describe('useSuggestExpression', () => {
     expect(result.current.state.status).toBe('loading');
     expect(result.current.state.result).toBeNull();
     expect(result.current.state.error).toBeNull();
+    expect(result.current.state.suggestionState).toBeNull();
+    expect(result.current.state.readyToApply).toBe(false);
 
     // Resolve to avoid dangling promise
     await act(async () => {
@@ -132,7 +175,26 @@ describe('useSuggestExpression', () => {
       status: 'success',
       result: MOCK_RESULT,
       error: null,
+      suggestionState: 'ready',
+      readyToApply: true,
     });
+  });
+
+  it('surfaces validation-invalid suggestion as success/non-apply-ready state', async () => {
+    const adapter = makeAdapter(vi.fn().mockResolvedValue(MOCK_INVALID_RESULT));
+    const { result } = renderHook(() => useSuggestExpression(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await act(async () => {
+      result.current.generate(MOCK_INPUT);
+    });
+
+    expect(result.current.state.status).toBe('success');
+    expect(result.current.state.result).toEqual(MOCK_INVALID_RESULT);
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.suggestionState).toBe('invalid');
+    expect(result.current.state.readyToApply).toBe(false);
   });
 
   it('transitions loading → error with user-friendly message when adapter rejects', async () => {
@@ -152,6 +214,8 @@ describe('useSuggestExpression', () => {
     expect(result.current.state.error).toBe(
       'An unexpected error occurred. Please try again.',
     );
+    expect(result.current.state.suggestionState).toBeNull();
+    expect(result.current.state.readyToApply).toBe(false);
   });
 
   it('maps offline mode error to user-friendly message', async () => {
@@ -170,6 +234,8 @@ describe('useSuggestExpression', () => {
     expect(result.current.state.error).toBe(
       'Suggest Expression is not available in offline mode',
     );
+    expect(result.current.state.suggestionState).toBeNull();
+    expect(result.current.state.readyToApply).toBe(false);
   });
 
   it('passes through rate limit error message', async () => {
@@ -185,6 +251,8 @@ describe('useSuggestExpression', () => {
     });
 
     expect(result.current.state.error).toBe(rateMsg);
+    expect(result.current.state.suggestionState).toBeNull();
+    expect(result.current.state.readyToApply).toBe(false);
   });
 
   it('passes through network error message', async () => {
@@ -200,6 +268,28 @@ describe('useSuggestExpression', () => {
     });
 
     expect(result.current.state.error).toBe(netMsg);
+    expect(result.current.state.suggestionState).toBeNull();
+    expect(result.current.state.readyToApply).toBe(false);
+  });
+
+  it('passes through FEATURE_NOT_ENABLED message from canonical gating', async () => {
+    const featureDisabledError = Object.assign(new Error('"suggestExpression" is not enabled in this mode.'), {
+      code: 'FEATURE_NOT_ENABLED',
+      retryable: false,
+    });
+    const adapter = makeAdapter(vi.fn().mockRejectedValue(featureDisabledError));
+    const { result } = renderHook(() => useSuggestExpression(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await act(async () => {
+      result.current.generate(MOCK_INPUT);
+    });
+
+    expect(result.current.state.status).toBe('error');
+    expect(result.current.state.error).toBe('"suggestExpression" is not enabled in this mode.');
+    expect(result.current.state.suggestionState).toBeNull();
+    expect(result.current.state.readyToApply).toBe(false);
   });
 
   it('dismiss() resets state to idle', async () => {
@@ -221,6 +311,8 @@ describe('useSuggestExpression', () => {
       status: 'idle',
       result: null,
       error: null,
+      suggestionState: null,
+      readyToApply: false,
     });
   });
 
@@ -243,6 +335,8 @@ describe('useSuggestExpression', () => {
       status: 'idle',
       result: null,
       error: null,
+      suggestionState: null,
+      readyToApply: false,
     });
   });
 

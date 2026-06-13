@@ -25,9 +25,9 @@ export interface ComparisonModeSelectorProps {
 const MODE_ORDER: ComparisonMode[] = [
   'current-vs-saved',
   'current-vs-dev',
-  'current-vs-qa',
-  'dev-vs-qa',
-  'qa-vs-prod',
+  'current-vs-preprod',
+  'dev-vs-preprod',
+  'preprod-vs-prod',
 ];
 
 function getModeLabel(mode: ComparisonMode): string {

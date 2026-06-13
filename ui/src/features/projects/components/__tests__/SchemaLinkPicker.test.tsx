@@ -1,23 +1,20 @@
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
+
+import { SchemaLinkPicker } from '../SchemaLinkPicker';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaMetadata } from '@/lib/types/domain';
-import { SchemaLinkPicker } from '../SchemaLinkPicker';
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 const SCHEMA_A: SchemaMetadata = {
   schemaId: 'schema-a',
   name: 'Schema A',
   format: 'json-schema',
   fieldCount: 5,
-  origin: 'local',
+  origin: 'uploaded',
   status: 'ready',
   source: { type: 'upload' },
   createdAt: '2026-01-01T00:00:00Z',
@@ -28,6 +25,14 @@ const SCHEMA_B: SchemaMetadata = {
   ...SCHEMA_A,
   schemaId: 'schema-b',
   name: 'Schema B',
+  source: {
+    type: 'github',
+    repo: 'KBXT/KBX-Canonicals',
+    branch: 'main',
+    path: 'JSONSchemas/CommonDataModels/Patient.json',
+    commitSha: 'sha-pat',
+  },
+  origin: 'cdm',
 };
 
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
@@ -54,6 +59,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    getCurrentDeployments: vi.fn(),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -73,76 +79,70 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function wrap(adapter: ApiAdapter, ui: React.ReactElement) {
-  return render(
-    React.createElement(AdapterProvider, { adapter }, ui),
-  );
+  return render(React.createElement(AdapterProvider, { adapter }, ui));
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe('SchemaLinkPicker', () => {
   it('shows loading state initially', () => {
     const adapter = createMockAdapter({
-      listSchemas: vi.fn().mockReturnValue(new Promise(() => {})), // never resolves
+      listSchemas: vi.fn().mockReturnValue(new Promise(() => {})),
     });
-    wrap(adapter, (
-      <SchemaLinkPicker attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />
-    ));
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText('Loading schemas…')).toBeInTheDocument();
   });
 
   it('shows available schemas after load', async () => {
     const adapter = createMockAdapter();
-    wrap(adapter, (
-      <SchemaLinkPicker attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />
-    ));
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('Schema A')).toBeInTheDocument());
     expect(screen.getByText('Schema B')).toBeInTheDocument();
   });
 
-  it('filters out already-attached schemas', async () => {
+  it('loads from schema library endpoint', async () => {
     const adapter = createMockAdapter();
-    wrap(adapter, (
-      <SchemaLinkPicker attachedSchemaIds={['schema-a']} onConfirm={vi.fn()} onClose={vi.fn()} />
-    ));
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={['schema-a']} onConfirm={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Schema B')).toBeInTheDocument());
+    expect(adapter.listSchemas).toHaveBeenCalled();
+  });
+
+  it('filters out already linked schema ids', async () => {
+    const adapter = createMockAdapter();
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={['schema-a']} onConfirm={vi.fn()} onClose={vi.fn()} />);
     await waitFor(() => expect(screen.queryByText('Schema A')).not.toBeInTheDocument());
     expect(screen.getByText('Schema B')).toBeInTheDocument();
   });
 
-  it('shows empty message when no unattached schemas', async () => {
+  it('shows empty message when all schemas are already linked', async () => {
     const adapter = createMockAdapter();
-    wrap(adapter, (
-      <SchemaLinkPicker
-        attachedSchemaIds={['schema-a', 'schema-b']}
-        onConfirm={vi.fn()}
-        onClose={vi.fn()}
-      />
-    ));
-    await waitFor(() =>
-      expect(screen.getByText('No unattached schemas available.')).toBeInTheDocument(),
-    );
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={['schema-a', 'schema-b']} onConfirm={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('No schemas available to link.')).toBeInTheDocument());
   });
 
-  it('calls onConfirm with schema ref when user selects and confirms', async () => {
+  it('calls onConfirm with local ref for upload-backed schema', async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();
     const adapter = createMockAdapter();
-    wrap(adapter, (
-      <SchemaLinkPicker attachedSchemaIds={[]} onConfirm={onConfirm} onClose={vi.fn()} />
-    ));
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={onConfirm} onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('Schema A')).toBeInTheDocument());
     await user.click(screen.getByText('Schema A'));
     await user.click(screen.getByTestId('schema-link-confirm'));
-    expect(onConfirm).toHaveBeenCalledWith({ schemaId: 'schema-a', type: 'local' });
+    expect(onConfirm).toHaveBeenCalledWith({ schemaId: 'schema-a', type: 'local', commitSha: undefined });
+  });
+
+  it('calls onConfirm with github ref for github-backed schema', async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    const adapter = createMockAdapter();
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={onConfirm} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Schema B')).toBeInTheDocument());
+    await user.click(screen.getByText('Schema B'));
+    await user.click(screen.getByTestId('schema-link-confirm'));
+    expect(onConfirm).toHaveBeenCalledWith({ schemaId: 'schema-b', type: 'github', commitSha: 'sha-pat' });
   });
 
   it('Link Schema button is disabled when nothing selected', async () => {
     const adapter = createMockAdapter();
-    wrap(adapter, (
-      <SchemaLinkPicker attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />
-    ));
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('Schema A')).toBeInTheDocument());
     expect(screen.getByTestId('schema-link-confirm')).toBeDisabled();
   });
@@ -151,11 +151,29 @@ describe('SchemaLinkPicker', () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
     const adapter = createMockAdapter();
-    wrap(adapter, (
-      <SchemaLinkPicker attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={onClose} />
-    ));
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={onClose} />);
     await waitFor(() => expect(screen.getByText('Schema A')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('renders actionable non-technical error and retry for list failures', async () => {
+    const user = userEvent.setup();
+    const adapter = createMockAdapter();
+    vi.mocked(adapter.listSchemas)
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce([SCHEMA_A]);
+
+    wrap(adapter, <SchemaLinkPicker projectId="project-1" attachedSchemaIds={[]} onConfirm={vi.fn()} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Unable to load schemas right now. Please retry in a moment.')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Schema A')).toBeInTheDocument();
+    });
   });
 });

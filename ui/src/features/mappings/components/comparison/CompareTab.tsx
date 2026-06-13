@@ -1,11 +1,12 @@
 import { useState } from 'react';
 
-import { useEnvironmentComparison } from '../../hooks/use-environment-comparison';
-import { COMPARISON_MODES } from '../../types';
+
 
 import { ComparisonDiffDisplay } from './ComparisonDiffDisplay';
 import { ComparisonModeSelector } from './ComparisonModeSelector';
 import { ComparisonSidePanel } from './ComparisonSidePanel';
+import { useEnvironmentComparison } from '../../hooks/use-environment-comparison';
+import { COMPARISON_MODES } from '../../types';
 
 import type { ComparisonMode, ComparisonSnapshot, MappingConfig, SchemaDetail } from '@/lib/types';
 
@@ -115,9 +116,9 @@ export function CompareTab({
   const allModes: ComparisonMode[] = [
     'current-vs-saved',
     'current-vs-dev',
-    'current-vs-qa',
-    'dev-vs-qa',
-    'qa-vs-prod',
+    'current-vs-preprod',
+    'dev-vs-preprod',
+    'preprod-vs-prod',
   ];
   const modeAvailabilityRecord = Object.fromEntries(
     allModes.map((m) => [m, modeAvailability(m)]),
@@ -261,7 +262,6 @@ export function CompareTab({
               placeholder="Test case name…"
               aria-label="New test case name"
               data-testid="save-new-tc-name-input"
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               className="rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
             />

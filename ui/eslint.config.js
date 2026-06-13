@@ -62,6 +62,24 @@ export default [
           'newlines-between': 'always',
         },
       ],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'openai',
+              message:
+                'Do not import openai in browser/client code. Use ApiAdapter/HttpAdapter to call backend AI endpoints.',
+            },
+            {
+              name: '@azure/openai',
+              message:
+                'Do not import @azure/openai in browser/client code. Use ApiAdapter/HttpAdapter to call backend AI endpoints.',
+            },
+          ],
+          patterns: ['openai/*', '@azure/openai/*'],
+        },
+      ],
     },
   },
   {

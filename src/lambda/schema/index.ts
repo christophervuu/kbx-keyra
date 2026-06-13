@@ -1,8 +1,17 @@
 export { handler as createSchemaHandler } from './create-schema.js';
 export { handler as deleteSchemaHandler } from './delete-schema.js';
 export { handler as getSchemaHandler } from './get-schema.js';
+export { handler as updateSchemaHandler } from './update-schema.js';
 export { handler as ingestSchemaHandler } from './ingest-schema.js';
 export { handler as listSchemasHandler } from './list-schemas.js';
+export { handler as markSchemaReviewedHandler } from './mark-reviewed.js';
+export { handler as addSchemaSampleHandler } from './add-schema-sample.js';
+export { handler as getSchemaSampleHandler } from './get-schema-sample.js';
+export { handler as deleteSchemaSampleHandler } from './delete-schema-sample.js';
+export { handler as listCdmSchemasHandler } from './list-cdm-schemas.js';
+export { handler as linkCdmSchemaHandler } from './link-cdm-schema.js';
+export { handler as syncAllCdmSchemasHandler } from './sync-all-cdm-schemas.js';
+export { handler as syncCdmSchemaHandler } from './sync-cdm-schema.js';
 export { handler as querySchemaNodesHandler } from './query-schema-nodes.js';
 export { handler as processBatchHandler } from './process-batch.js';
 export { aggregateResultsTask, handleErrorTask, parseSchemaTask, updateMetadataTask } from './orchestration-tasks.js';

@@ -104,7 +104,7 @@ describe('lib/deployment staleness', () => {
     const result = computeAllEnvironments(
       {
         DEV: deployment({ sourceType: 'revision', sourceNumber: 3 }),
-        QA: deployment({ sourceType: 'version', sourceNumber: 1 }),
+        PREPROD: deployment({ sourceType: 'version', sourceNumber: 1 }),
         PROD: null,
       },
       mapping({ revision: 4, latestVersion: 2 }),
@@ -112,7 +112,7 @@ describe('lib/deployment staleness', () => {
 
     expect(result).toEqual({
       DEV: 'stale',
-      QA: 'stale',
+      PREPROD: 'stale',
       PROD: 'not-deployed',
     });
   });

@@ -8,10 +8,6 @@ import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
 import { MappingEditorPage } from './MappingEditorPage';
 import { PanelPlaceholder } from './PanelPlaceholder';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function renderWithRouter(ui: ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
@@ -20,7 +16,6 @@ const DEFAULT_TOP_BAR_PROPS = {
   projectName: 'My Project',
   projectId: 'proj-1',
   mappingName: 'Order Transform',
-  mappingId: 'mapping-1',
   version: 3,
   saveStatus: 'saved' as SaveStatus,
   deployStatus: null as HighestDeployStatus | null,
@@ -30,10 +25,6 @@ const DEFAULT_TOP_BAR_PROPS = {
   sourceSchemaName: 'OrderRequest',
   targetSchemaName: 'PurchaseOrder',
 };
-
-// ---------------------------------------------------------------------------
-// PanelPlaceholder
-// ---------------------------------------------------------------------------
 
 describe('PanelPlaceholder', () => {
   it('renders the panel name text', () => {
@@ -47,116 +38,104 @@ describe('PanelPlaceholder', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// EditorTopBar
-// ---------------------------------------------------------------------------
-
 describe('EditorTopBar', () => {
-  it('renders mapping name', () => {
+  it('renders breadcrumb nav with Home / Projects / project / mapping', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.getByText('Order Transform')).toBeInTheDocument();
+
+    expect(screen.getByTestId('editor-breadcrumb')).toBeInTheDocument();
+    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+    expect(screen.getByTestId('project-name-link')).toHaveTextContent('My Project');
+    expect(screen.getByTestId('mapping-name-breadcrumb')).toHaveTextContent('Order Transform');
   });
 
-  it('renders revision badge', () => {
+  it('renders source -> target heading', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 3');
+    expect(screen.getByTestId('schema-names')).toHaveTextContent('OrderRequest → PurchaseOrder');
   });
 
-  it('renders version badge as "—" when no currentVersion', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.getByTestId('version-badge')).toHaveTextContent('—');
-  });
-
-  it('renders version badge with number when currentVersion is set', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} currentVersion={2} />);
-    expect(screen.getByTestId('version-badge')).toHaveTextContent('v2');
-  });
-
-  it('renders save status "Saved ✓"', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saved" />);
-    expect(screen.getByTestId('save-status')).toHaveTextContent('Saved');
-  });
-
-  it('renders save status with unsaved count', () => {
+  it('renders fallback source/target labels when null', () => {
     renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedChangeCount={3} />,
+      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} sourceSchemaName={null} targetSchemaName={null} />,
+    );
+    expect(screen.getByTestId('schema-names')).toHaveTextContent('No source → No target');
+  });
+
+  it('renders sample selector slot when provided', () => {
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        sampleSelectorSlot={<button data-testid="sample-selector-slot">Sample picker</button>}
+      />,
+    );
+    expect(screen.getByTestId('sample-selector-slot')).toBeInTheDocument();
+  });
+
+  it('renders Browse Source button in header utility area', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
+    expect(screen.getByTestId('browse-source-button')).toBeInTheDocument();
+  });
+
+  it('renders required/warning/error summary counts', () => {
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        requiredMappedCount={42}
+        requiredFieldCount={58}
+        warningCount={8}
+        errorCount={2}
+      />,
+    );
+
+    expect(screen.getByTestId('required-mapped-summary')).toHaveTextContent('42 / 58 required fields mapped');
+    expect(screen.getByTestId('warning-summary')).toHaveTextContent('8 warnings');
+    expect(screen.getByTestId('error-summary')).toHaveTextContent('2 errors');
+  });
+
+  it('renders save status variants', () => {
+    const { rerender } = renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saved" />);
+    expect(screen.getByTestId('save-status')).toHaveTextContent('Saved');
+
+    rerender(
+      <MemoryRouter>
+        <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedChangeCount={3} />
+      </MemoryRouter>,
     );
     expect(screen.getByTestId('save-status')).toHaveTextContent('3 unsaved changes');
-  });
 
-  it('renders save status "Saving…"', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saving" />);
+    rerender(
+      <MemoryRouter>
+        <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="saving" />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('save-status')).toHaveTextContent('Saving');
-  });
 
-  it('renders save status "Save failed"', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="error" />);
+    rerender(
+      <MemoryRouter>
+        <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="error" />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('save-status')).toHaveTextContent('Save failed');
   });
 
-  it('renders "Not deployed" badge when deployStatus is null', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} deployStatus={null} />);
-    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('Not deployed');
-  });
-
-  it('renders highest deploy environment badge when deployStatus is provided', () => {
-    const deployStatus: HighestDeployStatus = { environment: 'DEV', deployedVersion: 3 };
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} deployStatus={deployStatus} />);
-    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('DEV');
-  });
-
-  it('renders stale badge when saved version is ahead of deployed version', () => {
-    const deployStatus: HighestDeployStatus = { environment: 'QA', deployedVersion: 1 };
+  it('calls onViewUnsavedChanges when unsaved label is clicked', () => {
+    const onViewUnsavedChanges = vi.fn();
     renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} version={3} deployStatus={deployStatus} />,
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        saveStatus="unsaved"
+        unsavedChangeCount={2}
+        onViewUnsavedChanges={onViewUnsavedChanges}
+      />,
     );
-    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('QA (stale)');
-  });
 
-  it('renders source and target schema names', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    const schemaNames = screen.getByTestId('schema-names');
-    expect(schemaNames).toHaveTextContent('OrderRequest');
-    expect(schemaNames).toHaveTextContent('PurchaseOrder');
-  });
-
-  it('renders "No source" when sourceSchemaName is null', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} sourceSchemaName={null} />);
-    expect(screen.getByTestId('schema-names')).toHaveTextContent('No source');
-  });
-
-  it('renders "No target" when targetSchemaName is null', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} targetSchemaName={null} />);
-    expect(screen.getByTestId('schema-names')).toHaveTextContent('No target');
-  });
-
-  it('renders "Go to Deploy Page" link with correct href', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    const link = screen.getByTestId('deploy-page-link');
-    expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
-  });
-
-  it('renders config toggle button when onConfigToggle is provided', () => {
-    const onConfigToggle = vi.fn();
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onConfigToggle={onConfigToggle} />);
-
-    const button = screen.getByTestId('config-toggle-button');
-    expect(button).toBeInTheDocument();
-
-    fireEvent.click(button);
-    expect(onConfigToggle).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not render config toggle button by default', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.queryByTestId('config-toggle-button')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('save-status'));
+    expect(onViewUnsavedChanges).toHaveBeenCalledTimes(1);
   });
 
   it('calls onSave when Save button is clicked', () => {
     const onSave = vi.fn();
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedChangeCount={1} onSave={onSave} />,
-    );
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} saveStatus="unsaved" unsavedChangeCount={1} onSave={onSave} />);
     fireEvent.click(screen.getByTestId('save-button'));
     expect(onSave).toHaveBeenCalledTimes(1);
   });
@@ -166,183 +145,68 @@ describe('EditorTopBar', () => {
     expect(screen.getByTestId('save-button')).toBeDisabled();
   });
 
-  it('renders project name link', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.getByTestId('project-name-link')).toHaveTextContent('My Project');
-  });
-
-  it('renders disabled Auto-map button', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    const btn = screen.getByTestId('automap-button');
-    expect(btn).toBeInTheDocument();
-    expect(btn).toBeDisabled();
-  });
-
-  it('Auto-map button has correct tooltip text', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.getByTestId('automap-button')).toHaveAttribute(
-      'title',
-      'AI-powered auto-mapping \u2014 coming soon',
-    );
-  });
-
-  it('renders live Auto-map button when onAutoMap is provided', () => {
-    const onAutoMap = vi.fn();
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={onAutoMap} />);
-    const btn = screen.getByTestId('automap-button');
-    expect(btn).not.toBeDisabled();
-    expect(btn).not.toHaveAttribute('aria-disabled', 'true');
-  });
-
-  it('calls onAutoMap when live Auto-map button is clicked', () => {
-    const onAutoMap = vi.fn();
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={onAutoMap} />);
-    fireEvent.click(screen.getByTestId('automap-button'));
-    expect(onAutoMap).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables live Auto-map button and shows spinner when isAutoMapLoading is true', () => {
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onAutoMap={vi.fn()} isAutoMapLoading={true} />,
-    );
-    const btn = screen.getByTestId('automap-button');
-    expect(btn).toBeDisabled();
-    // Spinner element is present (animate-spin class)
-    expect(btn.querySelector('.animate-spin')).toBeInTheDocument();
-  });
-
-  it('renders top header controls in requested order', () => {
-    renderWithRouter(
-      <EditorTopBar
-        {...DEFAULT_TOP_BAR_PROPS}
-        saveStatus="unsaved"
-        unsavedChangeCount={2}
-        onConfigToggle={vi.fn()}
-        onHistoryToggle={vi.fn()}
-      />,
-    );
-
-    const breadcrumb = screen.getByTestId('editor-breadcrumb');
-    const revisionBadge = screen.getByTestId('revision-badge');
-    const versionBadge = screen.getByTestId('version-badge');
-    const deployBadge = screen.getByTestId('deploy-badge');
-    const saveStatus = screen.getByTestId('save-status');
-    const autoMap = screen.getByTestId('automap-button');
-    const config = screen.getByTestId('config-toggle-button');
-    const history = screen.getByTestId('history-toggle-button');
-    const deploy = screen.getByTestId('deploy-page-link');
-    const save = screen.getByTestId('save-button');
-
-    expect(breadcrumb.compareDocumentPosition(revisionBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(revisionBadge.compareDocumentPosition(versionBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(versionBadge.compareDocumentPosition(deployBadge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(deployBadge.compareDocumentPosition(saveStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(saveStatus.compareDocumentPosition(autoMap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(autoMap.compareDocumentPosition(config) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(config.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(history.compareDocumentPosition(deploy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(deploy.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('renders separator to the right of unsaved changes section', () => {
-    const { container } = renderWithRouter(
-      <EditorTopBar
-        {...DEFAULT_TOP_BAR_PROPS}
-        saveStatus="unsaved"
-        unsavedChangeCount={2}
-      />,
-    );
-
-    const saveStatus = screen.getByTestId('save-status');
-    const separator = Array.from(container.querySelectorAll('span')).find((el) => el.textContent?.trim() === '|');
-
-    expect(separator).toBeDefined();
-    expect(saveStatus.compareDocumentPosition(separator as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  // ---------------------------------------------------------------------------
-  // FS-063 T-06: revision/version badges, canSave, draft indicator, Version button
-  // ---------------------------------------------------------------------------
-
-  it('shows currentRevision in revision badge when provided', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} currentRevision={7} />);
-    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 7');
-  });
-
-  it('falls back to version in revision badge when currentRevision is absent', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} version={4} />);
-    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 4');
-  });
-
-  it('Save button is disabled when canSave=false regardless of unsavedChangeCount', () => {
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={false} unsavedChangeCount={5} />,
-    );
-    expect(screen.getByTestId('save-button')).toBeDisabled();
-  });
-
   it('Save button is enabled when canSave=true', () => {
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={true} unsavedChangeCount={0} />,
-    );
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={true} unsavedChangeCount={0} />);
     expect(screen.getByTestId('save-button')).not.toBeDisabled();
   });
 
-  it('draft indicator is not rendered when hasDraft=false', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} hasDraft={false} />);
-    expect(screen.queryByTestId('draft-indicator')).not.toBeInTheDocument();
-  });
+  it('routes More menu actions through callbacks', () => {
+    const onHistoryToggle = vi.fn();
+    const onOpenTestLab = vi.fn();
+    const onOpenRulesView = vi.fn();
+    const onOpenTargetView = vi.fn();
+    const onOpenDeploymentPage = vi.fn();
+    const onExportMapping = vi.fn();
+    const onImportMapping = vi.fn();
+    const onConfigToggle = vi.fn();
 
-  it('draft indicator is rendered when hasDraft=true', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} hasDraft={true} />);
-    expect(screen.getByTestId('draft-indicator')).toBeInTheDocument();
-  });
-
-  it('Version button is not rendered when onCreateVersion is absent', () => {
-    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
-    expect(screen.queryByTestId('version-button')).not.toBeInTheDocument();
-  });
-
-  it('Version button is rendered when onCreateVersion is provided', () => {
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onCreateVersion={vi.fn()} />,
-    );
-    expect(screen.getByTestId('version-button')).toBeInTheDocument();
-  });
-
-  it('Version button calls onCreateVersion when clicked', () => {
-    const onCreateVersion = vi.fn();
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} onCreateVersion={onCreateVersion} />,
-    );
-    fireEvent.click(screen.getByTestId('version-button'));
-    expect(onCreateVersion).toHaveBeenCalledTimes(1);
-  });
-
-  it('Version button is disabled while saving', () => {
     renderWithRouter(
       <EditorTopBar
         {...DEFAULT_TOP_BAR_PROPS}
-        saveStatus="saving"
-        onCreateVersion={vi.fn()}
+        onHistoryToggle={onHistoryToggle}
+        onOpenTestLab={onOpenTestLab}
+        onOpenRulesView={onOpenRulesView}
+        onOpenTargetView={onOpenTargetView}
+        onOpenDeploymentPage={onOpenDeploymentPage}
+        onExportMapping={onExportMapping}
+        onImportMapping={onImportMapping}
+        onConfigToggle={onConfigToggle}
       />,
     );
-    expect(screen.getByTestId('version-button')).toBeDisabled();
-  });
 
-  it('Version button appears before Save button in document order', () => {
-    renderWithRouter(
-      <EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={true} onCreateVersion={vi.fn()} />,
-    );
-    const versionBtn = screen.getByTestId('version-button');
-    const saveBtn = screen.getByTestId('save-button');
-    expect(versionBtn.compareDocumentPosition(saveBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-history'));
+    expect(onHistoryToggle).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-test-lab'));
+    expect(onOpenTestLab).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-rules-view'));
+    expect(onOpenRulesView).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-target-view'));
+    expect(onOpenTargetView).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-deployment'));
+    expect(onOpenDeploymentPage).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-export'));
+    expect(onExportMapping).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-import'));
+    expect(onImportMapping).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-settings'));
+    expect(onConfigToggle).toHaveBeenCalledTimes(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// MappingEditorPage
-// ---------------------------------------------------------------------------
 
 describe('MappingEditorPage', () => {
   it('renders the top bar', () => {
@@ -350,14 +214,14 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('editor-top-bar')).toBeInTheDocument();
   });
 
-  it('renders all semantic slot areas', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('source-panel')).toBeInTheDocument();
+  it('renders overview mode with only the Mapping Fields card', () => {
+    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="overview" />);
+    expect(screen.getByTestId('mapping-fields-card')).toBeInTheDocument();
     expect(screen.getByTestId('target-worklist')).toBeInTheDocument();
-    expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('bottom-area')).toBeInTheDocument();
+    expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bottom-area')).not.toBeInTheDocument();
   });
-
   it('does not render a global-toolbar element', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     expect(screen.queryByTestId('global-toolbar')).not.toBeInTheDocument();
@@ -368,30 +232,42 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
   });
 
-  it('renders mapping name in top bar', () => {
+  it('renders mapping name in top bar (sr-only mapping text)', () => {
     renderWithRouter(
       <MappingEditorPage projectId="proj-1" mappingId="mapping-1" mappingName="Test Mapping" />,
     );
-    expect(screen.getByText('Test Mapping')).toBeInTheDocument();
+    expect(screen.getByTestId('mapping-name')).toHaveTextContent('Test Mapping');
   });
 
-  it('renders revision badge in top bar', () => {
+  it('renders summary counts in top bar when provided', () => {
     renderWithRouter(
-      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" version={5} />,
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        requiredMappedCount={7}
+        requiredFieldCount={9}
+        warningCount={2}
+        errorCount={1}
+      />,
     );
-    expect(screen.getByTestId('revision-badge')).toHaveTextContent('Rev 5');
+
+    expect(screen.getByTestId('required-mapped-summary')).toHaveTextContent('7 / 9 required fields mapped');
+    expect(screen.getByTestId('warning-summary')).toHaveTextContent('2 warnings');
+    expect(screen.getByTestId('error-summary')).toHaveTextContent('1 error');
   });
 
-  it('renders placeholder in source panel when no sourceContent provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+  it('renders placeholder in source panel when source-browse mode is active', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="source-browse" />,
+    );
     expect(screen.getByTestId('source-panel')).toHaveTextContent('Source Schema');
   });
-
   it('renders custom content in source panel when sourceContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
+        panelMode="source-browse"
         sourceContent={<div data-testid="custom-source">Source Tree</div>}
       />,
     );
@@ -414,43 +290,38 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('custom-worklist')).toBeInTheDocument();
   });
 
-  it('renders placeholder in builder panel when no builderContent provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+  it('renders placeholder in builder panel when row-editing mode is active', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
+    );
     expect(screen.getByTestId('builder-panel')).toHaveTextContent('Builder / Editor');
   });
-
   it('renders custom content in builder panel when builderContent is provided', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
+        panelMode="row-editing"
         builderContent={<div data-testid="custom-builder">Builder</div>}
       />,
     );
     expect(screen.getByTestId('custom-builder')).toBeInTheDocument();
   });
 
-  it('renders placeholder in bottom area when no bottomContent provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('bottom-area')).toHaveTextContent('Preview & Diagnostics');
-  });
-
-  it('renders resize handle in placeholder bottom area', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('bottom-resize-handle')).toBeInTheDocument();
-  });
-
-  it('renders custom content in bottom area when bottomContent is provided', () => {
+  it('shows Source card only in source-browse mode', () => {
     renderWithRouter(
-      <MappingEditorPage
-        projectId="proj-1"
-        mappingId="mapping-1"
-        bottomContent={<div data-testid="custom-bottom">Preview Panel</div>}
-      />,
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="source-browse" />,
     );
-    expect(screen.getByTestId('custom-bottom')).toBeInTheDocument();
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
   });
-
+  it('shows Source and Builder cards in row-editing mode', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
+    );
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-card')).toBeInTheDocument();
+  });
   it('target worklist is always rendered regardless of other slots', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     const worklist = screen.getByTestId('target-worklist');
@@ -463,64 +334,94 @@ describe('MappingEditorPage', () => {
     expect(worklist.className).not.toContain('hidden');
   });
 
-  it('target panel uses flex-1 to fill remaining space', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
+  it('target panel uses flex-1 to fill remaining space in non-overview modes', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
+    );
     expect(screen.getByTestId('target-worklist').className).toContain('flex-1');
   });
 
-  it('renders resize handle between source and target columns', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('resize-handle-source')).toBeInTheDocument();
-  });
-
-  it('renders resize handle between target and builder columns', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('resize-handle-builder')).toBeInTheDocument();
-  });
-
-  it('renders bottom resize handle', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('bottom-resize-handle')).toBeInTheDocument();
-  });
-
-  it('source panel has non-zero inline width by default', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel = screen.getByTestId('source-panel');
-    const width = (panel as HTMLElement).style.width;
-    expect(width).toBeTruthy();
-    expect(parseInt(width)).toBeGreaterThan(0);
-  });
-
-  it('builder panel has non-zero inline width by default', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    const panel = screen.getByTestId('builder-panel');
-    const width = (panel as HTMLElement).style.width;
-    expect(width).toBeTruthy();
-    expect(parseInt(width)).toBeGreaterThan(0);
-  });
-
-  it('renders deploy page link with correct route params', () => {
-    renderWithRouter(
-      <MappingEditorPage projectId="my-project" mappingId="my-mapping" />,
-    );
-    const link = screen.getByTestId('deploy-page-link');
-    expect(link).toHaveAttribute('href', '/projects/my-project/mappings/my-mapping/deploy');
-  });
-
-  it('renders "Not deployed" badge by default when no deployStatus provided', () => {
-    renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
-    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('Not deployed');
-  });
-
-  it('renders highest deploy environment badge when deployStatus is provided', () => {
+  it('keeps bottomContent out of visible layout for all modes', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
         mappingId="mapping-1"
-        deployStatus={{ environment: 'PROD', deployedVersion: 3 }}
-        version={3}
+        panelMode="row-editing"
+        bottomContent={<div data-testid="custom-bottom">Preview Panel</div>}
       />,
     );
-    expect(screen.getByTestId('deploy-badge')).toHaveTextContent('PROD');
+    expect(screen.queryByTestId('custom-bottom')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bottom-area-removed')).toBeInTheDocument();
+  });
+  it('passes sample selector slot through to top bar', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        sampleSelectorSlot={<button data-testid="page-sample-slot">Sample</button>}
+      />,
+    );
+
+    expect(screen.getByTestId('page-sample-slot')).toBeInTheDocument();
+  });
+
+  it('wires Browse Source button pressed state through props', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        isBrowseSourceActive={true}
+      />,
+    );
+    expect(screen.getByTestId('browse-source-button')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('calls onToggleBrowseSource when Browse Source button is clicked', () => {
+    const onToggleBrowseSource = vi.fn();
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        onToggleBrowseSource={onToggleBrowseSource}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('browse-source-button'));
+    expect(onToggleBrowseSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders hide buttons on Source and Builder cards and triggers callbacks', () => {
+    const onHideSourcePanel = vi.fn();
+    const onHideBuilderPanel = vi.fn();
+
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        onHideSourcePanel={onHideSourcePanel}
+        onHideBuilderPanel={onHideBuilderPanel}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('hide-source-panel'));
+    fireEvent.click(screen.getByTestId('hide-builder-panel'));
+
+    expect(onHideSourcePanel).toHaveBeenCalledTimes(1);
+    expect(onHideBuilderPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render Source/Builder cards when hidden flags are true', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        hideSourcePanel={true}
+        hideBuilderPanel={true}
+      />,
+    );
+
+    expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
   });
 });

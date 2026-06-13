@@ -1,100 +1,136 @@
-import { invokeAI, type AIErrorCode } from '../../lib/ai/index.js';
+import {
+  ERROR_CODES,
+  errorResponse,
+  generateRequestId,
+  jsonResponse,
+  parseBody,
+  type APIGatewayProxyEvent,
+  type APIGatewayProxyResult,
+} from '../shared/index.js';
+import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
 
-export interface APIGatewayProxyEvent {
-  readonly body: string | null;
-  readonly headers?: Record<string, string | undefined>;
+interface ExplainRuleOutput {
+  explanation: string;
+  confidence?: 'high' | 'medium' | 'low';
+  limitations?: string[];
 }
 
-export interface APIGatewayProxyResult {
-  readonly statusCode: number;
-  readonly headers?: Record<string, string>;
-  readonly body: string;
+const HARD_TOKEN_CAP = 120;
+const MAX_SENTENCES = 2;
+
+function hasMeaningfulDslFragment(expression: string): boolean {
+  return /[A-Za-z0-9_"()]/.test(expression);
 }
 
-const JSON_HEADERS: Record<string, string> = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-};
+function clampExplanation(raw: string): string {
+  const normalized = raw.replace(/\s+/g, ' ').trim();
+  if (normalized.length === 0) {
+    return normalized;
+  }
 
-function jsonResponse(statusCode: number, payload: unknown): APIGatewayProxyResult {
+  const sentenceSegments = normalized.split(/(?<=[.!?])\s+/g).filter((segment) => segment.length > 0);
+  const sentenceLimited = sentenceSegments.length > 0
+    ? sentenceSegments.slice(0, MAX_SENTENCES).join(' ')
+    : normalized;
+
+  const tokens = sentenceLimited.split(/\s+/g).filter((token) => token.length > 0);
+  if (tokens.length <= HARD_TOKEN_CAP) {
+    return sentenceLimited;
+  }
+
+  return `${tokens.slice(0, HARD_TOKEN_CAP).join(' ')}…`;
+}
+
+function normalizeExplainRuleOutput(data: ExplainRuleOutput): ExplainRuleOutput {
   return {
-    statusCode,
-    headers: JSON_HEADERS,
-    body: JSON.stringify(payload),
+    explanation: clampExplanation(data.explanation),
+    confidence: data.confidence,
+    limitations: Array.isArray(data.limitations)
+      ? data.limitations.filter((item): item is string => typeof item === 'string')
+      : undefined,
   };
 }
 
-function statusCodeForAIError(code: AIErrorCode): number {
-  switch (code) {
-    case 'PROMPT_NOT_FOUND':
-      return 404;
-    case 'MODEL_RATE_LIMITED':
-      return 429;
-    case 'VALIDATION_ERROR':
-      return 400;
-    default:
-      return 500;
-  }
-}
-
-function parseRequestBody(body: string | null): Record<string, unknown> | null {
-  if (!body) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(body) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) {
-      return null;
-    }
-
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
-  const requestBody = parseRequestBody(event.body);
+  const requestId = generateRequestId();
+  const requestBody = parseBody(event);
+
   if (!requestBody) {
-    return jsonResponse(400, {
-      error: 'Invalid request body',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
   }
 
   const targetPath = requestBody.targetPath;
   if (typeof targetPath !== 'string') {
-    return jsonResponse(400, {
-      error: 'Missing required field: targetPath',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetPath', 400, false, requestId);
   }
 
   const expression = requestBody.expression;
   if (typeof expression !== 'string') {
-    return jsonResponse(400, {
-      error: 'Missing required field: expression',
-    });
+    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: expression', 400, false, requestId);
+  }
+
+  const normalizedExpression = expression.trim();
+  if (normalizedExpression.length === 0) {
+    return errorResponse(
+      ERROR_CODES.VALIDATION_ERROR,
+      'Expression must be a non-empty string',
+      400,
+      false,
+      requestId,
+    );
+  }
+
+  if (!hasMeaningfulDslFragment(normalizedExpression)) {
+    return errorResponse(
+      ERROR_CODES.VALIDATION_ERROR,
+      'Expression is completely unparsable: no meaningful DSL fragment found',
+      400,
+      false,
+      requestId,
+    );
   }
 
   try {
-    const result = await invokeAI('explain-rule', {
+    const result = await invokeAI<ExplainRuleOutput>('explain-rule', {
       targetPath,
-      expression,
+      expression: normalizedExpression,
     });
 
     if (result.success) {
-      return jsonResponse(200, result);
+      const explanation = normalizeExplainRuleOutput(result.data);
+
+      if (explanation.explanation.length === 0) {
+        const normalized = normalizeAIError({
+          code: 'INVALID_MODEL_OUTPUT',
+          message: 'Model response failed schema validation: explanation must be non-empty',
+        });
+        return errorResponse(
+          normalized.code,
+          normalized.message,
+          normalized.statusCode,
+          normalized.retryable,
+          requestId,
+        );
+      }
+
+      return jsonResponse(200, { ...result, data: explanation }, requestId);
     }
 
-    return jsonResponse(statusCodeForAIError(result.error.code), result);
+    const normalized = normalizeAIError(result.error);
+    return errorResponse(
+      normalized.code,
+      normalized.message,
+      normalized.statusCode,
+      normalized.retryable,
+      requestId,
+    );
   } catch {
-    return jsonResponse(500, {
-      success: false,
-      error: {
-        code: 'MODEL_ERROR',
-        message: 'Unexpected error while handling request',
-      },
-      promptId: 'explain-rule',
-    });
+    return errorResponse(
+      ERROR_CODES.INTERNAL_ERROR,
+      'Unexpected error while handling request',
+      500,
+      true,
+      requestId,
+    );
   }
 }

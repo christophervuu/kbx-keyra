@@ -21,8 +21,11 @@ const MOCK_RESULT: ServerPreviewResult = {
   diagnostics: [],
   metadata: {
     environment: 'DEV',
-    snapshotVersion: 3,
+    artifactId: 'artifact-dev-3',
+    artifactHash: 'hash-dev-3',
     deployedAt: '2026-01-01T00:00:00Z',
+    sourceType: 'version',
+    sourceNumber: 3,
     engineVersion: '1.0.0',
   },
 };
@@ -97,7 +100,7 @@ describe('useServerPreview', () => {
     const adapter = makeAdapter(vi.fn().mockReturnValue(neverResolves));
 
     const { result } = renderHook(
-      () => useServerPreview({ mappingId: MAPPING_ID, environment: 'QA' }),
+      () => useServerPreview({ mappingId: MAPPING_ID, environment: 'PREPROD' }),
       { wrapper: makeWrapper(adapter) },
     );
 
@@ -171,6 +174,33 @@ describe('useServerPreview', () => {
     expect(result.current.error).toBe('Internal server error');
     expect(result.current.isAvailable).toBe(true); // not an offline error
     expect(result.current.result).toBeNull();
+  });
+
+  it('maps NOT_DEPLOYED backend error to deterministic guidance', async () => {
+    const notDeployed = Object.assign(new Error('NOT_DEPLOYED: no active deployment found'), {
+      code: 'NOT_DEPLOYED',
+      statusCode: 404,
+      retryable: false,
+      details: {
+        environment: 'PREPROD',
+        finalStatus: 'failed',
+      },
+    });
+
+    const adapter = makeAdapter(vi.fn().mockRejectedValue(notDeployed));
+    const { result } = renderHook(
+      () => useServerPreview({ mappingId: MAPPING_ID, environment: 'PREPROD' }),
+      { wrapper: makeWrapper(adapter) },
+    );
+
+    await act(async () => {
+      await result.current.execute(SOURCE_DATA);
+    });
+
+    expect(result.current.error).toBe(
+      'No deployed artifact found in PREPROD. Deploy to PREPROD first, then run server preview.',
+    );
+    expect(result.current.isAvailable).toBe(true);
   });
 
   it('resets result and error between sequential calls', async () => {

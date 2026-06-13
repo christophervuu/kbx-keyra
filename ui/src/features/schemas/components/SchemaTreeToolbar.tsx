@@ -1,46 +1,43 @@
 import { ChevronsDown, ChevronsUp } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { Button } from '@/components';
 
 interface SchemaTreeToolbarProps {
   onExpandAll: () => void;
   onCollapseAll: () => void;
-  onExpandToDepth: (depth: number) => void;
+  searchSlot?: ReactNode;
 }
 
-export function SchemaTreeToolbar({ onExpandAll, onCollapseAll, onExpandToDepth }: SchemaTreeToolbarProps) {
+export function SchemaTreeToolbar({
+  onExpandAll,
+  onCollapseAll,
+  searchSlot,
+}: SchemaTreeToolbarProps) {
   return (
-    <div className="flex items-center gap-1 px-2 py-1 border-b border-slate-700/50">
-      <Button variant="ghost" size="sm" onClick={onExpandAll}>
-        <ChevronsDown size={14} aria-hidden="true" />
-        Expand All
-      </Button>
-      <Button variant="ghost" size="sm" onClick={onCollapseAll}>
-        <ChevronsUp size={14} aria-hidden="true" />
-        Collapse All
-      </Button>
+    <div className="mb-2 flex items-start gap-2 border-b border-slate-700/50 py-1" data-testid="schema-tree-controls-row">
+      <div className="min-w-0 flex-1" data-testid="schema-tree-controls-search-slot">{searchSlot}</div>
 
-      <span className="ml-2 text-xs text-slate-400">Depth:</span>
-      <select
-        aria-label="Expand to depth"
-        className="ml-1 text-xs bg-slate-800 text-slate-200 border border-slate-600 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        defaultValue=""
-        onChange={(e) => {
-          const depth = Number(e.target.value);
-          if (depth > 0) {
-            onExpandToDepth(depth);
-          }
-          // Reset so same value can be re-selected
-          e.target.value = '';
-        }}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onExpandAll}
+        data-testid="schema-tree-expand-button"
+        aria-label="Expand All"
+        title="Expand All"
       >
-        <option value="" disabled>
-          —
-        </option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-      </select>
+        <ChevronsDown size={14} aria-hidden="true" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onCollapseAll}
+        data-testid="schema-tree-collapse-button"
+        aria-label="Collapse All"
+        title="Collapse All"
+      >
+        <ChevronsUp size={14} aria-hidden="true" />
+      </Button>
     </div>
   );
 }

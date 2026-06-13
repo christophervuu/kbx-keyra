@@ -95,6 +95,7 @@ describe('LocalStorageAdapter', () => {
 
     const detail = await adapter.getProject(created.projectId);
     expect(detail.projectId).toBe(created.projectId);
+    expect(detail.linkedSchemaIds).toEqual([]);
 
     const updated = await adapter.updateProject(created.projectId, { name: 'Project Two' });
     expect(updated.name).toBe('Project Two');
@@ -125,7 +126,11 @@ describe('LocalStorageAdapter', () => {
     expect(metadata.syncStatus).toBe('synced');
 
     const schemas = await adapter.listSchemas();
-    expect(schemas).toHaveLength(1);
+    expect(schemas.length).toBeGreaterThan(1);
+    expect(schemas.some((schema) => schema.schemaId === metadata.schemaId)).toBe(true);
+    const seededCdm = schemas.filter((schema) => schema.origin === 'cdm');
+    expect(seededCdm.length).toBeGreaterThan(0);
+    expect(seededCdm.every((schema) => schema.ownership === 'cdm' && schema.readonly === true)).toBe(true);
 
     const detail = await adapter.getSchema(metadata.schemaId);
     expect(detail.metadata.schemaId).toBe(metadata.schemaId);
@@ -151,7 +156,7 @@ describe('LocalStorageAdapter', () => {
     });
 
     expect(nameUpdated.name).toBe('Renamed Schema');
-    expect(nameUpdated.scope).toBe('global');
+    expect(nameUpdated.scope).toBeUndefined();
 
     const scopeUpdated = await adapter.updateSchema(created.schemaId, {
       scope: 'project',
@@ -216,7 +221,7 @@ describe('LocalStorageAdapter', () => {
     }
   });
 
-  it("updateSchema content changes move synced schema to 'local-changes'", async () => {
+  it("updateSchema content changes move synced schema to 'sync-failed'", async () => {
     const adapter = new LocalStorageAdapter();
 
     const created = await adapter.createSchema({
@@ -231,7 +236,7 @@ describe('LocalStorageAdapter', () => {
       content: { type: 'object', properties: { id: { type: 'number' } } },
     });
 
-    expect(updated.syncStatus).toBe('local-changes');
+    expect(updated.syncStatus).toBe('sync-failed');
   });
 
   it('performs mapping create/list/get/update/delete and duplicate', async () => {
@@ -246,6 +251,7 @@ describe('LocalStorageAdapter', () => {
     const created = await adapter.createMapping({
       projectId: project.projectId,
       name: 'Mapping A',
+      businessContext: 'Transform source invoice model to target shipment contract.',
       sourceSchemaRef: SOURCE_SCHEMA_REF,
       targetSchemaRef: TARGET_SCHEMA_REF,
       rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
@@ -256,6 +262,8 @@ describe('LocalStorageAdapter', () => {
 
     const config = await adapter.getMapping(created.mappingId);
     expect(config.name).toBe('Mapping A');
+    expect(config.businessContext).toBe('Transform source invoice model to target shipment contract.');
+    expect(created.businessContext).toBe('Transform source invoice model to target shipment contract.');
 
     const updatedConfig: MappingConfig = {
       ...config,
@@ -271,6 +279,7 @@ describe('LocalStorageAdapter', () => {
     const duplicate = await adapter.duplicateMapping(created.mappingId, 'Mapping C');
     expect(duplicate.mappingId).not.toBe(created.mappingId);
     expect(duplicate.name).toBe('Mapping C');
+    expect(duplicate.businessContext).toBe('Transform source invoice model to target shipment contract.');
 
     await adapter.deleteMapping(created.mappingId);
     await expect(adapter.getMapping(created.mappingId)).rejects.toMatchObject({
@@ -278,16 +287,78 @@ describe('LocalStorageAdapter', () => {
     });
   });
 
-  it('throws offline error for AI and GitHub methods', async () => {
+  it('createMapping omits businessContext when not provided', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'No Context Mapping',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+    });
+
+    const config = await adapter.getMapping(created.mappingId);
+    expect(created.businessContext).toBeUndefined();
+    expect(config.businessContext).toBeUndefined();
+  });
+
+  it.each([
+    ['autoMap', (adapter: LocalStorageAdapter) => adapter.autoMap({ projectId: 'p', mappingId: 'm' })],
+    [
+      'autoMapSection',
+      (adapter: LocalStorageAdapter) =>
+        adapter.autoMapSection({
+          projectId: 'p',
+          mappingId: 'm',
+          sectionPath: 'Order.Header',
+        }),
+    ],
+    [
+      'suggestExpression',
+      (adapter: LocalStorageAdapter) =>
+        adapter.suggestExpression({
+          mappingId: 'm',
+          instruction: 'copy',
+          targetPath: 'Order.Total',
+          targetType: 'string',
+        }),
+    ],
+    [
+      'explainRule',
+      (adapter: LocalStorageAdapter) =>
+        adapter.explainRule({
+          targetPath: 'Order.Total',
+          expression: 'source("Invoice.Total")',
+        }),
+    ],
+    [
+      'smartFix',
+      (adapter: LocalStorageAdapter) =>
+        adapter.smartFix({
+          mappingId: 'm',
+          ruleIndex: 0,
+          targetPath: 'Order.Total',
+          failingExpression: 'source("Invoice.Total")',
+          diagnostics: [{ code: 'KEYRA-E001', severity: 'error', message: 'Invalid expression' }],
+        }),
+    ],
+    ['validateMappings', (adapter: LocalStorageAdapter) => adapter.validateMappings({ mappingId: 'm' })],
+    ['listCdmSchemas', (adapter: LocalStorageAdapter) => adapter.listCdmSchemas()],
+    ['syncAllCdmSchemas', (adapter: LocalStorageAdapter) => adapter.syncAllCdmSchemas()],
+    [
+      'previewOnServer',
+      (adapter: LocalStorageAdapter) =>
+        adapter.previewOnServer('m', { environment: 'DEV', sourceData: {} }),
+    ],
+  ])('%s uses canonical offline unsupported behavior', async (_method, invoke) => {
     const adapter = new LocalStorageAdapter();
 
-    await expect(adapter.autoMap({ projectId: 'p', mappingId: 'm' })).rejects.toThrow(
-      'Not available in offline mode',
-    );
-    await expect(adapter.listCdmSchemas()).rejects.toThrow('Not available in offline mode');
-    await expect(
-      adapter.previewOnServer('m', { environment: 'DEV', sourceData: {} }),
-    ).rejects.toThrow('Not available in offline mode');
+    await expect(invoke(adapter)).rejects.toThrow('Not available in offline mode');
   });
 
   it('returns empty arrays for corrupted localStorage payloads', async () => {
@@ -300,10 +371,11 @@ describe('LocalStorageAdapter', () => {
     const schemas = await adapter.listSchemas();
 
     expect(projects).toEqual([]);
-    expect(schemas).toEqual([]);
+    expect(schemas.length).toBeGreaterThan(0);
+    expect(schemas.every((schema) => schema.origin === 'cdm')).toBe(true);
   });
 
-  it('normalizes missing schema origin to local when listing schemas', async () => {
+  it('normalizes missing schema origin to uploaded when listing schemas', async () => {
     const baseMetadata = {
       schemaId: 'schema-legacy-missing-origin',
       name: 'Legacy Missing Origin',
@@ -311,7 +383,7 @@ describe('LocalStorageAdapter', () => {
       fieldCount: 1,
       status: 'ready',
       scope: 'global',
-      syncStatus: 'not-synced',
+      syncStatus: 'sync-failed',
       source: { type: 'upload' },
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -333,11 +405,35 @@ describe('LocalStorageAdapter', () => {
     const adapter = new LocalStorageAdapter();
     const schemas = await adapter.listSchemas();
 
-    expect(schemas).toHaveLength(1);
-    expect(schemas[0].origin).toBe('local');
+    const legacy = schemas.find((schema) => schema.schemaId === 'schema-legacy-missing-origin');
+    expect(legacy?.origin).toBe('uploaded');
   });
 
-  it('normalizes invalid schema origin to local when loading schema detail', async () => {
+  it('lists seeded CDM metadata by default with no stored schemas', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const schemas = await adapter.listSchemas();
+
+    expect(schemas.length).toBeGreaterThan(0);
+    const cdmSchemas = schemas.filter((schema) => schema.origin === 'cdm');
+    expect(cdmSchemas.length).toBeGreaterThan(0);
+    expect(cdmSchemas.every((schema) => schema.ownership === 'cdm' && schema.readonly === true)).toBe(true);
+  });
+
+  it('getSchema resolves seeded CDM schema without persisted local record', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const schemas = await adapter.listSchemas();
+    const cdmSchema = schemas.find((schema) => schema.origin === 'cdm');
+    expect(cdmSchema).toBeDefined();
+
+    const detail = await adapter.getSchema(cdmSchema!.schemaId);
+    expect(detail.metadata.origin).toBe('cdm');
+    expect(detail.metadata.readonly).toBe(true);
+    expect(detail.metadata.ownership).toBe('cdm');
+  });
+
+  it('normalizes invalid schema origin to uploaded when loading schema detail', async () => {
     const metadataWithInvalidOrigin = {
       schemaId: 'schema-legacy-invalid-origin',
       name: 'Legacy Invalid Origin',
@@ -346,7 +442,7 @@ describe('LocalStorageAdapter', () => {
       origin: 'legacy-origin',
       status: 'ready',
       scope: 'global',
-      syncStatus: 'not-synced',
+      syncStatus: 'sync-failed',
       source: { type: 'upload' },
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -368,7 +464,42 @@ describe('LocalStorageAdapter', () => {
     const adapter = new LocalStorageAdapter();
     const detail = await adapter.getSchema('schema-legacy-invalid-origin');
 
-    expect(detail.metadata.origin).toBe('local');
+    expect(detail.metadata.origin).toBe('uploaded');
+  });
+
+  it('deduplicates and trims linkedSchemaIds from legacy schemaRefs fallback', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createProject({
+      name: 'Legacy refs project',
+      description: 'desc',
+      slug: 'legacy-refs',
+      schemaRefs: [
+        { schemaId: ' schema-a ', type: 'local' },
+        { schemaId: 'schema-a', type: 'github' },
+        { schemaId: 'schema-b', type: 'published' },
+        { schemaId: '   ', type: 'local' },
+      ],
+    });
+
+    const detail = await adapter.getProject(created.projectId);
+    expect(detail.linkedSchemaIds).toEqual(['schema-a', 'schema-b']);
+  });
+
+  it('prefers linkedSchemaIds and normalizes duplicates/whitespace', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createProject({
+      name: 'Canonical links project',
+      description: 'desc',
+      slug: 'canonical-links',
+      linkedSchemaIds: [' schema-x ', 'schema-x', 'schema-y', '   '],
+      schemaRefs: [{ schemaId: 'schema-z', type: 'local' }],
+    });
+
+    const detail = await adapter.getProject(created.projectId);
+    expect(detail.linkedSchemaIds).toEqual(['schema-x', 'schema-y']);
+    expect(detail.schemaRefs).toEqual([{ schemaId: 'schema-z', type: 'local' }]);
   });
 
   it('querySchemaNodes returns empty array in offline mode', async () => {
@@ -618,6 +749,46 @@ describe('LocalStorageAdapter', () => {
     await expect(adapter.listRevisions(created.mappingId)).resolves.toEqual([]);
   });
 
+  it('deleteMapping prunes stale linked schema ids for the project', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+      linkedSchemaIds: ['source-a', 'target-a', 'source-b', 'target-b'],
+      schemaRefs: [
+        { schemaId: 'source-a', type: 'local' },
+        { schemaId: 'target-a', type: 'local' },
+        { schemaId: 'source-b', type: 'local' },
+        { schemaId: 'target-b', type: 'local' },
+      ],
+    });
+
+    const mappingA = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: { schemaId: 'source-a', type: 'local' },
+      targetSchemaRef: { schemaId: 'target-a', type: 'local' },
+    });
+
+    await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping B',
+      sourceSchemaRef: { schemaId: 'source-b', type: 'local' },
+      targetSchemaRef: { schemaId: 'target-b', type: 'local' },
+    });
+
+    await adapter.deleteMapping(mappingA.mappingId);
+
+    const detail = await adapter.getProject(project.projectId);
+    expect(detail.linkedSchemaIds).toEqual(['source-b', 'target-b']);
+    expect(detail.schemaRefs).toEqual([
+      { schemaId: 'source-b', type: 'local' },
+      { schemaId: 'target-b', type: 'local' },
+    ]);
+  });
+
   it('deployMapping enforces revision->DEV rule and writes deployment history', async () => {
     const adapter = new LocalStorageAdapter();
     const project = await adapter.createProject({
@@ -660,50 +831,62 @@ describe('LocalStorageAdapter', () => {
   });
 
   it('promoteDeployment requires version-backed source', async () => {
-    const adapter = new LocalStorageAdapter();
-    const project = await adapter.createProject({
-      name: 'Project',
-      description: 'desc',
-      slug: 'project',
-    });
+    vi.useFakeTimers();
+    try {
+      const adapter = new LocalStorageAdapter();
+      const project = await adapter.createProject({
+        name: 'Project',
+        description: 'desc',
+        slug: 'project',
+      });
 
-    const created = await adapter.createMapping({
-      projectId: project.projectId,
-      name: 'Mapping A',
-      sourceSchemaRef: SOURCE_SCHEMA_REF,
-      targetSchemaRef: TARGET_SCHEMA_REF,
-      rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
-    });
+      const created = await adapter.createMapping({
+        projectId: project.projectId,
+        name: 'Mapping A',
+        sourceSchemaRef: SOURCE_SCHEMA_REF,
+        targetSchemaRef: TARGET_SCHEMA_REF,
+        rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
+      });
 
-    await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
-    await adapter.createVersion(created.mappingId);
+      await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("x")'));
+      await adapter.createVersion(created.mappingId);
 
-    await adapter.deployMapping(created.mappingId, {
-      environment: 'DEV',
-      sourceType: 'revision',
-      sourceNumber: 1,
-    });
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+      await adapter.deployMapping(created.mappingId, {
+        environment: 'DEV',
+        sourceType: 'revision',
+        sourceNumber: 1,
+      });
 
-    await expect(
-      adapter.promoteDeployment(created.mappingId, {
+      await expect(
+        adapter.promoteDeployment(created.mappingId, {
+          fromEnvironment: 'DEV',
+          toEnvironment: 'QA',
+        }),
+      ).rejects.toMatchObject({
+        code: 'PROMOTION_REQUIRES_VERSION',
+        message: 'Promotion requires a version-backed source deployment',
+        statusCode: 400,
+        retryable: false,
+      });
+
+      vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'));
+      await adapter.deployMapping(created.mappingId, {
+        environment: 'DEV',
+        sourceType: 'version',
+        sourceNumber: 1,
+      });
+
+      const promoted = await adapter.promoteDeployment(created.mappingId, {
         fromEnvironment: 'DEV',
         toEnvironment: 'QA',
-      }),
-    ).rejects.toThrow('Promotion requires a version-backed source deployment');
+      });
 
-    await adapter.deployMapping(created.mappingId, {
-      environment: 'DEV',
-      sourceType: 'version',
-      sourceNumber: 1,
-    });
-
-    const promoted = await adapter.promoteDeployment(created.mappingId, {
-      fromEnvironment: 'DEV',
-      toEnvironment: 'QA',
-    });
-
-    expect(promoted.sourceType).toBe('version');
-    expect(promoted.promotedFrom).toBe('DEV');
+      expect(promoted.sourceType).toBe('version');
+      expect(promoted.promotedFrom).toBe('DEV');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rollbackDeployment creates rollback entry and current staleness summary', async () => {
@@ -727,24 +910,24 @@ describe('LocalStorageAdapter', () => {
     await adapter.saveMapping(created.mappingId, makeMappingConfig(created.mappingId, project.projectId, 1, 'static("y")'));
     await adapter.createVersion(created.mappingId);
 
-    const qaV1 = await adapter.deployMapping(created.mappingId, {
-      environment: 'QA',
+    const preprodV1 = await adapter.deployMapping(created.mappingId, {
+      environment: 'PREPROD',
       sourceType: 'version',
       sourceNumber: 1,
     });
 
     await adapter.deployMapping(created.mappingId, {
-      environment: 'QA',
+      environment: 'PREPROD',
       sourceType: 'version',
       sourceNumber: 2,
     });
 
     const rollback = await adapter.rollbackDeployment(created.mappingId, {
-      environment: 'QA',
-      deploymentSK: qaV1.environmentDeployedAt,
+      environment: 'PREPROD',
+      deploymentSK: preprodV1.environmentDeployedAt,
     });
 
-    expect(rollback.rollbackOf).toBe(qaV1.environmentDeployedAt);
+    expect(rollback.rollbackOf).toBe(preprodV1.environmentDeployedAt);
     expect(rollback.sourceNumber).toBe(1);
 
     const current = await adapter.getCurrentDeployments(created.mappingId);

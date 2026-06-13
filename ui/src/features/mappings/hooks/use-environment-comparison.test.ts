@@ -72,8 +72,11 @@ const MOCK_SERVER_RESULT: ServerPreviewResult = {
   diagnostics: [],
   metadata: {
     environment: 'DEV',
-    snapshotVersion: 2,
+    artifactId: 'artifact-dev-2',
+    artifactHash: 'hash-dev-2',
     deployedAt: '2026-01-01T00:00:00Z',
+    sourceType: 'version',
+    sourceNumber: 2,
     engineVersion: '1.0.0',
   },
 };
@@ -85,7 +88,7 @@ const MOCK_DEPLOYMENT_CONTEXT = {
   projectName: 'Test Project',
   environments: [
     { environment: 'DEV', status: 'deployed', deployedVersion: 2, deployedAt: '2026-01-01T00:00:00Z' },
-    { environment: 'QA', status: 'deployed', deployedVersion: 1, deployedAt: '2026-01-01T00:00:00Z' },
+    { environment: 'PREPROD', status: 'deployed', deployedVersion: 1, deployedAt: '2026-01-01T00:00:00Z' },
     { environment: 'PROD', status: 'not-deployed' },
   ],
 };
@@ -271,7 +274,7 @@ describe('useEnvironmentComparison', () => {
     await waitFor(() => expect(result.current.canRun).toBe(true));
 
     act(() => {
-      result.current.setMode('dev-vs-qa');
+      result.current.setMode('dev-vs-preprod');
     });
 
     await waitFor(() => expect(result.current.canRun).toBe(true));
@@ -283,7 +286,7 @@ describe('useEnvironmentComparison', () => {
     expect(previewFn).toHaveBeenCalledTimes(2);
     const state = result.current.state;
     expect(state!.left.label).toBe('DEV');
-    expect(state!.right.label).toBe('QA');
+    expect(state!.right.label).toBe('PREPROD');
     expect(state!.overallStatus).toBe('complete');
   });
 
@@ -364,7 +367,7 @@ describe('useEnvironmentComparison', () => {
     await waitFor(() => expect(result.current.canRun).toBe(true));
 
     act(() => {
-      result.current.setMode('qa-vs-prod'); // PROD is not-deployed in mock
+      result.current.setMode('preprod-vs-prod'); // PROD is not-deployed in mock
     });
 
     await waitFor(() => expect(result.current.canRun).toBe(false));
@@ -382,6 +385,6 @@ describe('useEnvironmentComparison', () => {
     });
 
     expect(result.current.modeAvailability('current-vs-dev').available).toBe(true);
-    expect(result.current.modeAvailability('qa-vs-prod').available).toBe(false);
+    expect(result.current.modeAvailability('preprod-vs-prod').available).toBe(false);
   });
 });

@@ -12,6 +12,8 @@ const RATE_LIMIT_FRAGMENT = 'temporarily busy';
 const RATE_LIMIT_FRAGMENT_ALT = 'rate limit';
 const NETWORK_ERROR_FRAGMENT = 'Could not reach';
 const UNEXPECTED_RESPONSE_FRAGMENT = 'unexpected response';
+const FEATURE_NOT_ENABLED_FRAGMENT = 'not enabled in this mode';
+const FEATURE_NOT_ENABLED_CODE = 'FEATURE_NOT_ENABLED';
 const GENERIC_ERROR_MESSAGE = 'An unexpected error occurred. Please try again.';
 const OFFLINE_USER_MESSAGE = 'Suggest Expression is not available in offline mode';
 
@@ -23,6 +25,8 @@ export interface SuggestExpressionState {
   status: 'idle' | 'inputting' | 'loading' | 'success' | 'error';
   result: SuggestExpressionResult | null;
   error: string | null;
+  suggestionState: 'ready' | 'invalid' | null;
+  readyToApply: boolean;
 }
 
 export interface UseSuggestExpressionReturn {
@@ -43,6 +47,14 @@ export interface UseSuggestExpressionReturn {
 
 function mapErrorToMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+
+  if (code === FEATURE_NOT_ENABLED_CODE || message.includes(FEATURE_NOT_ENABLED_FRAGMENT)) {
+    return message;
+  }
 
   if (message.includes(OFFLINE_MODE_FRAGMENT)) {
     return OFFLINE_USER_MESSAGE;
@@ -70,7 +82,13 @@ function mapErrorToMessage(err: unknown): string {
 // Hook
 // ---------------------------------------------------------------------------
 
-const IDLE_STATE: SuggestExpressionState = { status: 'idle', result: null, error: null };
+const IDLE_STATE: SuggestExpressionState = {
+  status: 'idle',
+  result: null,
+  error: null,
+  suggestionState: null,
+  readyToApply: false,
+};
 
 /**
  * Manages the async lifecycle for `adapter.suggestExpression()`.
@@ -78,12 +96,14 @@ const IDLE_STATE: SuggestExpressionState = { status: 'idle', result: null, error
  * State machine:
  *   idle → openInput() → inputting
  *   inputting → generate(input) → loading
- *   loading → success | error
+ *   loading → success (ready|invalid) | error
  *   success | error → dismiss() → idle
  *   any → reset() → idle  (aborts in-flight)
  *   any → openInput() → inputting  (aborts in-flight, clears result)
  *
  * The hook does NOT own the instruction text — that is the component's responsibility.
+ * Validation-invalid suggestions are surfaced as success-state results with
+ * `suggestionState: 'invalid'` and `readyToApply: false`.
  *
  * Must be rendered inside an `<AdapterProvider>`.
  */
@@ -96,7 +116,7 @@ export function useSuggestExpression(): UseSuggestExpressionReturn {
   const adapterRef = useRef(adapter);
   useEffect(() => {
     adapterRef.current = adapter;
-  });
+  }, [adapter]);
 
   // Ref to the current AbortController so we can cancel in-flight requests
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -112,7 +132,13 @@ export function useSuggestExpression(): UseSuggestExpressionReturn {
     // Abort any in-flight request (e.g. user re-opens while loading)
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
-    setState({ status: 'inputting', result: null, error: null });
+    setState({
+      status: 'inputting',
+      result: null,
+      error: null,
+      suggestionState: null,
+      readyToApply: false,
+    });
   }, []);
 
   const generate = useCallback((input: SuggestExpressionInput): void => {
@@ -121,7 +147,13 @@ export function useSuggestExpression(): UseSuggestExpressionReturn {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setState({ status: 'loading', result: null, error: null });
+    setState({
+      status: 'loading',
+      result: null,
+      error: null,
+      suggestionState: null,
+      readyToApply: false,
+    });
 
     void (async () => {
       try {
@@ -131,11 +163,24 @@ export function useSuggestExpression(): UseSuggestExpressionReturn {
         // do not update state
         if (controller.signal.aborted) return;
 
-        setState({ status: 'success', result, error: null });
+        const readyToApply = result.validation.valid === true && result.readyToApply === true;
+        setState({
+          status: 'success',
+          result,
+          error: null,
+          suggestionState: readyToApply ? 'ready' : 'invalid',
+          readyToApply,
+        });
       } catch (err) {
         if (controller.signal.aborted) return;
 
-        setState({ status: 'error', result: null, error: mapErrorToMessage(err) });
+        setState({
+          status: 'error',
+          result: null,
+          error: mapErrorToMessage(err),
+          suggestionState: null,
+          readyToApply: false,
+        });
       }
     })();
   }, []);

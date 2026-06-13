@@ -18,8 +18,11 @@ const sharedMocks = vi.hoisted(() => {
   return {
     parseBody: vi.fn(),
     requireFields: vi.fn(),
+    getItem: vi.fn(),
     putItem: vi.fn(),
     putObject: vi.fn(),
+    updateItem: vi.fn(),
+    notFound: vi.fn(),
     jsonResponse: vi.fn(),
     errorResponse: vi.fn(),
     internalError: vi.fn(),
@@ -53,6 +56,7 @@ describe('create-schema handler', () => {
     env.SCHEMAS_TABLE = 'Schemas';
     env.SCHEMA_NODES_TABLE = 'SchemaNodes';
     env.CONTENT_BUCKET = 'Content';
+    env.PROJECTS_TABLE = 'Projects';
 
     sharedMocks.parseBody.mockReset().mockReturnValue({
       name: 'Small Schema',
@@ -67,8 +71,11 @@ describe('create-schema handler', () => {
       },
     });
     sharedMocks.requireFields.mockReset().mockReturnValue({ ok: true });
+    sharedMocks.getItem.mockReset().mockResolvedValue(null);
     sharedMocks.putItem.mockReset().mockResolvedValue(undefined);
     sharedMocks.putObject.mockReset().mockResolvedValue(undefined);
+    sharedMocks.updateItem.mockReset().mockResolvedValue(undefined);
+    sharedMocks.notFound.mockReset().mockReturnValue({ code: 'RESOURCE_NOT_FOUND', message: 'missing', statusCode: 404, retryable: false, requestId: 'req-missing' });
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
     sharedMocks.errorResponse
       .mockReset()
@@ -89,6 +96,10 @@ describe('create-schema handler', () => {
     const parsed = JSON.parse(result.body) as { status: string; fieldCount: number };
     expect(parsed.status).toBe('ready');
     expect(parsed.fieldCount).toBe(2);
+    expect((parsed as { origin?: string }).origin).toBe('uploaded');
+    expect((parsed as { sourceKind?: string }).sourceKind).toBe('json_schema');
+    expect((parsed as { dataFormat?: string }).dataFormat).toBe('json');
+    expect((parsed as { reviewState?: string }).reviewState).toBe('not_required');
     expect(sharedMocks.putItem).toHaveBeenCalledTimes(3); // metadata + 2 nodes
 
     const firstNodePut = sharedMocks.putItem.mock.calls[1]?.[0] as { Item?: Record<string, unknown> } | undefined;
@@ -112,6 +123,46 @@ describe('create-schema handler', () => {
     const parsed = JSON.parse(result.body) as { status: string; fieldCount: number };
     expect(parsed.status).toBe('ingesting');
     expect(parsed.fieldCount).toBe(0);
+    expect((parsed as { sourceKind?: string }).sourceKind).toBe('xsd');
+    expect((parsed as { dataFormat?: string }).dataFormat).toBe('xml');
+  });
+
+  it('inferred schema persists initial sample payload metadata with usedForInference=true', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'Inferred Invoice',
+      format: 'json-schema',
+      origin: 'inferred',
+      inferred: true,
+      content: {
+        type: 'object',
+        properties: {
+          invoiceId: { type: 'string' },
+        },
+      },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    const parsed = JSON.parse(result.body) as {
+      sourceKind?: string;
+      dataFormat?: string;
+      reviewState?: string;
+      samplePayloadCount?: number;
+      samplePayloads?: Array<{ usedForInference?: boolean; source?: string; contentRef?: string }>;
+    };
+
+    expect(parsed.sourceKind).toBe('inferred_from_json');
+    expect(parsed.dataFormat).toBe('json');
+    expect(parsed.reviewState).toBe('unreviewed');
+    expect(parsed.samplePayloadCount).toBe(1);
+    expect(parsed.samplePayloads?.[0]?.usedForInference).toBe(true);
+    expect(parsed.samplePayloads?.[0]?.source).toBe('initial_upload');
+    expect(parsed.samplePayloads?.[0]?.contentRef).toMatch(/schemas\/.+\/samples\/.+\/payload\.json$/);
+
+    // one schema content write + one sample payload write
+    expect(sharedMocks.putObject).toHaveBeenCalledTimes(2);
   });
 
   it('missing required fields returns 400 validation error', async () => {
@@ -124,6 +175,50 @@ describe('create-schema handler', () => {
     const result = await handler({ body: '{}' });
 
     expect(result.statusCode).toBe(400);
+  });
+
+  it('accepts FS-076 canonical sync statuses and github repoId in source', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'CDM Schema',
+      format: 'json-schema',
+      origin: 'cdm',
+      syncStatus: 'update-available',
+      source: {
+        type: 'github',
+        repo: 'KBXT/KBX-Canonicals',
+        repoId: 1052821334,
+        branch: 'main',
+        path: 'JSONSchemas/CommonDataModels/Patient.json',
+        commitSha: 'deadbeef',
+      },
+      content: {
+        type: 'object',
+        properties: {
+          patientId: { type: 'string' },
+        },
+      },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+
+    const metadataPutCall = sharedMocks.putItem.mock.calls.find((call) => {
+      const arg = call[0] as { Item?: Record<string, unknown> } | undefined;
+      return typeof arg?.Item?.schemaId === 'string' && typeof arg?.Item?.name === 'string';
+    });
+    const metadataItem = metadataPutCall?.[0] as { Item: Record<string, unknown> };
+
+    expect(metadataItem.Item.syncStatus).toBe('update-available');
+    expect(metadataItem.Item.source).toEqual({
+      type: 'github',
+      repo: 'KBXT/KBX-Canonicals',
+      repoId: 1052821334,
+      branch: 'main',
+      path: 'JSONSchemas/CommonDataModels/Patient.json',
+      commitSha: 'deadbeef',
+    });
   });
 
   it('maps S3 service errors to error response envelope', async () => {
@@ -172,5 +267,39 @@ describe('create-schema handler', () => {
       true,
       'req-dynamo',
     );
+  });
+
+  it('upload with projectId links schema to project linkage fields', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'Project Upload',
+      format: 'json-schema',
+      origin: 'local',
+      projectId: 'proj-1',
+      content: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+    });
+    sharedMocks.getItem.mockResolvedValue({
+      projectId: 'proj-1',
+      schemaRefs: [],
+      linkedSchemaIds: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    expect(sharedMocks.updateItem).toHaveBeenCalledTimes(1);
+    const updateCall = sharedMocks.updateItem.mock.calls[0]?.[0] as {
+      ExpressionAttributeValues?: Record<string, unknown>;
+    };
+    expect(Array.isArray(updateCall.ExpressionAttributeValues?.[':schemaRefs'])).toBe(true);
+    expect(Array.isArray(updateCall.ExpressionAttributeValues?.[':linkedSchemaIds'])).toBe(true);
+
+    const refs = updateCall.ExpressionAttributeValues?.[':schemaRefs'] as Array<{ type: string }>;
+    expect(refs.at(-1)?.type).toBe('published');
   });
 });

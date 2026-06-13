@@ -167,6 +167,89 @@ describe('persistence schema-nodes', () => {
     expect(firstCommand.input.ExpressionAttributeValues[':q']).toBe('field');
   });
 
+  it('queryContains backfills missing retrieval fields in-memory for legacy nodes', async () => {
+    sendMock.mockResolvedValueOnce({
+      Items: [
+        {
+          schemaId: 'schema-1',
+          path: 'Order.LegacyCode',
+          fieldName: 'LegacyCode',
+          type: 'string',
+          depth: 1,
+          isArray: false,
+          isRequired: false,
+          parentPath: 'Order',
+          childCount: 0,
+          subtreeFieldCount: 1,
+          embeddingText: '',
+        },
+      ],
+      LastEvaluatedKey: undefined,
+    });
+
+    const mod = await importModule();
+    const result = await mod.queryContains('schema-1', 'legacy', 10);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.embeddingText).toBe('Order.LegacyCode | LegacyCode (string)');
+    expect(Array.isArray(result[0]?.embedding)).toBe(true);
+    expect((result[0]?.embedding ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('backfillRetrievalFields is safe to rerun and deterministic', async () => {
+    sendMock
+      // first run listBySchema query
+      .mockResolvedValueOnce({
+        Items: [
+          {
+            schemaId: 'schema-1',
+            path: 'Order.LegacyA',
+            fieldName: 'LegacyA',
+            type: 'string',
+            depth: 1,
+            isArray: false,
+            isRequired: false,
+            parentPath: 'Order',
+            childCount: 0,
+            subtreeFieldCount: 1,
+            embeddingText: '',
+          },
+        ],
+        LastEvaluatedKey: undefined,
+      })
+      // first run batchWrite success
+      .mockResolvedValueOnce({ UnprocessedItems: {} })
+      // second run listBySchema query
+      .mockResolvedValueOnce({
+        Items: [
+          {
+            schemaId: 'schema-1',
+            path: 'Order.LegacyA',
+            fieldName: 'LegacyA',
+            type: 'string',
+            depth: 1,
+            isArray: false,
+            isRequired: false,
+            parentPath: 'Order',
+            childCount: 0,
+            subtreeFieldCount: 1,
+            embeddingText: '',
+          },
+        ],
+        LastEvaluatedKey: undefined,
+      })
+      // second run batchWrite success
+      .mockResolvedValueOnce({ UnprocessedItems: {} });
+
+    const mod = await importModule();
+    const first = await mod.backfillRetrievalFields('schema-1');
+    const second = await mod.backfillRetrievalFields('schema-1');
+
+    expect(first).toEqual({ scanned: 1, written: 1 });
+    expect(second).toEqual({ scanned: 1, written: 1 });
+    expect(sendMock).toHaveBeenCalledTimes(4);
+  });
+
   it('deleteBySchema performs query + batched deletes', async () => {
     const items = createNodes(30).map((node) => ({ schemaId: node.schemaId, path: node.path }));
     sendMock

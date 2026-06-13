@@ -2,121 +2,90 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { autoMapSectionHttp, explainRuleHttp, suggestExpressionHttp } from '../ai-api-client';
 import { HybridAdapter } from '../hybrid-adapter';
-import { LocalStorageAdapter } from '../local-storage-adapter';
 
 vi.mock('../ai-api-client', () => ({
-  autoMapSectionHttp: vi.fn(),
   explainRuleHttp: vi.fn(),
   suggestExpressionHttp: vi.fn(),
+  autoMapSectionHttp: vi.fn(),
 }));
 
-interface StorageLike {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-  removeItem: (key: string) => void;
-  clear: () => void;
-}
-
-function createStorageMock(): StorageLike {
-  const store = new Map<string, string>();
-
-  return {
-    getItem(key: string) {
-      return store.has(key) ? store.get(key)! : null;
-    },
-    setItem(key: string, value: string) {
-      store.set(key, value);
-    },
-    removeItem(key: string) {
-      store.delete(key);
-    },
-    clear() {
-      store.clear();
-    },
-  };
-}
-
-describe('HybridAdapter', () => {
+describe('HybridAdapter (deprecated retained path)', () => {
   beforeEach(() => {
-    vi.stubGlobal('localStorage', createStorageMock());
     vi.clearAllMocks();
   });
 
-  it('extends LocalStorageAdapter', () => {
-    const adapter = new HybridAdapter('https://example.com/sandbox');
-    expect(adapter).toBeInstanceOf(LocalStorageAdapter);
+  it('warns in development mode when instantiated', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const adapter = new HybridAdapter('http://localhost:3001/api');
+
+    expect(adapter).toBeInstanceOf(HybridAdapter);
+    expect(warnSpy).toHaveBeenCalledTimes(import.meta.env.DEV ? 1 : 0);
+
+    warnSpy.mockRestore();
   });
 
-  it('routes explainRule to explainRuleHttp with apiUrl and input', async () => {
-    const adapter = new HybridAdapter('https://example.com/sandbox');
-    const input = {
-      targetPath: 'Order.Header.DocumentType',
-      expression: 'if(lt(source("InvoiceAmount"), 0), "CreditMemo", "Invoice")',
-    };
+  it('routes explainRule through ai-api-client helper', async () => {
+    vi.mocked(explainRuleHttp).mockResolvedValueOnce({ explanation: 'ok' });
+    const adapter = new HybridAdapter('http://localhost:3001/api');
 
-    vi.mocked(explainRuleHttp).mockResolvedValue({ explanation: 'ok' });
+    await expect(
+      adapter.explainRule({ targetPath: 'Order.Total', expression: 'source("Invoice.Total")' }),
+    ).resolves.toEqual({ explanation: 'ok' });
 
-    await expect(adapter.explainRule(input)).resolves.toEqual({ explanation: 'ok' });
-    expect(explainRuleHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
+    expect(explainRuleHttp).toHaveBeenCalledWith('http://localhost:3001/api', {
+      targetPath: 'Order.Total',
+      expression: 'source("Invoice.Total")',
+    });
   });
 
-  it('routes suggestExpression to suggestExpressionHttp with apiUrl and input', async () => {
-    const adapter = new HybridAdapter('https://example.com/sandbox');
-    const input = {
-      instruction: 'default to USD if source currency is missing',
-      targetPath: 'Order.Header.Currency',
+  it('routes suggestExpression through ai-api-client helper', async () => {
+    vi.mocked(suggestExpressionHttp).mockResolvedValueOnce({ expression: 'source("Invoice.Total")' });
+    const adapter = new HybridAdapter('http://localhost:3001/api');
+
+    await expect(
+      adapter.suggestExpression({
+        mappingId: 'm-1',
+        instruction: 'copy',
+        targetPath: 'Order.Total',
+        targetType: 'string',
+      }),
+    ).resolves.toEqual({ expression: 'source("Invoice.Total")' });
+
+    expect(suggestExpressionHttp).toHaveBeenCalledWith('http://localhost:3001/api', {
+      mappingId: 'm-1',
+      instruction: 'copy',
+      targetPath: 'Order.Total',
       targetType: 'string',
-      targetDescription: 'ISO currency code',
-      sourceContext: '- Invoice.Amount (number)\n- Invoice.CurrencyCode (string)',
-    };
-
-    vi.mocked(suggestExpressionHttp).mockResolvedValue({
-      expression: 'default(source("Invoice.CurrencyCode"), "USD")',
-      explanation: 'Uses source currency and falls back to USD.',
     });
-
-    await expect(adapter.suggestExpression(input)).resolves.toEqual({
-      expression: 'default(source("Invoice.CurrencyCode"), "USD")',
-      explanation: 'Uses source currency and falls back to USD.',
-    });
-    expect(suggestExpressionHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
   });
 
-  it('routes autoMapSection to autoMapSectionHttp with apiUrl and input', async () => {
-    const adapter = new HybridAdapter('https://example.com/sandbox');
-    const input = {
-      projectId: 'project-1',
-      mappingId: 'mapping-1',
+  it('routes autoMapSection through ai-api-client helper', async () => {
+    vi.mocked(autoMapSectionHttp).mockResolvedValueOnce({
+      suggestions: [],
+      retrievalMeta: { mode: 'section' },
+    });
+    const adapter = new HybridAdapter('http://localhost:3001/api');
+
+    await expect(
+      adapter.autoMapSection({
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        sectionPath: 'Order.Header',
+      }),
+    ).resolves.toEqual({ suggestions: [], retrievalMeta: { mode: 'section' } });
+
+    expect(autoMapSectionHttp).toHaveBeenCalledWith('http://localhost:3001/api', {
+      projectId: 'p-1',
+      mappingId: 'm-1',
       sectionPath: 'Order.Header',
-      sourceContext: '- Invoice.InvoiceAmount (number)',
-    };
-
-    vi.mocked(autoMapSectionHttp).mockResolvedValue({ suggestions: [] });
-
-    await expect(adapter.autoMapSection(input)).resolves.toEqual({ suggestions: [] });
-    expect(autoMapSectionHttp).toHaveBeenCalledWith('https://example.com/sandbox', input);
-  });
-
-  it('delegates CRUD methods to LocalStorageAdapter behavior', async () => {
-    const adapter = new HybridAdapter('https://example.com/sandbox');
-
-    await adapter.createSchema({
-      name: 'Invoice Schema',
-      format: 'json-schema',
-      origin: 'local',
-      content: { type: 'object' },
     });
-
-    await expect(adapter.listSchemas()).resolves.toHaveLength(1);
   });
 
-  it('keeps other non-overridden AI methods in offline-mode behavior', async () => {
-    const adapter = new HybridAdapter('https://example.com/sandbox');
+  it('keeps other inherited AI methods offline-only in deprecated path', async () => {
+    const adapter = new HybridAdapter('http://localhost:3001/api');
 
-    await expect(adapter.autoMap({ projectId: 'p', mappingId: 'm' })).rejects.toThrow(
-      'Not available in offline mode',
-    );
-    await expect(adapter.smartFix({ mappingId: 'm', diagnostics: [] })).rejects.toThrow(
+    await expect(adapter.autoMap({ projectId: 'p-1', mappingId: 'm-1' })).rejects.toThrow(
       'Not available in offline mode',
     );
   });

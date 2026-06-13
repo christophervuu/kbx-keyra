@@ -16,7 +16,7 @@ export function SchemaSearchInput({
   isSearchActive,
 }: SchemaSearchInputProps) {
   return (
-    <div className="mb-2">
+    <div>
       <div className="relative flex items-center">
         {/* Search icon */}
         <Search

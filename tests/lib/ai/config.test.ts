@@ -6,6 +6,7 @@ const AI_ENV_KEYS = [
   'AI_RUNTIME_MODE',
   'PROMPT_REGISTRY_TABLE',
   'PROMPT_REGISTRY_LOCAL_DIR',
+  'PROMPT_REGISTRY_ACTIVE_POINTER_ENV',
   'DSL_ASSET_BUCKET',
   'DSL_ASSET_KEY',
   'DSL_ASSET_LOCAL_PATH',
@@ -30,6 +31,7 @@ const ORIGINAL_ENV: Record<AIEnvKey, string | undefined> = {
   AI_RUNTIME_MODE: getTestEnvStore().AI_RUNTIME_MODE,
   PROMPT_REGISTRY_TABLE: getTestEnvStore().PROMPT_REGISTRY_TABLE,
   PROMPT_REGISTRY_LOCAL_DIR: getTestEnvStore().PROMPT_REGISTRY_LOCAL_DIR,
+  PROMPT_REGISTRY_ACTIVE_POINTER_ENV: getTestEnvStore().PROMPT_REGISTRY_ACTIVE_POINTER_ENV,
   DSL_ASSET_BUCKET: getTestEnvStore().DSL_ASSET_BUCKET,
   DSL_ASSET_KEY: getTestEnvStore().DSL_ASSET_KEY,
   DSL_ASSET_LOCAL_PATH: getTestEnvStore().DSL_ASSET_LOCAL_PATH,
@@ -76,10 +78,11 @@ describe('lib/ai loadConfig', () => {
       mode: 'aws',
       promptRegistryTable: 'integrations-keyra-promptregistry',
       promptRegistryLocalDir: undefined,
+      promptRegistryActivePointerEnv: undefined,
       dslAssetBucket: 'integrations-keyra',
       dslAssetKey: 'prompt-assets/dsl/keyra-dsl-reference.md',
       dslAssetLocalPath: undefined,
-      githubModelsEndpoint: 'https://models.inference.ai.azure.com',
+      githubModelsEndpoint: 'https://models.github.ai/inference',
       githubToken: undefined,
     });
   });
@@ -88,6 +91,7 @@ describe('lib/ai loadConfig', () => {
     clearAIEnv();
     setEnv('PROMPT_REGISTRY_TABLE', 'custom-prompt-table');
     setEnv('PROMPT_REGISTRY_LOCAL_DIR', './test-prompts');
+    setEnv('PROMPT_REGISTRY_ACTIVE_POINTER_ENV', 'prod');
     setEnv('DSL_ASSET_BUCKET', 'custom-dsl-bucket');
     setEnv('DSL_ASSET_KEY', 'prompt-assets/dsl/custom-reference.md');
     setEnv('DSL_ASSET_LOCAL_PATH', './test-assets/dsl-reference.md');
@@ -98,6 +102,7 @@ describe('lib/ai loadConfig', () => {
 
     expect(config.promptRegistryTable).toBe('custom-prompt-table');
     expect(config.promptRegistryLocalDir).toBe('./test-prompts');
+    expect(config.promptRegistryActivePointerEnv).toBe('prod');
     expect(config.dslAssetBucket).toBe('custom-dsl-bucket');
     expect(config.dslAssetKey).toBe('prompt-assets/dsl/custom-reference.md');
     expect(config.dslAssetLocalPath).toBe('./test-assets/dsl-reference.md');
@@ -124,12 +129,14 @@ describe('lib/ai loadConfig', () => {
   it('normalizes optional path/token values by trimming whitespace', () => {
     clearAIEnv();
     setEnv('PROMPT_REGISTRY_LOCAL_DIR', '   ');
+    setEnv('PROMPT_REGISTRY_ACTIVE_POINTER_ENV', '   staging   ');
     setEnv('DSL_ASSET_LOCAL_PATH', '\n\t   ');
     setEnv('GITHUB_TOKEN', '   ghp_value   ');
 
     const config = loadConfig();
 
     expect(config.promptRegistryLocalDir).toBeUndefined();
+    expect(config.promptRegistryActivePointerEnv).toBe('staging');
     expect(config.dslAssetLocalPath).toBeUndefined();
     expect(config.githubToken).toBe('ghp_value');
   });

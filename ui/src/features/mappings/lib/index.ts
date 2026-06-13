@@ -229,6 +229,7 @@ export {
   clearAutoMapSuggestions,
   hasPersistedSuggestions,
   listPersistedSections,
+  getPendingAutoMapSession,
 } from './auto-map-persistence';
 // FS-048 T-04 auto-map staleness detection
 export { detectStaleSuggestions } from './auto-map-staleness';

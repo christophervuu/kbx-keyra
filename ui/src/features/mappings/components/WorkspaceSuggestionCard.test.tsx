@@ -221,6 +221,13 @@ describe('WorkspaceSuggestionCard — expanded', () => {
     expect(screen.getByText('source.orderId')).toBeInTheDocument();
   });
 
+  it('renders generated-state label copy', () => {
+    renderCard(makeItem());
+    expect(screen.getByTestId('suggestion-generated-label-Order.Id')).toHaveTextContent(
+      'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
+    );
+  });
+
   it('renders New rule badge for new suggestions', () => {
     renderCard(makeItem({ isNew: true }));
     expect(screen.getByTestId('badge-new')).toBeInTheDocument();
@@ -310,6 +317,25 @@ describe('WorkspaceSuggestionCard — validation badges', () => {
     renderCard(makeItem({ validation: undefined }));
     expect(screen.queryByTestId('validation-badge-valid')).not.toBeInTheDocument();
     expect(screen.queryByTestId('validation-badge-invalid')).not.toBeInTheDocument();
+  });
+
+  it('renders invalid validation badge when backend-normalized missing validation is provided', () => {
+    renderCard(
+      makeItem({
+        validation: {
+          valid: false,
+          diagnostics: [
+            {
+              severity: 'error',
+              code: 'VALIDATION_MISSING',
+              message: 'No validation status returned',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(screen.getByTestId('validation-badge-invalid')).toBeInTheDocument();
   });
 });
 

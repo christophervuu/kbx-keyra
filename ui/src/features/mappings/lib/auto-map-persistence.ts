@@ -16,6 +16,11 @@ const STORAGE_KEY_PREFIX = 'keyra:automap-suggestions:';
 
 type PersistedSectionsRecord = Readonly<Record<string, PersistedSectionSuggestions>>;
 
+export interface PendingAutoMapSession {
+  readonly pendingCount: number;
+  readonly primarySectionPath: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -189,4 +194,45 @@ export function listPersistedSections(mappingId: string): readonly PersistedSect
     suggestionCount: section.items.length,
     generatedAt: section.generatedAt,
   }));
+}
+
+/**
+ * Returns mapping-level pending review metadata from persisted Auto-Map suggestions.
+ *
+ * Pending suggestions include `suggested` and `stale` statuses.
+ */
+export function getPendingAutoMapSession(mappingId: string): PendingAutoMapSession {
+  const sections = Object.values(readSections(mappingId));
+
+  let pendingCount = 0;
+  let primarySectionPath: string | null = null;
+  let latestGeneratedAt: string | null = null;
+
+  for (const section of sections) {
+    const sectionPending = section.items.filter(
+      (item) => item.status === 'suggested' || item.status === 'stale',
+    ).length;
+
+    if (sectionPending === 0) {
+      continue;
+    }
+
+    pendingCount += sectionPending;
+
+    if (primarySectionPath === null) {
+      primarySectionPath = section.sectionPath;
+      latestGeneratedAt = section.generatedAt;
+      continue;
+    }
+
+    if (latestGeneratedAt === null || section.generatedAt > latestGeneratedAt) {
+      primarySectionPath = section.sectionPath;
+      latestGeneratedAt = section.generatedAt;
+    }
+  }
+
+  return {
+    pendingCount,
+    primarySectionPath,
+  };
 }

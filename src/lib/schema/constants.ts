@@ -14,11 +14,40 @@ export const INLINE_FIELD_THRESHOLD = 500;
 export const DYNAMO_BATCH_SIZE = 25;
 
 /**
- * OpenSearch bulk indexing document batch size.
- *
- * Chosen to balance throughput and request payload size.
+ * Schema ingestion orchestration batch size (nodes per Step Functions worker batch).
  */
-export const OPENSEARCH_BULK_SIZE = 500;
+export const INGESTION_BATCH_SIZE = 500;
+
+/**
+ * Runtime retrieval cap defaults by environment stage (FS-091 Rev 2).
+ */
+export interface RetrievalCaps {
+  readonly lexicalCap: number;
+  readonly rerankCap: number;
+  readonly topK: number;
+  readonly contextExpansionCap: number;
+}
+
+const RETRIEVAL_CAPS_BY_STAGE: Record<string, RetrievalCaps> = {
+  DEV: {
+    lexicalCap: 120,
+    rerankCap: 80,
+    topK: 12,
+    contextExpansionCap: 24,
+  },
+  QA: {
+    lexicalCap: 150,
+    rerankCap: 100,
+    topK: 15,
+    contextExpansionCap: 30,
+  },
+  PROD: {
+    lexicalCap: 180,
+    rerankCap: 120,
+    topK: 18,
+    contextExpansionCap: 36,
+  },
+};
 
 function getEnvValue(key: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -51,4 +80,67 @@ export function getInlineFieldThreshold(): number {
   }
 
   return parsed;
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
+function resolveStage(): string {
+  const raw = getEnvValue('STAGE')?.trim();
+  if (!raw) {
+    return 'DEV';
+  }
+
+  return raw.toUpperCase();
+}
+
+/**
+ * Returns effective retrieval caps for current runtime environment.
+ *
+ * Defaults come from STAGE-based presets; optional env overrides:
+ * - RAG_LEXICAL_CAP
+ * - RAG_RERANK_CAP
+ * - RAG_TOPK
+ * - RAG_CONTEXT_EXPANSION_CAP
+ */
+export function getRetrievalCaps(): RetrievalCaps {
+  const stage = resolveStage();
+  const base = RETRIEVAL_CAPS_BY_STAGE[stage] ?? RETRIEVAL_CAPS_BY_STAGE.DEV;
+  const effectiveBase: RetrievalCaps = base ?? {
+    lexicalCap: 120,
+    rerankCap: 80,
+    topK: 12,
+    contextExpansionCap: 24,
+  };
+
+  const lexicalCap = parsePositiveInt(getEnvValue('RAG_LEXICAL_CAP')) ?? effectiveBase.lexicalCap;
+  const rerankCapRaw = parsePositiveInt(getEnvValue('RAG_RERANK_CAP')) ?? effectiveBase.rerankCap;
+  const topKRaw = parsePositiveInt(getEnvValue('RAG_TOPK')) ?? effectiveBase.topK;
+  const contextExpansionCap =
+    parsePositiveInt(getEnvValue('RAG_CONTEXT_EXPANSION_CAP')) ?? effectiveBase.contextExpansionCap;
+
+  const rerankCap = Math.min(rerankCapRaw, lexicalCap);
+  const topK = Math.min(topKRaw, rerankCap);
+
+  return {
+    lexicalCap,
+    rerankCap,
+    topK,
+    contextExpansionCap,
+  };
 }

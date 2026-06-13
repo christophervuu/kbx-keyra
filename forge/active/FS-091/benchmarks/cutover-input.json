@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-06-10T18:30:00.000Z",
+  "baselineAcceptanceRate": 0.82,
+  "postCutoverAcceptanceRate": 0.76,
+  "latencySamples": [
+    { "schemaFieldCount": 120, "schemaSizeSegment": "small", "retrievalMs": 180 },
+    { "schemaFieldCount": 220, "schemaSizeSegment": "small", "retrievalMs": 190 },
+    { "schemaFieldCount": 330, "schemaSizeSegment": "small", "retrievalMs": 205 },
+    { "schemaFieldCount": 410, "schemaSizeSegment": "small", "retrievalMs": 210 },
+    { "schemaFieldCount": 480, "schemaSizeSegment": "small", "retrievalMs": 220 },
+    { "schemaFieldCount": 500, "schemaSizeSegment": "small", "retrievalMs": 230 },
+    { "schemaFieldCount": 520, "schemaSizeSegment": "medium", "retrievalMs": 470 },
+    { "schemaFieldCount": 800, "schemaSizeSegment": "medium", "retrievalMs": 520 },
+    { "schemaFieldCount": 1100, "schemaSizeSegment": "medium", "retrievalMs": 540 },
+    { "schemaFieldCount": 1700, "schemaSizeSegment": "medium", "retrievalMs": 560 },
+    { "schemaFieldCount": 2600, "schemaSizeSegment": "medium", "retrievalMs": 600 },
+    { "schemaFieldCount": 4200, "schemaSizeSegment": "medium", "retrievalMs": 650 },
+    { "schemaFieldCount": 6200, "schemaSizeSegment": "large", "retrievalMs": 880 },
+    { "schemaFieldCount": 9000, "schemaSizeSegment": "large", "retrievalMs": 930 },
+    { "schemaFieldCount": 12000, "schemaSizeSegment": "large", "retrievalMs": 980 },
+    { "schemaFieldCount": 15000, "schemaSizeSegment": "large", "retrievalMs": 1020 },
+    { "schemaFieldCount": 18000, "schemaSizeSegment": "large", "retrievalMs": 1100 },
+    { "schemaFieldCount": 23000, "schemaSizeSegment": "large", "retrievalMs": 1180 }
+  ],
+  "paritySamples": [
+    { "jaccardAt10": 0.73, "ndcgDeltaAt10": -0.03 },
+    { "jaccardAt10": 0.74, "ndcgDeltaAt10": -0.02 },
+    { "jaccardAt10": 0.77, "ndcgDeltaAt10": -0.01 },
+    { "jaccardAt10": 0.75, "ndcgDeltaAt10": -0.04 },
+    { "jaccardAt10": 0.72, "ndcgDeltaAt10": -0.02 },
+    { "jaccardAt10": 0.78, "ndcgDeltaAt10": -0.03 },
+    { "jaccardAt10": 0.74, "ndcgDeltaAt10": -0.05 },
+    { "jaccardAt10": 0.79, "ndcgDeltaAt10": -0.02 },
+    { "jaccardAt10": 0.71, "ndcgDeltaAt10": -0.01 },
+    { "jaccardAt10": 0.76, "ndcgDeltaAt10": -0.03 }
+  ]
+}

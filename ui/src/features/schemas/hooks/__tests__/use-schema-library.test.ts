@@ -1,12 +1,33 @@
-import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { useSchemaLibrary } from '../use-schema-library';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { ProjectDetail, SchemaMetadata } from '@/lib/types/domain';
 
-import { useSchemaLibrary } from '../use-schema-library';
+function createStorageMock(): Storage {
+  const store = new Map<string, string>();
+
+  return {
+    get length() {
+      return store.size;
+    },
+    clear: () => {
+      store.clear();
+    },
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -17,11 +38,13 @@ function makeSchemaMeta(overrides: Partial<SchemaMetadata> = {}): SchemaMetadata
     schemaId: 'schema-1',
     name: 'Schema One',
     format: 'json-schema',
+    dataFormat: 'json',
+    sourceKind: 'json_schema',
     fieldCount: 10,
-    origin: 'local',
+    origin: 'uploaded',
+    ownership: 'user',
     status: 'ready',
-    scope: 'project',
-    syncStatus: 'local-changes',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
@@ -40,6 +63,7 @@ function makeProjectDetail(
     slug: 'project-one',
     tags: [],
     schemaRefs: schemaIds.map((id) => ({ schemaId: id, type: 'local' as const })),
+    linkedSchemaIds: schemaIds,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     mappings: [],
@@ -107,6 +131,7 @@ function makeWrapper(adapter: ApiAdapter) {
 describe('useSchemaLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('localStorage', createStorageMock());
   });
 
   it('starts in loading state', () => {
@@ -143,7 +168,80 @@ describe('useSchemaLibrary', () => {
     const item = result.current.items[0];
     expect(item.schemaId).toBe('schema-1');
     expect(item.name).toBe('Schema One');
-    expect(item.displayFormat).toBe('JSON Schema');
+    expect(item.displayFormat).toBe('JSON');
+    expect(item.ownership).toBe('user');
+    expect(item.dataFormat).toBe('JSON');
+    expect(item.status).toBe('ready');
+  });
+
+  it('uses totalFieldCount as fallback when fieldCount is zero', async () => {
+    const schemaWithLegacyCount = {
+      ...makeSchemaMeta({ schemaId: 'schema-legacy-count', fieldCount: 0 }),
+      totalFieldCount: 412,
+    } as SchemaMetadata & { totalFieldCount: number };
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([schemaWithLegacyCount]),
+      listProjects: vi.fn().mockResolvedValue([]),
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(result.current.items[0].fieldCount).toBe(412);
+  });
+
+  it('backfills fieldCount from schema detail content when list metadata is stale', async () => {
+    const schemaWithStaleCount = makeSchemaMeta({ schemaId: 'schema-stale', fieldCount: 0 });
+    const getSchema = vi.fn().mockResolvedValue({
+      metadata: schemaWithStaleCount,
+      content: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          age: { type: 'number' },
+        },
+      },
+    });
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([schemaWithStaleCount]),
+      listProjects: vi.fn().mockResolvedValue([]),
+      getSchema,
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(getSchema).toHaveBeenCalledWith('schema-stale');
+    expect(result.current.items[0].fieldCount).toBe(3);
+  });
+
+  it('does not backfill fieldCount for processing schemas', async () => {
+    const processingSchema = makeSchemaMeta({ schemaId: 'schema-processing', fieldCount: 0, status: 'processing' });
+    const getSchema = vi.fn();
+
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([processingSchema]),
+      listProjects: vi.fn().mockResolvedValue([]),
+      getSchema,
+    });
+
+    const { result } = renderHook(() => useSchemaLibrary(), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(getSchema).not.toHaveBeenCalled();
+    expect(result.current.items[0].fieldCount).toBe(0);
   });
 
   it('transitions to error state when adapter fails', async () => {
@@ -252,20 +350,22 @@ describe('useSchemaLibrary', () => {
       expect(await getStatus(s)).toBe('local');
     });
 
-    it('github source with commitSha → synced', async () => {
+    it('github source uses backend sync status (synced)', async () => {
       const s = makeSchemaMeta({
         source: { type: 'github', repo: 'r', branch: 'main', path: '/x.json', commitSha: 'abc123' },
         inferred: false,
+        syncStatus: 'synced',
       });
       expect(await getStatus(s)).toBe('synced');
     });
 
-    it('github source without commitSha → not-synced', async () => {
+    it('github source without commitSha uses schema sync status from backend contract', async () => {
       const s = makeSchemaMeta({
         source: { type: 'github', repo: 'r', branch: 'main', path: '/x.json' },
         inferred: false,
+        syncStatus: 'sync-failed',
       });
-      expect(await getStatus(s)).toBe('not-synced');
+      expect(await getStatus(s)).toBe('sync-failed');
     });
 
     it('inferred schema → inferred (takes priority over source)', async () => {
@@ -280,9 +380,9 @@ describe('useSchemaLibrary', () => {
   describe('filter/sort state updates', () => {
     async function setupHook() {
       const schemas = [
-        makeSchemaMeta({ schemaId: '1', name: 'Alpha', origin: 'local', scope: 'project', format: 'json-schema' }),
-        makeSchemaMeta({ schemaId: '2', name: 'Beta', origin: 'published', scope: 'global', format: 'xsd' }),
-        makeSchemaMeta({ schemaId: '3', name: 'Gamma', origin: 'cdm', scope: 'global', format: 'json-schema' }),
+        makeSchemaMeta({ schemaId: '1', name: 'Alpha', origin: 'uploaded', ownership: 'user', format: 'json-schema', dataFormat: 'json', status: 'ready' }),
+        makeSchemaMeta({ schemaId: '2', name: 'Beta', origin: 'uploaded', ownership: 'user', format: 'xsd', dataFormat: 'xml', status: 'processing' }),
+        makeSchemaMeta({ schemaId: '3', name: 'Gamma', origin: 'cdm', ownership: 'cdm', format: 'json-schema', dataFormat: 'json', status: 'error' }),
       ];
 
       const adapter = createMockAdapter({
@@ -309,41 +409,42 @@ describe('useSchemaLibrary', () => {
       expect(result.current.filteredItems[0].name).toBe('Alpha');
     });
 
-    it('toggleOriginFilter adds and removes origin', async () => {
+    it('toggleOwnershipFilter adds and removes ownership', async () => {
       const { result } = await setupHook();
 
       act(() => {
-        result.current.toggleOriginFilter('local');
+        result.current.toggleOwnershipFilter('cdm');
       });
-      expect(result.current.filters.origins).toContain('local');
+      expect(result.current.filters.ownerships).toContain('cdm');
       expect(result.current.filteredItems).toHaveLength(1);
 
       act(() => {
-        result.current.toggleOriginFilter('local');
+        result.current.toggleOwnershipFilter('cdm');
       });
-      expect(result.current.filters.origins).not.toContain('local');
+      expect(result.current.filters.ownerships).not.toContain('cdm');
       expect(result.current.filteredItems).toHaveLength(3);
     });
 
-    it('toggleFormatFilter filters by display format', async () => {
+    it('toggleDataFormatFilter filters by data format', async () => {
       const { result } = await setupHook();
 
       act(() => {
-        result.current.toggleFormatFilter('XSD');
+        result.current.toggleDataFormatFilter('XML');
       });
 
       expect(result.current.filteredItems).toHaveLength(1);
       expect(result.current.filteredItems[0].schemaId).toBe('2');
     });
 
-    it('toggleScopeFilter filters by scope', async () => {
+    it('toggleStatusFilter filters by status', async () => {
       const { result } = await setupHook();
 
       act(() => {
-        result.current.toggleScopeFilter('global');
+        result.current.toggleStatusFilter('ready');
       });
 
-      expect(result.current.filteredItems).toHaveLength(2);
+      expect(result.current.filteredItems).toHaveLength(1);
+      expect(result.current.filteredItems[0].schemaId).toBe('1');
     });
 
     it('clearFilters resets all filters', async () => {
@@ -351,7 +452,7 @@ describe('useSchemaLibrary', () => {
 
       act(() => {
         result.current.setSearch('alpha');
-        result.current.toggleOriginFilter('local');
+        result.current.toggleOwnershipFilter('user');
       });
 
       act(() => {
@@ -359,7 +460,7 @@ describe('useSchemaLibrary', () => {
       });
 
       expect(result.current.filters.search).toBe('');
-      expect(result.current.filters.origins).toHaveLength(0);
+      expect(result.current.filters.ownerships).toHaveLength(0);
       expect(result.current.filteredItems).toHaveLength(3);
     });
 
@@ -383,6 +484,19 @@ describe('useSchemaLibrary', () => {
       });
 
       expect(result.current.sort).toEqual({ field: 'fieldCount', direction: 'asc' });
+    });
+
+    it('view mode defaults to card and persists to localStorage', async () => {
+      const { result } = await setupHook();
+
+      expect(result.current.viewMode).toBe('card');
+
+      act(() => {
+        result.current.setViewMode('list');
+      });
+
+      expect(result.current.viewMode).toBe('list');
+      expect(localStorage.getItem('keyra.schemas.viewMode')).toBe('list');
     });
 
     it('setSort with explicit direction overrides toggle logic', async () => {

@@ -46,6 +46,7 @@ const PROJECT_DETAIL: ProjectDetail = {
   description: 'A test project',
   slug: 'project-one',
   schemaRefs: [{ schemaId: 'schema-1', type: 'local' }],
+  linkedSchemaIds: ['schema-1'],
   tags: ['alpha'],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
@@ -80,6 +81,11 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    getCurrentDeployments: vi.fn().mockResolvedValue({
+      DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
+      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+    }),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -254,8 +260,26 @@ describe('useProjectOverview', () => {
       await result.current.removeSchema('schema-1');
     });
 
-    expect(adapter.updateProject).toHaveBeenCalledWith('project-1', { schemaRefs: [] });
+    expect(adapter.updateProject).toHaveBeenCalledWith('project-1', { linkedSchemaIds: [] });
     expect(result.current.schemas).toHaveLength(0);
+  });
+
+  it('loads schemas from linkedSchemaIds when schemaRefs are empty', async () => {
+    const adapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        schemaRefs: [],
+        linkedSchemaIds: ['schema-1'],
+      }),
+    });
+
+    const { result } = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+    expect(adapter.getSchema).toHaveBeenCalledWith('schema-1');
+    expect(result.current.schemas).toHaveLength(1);
   });
 
   it('deleteMappingAction removes mapping from list', async () => {

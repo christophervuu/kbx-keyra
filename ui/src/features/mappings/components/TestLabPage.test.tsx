@@ -7,9 +7,9 @@ import {
 } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
+import { TestLabPage } from '@/features/mappings/components/TestLabPage';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
-import { TestLabPage } from '@/features/mappings/components/TestLabPage';
 import MappingTestLab from '@/routes/pages/MappingTestLab';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +55,8 @@ const mockAdapter: ApiAdapter = {
   listSchemas: vi.fn(),
   getSchema: vi.fn().mockReturnValue(new Promise(() => {})),
   createSchema: vi.fn(),
+  updateSchema: vi.fn(),
+  markSchemaReviewed: vi.fn(),
   deleteSchema: vi.fn(),
   listMappings: vi.fn(),
   getMapping: vi.fn().mockReturnValue(new Promise(() => {})),
@@ -76,6 +78,7 @@ const mockAdapter: ApiAdapter = {
   getDeploymentDiff: vi.fn(),
   listCdmSchemas: vi.fn(),
   linkCdmSchema: vi.fn(),
+  syncAllCdmSchemas: vi.fn(),
   syncCdmSchema: vi.fn(),
   listPublishedSchemas: vi.fn(),
   publishSchemaToGitHub: vi.fn(),

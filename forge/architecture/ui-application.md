@@ -58,7 +58,7 @@ ui/src/
     PageHeader.tsx            Primitive page heading block
     StatusBadge.tsx           Primitive deploy status badge
     layout/                   App shell components
-      AppLayout.tsx           NavBar + Breadcrumbs + Outlet wrapper (provides BreadcrumbProvider)
+      AppLayout.tsx           Sidebar-first shell (`NavBar` sidebar) + Breadcrumbs + Outlet wrapper (provides BreadcrumbProvider)
       BreadcrumbContext.tsx   Split context for breadcrumb label registration (FS-050 T-01)
       Breadcrumbs.tsx         Path-derived breadcrumb navigation (reads from BreadcrumbContext)
       index.ts                Layout component barrel
@@ -67,7 +67,7 @@ ui/src/
     use-async-state.ts        Async state lifecycle hook
 
   features/
-    home/                     Home dashboard feature module (metrics, list modes, recent activity, attention summary)
+    home/                     Home dashboard feature module (Projects panel + Recent activity panel workspace layout)
       index.ts                Feature barrel
       components/             Dashboard page composition and state UI (skeleton/error/empty/loaded)
       hooks/                  Dashboard data + view mode + recent-activity orchestration
@@ -87,7 +87,7 @@ ui/src/
         SchemaGitStatus.tsx   Git/source status section (upload vs GitHub source metadata)
         SchemaUsageSection.tsx Usage section (projects + mappings that reference schema)
         SchemaActions.tsx     Context-dependent actions + confirm-dialog flows
-        InferredSchemaBanner.tsx Dismissible inferred-schema warning (localStorage-backed UI preference)
+        InferredSchemaBanner.tsx Persistent inferred-schema warning with explicit `Mark as Reviewed` action for `needs_review` inferred schemas
         ViewRawModal.tsx      Read-only raw schema modal with lightweight syntax highlighting + copy
         ReplaceFileDialog.tsx Replace-file flow: confirm -> pick -> parse -> persist -> refresh
         SchemaTreeView.tsx    Virtualized schema tree renderer (editable + read-only modes)
@@ -108,15 +108,13 @@ ui/src/
         SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
         TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Center panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Center panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest AI vertical slices wired (FS-041/FS-042) with inline `ExplanationPanel` / `SuggestExpressionInline`; savedRules prop drives per-field diff (FS-040 T-05)
+        ScalarFieldBuilder.tsx Center panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest + Smart Fix AI slices wired (FS-041/FS-042/FS-071) with inline `ExplanationPanel` / `SuggestExpressionInline` / `SmartFixInline`; Smart Fix includes rule-diagnostic request context, validation-gated Accept, stale conflict rerun CTA, and non-mutating dismiss/error behavior
         SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
         AutoMapWorkspace.tsx        FS-048 center-panel Auto-Map review workspace shell: sticky header, toolbar slot, refresh confirmation slot, no-source-data slot, loading/error/empty/list states, completion banner
         WorkspaceHeader.tsx         FS-048 workspace header (section path, summary counts, last refreshed metadata, Back to Editor)
         WorkspaceSuggestionCard.tsx FS-048 suggestion card with lifecycle badges, expand/collapse, diagnostics, stale indicator, per-item actions (Accept/Edit/Dismiss/Undo)
         WorkspaceToolbar.tsx        FS-048 filter chips + bulk actions (Accept All Valid, Refresh Unmapped/Stale/All)
         WorkspaceSuggestionPreview.tsx FS-048 optional per-suggestion preview section (current vs suggested output) + no-source-data callout
-        AutoMapReviewDrawer.tsx     FS-046 legacy drawer component retained for compatibility; no longer composed in MappingEditor (retired by FS-048)
-        SuggestionReviewCard.tsx    FS-046 legacy drawer card retained for compatibility; superseded by WorkspaceSuggestionCard in FS-048
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (FS-043, updated FS-051); header row: status icon + type badge + target path + Builder/Editor ModeToggle + ⋮ HeaderOverflowMenu; Builder mode: ArrayModeSelector + CollectionEditorSlot + ItemTemplateEditor; Editor mode: RawDslEditor + parse status + error list + restore/reset actions; nested focused panel (NestedArrayPanel) with "Back to parent" navigation; ValidationSummaryRow pinned between feedback area and content; action row: Reset draft + Discard changes (no AI buttons — intentionally omitted)
         ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches (4 cards only; customExpression removed as mode card in FS-051 T-01 — raw DSL now accessed via Builder/Editor toggle in header)
@@ -204,7 +202,6 @@ ui/src/
         use-suggest-expression.ts  FS-042 suggest-expression async lifecycle hook (`idle|inputting|loading|success|error`) with abort-on-reinvoke/unmount/reset semantics and user-friendly error mapping
         use-auto-map-workspace.ts  FS-048 Auto-Map workspace lifecycle hook: section-triggered generation + persistence hydration, lifecycle transitions (suggested/accepted/edited/dismissed/stale), refresh merge strategy, filtering, and bulk actions
         use-suggestion-preview.ts  FS-048 lazy per-expression preview hook for workspace cards (debounced evaluateExpression with source-data dependency)
-        use-auto-map-review.ts     FS-046 legacy drawer hook retained for compatibility; no longer used by MappingEditor composition
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
       lib/
@@ -237,10 +234,9 @@ ui/src/
     api/
       types.ts                ApiAdapter contract
       local-storage-adapter.ts
-      http-adapter.ts         FS-055 HTTP adapter: CRUD over HTTP for schemas/mappings/versions/projects; non-CRUD methods throw structured NOT_IMPLEMENTED placeholders
+      http-adapter.ts         FS-055 HTTP adapter: CRUD + AI + schema-query routes over HTTP for canonical backend mode; deferred non-core methods use structured FEATURE_NOT_ENABLED gating
       http-client.ts          FS-055 reusable HTTP utility (typed fetch wrapper: timeout, canonical envelope parsing, retry/backoff, error normalization)
-      errors.ts               FS-055 API errors (`AdapterMethodNotImplementedError`)
-      hybrid-adapter.ts       Legacy/deprecated adapter retained for compatibility; no longer bootstrap-selected (FS-055)
+      errors.ts               FS-055 API errors (`FeatureNotEnabledError`; deprecated compatibility alias retained for migration compatibility)
       ai-api-client.ts        HTTP client functions for AI endpoints (`explainRuleHttp`, `suggestExpressionHttp`) (FS-041, FS-042)
       adapter-provider.tsx
       bootstrap.ts            Adapter selection using VITE_API_URL (`HttpAdapter` when set, `LocalStorageAdapter` otherwise)
@@ -283,8 +279,7 @@ This broad contract is intentionally stable for UI call sites; adapter implement
 ### Implementations
 
 - **Current (Phase 0):** `LocalStorageAdapter` — all operations use localStorage
-- **Current (Phase 1 transition / FS-055):** `HttpAdapter` — schema/mapping/version/project CRUD routes through shared HTTP client utility; non-CRUD methods currently throw structured `AdapterMethodNotImplementedError` placeholders (`code: "NOT_IMPLEMENTED"`, `retryable: false`)
-- **Legacy (retained):** `HybridAdapter` — earlier showcase adapter that extended `LocalStorageAdapter` and overrode selected AI methods; retained for compatibility but deprecated and no longer selected by bootstrap
+- **Current (Phase 1 transition / FS-055 + FS-065 reconciliation):** `HttpAdapter` routes canonical backend operations through the shared HTTP client utility, including retained AI methods and schema query; deferred non-core methods return structured `FeatureNotEnabledError` (`code: "FEATURE_NOT_ENABLED"`, `retryable: false`)
 
 ### Bootstrap
 
@@ -294,7 +289,7 @@ Startup behavior is centralized in `createAdapter()`:
 2. If unset/empty → return `new LocalStorageAdapter()`
 3. If set → return `new HttpAdapter(apiUrl)`
 
-`HybridAdapter` is retained in the codebase with a dev-only deprecation warning and is not used by `createAdapter()`.
+`createAdapter()` has a single production backend path: `HttpAdapter` when `VITE_API_URL` is set.
 
 ### HTTP Client Utility and Error Normalization (FS-055)
 
@@ -310,27 +305,27 @@ Startup behavior is centralized in `createAdapter()`:
   - max attempts = 3, backoff = `500ms * attempt + jitter`
 - Errors are normalized to `HttpClientError` with `statusCode?`, `code?`, and `retryable`, intentionally compatible with `toAppError()` / `AppError` in async UI state
 
-### Placeholder Error Contract (FS-055)
+### Deferred Feature Gating Contract
 
-`AdapterMethodNotImplementedError` (`ui/src/lib/api/errors.ts`) is used by `HttpAdapter` non-CRUD placeholders.
+`FeatureNotEnabledError` (`ui/src/lib/api/errors.ts`) is used for explicitly deferred non-core methods.
 
-- `message`: `"{methodName}" is not yet available in HTTP mode.`
-- `code`: `NOT_IMPLEMENTED`
+- `message`: `"{featureName}" is not enabled in this mode.`
+- `code`: `FEATURE_NOT_ENABLED`
 - `retryable`: `false`
 
-This gives deterministic `toAppError()` output for unimplemented HTTP-mode adapter methods.
+This gives deterministic `toAppError()` output for intentionally gated adapter methods.
 
 ### AI API Client
 
-`ui/src/lib/api/ai-api-client.ts` provides focused HTTP client functions for individual AI endpoints:
+`ui/src/lib/api/ai-api-client.ts` provides focused HTTP helpers for AI endpoint behavior tests and legacy-retained compatibility only:
 
-- **Purpose:** Thin HTTP wrappers consumed by `HybridAdapter` (and potentially future `HttpAdapter`)
+- **Purpose:** endpoint-focused HTTP wrappers retained for deprecated `HybridAdapter` behavior parity and test utilities; canonical production routing is through `HttpAdapter`
 - **Current exports:**
   - `explainRuleHttp(apiUrl, input)` → `Promise<ExplainRuleResult>`
   - `suggestExpressionHttp(apiUrl, input)` → `Promise<SuggestExpressionResult>`
   - `autoMapSectionHttp(apiUrl, input)` → `Promise<AutoMapSectionResult>`
 - **Pattern:** One exported function per AI endpoint; each handles fetch + endpoint-specific timeout + response envelope parsing + user-friendly error mapping
-- **Not an adapter** — does not implement `ApiAdapter`; consumed by adapter implementations
+- **Not an adapter** — does not implement `ApiAdapter`; must not be used for new production call paths
 
 ### Dependency Injection
 
@@ -338,7 +333,20 @@ This gives deterministic `toAppError()` output for unimplemented HTTP-mode adapt
 
 ### Offline-Only Enforcement
 
-In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw `Error("Not available in offline mode")` to enforce Phase 0 boundaries. In `HttpAdapter`, non-CRUD methods throw structured `AdapterMethodNotImplementedError` placeholders; CRUD methods use the shared HTTP client utility and normalized `HttpClientError` semantics.
+In `LocalStorageAdapter`, AI/GitHub/server-preview methods throw deterministic offline-unavailable errors via centralized `offlineModeError()` (`Error("Not available in offline mode")`) to enforce Phase 0 boundaries. In `HttpAdapter`, canonical backend methods use the shared HTTP client utility and normalized `HttpClientError` semantics; explicitly deferred methods throw structured `FeatureNotEnabledError` and temporarily unavailable backend endpoints are surfaced as `FEATURE_NOT_ENABLED` without hybrid fallback.
+
+FS-076 CDM integration status (implemented foundation):
+
+- `HttpAdapter.listCdmSchemas(path?)` -> `GET /schemas/cdm` (client-driven directory navigation)
+- `HttpAdapter.linkCdmSchema(input)` -> `POST /schemas/cdm/link`
+- `HttpAdapter.syncCdmSchema(schemaId)` -> `POST /schemas/:id/sync-cdm` (explicit manual re-sync)
+- `HttpAdapter.syncCdmSchema(schemaId, { statusOnly: true })` -> `GET /schemas/:id/sync-cdm` (lightweight status-refresh)
+
+CDM constraints represented in UI architecture:
+
+- Browse results are scoped to `JSONSchemas/CommonDataModels` with one-directory-level-per-request semantics.
+- CDM schemas are treated as read-only in schema surfaces (no edit/replace/remove/publish/promote actions).
+- CDM flows are read-only against GitHub from the UI perspective (no publish/write pathway in this integration slice).
 
 Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Phase 0:
 - `listTemplates()` returns `[]`
@@ -346,31 +354,181 @@ Implemented placeholder behavior in `LocalStorageAdapter` is intentional for Pha
 
 These stubs keep interface shape stable while backend-backed implementations are deferred.
 
-### Showcase AI Integration Pattern (FS-041 / FS-042)
+### Canonical AI Integration Pattern (FS-041 / FS-042 / FS-065 / FS-068)
 
 AI features are integrated as thin vertical slices with a stable layering pattern:
 
 1. **Type contract** in `ui/src/lib/types/domain.ts`
-2. **HTTP function** in `ui/src/lib/api/ai-api-client.ts`
-3. **`HybridAdapter` override** to route the method to HTTP when `VITE_API_URL` is set
-4. **Feature hook** for async lifecycle + abort semantics
-5. **Inline UI component** for user interaction and result presentation
+2. **`HttpAdapter` backend route mapping** in `ui/src/lib/api/http-adapter.ts`
+3. **Feature hook** for async lifecycle + abort semantics
+4. **Inline UI component** for user interaction and result presentation
 
 Current slices:
-- **Explain Rule (FS-041):** `explainRuleHttp` → `HybridAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
-- **Suggest Expression (FS-042):** `suggestExpressionHttp` → `HybridAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
-- **Auto-Map Review Workspace (FS-046 → FS-048):** `autoMapSectionHttp` → `HybridAdapter.autoMapSection` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+- **Explain Rule (FS-041, hardened by FS-069):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
+- **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
+- **Smart Fix (FS-071):** `HttpAdapter.smartFix` → `useSmartFix` → `SmartFixInline` (rendered in `ScalarFieldBuilder`)
+- **Auto-Map Review Workspace (FS-046 → FS-048, hardened by FS-073):** `HttpAdapter.autoMapSection`/`autoMap` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+- **Phase 2 route-complete adapter surface (FS-068):** `HttpAdapter.autoMap` / `smartFix` / `validateMappings` map to canonical `/ai/*` routes; temporarily unavailable backend capability is surfaced as `FEATURE_NOT_ENABLED`
 
-The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion, section-level review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
+Explain Rule UI semantics (current canonical behavior):
+- The explanation surface is explicitly labeled as **AI-generated assistance**.
+- The panel copy clarifies explanations are **not persisted** to mapping content.
+- Explain success/failure flows are read-only: they must not mutate expression text, rule ordering, or draft/persisted mapping state.
+- Optional backend metadata (`confidence`, `limitations[]`) is part of the UI type/API contract even when not prominently rendered.
 
-### Suggest Source Context and RAG Compatibility (FS-042)
+Canonical backend-mode contract notes:
 
-`SuggestExpressionInput.sourceContext` is a **showcase/local-first** context mechanism, not a long-term retrieval architecture dependency.
+- `HttpAdapter` is the single canonical production adapter path when `VITE_API_URL` is set.
+- Deferred non-core methods use explicit `FEATURE_NOT_ENABLED` errors; no silent local or alternate-adapter fallback is allowed.
+- Schema query (`querySchemaNodes`) is consumed through `HttpAdapter` -> `POST /schemas/:id/query`; backend retrieval policy is OpenSearch-first with explicit gated degraded fallback.
 
-- **Today (showcase):** UI derives source context from `ParsedSchema` leaf fields and sends a pre-formatted text block (max 200 lines), format: `- {path} ({type})`.
-- **Transition path:** backend RAG retrieval (OpenSearch + structural enrichment) can ignore `sourceContext` and fetch context server-side.
-- **Compatibility model:** API supports both paths simultaneously; `sourceContext` remains optional/compatible during migration.
-- **UI impact:** no UI surface/API-layer redesign is required when backend transitions to RAG.
+Non-canonical/prohibited shortcut patterns:
+
+- `HybridAdapter` is retained for one release cycle as a **deprecated bridge only** (dev warning on instantiation); it is not part of canonical bootstrap/runtime routing.
+- New `HybridAdapter` callsites are prohibited by repository guardrails.
+- New production use of legacy `ai-api-client.ts` call loops is prohibited by repository guardrails.
+- Reintroducing legacy Auto-Map drawer/review loop surfaces retired in FS-065 is prohibited.
+
+The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). FS-073 extends this to canonical backend mode semantics (`mode: 'section' | 'whole'`) on the shared `/ai/auto-map` endpoint while preserving one workspace interaction model. See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
+
+### Cross-feature AI suggestion review contract (FS-074)
+
+FS-074 hardens a shared, reusable review contract across Explain Rule, Suggest Expression, Smart Fix, AI Validation follow-on recommendation surfaces, and Auto-Map workspace cards.
+
+Canonical invariants:
+
+- **Generated vs committed is explicit:** AI outputs are rendered as generated review artifacts and must be visually/behaviorally distinct from committed/draft mapping content.
+- **Mutation boundary is explicit:** mapping mutations are allowed only from explicit user review actions (`Accept`, or `Edit` + explicit apply). Generate/refresh/retry/failure paths must not mutate draft or persisted mapping state.
+- **Universal V1 apply guards:**
+  - validation-invalid suggestions are blocked from apply until edited into a valid expression
+  - stale suggestions are blocked from acceptance until refreshed against latest draft/rule state
+- **Explain Rule remains generated/discard-only:** no accept-to-mutate path exists for explanations.
+- **Batch accept is deterministic and eligibility-scoped:** only eligible suggestions are applied; ineligible items are skipped with deterministic reason accounting (`invalid`, `stale`, `dismissed`, `already-reviewed`/non-pending states).
+- **Audit traceability requirement:** minimum feature-level review events are `suggestion_generated`, `suggestion_viewed`, `suggestion_edited`, `suggestion_accepted`, `suggestion_dismissed`, `apply_blocked_invalid`, `apply_blocked_stale`, with request lineage continuity through API/runtime correlation identifiers.
+
+### Suggest Expression canonical review model (FS-070)
+
+Suggest Expression uses backend-owned retrieval and validation-aware review semantics.
+
+Canonical UI→API request contract:
+
+- `mappingId`
+- `instruction`
+- `targetPath`
+- `targetType`
+- optional `targetDescription`
+
+`sourceContext` is non-canonical for production flow; context retrieval/assembly is owned by backend handlers.
+
+Canonical hook/UI state model:
+
+- `useSuggestExpression` lifecycle: `idle | inputting | loading | success | error`
+- success-state sub-state:
+  - `suggestionState: 'ready' | 'invalid'`
+  - `readyToApply: boolean`
+- invalid suggestions are represented as success-state review outcomes (with diagnostics), not transport failures.
+
+Canonical `SuggestExpressionInline` review behavior:
+
+- Inline editable suggestion area supports **edit-before-apply**.
+- Surface is explicitly labeled as AI-generated assistance and non-persistent.
+- Validation diagnostics are shown for invalid suggestions/reviewed expressions.
+- **Strict apply block:** Accept is disabled until the current reviewed expression validates.
+- Dismiss closes suggestion UI without mutating current draft expression.
+
+Draft mutation semantics:
+
+- Accept applies only to in-memory draft state (`updateDraft`) for the active target field.
+- No implicit save/persist occurs from suggestion generation, invalid outcomes, dismiss, or retry flows.
+
+### Smart Fix canonical review model (FS-071)
+
+Smart Fix is a rule-diagnostic correction flow with explicit review semantics and stale protection.
+
+Canonical UI→API request contract:
+
+- `mappingId`
+- `ruleIndex`
+- `targetPath`
+- `failingExpression`
+- `diagnostics[]` (default: all diagnostics for selected rule)
+- optional `diagnosticScope: 'all' | 'single'`
+- optional `selectedDiagnosticIndex`
+- optional `targetType`
+- optional stale snapshot fields: `ruleVersion`, `ruleHash`
+
+Canonical hook/UI state model:
+
+- `useSmartFix` lifecycle: `idle | loading | success-valid | success-invalid | stale-mismatch | error`
+- command surface: `run`, `retry`, `rerunOnLatest`, `dismiss`, `reset`
+- stale conflicts are represented as dedicated `stale-mismatch` state (not generic errors)
+
+Canonical `SmartFixInline` review behavior:
+
+- Shows original expression, suggested expression, explanation, and validation diagnostics.
+- Surface is explicitly labeled as AI-generated assistance and non-persistent.
+- Explicit user actions: **Accept**, **Edit**, **Dismiss**.
+- **Strict apply block:** one-click Accept is allowed only for validation-valid suggestions.
+- Invalid suggestions remain review-only until edited into a valid expression (no “Apply anyway” path).
+- Stale mismatch blocks direct apply and offers **Re-run on latest rule** CTA.
+
+Draft mutation semantics:
+
+- Accept applies only to in-memory draft state (`updateDraft`) for the selected field and immediately re-enters normal validation flow.
+- Dismiss, error, stale-mismatch, and retry flows do not mutate draft or persisted mapping state.
+
+### AI Validation canonical review model (FS-072)
+
+AI Validation is a mapping-quality **advisory report** flow and remains explicitly distinct from deterministic validation diagnostics.
+
+Canonical UI→API request contract:
+
+- required: `mappingId`
+- optional: `sampleData: { contentType, content }`
+- request path: `ApiAdapter.validateMappings` → `HttpAdapter` → `POST /ai/validate-mappings`
+
+Canonical hook/UI state model:
+
+- `useAiValidation` lifecycle: `idle | loading | success | error`
+- command surface: `run`, `retry`, `reset`
+- request cancellation semantics:
+  - reinvoking `run` aborts prior in-flight request
+  - `reset` aborts in-flight request and clears state
+  - unmount aborts in-flight request
+
+Canonical Mapping Editor integration behavior:
+
+- `useMappingEditor` exposes AI validation orchestration via:
+  - state: `aiValidation`
+  - actions: `runAiValidation`, `retryAiValidation`, `resetAiValidation`
+- Trigger model is **manual-only** in V1:
+  - editing rules does not auto-run AI validation
+  - user must explicitly click Validate with AI / Retry
+
+Canonical report rendering behavior (`AiValidationPanel`):
+
+- Placement: Rules view, rendered above `RuleList`.
+- Labeling: clearly marked as AI-generated guidance/advisory.
+- Report sections:
+  - summary counts/signal
+  - issue list with canonical V1 category/severity badges
+  - per-issue description and recommendation
+- Canonical V1 enums surfaced in UI:
+  - `category`: `correctness | completeness | maintainability | risk`
+  - `severity`: `info | warning | error`
+
+Rule-link behavior:
+
+- `affectedRules[]` references attempt resolution in this order:
+  1. valid `ruleIndex`
+  2. fallback by `targetPath`
+- When unresolved/stale, panel renders non-click fallback text/chip and does not crash.
+
+Deterministic-vs-AI boundary semantics:
+
+- Deterministic engine diagnostics remain the authoritative validation channel.
+- AI Validation findings are additive and non-blocking guidance.
+- AI Validation failures do not mutate mapping draft state or deterministic diagnostics.
 
 ---
 
@@ -500,7 +658,7 @@ This pattern is the canonical single-expression engine usage for UI surfaces tha
 - `/projects/:projectId` → Project Overview
 - `/projects/:projectId/settings` → Project Settings
 - `/projects/:projectId/deployments` → Project Deployments
-- `/projects/:projectId/mappings/new` → Create Mapping
+- `/projects/:projectId/mappings/new` → Create Mapping (FS-088 single-page setup workspace)
 - `/projects/:projectId/mappings/:mappingId` → Mapping Editor
 - `/projects/:projectId/mappings/:mappingId/deploy` → Mapping Deployment
 - `/projects/:projectId/mappings/:mappingId/test-lab` → Test Lab (FS-021 T-06, FS-032)
@@ -518,18 +676,44 @@ Router runtime config (`App.tsx`):
 
 All pages render inside a single shell route:
 
-- `AppLayout` provides `NavBar` + `Breadcrumbs` + content container (`<Outlet />`)
+- `AppLayout` provides a **sidebar-first shell**: left `NavBar` sidebar + right content column with optional `Breadcrumbs` and content container (`<Outlet />`)
+- `NavBar` is now a collapsible sidebar (not a top row). Primary routes render this sidebar as the global navigation surface.
+- Sidebar collapse preference is persisted client-side in localStorage (`keyra:app-sidebar-collapsed`) and gracefully defaults to expanded when storage is unavailable.
 - Mapping Editor and Test Lab are treated as focused-workspace routes: breadcrumbs are suppressed and content renders full-bleed (`<main className="flex-1">`) rather than the constrained `max-w-7xl` container
+- Focused routes continue to render within the sidebar shell; top navigation is not reintroduced, and dual top+side navigation is prohibited.
 - Not Found route is also rendered inside shell
+
+### Sidebar Navigation Pattern (FS-084)
+
+`NavBar` now represents the application sidebar contract:
+
+- Expanded mode: KeyRa brand text, workspace label, icon + text nav rows
+- Collapsed mode: icon-only rows with accessible labels/tooltips
+- Active state uses both color and structural cues (left indicator + emphasized typography), avoiding color-only signaling
+- Interaction contract includes hover states and visible `focus-visible` ring treatment on nav rows and collapse toggle
 
 ### Breadcrumb Strategy
 
-Breadcrumbs are derived from `location.pathname` segments:
-- Home is always first
-- Intermediate segments are links
-- Last segment is current-page text
-- Dynamic IDs display raw parameter values by default
-- `BreadcrumbContext` allows route pages/features to register human-readable labels for dynamic segments (e.g., project/mapping/schema names)
+Breadcrumbs are location-derived but route-shape-aware for project surfaces.
+
+Baseline behavior:
+
+- `Home` is always first.
+- The final segment is always current-page text (`aria-current="page"`) and never a link.
+- `BreadcrumbContext` allows route pages/features to register human-readable labels for dynamic segments (for example, project/mapping/schema names).
+
+FS-086 hierarchy contract for project/mapping/deployment routes:
+
+- `/projects/:projectId` -> `Home / Projects / {projectName}`
+- `/projects/:projectId/mappings/:mappingId` -> `Home / Projects / {projectName} / Mappings / {mappingName}`
+- `/projects/:projectId/mappings/:mappingId/deploy` -> `Home / Projects / {projectName} / Mappings / {mappingName} / Deployment`
+- `/projects/:projectId/deployments` -> `Home / Projects / {projectName} / Deployments`
+
+Clickability constraints (route-reality-aware):
+
+- `Projects` is structural and non-clickable until a real `/projects` route exists.
+- `Mappings` is structural and non-clickable in the hierarchy.
+- Dynamic project/mapping segments are linkable only when they represent real parent routes in the current path.
 
 ### Route Constants
 
@@ -555,16 +739,82 @@ All navigable paths are centralized in `ui/src/routes/paths.ts` (`PATHS`) for re
 
 ---
 
+## Home Dashboard Architecture (FS-084)
+
+FS-084 redefines the Home dashboard toward a workspace composition aligned to the spec-local canonical target: `forge/active/FS-084/keyra_dashboard_simple.html`.
+
+### Layout + hierarchy
+
+- Header: `Dashboard` title + muted subtitle + right-aligned `New project` action
+- Main content row (desktop):
+  - dominant **Projects** panel (left)
+  - secondary **Recent activity** panel (right)
+- Narrower desktop widths may stack panels vertically while preserving hierarchy.
+
+### Panel contracts
+
+- **Projects panel (`ProjectList` + `ProjectCard`)**
+  - section title + grid/list toggle
+  - search input
+  - project cards with name, status badge, description, mapping/schema counts, edited timestamp, and Open affordance
+  - intentional empty state when filters/search yield no results
+
+- **Recent activity panel (`ActivityPlaceholder`)**
+  - renders recent entries when available
+  - renders intentional placeholder empty state when activity data is absent/unimplemented
+  - empty state is explicit and polished (not implied failure)
+
+### Removed surfaces in redesigned dashboard
+
+- The prior dashboard metrics strip is removed from Home dashboard composition in FS-084.
+- Attention/continue sections from earlier dashboard IA are not part of the default FS-084 dashboard layout.
+
+---
+
 ## Mapping Editor Architecture
 
-FS-020 redesigns the Mapping Editor from an 8-panel grid into a **three-column focused-authoring layout** with a collapsible bottom area. FS-021 adds the two-row top context model and inline preview strip. FS-022 consolidates toolbar controls into panel-local surfaces, removes Focus/Breadcrumb drill-down mode, introduces persistent resizable panel layout, adds Rules View search, and makes inline preview auto-run on Apply unconditional when source data is present. FS-048 introduces an Auto-Map review workspace mode in the center authoring panel.
+### FS-092 authoritative baseline (current)
+
+FS-092 supersedes earlier Mapping Editor page composition on the primary authoring route (`/projects/:projectId/mappings/:mappingId`). Where older FS-020/021/022-era details conflict, FS-092 behavior below is authoritative.
+
+Primary-route information architecture:
+
+- Mapping Editor is an **authoring-only workspace**.
+- Primary composition is **header + filter/controls + target-first mapping grid + row details panels** (Source + Builder).
+- In-page full testing console and in-page deployment workflow are intentionally removed from this route.
+- Save remains the primary mutation action and persists mapping data only (no deploy side effects).
+
+Route-boundary contract (explicit separation of concerns):
+
+- Authoring: `/projects/:projectId/mappings/:mappingId`
+- Test execution workspace: `/projects/:projectId/mappings/:mappingId/test-lab`
+- Deployment workflow: `/projects/:projectId/mappings/:mappingId/deploy`
+- Mapping Editor route-outs use canonical `PATHS` constants and are exposed under **More** menu actions (`Open Test Lab`, `Open Deployment Page`).
+
+FS-092 UI interaction contracts:
+
+- **View Issues consolidation:** top-bar `View Issues` opens a consolidated issues panel with warning/error items and row-open navigation; default copy is BA-friendly and does not expose raw diagnostic payloads by default.
+- **Advanced Mode posture:** DSL/diagnostic detail is hidden by default; Advanced Mode is an explicit opt-in and persisted as a per-user global preference (`keyra:mappings:advanced-mode` in localStorage).
+- **Sample-context precedence:**
+  1. per-user last-selected sample for mapping (`keyra:mappings:last-selected-sample:{mappingId}`),
+  2. mapping default sample (`config.editorPreferences.defaultSelectedSampleId`),
+  3. schema default sample (`usedForInference=true`),
+  4. no sample context.
+- **Sample add/select integration:** sample add from editor uses canonical schema sample lifecycle (`POST /schemas/:id/samples`, save-only mutation mode), then allows immediate selection in picker.
+- **Auto-map scope semantics:** auto-map requests include deterministic visible scope (`visibleTargetPaths`), and top-bar copy makes scope explicit (`Scope: N visible fields`).
+- **Suggestion lifecycle surface:** suggestion states (`suggested`, `accepted`, `edited`, `dismissed`, `stale`) are visible in grid/details surfaces; accepted mappings are not silently overwritten.
+- **Array progressive disclosure:** child-field rendering thresholds are explicit: `<=25` inline, `26–75` filtered/prioritized workspace, `>75` summary-first + strong Array Builder CTA, with optional `View all child fields`.
+
+Legacy note:
+
+- Historical three-column + bottom-area descriptions remain below for implementation lineage context, but do not redefine FS-092 route-boundary or authoring-scope behavior.
 
 ### Three-Column + Resizable Layout (FS-022)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────┐
-│ Row 1: NavBar (global navigation)                                                 │
-│ Row 2: EditorTopBar (mapping context + save/deploy + Auto-Map workspace re-entry) │
+│ Left: App shell sidebar (global navigation)                                       │
+│ Top of editor area: EditorTopBar (mapping context + save/deploy + Auto-Map)      │
 ├──────────────────────┬┬──────────────────────────────┬┬───────────────────────────┤
 │ Source Panel         ││ Builder / Workspace Panel    ││ Target Panel              │
 │ SourceSchemaPanel    ││ Node-type builder (target)   ││ TargetWorklist (target)   │
@@ -844,6 +1094,7 @@ Persistent re-entry affordance:
 - Refresh actions: `refreshAll`, `refreshUnmapped`, `refreshStale`
 - Filtering: `activeFilters`, `toggleFilter`, `clearFilters`, `filteredItems`
 - Persistence + metadata: `sectionPath`, `generatedAt`, `previousSuggestionsAvailable`, `restorePreviousSuggestions`, `hasPersistedSuggestions`
+- Run metadata summary surfaced to workspace consumers: mode/chunk/retrieval/validation/dedup counters + explicit no-context reason when present
 - Draft-model integration: acceptance/edit actions call `updateDraft(targetPath, expression)` so AI suggestions remain suggestion-only and flow through unsaved-change tracking
 
 #### Suggestion Persistence Model
@@ -878,7 +1129,7 @@ Transition model:
 | suggested | dismiss | dismissed | none |
 | dismissed | undoDismiss | suggested | none |
 | suggested/dismissed | stale-detected | stale | none |
-| stale | accept | accepted | `updateDraft(...)` |
+| stale | accept | stale | none (blocked; refresh required before apply) |
 | stale | dismiss | dismissed | none |
 | stale | refresh | suggested | replaced by refreshed suggestion |
 
@@ -891,7 +1142,7 @@ Transition model:
 - rule expression changed since generation for same target
 - rule added for a target that was previously unmapped (`isNew` at generation)
 
-Stale markers are advisory UX signals, not hard blockers.
+Stale markers are hard-blocking review guards in V1; acceptance remains disabled until refresh/regeneration on latest state.
 
 #### Refresh / Regenerate Merge Strategy
 
@@ -925,19 +1176,24 @@ Bulk actions:
 - Refresh Stale
 - Refresh All (with inline confirmation banner)
 
+`Accept All Valid` applies only eligibility-passing items and records deterministic skip accounting for ineligible entries (`invalid`, `stale`, `dismissed`, already-reviewed/non-pending statuses) without mutating skipped suggestions.
+
 All actions are state-derived and disable safely when not applicable.
 
-#### Showcase vs RAG-Ready Design Decisions
+#### Canonical backend contract alignment (FS-073)
 
-The workspace remains backend-strategy agnostic:
+The workspace now assumes retrieval-backed backend behavior as canonical:
 
-- Current showcase mode passes optional source-context text to AI generation
-- Future RAG backend can ignore client context and retrieve server-side context
-- UI contracts (`autoMapSection`, workspace persistence, lifecycle model) stay stable across backend evolution
+- UI does not construct or require full source-schema prompt context blobs.
+- Canonical transport remains a single endpoint: `POST /ai/auto-map` with request `mode: 'section' | 'whole'`.
+- `useAutoMapWorkspace` sends mode-aware requests and normalizes review data for both section and whole runs.
+- Response metadata consumed by UI includes retrieval/chunk/validation/dedup summaries and per-suggestion validation.
+- No-context retrieval is handled as successful empty-result UX, with explicit empty-state guidance rather than generic error treatment.
+- UI contracts (`autoMapSection`, workspace persistence, lifecycle model) remain stable while backend retrieval/chunk internals evolve.
 
 #### Drawer Retirement Note
 
-`AutoMapReviewDrawer` and `useAutoMapReview` remain in the codebase for compatibility/history but are no longer composed by `MappingEditor.tsx`. The active architecture is workspace mode (`useAutoMapWorkspace` + `AutoMapWorkspace`).
+Legacy drawer-path surfaces were removed during FS-065 reconciliation. The active architecture is workspace mode (`useAutoMapWorkspace` + `AutoMapWorkspace`).
 
 ### Drag-and-Drop Pattern (HTML5 API)
 
@@ -1099,11 +1355,11 @@ Completion + validation derivation:
 
 This replaces the legacy "No rules yet" empty state from `RuleList` in the target-driven view. `RuleList`'s own empty state is still shown in Rules View.
 
-### Top Bar Contract (FS-021, FS-039)
+### Top Bar Contract (FS-021, FS-039, FS-084 note)
 
 `EditorTopBar` is the canonical metadata strip for Mapping Editor pages. FS-021 T-01 redesigns it as a **2-row layout** replacing the previous single-row strip:
 
-- **Row 1 (NavBar):** global navigation (provided by `AppLayout`; breadcrumbs suppressed on editor route)
+- **Row 1 (App shell sidebar):** global navigation is provided by `AppLayout` as a left collapsible sidebar (not a top row)
 - **Row 2 (context bar):** mapping identity, save state, deploy badges, schema names, action buttons
 
 Props contract:
@@ -2078,20 +2334,21 @@ State management note:
 
 ## Schema Detail Page Architecture
 
-FS-015 establishes the feature-page architecture for `/schemas/:schemaId` under `ui/src/features/schemas/`.
+FS-015 established the original feature-page architecture for `/schemas/:schemaId` under `ui/src/features/schemas/`.
+FS-090 supersedes the Schema Detail information architecture and action model.
 
 ### Page composition pattern
 
 - Route-level wrapper (`ui/src/routes/pages/SchemaDetail.tsx`) is intentionally thin and only resolves route params.
 - Feature page (`SchemaDetailPage`) owns orchestration and section layout.
-- Stable section order:
-  1. inferred-schema banner (conditional)
-  2. metadata
-  3. git/source status
-  4. tree view (+ edit toolbar/banner)
-  5. usage
-  6. actions
-  7. modal/dialog overlays (View Raw + Replace File)
+- Stable section order now follows FS-090:
+  - **Desktop:**
+    - left/main column: header -> review panel (conditional) -> fields workspace
+    - right sidebar: sample payloads -> usage -> metadata -> actions
+  - **Narrow/stacked:** Header -> Review -> Sample Payloads -> Fields -> Usage -> Metadata
+- Breadcrumb terminal segment resolves to schema name (not raw schema ID).
+- Header emphasizes readiness + canonical metadata: status, data format (`JSON|XML`), field count, updated timestamp, and CDM badge placement.
+- `Uploaded`/`Inferred` are not format badges; source lineage is shown separately via schema-source metadata.
 
 This keeps routing concerns separate from feature logic and allows section-level evolution without route refactors.
 
@@ -2144,7 +2401,7 @@ Responsibilities:
 - derives usage data for both display (`SchemaUsageSection`) and action gating (`SchemaActions` remove blocking)
 - Phase 0 algorithm:
   - `listProjects()`
-  - hydrate each with `getProject(projectId)` to inspect `schemaRefs`
+  - hydrate each with `getProject(projectId)` to inspect canonical `linkedSchemaIds` (with compatibility fallback from legacy `schemaRefs`)
   - keep referencing projects
   - `listMappings(projectId)` for each referencing project
   - classify mapping role as `source` or `target`
@@ -2171,21 +2428,365 @@ Schema editing is intentionally split into three layers:
 
 This separation keeps row-level interactions deterministic/testable while concentrating persistence concerns in a single hook.
 
-### Action visibility rules (origin x scope x format)
+## FS-087 Shared Schema Library + Linked Schema Model
 
-Current implementation in `SchemaActions` uses metadata-driven conditional rendering:
+FS-087 establishes canonical schema availability semantics across UI surfaces:
 
-- CDM schemas: Re-sync (placeholder), View Raw
-- Non-CDM schemas:
-  - Edit when `format === 'json-schema'` and not already editing
-  - Auto-describe (placeholder)
-  - Sync to GitHub (placeholder)
-  - Replace file
-  - Remove (blocked if usage mappings exist)
-  - View Raw
-- `scope === 'project'`: additional Promote to Global action + confirm flow
+- Schema Library is shared across all projects (no scope-based availability boundary).
+- Project-level schema relationships are relevance links only, canonicalized as `linkedSchemaIds: string[]`.
+- Legacy `schemaRefs` is consumed as compatibility bridge for read-time normalization and staged rollout safety.
+- Mapping source/target references remain explicit schema IDs and are unchanged by scope simplification.
+
+Compatibility normalization contract:
+
+- Canonical origins displayed by UI are `CDM`, `Uploaded`, `Inferred`.
+- Legacy `origin: local|published` normalizes to canonical `uploaded` in adapter/domain read paths.
+- Legacy `scope` may still exist in records but is non-authoritative compatibility metadata and must not drive access behavior or user-facing availability concepts.
+
+Project flow impacts:
+
+- Project-linked schema surfaces show only linked schemas for relevance.
+- Add Schema and mapping schema selectors can access the shared library; linked schemas are prioritized/grouped where applicable.
+- Create Mapping schema selectors include seeded CDM records by default (no prior link/add step required for visibility).
+- Unlink is hard-blocked when active mappings in the same project reference the schema; dependency details are surfaced to the user.
+
+## FS-089 Simplified schema model and selector contracts
+
+FS-089 finalizes the current schema UX baseline across Schema Library, Add Schema, Schema Detail, and Create Mapping.
+
+Canonical metadata model in UI read paths:
+
+- `ownership: cdm | user`
+- `dataFormat: json | xml` (user-facing labels: `JSON` / `XML`)
+- `sourceKind: json_schema | xsd | inferred_from_json | inferred_from_xml`
+- `status: ready | processing | needs_review | error`
+- `readonly` and `isCdm` as ownership/action-policy companions
+
+Schema Library contract updates:
+
+- Library controls are limited to ownership/data format/status filters plus explicit direction sort labels.
+- Card/list metadata primary format label must use `JSON` / `XML` (never `Inferred` as a format label).
+- Card/list actions remain ownership-aware: CDM records are navigation/read-only in library surfaces.
+- View mode persistence uses `keyra.schemas.viewMode`.
+
+Add Schema contract updates:
+
+- Add Schema modal supports only user-created flows:
+  - `Upload File`
+  - `Paste Content`
+- Link/publish/sync actions and terminology are not part of Add Schema.
+- Input-kind classification contract:
+  - JSON Schema -> `sourceKind=json_schema`, `status=ready`
+  - XSD -> `sourceKind=xsd`, `status=ready`
+  - sample JSON -> `sourceKind=inferred_from_json`, `status=needs_review`
+  - sample XML -> `sourceKind=inferred_from_xml`, `status=needs_review`
+
+Schema Detail contract updates:
+
+- CDM detail remains read-only (no edit/replace/delete).
+- Metadata explicitly separates:
+  - `Data format` (`JSON`/`XML`)
+  - `Schema source` (`JSON Schema` / `XSD` / inferred variants)
+- Inferred callout is persistent for inferred schemas.
+- Explicit review transition is supported via `Mark as Reviewed` (`needs_review -> ready`) while inferred source lineage remains unchanged.
+
+Create Mapping selector contract updates:
+
+- Selectors must show CDM schemas immediately from default list data.
+- Selector option and selected-summary semantics include status + format + field-count clarity.
+- Status gating:
+  - `needs_review` remains selectable with warning
+  - `error` remains visible but non-selectable
+
+Legacy vocabulary posture:
+
+- `Global/Local/Project-level/Published` and schema sync/publish vocabulary are compatibility-only legacy concepts and are not active Schema Library model language.
+
+## Create Mapping Setup Workspace Architecture (FS-088)
+
+FS-088 replaces the legacy Create Mapping wizard with a dedicated single-page setup workspace at `/projects/:projectId/mappings/new`.
+
+### Section model and interaction flow
+
+The page is a single-screen setup flow with these sections, in order:
+
+1. `PageHeader` (`Create Mapping` + setup subtitle)
+2. `Mapping Details` card
+   - required `Mapping Name`
+   - optional multiline `Business Context`
+3. side-by-side `Source Schema` and `Target Schema` cards
+4. simple `Schema Summary` card
+5. `Start From` card (`Blank mapping` | `Auto-map suggestions`)
+6. footer action row (`Cancel` + mode-sensitive primary action)
+
+Validation gates submission until all required inputs are present:
+- mapping name
+- source schema
+- target schema
+- start mode
+
+### In-card add-schema reuse contract
+
+Create Mapping does not introduce a new schema-creation subsystem.
+
+- Source/Target cards open existing `SchemaUploadDialog` in context (`+ Add new source schema` / `+ Add new target schema`).
+- Flow remains in-page (no route navigation away from Create Mapping).
+- On successful add/link, the invoking card auto-selects the new schema and refreshes displayed details/summary.
+- Selected source/target schemas are best-effort linked to the project relevance set (`linkedSchemaIds`) via existing project update pathways.
+
+### Schema summary and required-count derivation
+
+Create Mapping summary intentionally remains minimal and shows only:
+- source field count
+- source required field count
+- target field count
+- target required field count
+
+Required-field count uses normalized schema-summary precedence:
+1. metadata `requiredFieldCount` when available
+2. required-leaf count from normalized parsed schema nodes
+3. fallback `—`
+
+Create Mapping must not implement raw JSON Schema/XSD required parsing logic directly.
+
+### Start-mode branching and create-time Auto-Map behavior
+
+`Start From` options are intentionally limited to:
+- `Blank mapping`
+- `Auto-map suggestions`
+
+Primary CTA label is mode-dependent:
+- blank -> `Create Mapping`
+- auto-map -> `Create & Generate Suggestions`
+
+Create-time branching contract:
+- **Blank mode:** create mapping via canonical `adapter.createMapping(...)`, then navigate to Mapping Editor.
+- **Auto-map mode:**
+  1. create mapping first (mapping remains valid even if subsequent auto-map step fails),
+  2. trigger callable auto-map path keyed by created `mappingId`,
+  3. persist pending suggestion context by `mappingId`,
+  4. navigate to Mapping Editor with optional non-blocking notice state.
+
+Failure semantics:
+- Auto-map generation failure is non-blocking to mapping creation.
+- Editor opens regardless, with explicit notice when generation was unavailable/failed.
+- No fake/generated-placeholder suggestions are fabricated.
+
+### AI review-only invariant at create time
+
+FS-088 does not change AI acceptance semantics:
+- create-time Auto-Map outputs are review artifacts only,
+- generated suggestions are not auto-committed into mapping rules,
+- explicit user review/acceptance in editor workspace remains required.
+
+## Project Overview Workspace Architecture (FS-086)
+
+FS-086 supersedes the FS-085 right-rail default for `/projects/:projectId` and defines Project Overview as a single-column, mappings-first workspace aligned to the FS-084 shell visual hierarchy.
+
+### Layout + hierarchy contract
+
+- `ProjectHeader` is the first surface: project identity, compact summary line, and primary actions.
+- Main content is single-column with `MappingListSection` as the default operational surface.
+- Default Project Overview does **not** render a right rail.
+- Default Project Overview does **not** render a Deployment Activity card.
+- Default Project Overview does **not** render an always-visible lower schema-management grid.
+
+### Mappings surface contract
+
+`MappingListSection` is the operational center and includes:
+
+- table columns: `Name`, `Source -> Target`, `Rules`, `Coverage`, `Status`, `Deployment`, `Last Modified`, `Actions`
+- search over mapping name and source/target schema text
+- no legacy "continue" panel in default Project Overview layout
+- table container uses full available content width to preserve Source -> Target and Actions readability
+
+### Mapping row deployment/action contract
+
+`MappingRow` uses a single compact deployment column and normalized wording:
+
+- display precedence: any `deploying` -> `Deploying`; any `stale` -> `Changed since deploy`; else highest deployed env (`PROD` > `QA` > `DEV`); otherwise `Not deployed`
+- raw `stale` wording is not shown in primary UI copy
+
+Row actions are status-based and navigation-only:
+
+- `draft` -> `Open` (hide `Deploy`)
+- `ready` -> `Open` + `Deploy`
+- `has-errors` -> `Fix` when supported, otherwise `Open` fallback (hide `Deploy`)
+
+`Deploy` is route navigation to mapping deployment, not inline execution.
+
+### Linked schemas interaction contract
+
+Schema access from Project Overview is on-demand via a lightweight interaction opened from the project summary linked-schema trigger (for example, `{N} linked schemas`).
+
+- Preferred implementation order:
+  1. existing shared dialog/modal primitive
+  2. existing accessible third-party/wrapper modal already used by app
+  3. compact inline expansion fallback
+- Do not introduce a new custom modal infrastructure for this surface.
+- Rows are compact and text-first: name + origin (when useful) + normalized format label + field count + usage count.
+- Format normalization includes simplified user-facing labels such as:
+  - `json-schema` -> `JSON`
+  - `xsd` -> `XSD`
+  - inferred JSON/XML variants -> `Inferred JSON` / `Inferred XML`
+- Interaction accessibility expectations follow existing modal conventions: focus trap, Escape close, keyboard-reachable actions, accessible title/label, backdrop behavior consistent with existing modal usage, and focus return to linked-schema trigger on close.
+
+### Project Overview CDM link flow (FS-076 / FS-078)
+
+Project Overview includes a CDM linking path in schema management:
+
+- Entry point: Schema management section action labeled **Link from CDM Library**.
+- Picker loading uses `ApiAdapter.listCdmSchemas(path?)` and supports client-driven directory navigation (one directory level per request).
+- Confirm action uses `ApiAdapter.linkCdmSchema({ projectId, path })` and attaches the returned schema to the project overview surface.
+
+CDM-linked cards in Project Overview:
+
+- Show canonical CDM provenance label `CDM (KBXT/KBX-Canonicals)` and sync-state badges driven by `metadata.syncStatus`.
+- Hide remove action for CDM entries to enforce read-only behavior at the project schema surface.
+
+### Action visibility rules (ownership x readiness x mutability)
+
+Current implementation in `SchemaActions` is ownership-aware and follows FS-090 action-model cleanup.
+
+Schema Detail actions:
+
+- **User-owned schemas (`ownership=user`, `readonly=false`)**
+  - top-level action: `Edit Schema`
+  - overflow menu: `View raw`, `Replace schema`, `Delete schema` (with usage/dependency guards)
+- **CDM/read-only schemas (`ownership=cdm` or `readonly=true`)**
+  - no edit/replace/delete actions
+  - read-only actions only (for example, `View raw`)
+
+Deprecated Schema Detail action vocabulary is removed:
+
+- no `Sync to GitHub`
+- no `Re-sync`
+- no `Publish`
+- no `Promote`
+
+Legacy compatibility note: scope-driven action semantics remain retired; `scope` is compatibility metadata only and must not drive action availability.
+
+FS-078 surface policy clarifications:
+
+- **Project Overview:** View + linkage management actions in project context
+- **Schema Detail:** ownership-aware actions only (no sync/re-sync/publish/promote vocabulary)
+- **Schema Library:** navigation-first cards (no inline sync controls on cards)
 
 Promote/Remove flows use shared `ConfirmDialog` and adapter mutations (`updateSchema`, `deleteSchema`) with post-action page refresh/navigation.
+
+CDM sync-state presentation contract:
+
+- `SchemaGitStatus` and shared schema presentation primitives render canonical CDM sync states from metadata (`syncStatus`) including `synced`, `update-available`, and `sync-failed`.
+- Schema detail load performs best-effort status-refresh read (`syncCdmSchema(..., { statusOnly: true })`) followed by metadata re-fetch for trustworthy passive status display.
+- No schema-detail sync action is exposed in this phase; schema sync/publish semantics are out of scope for FS-090 Schema Detail.
+
+### FS-078 canonical CDM UX consistency contract (Rev 2)
+
+Cross-surface invariants for `origin === 'cdm'`:
+
+- **Canonical origin label:** all schema surfaces (Project Overview, Schema Library, Schema Detail) show `CDM (KBXT/KBX-Canonicals)`.
+- **Canonical sync badges:** all schema surfaces use the same UI status meanings:
+  - `synced` -> `✓ Synced`
+  - `update-available` -> `⚠ Update available`
+  - `sync-failed` -> `⚠ Sync failed`
+- **Schema Detail action semantics:** no sync/re-sync/publish/promote controls; actions are ownership/read-only gated.
+- **Strict Schema Detail read-only posture for CDM:** no inline metadata edit, no tree edit mode, no replace-schema flow, and no mutate-capable actions.
+- **Unlink scope constraint:** Unlink is available only in Project Overview (project association context), never in Schema Detail.
+
+UI consumption contract notes:
+
+- Backend is the canonical source of CDM sync-status normalization.
+- UI consumes canonical enum values for primary rendering; defensive display fallback maps unknown/legacy status values to `sync-failed` to preserve cross-surface safety and consistency.
+
+### FS-079 deployment guardrail messaging contract
+
+Deployment UI consumes backend CDM deploy-block responses and renders schema-specific remediation guidance.
+
+Canonical contract:
+
+- Trigger surfaces: deployment and promotion actions in deployment workflows.
+- Blocking source of truth: backend `DEPLOY_BLOCKED_CDM_SCHEMA_STATE` envelope (HTTP 409).
+- UI renders `error.details.issues[]` entries with:
+  - schema identity (`schemaId`, optional `schemaName`)
+  - `referenceRole` (`source` | `target`)
+  - stable reason enum (`unsynced`, `update-failed`, `metadata-incomplete`, `ingest-not-ready`, `schema-missing`)
+  - remediation CTA mapping derived from `remediationKey`
+
+Interaction semantics:
+
+- Block messaging is rendered for both deploy and promote failures of this class.
+- UI should display all issues returned by backend in one render pass (no local first-failure truncation).
+- Successful retry clears prior block state and returns to normal success feedback.
+- Generic deployment-error handling remains unchanged for non-guardrail failures.
+
+Traceability-facing note:
+
+- Successful deploy/promote responses include deployment records carrying CDM traceability metadata (`cdmSchemaTraceability`) produced by backend; UI uses this for provenance display where deployment-history surfaces expose metadata fields.
+
+### FS-080 CDM resilience UX contract
+
+FS-080 extends CDM browse/link/sync UI behavior with explicit degraded-state, retry, and class-specific recovery guidance.
+
+Canonical backend failure classes consumed by UI:
+
+- `rate-limited`
+- `unauthorized-forbidden`
+- `not-found-path-mismatch`
+- `timeout-transient`
+
+UI ownership boundary:
+
+- Backend is canonical for failure-class normalization and retryability envelope semantics.
+- UI is canonical for class-to-copy mapping and user-action phrasing.
+
+Class-to-UX mapping contract:
+
+- `rate-limited`
+  - show wait/retry-later guidance
+  - render Retry affordance (manual user-triggered)
+  - if provided, render retry timing hint from `retry-after` / `retryAfterSeconds`
+- `unauthorized-forbidden`
+  - show permission/access guidance
+  - do not present as auto-recovering; explicit user remediation is required
+- `not-found-path-mismatch`
+  - show repository/path mismatch guidance
+  - treat as non-retryable until input/source metadata changes
+- `timeout-transient`
+  - show transient/network timeout guidance
+  - render Retry affordance for user-initiated recovery
+
+### Degraded browse-state behavior
+
+For CDM browse surfaces backed by `listCdmSchemas`:
+
+- Cache-hit outage fallback is rendered as **degraded/cached** (not healthy/fresh).
+- UI remains interactive and navigable with returned cached listing.
+- Retry action remains visible so users can re-attempt fresh fetch.
+
+Failure handling boundaries:
+
+- Cache miss during outage shows friendly failure state (no crash).
+- Cache older than stale-grace window is treated as explicit failure (not normal fallback display).
+- Degraded browse state must not relabel schema sync badges as `synced`; sync-status semantics remain backend-driven and independent.
+
+### Retry affordance and timing guidance
+
+Recovery affordances are explicit and user-driven across CDM read failures:
+
+- Re-sync actions remain manual-only (`Re-sync`), including after failure.
+- Error banners/cards expose retry controls only when response semantics are retryable or operationally recoverable.
+- When `retry-after` metadata exists, UI may show a human-readable wait hint (for example, “Try again in ~N seconds”).
+
+UI should not implement unbounded autonomous retry loops for CDM error surfaces.
+
+### Error and observability lineage handling in UI
+
+UI transport/error normalization preserves backend request lineage for support handoff and diagnostics:
+
+- `requestId` from backend envelope remains available through normalized UI error objects.
+- Optional correlation lineage (`x-correlation-id`) may be propagated by callers and should remain pass-through for trace joins.
+
+This supports FS-080 incident debugging requirements without changing feature-level interaction patterns.
 
 ### UI preference storage vs domain storage
 

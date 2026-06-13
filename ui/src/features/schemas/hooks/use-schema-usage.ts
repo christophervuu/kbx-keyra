@@ -14,8 +14,10 @@ export interface UsageProject {
 export interface UsageMapping {
   readonly mappingId: string;
   readonly projectId: string;
+  readonly projectName: string;
   readonly name: string;
   readonly role: 'source' | 'target';
+  readonly updatedAt?: string;
 }
 
 export interface UseSchemaUsageResult {
@@ -78,6 +80,10 @@ export function useSchemaUsage(schemaId: string): UseSchemaUsageResult {
 
         if (cancelled) return;
 
+        const projectNameById = new Map(
+          referencingProjects.map((p) => [p.projectId, p.name] as const),
+        );
+
         const usageMappings: UsageMapping[] = [];
         mappingArrays.forEach((mappings) => {
           for (const m of mappings) {
@@ -85,15 +91,19 @@ export function useSchemaUsage(schemaId: string): UseSchemaUsageResult {
               usageMappings.push({
                 mappingId: m.mappingId,
                 projectId: m.projectId,
+                projectName: projectNameById.get(m.projectId) ?? m.projectId,
                 name: m.name,
                 role: 'source',
+                updatedAt: m.updatedAt,
               });
             } else if (m.targetSchemaId === schemaId) {
               usageMappings.push({
                 mappingId: m.mappingId,
                 projectId: m.projectId,
+                projectName: projectNameById.get(m.projectId) ?? m.projectId,
                 name: m.name,
                 role: 'target',
+                updatedAt: m.updatedAt,
               });
             }
           }

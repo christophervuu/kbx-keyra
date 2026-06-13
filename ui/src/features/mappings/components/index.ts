@@ -58,6 +58,8 @@ export { RuleForm } from './RuleForm';
 export type { RuleFormProps, RuleFormMode } from './RuleForm';
 export { RuleList } from './RuleList';
 export type { RuleListProps } from './RuleList';
+export { AiValidationPanel } from './AiValidationPanel';
+export type { AiValidationPanelProps } from './AiValidationPanel';
 export { RuleRow } from './RuleRow';
 export type { RuleRowProps } from './RuleRow';
 export { SourceFieldPicker } from './SourceFieldPicker';
@@ -120,6 +122,8 @@ export { BreadcrumbNav } from './BreadcrumbNav';
 export type { BreadcrumbNavProps } from './BreadcrumbNav';
 export { InlinePreviewStrip } from './InlinePreviewStrip';
 export type { InlinePreviewStripProps } from './InlinePreviewStrip';
+export { IssuesPanel } from './IssuesPanel';
+export type { IssuesPanelProps, ConsolidatedIssueItem } from './IssuesPanel';
 export { ConnectedInlinePreviewStrip } from './ConnectedInlinePreviewStrip';
 export type { ConnectedInlinePreviewStripProps } from './ConnectedInlinePreviewStrip';
 export { TestLabPage } from './TestLabPage';
@@ -188,12 +192,6 @@ export type { ChainBuilderProps } from './ChainBuilder';
 // FS-039 unsaved changes overlay
 export { UnsavedChangesOverlay } from './UnsavedChangesOverlay';
 export type { UnsavedChangesOverlayProps } from './UnsavedChangesOverlay';
-// FS-046 auto-map review drawer
-export { AutoMapReviewDrawer } from './AutoMapReviewDrawer';
-export type { AutoMapReviewDrawerProps } from './AutoMapReviewDrawer';
-// FS-046 suggestion review card
-export { SuggestionReviewCard } from './SuggestionReviewCard';
-export type { SuggestionReviewCardProps } from './SuggestionReviewCard';
 // FS-048 auto-map workspace shell
 export { AutoMapWorkspace } from './AutoMapWorkspace';
 export type { AutoMapWorkspaceProps } from './AutoMapWorkspace';

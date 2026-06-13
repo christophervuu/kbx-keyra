@@ -15,6 +15,7 @@ function makeProject(overrides: Partial<ProjectListItem> = {}): ProjectListItem 
     name: 'Alpha Project',
     description: 'A test project description',
     mappingCount: 4,
+    schemaCount: 2,
     updatedAt: '2026-04-30T00:00:00Z',
     worstStatus: 'has-errors',
     devDeploy: 'not-deployed',
@@ -49,6 +50,11 @@ describe('ProjectCard', () => {
     expect(screen.getByText('4 mappings')).toBeInTheDocument();
   });
 
+  it('renders schema count', () => {
+    render(<ProjectCard project={makeProject({ schemaCount: 3 })} onClick={vi.fn()} />);
+    expect(screen.getByText('3 schemas')).toBeInTheDocument();
+  });
+
   it('renders has-errors worst-status badge', () => {
     render(<ProjectCard project={makeProject({ worstStatus: 'has-errors' })} onClick={vi.fn()} />);
     expect(screen.getByText('Has Errors')).toBeInTheDocument();
@@ -69,13 +75,9 @@ describe('ProjectCard', () => {
     expect(screen.queryByText('No Mappings')).not.toBeInTheDocument();
   });
 
-  it('renders condensed "Not deployed" when all environments are not-deployed', () => {
+  it('renders Open action button when all environments are not-deployed', () => {
     render(<ProjectCard project={makeProject()} onClick={vi.fn()} />);
-    expect(screen.getByTestId('deploy-condensed')).toBeInTheDocument();
-    expect(screen.getByText('Not deployed')).toBeInTheDocument();
-    expect(screen.queryByText('DEV')).not.toBeInTheDocument();
-    expect(screen.queryByText('QA')).not.toBeInTheDocument();
-    expect(screen.queryByText('PROD')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open alpha project/i })).toBeInTheDocument();
   });
 
   it('renders DEV/QA/PROD environment labels when any deploy status is non-default', () => {
@@ -88,7 +90,7 @@ describe('ProjectCard', () => {
     expect(screen.getByText('DEV')).toBeInTheDocument();
     expect(screen.getByText('QA')).toBeInTheDocument();
     expect(screen.getByText('PROD')).toBeInTheDocument();
-    expect(screen.queryByTestId('deploy-condensed')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /open alpha project/i })).not.toBeInTheDocument();
   });
 
   it('calls onClick with project ID when clicked', () => {

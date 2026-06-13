@@ -33,8 +33,6 @@ import { useExplainRule } from '../hooks/use-explain-rule';
 import type { ExplainRuleState } from '../hooks/use-explain-rule';
 import { useSuggestExpression } from '../hooks/use-suggest-expression';
 
-import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -64,11 +62,6 @@ export interface ChainBuilderShellProps {
   readonly onClearMapping: () => void;
   /** Fires when the user clicks the expression to switch to Editor mode. */
   readonly onExpressionClick: () => void;
-  /**
-   * Optional: parsed source schema for suggest-expression source context.
-   * When provided, enables the Suggest button to include source field context.
-   */
-  readonly parsedSourceSchema?: ParsedSchema | null;
   /**
    * Optional: called when the user accepts a suggested expression.
    * When not provided, the Suggest button is still shown but Accept is a no-op.
@@ -270,27 +263,6 @@ function AiActionBar({
 }
 
 // ---------------------------------------------------------------------------
-// Source context formatting (for SuggestExpression)
-// ---------------------------------------------------------------------------
-
-function formatSourceContext(parsedSourceSchema: ParsedSchema | null | undefined): string {
-  if (!parsedSourceSchema?.nodes) return '';
-  const lines: string[] = [];
-  function walk(nodes: SchemaTreeNode[]) {
-    for (const node of nodes) {
-      if (lines.length >= 200) return;
-      if (node.children && node.children.length > 0) {
-        walk(node.children);
-      } else {
-        lines.push(`- ${node.path} (${node.type})`);
-      }
-    }
-  }
-  walk(parsedSourceSchema.nodes);
-  return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -315,7 +287,6 @@ export function ChainBuilderShell({
   onToggleMode,
   onClearMapping,
   onExpressionClick,
-  parsedSourceSchema,
   onExpressionAccept,
   children,
   showChrome = true,
@@ -405,12 +376,12 @@ export function ChainBuilderShell({
                 state={suggestState}
                 targetPath={targetPath}
                 targetType={targetType}
+                currentExpression={expression || null}
                 onGenerate={(instruction) => {
                   generateSuggestion({
                     instruction,
                     targetPath,
                     targetType,
-                    sourceContext: formatSourceContext(parsedSourceSchema),
                   });
                 }}
                 onAccept={(expr) => {

@@ -13,3 +13,5 @@ export {
 } from './schema-editor-ops';
 export { treeToJsonSchema, countAllNodes } from './tree-to-json-schema';
 export { filterSchemas, sortSchemas } from './schema-filters';
+export { isSchemaActionAllowed } from './cdm-action-policy';
+export type { SchemaActionSurface, SchemaUiAction } from './cdm-action-policy';

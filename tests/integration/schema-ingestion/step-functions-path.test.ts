@@ -14,7 +14,6 @@ const schemaLibMocks = vi.hoisted(() => ({
   storeProcessedContent: vi.fn(),
   updateSchemaStatus: vi.fn(),
   batchWriteSchemaNodes: vi.fn(),
-  bulkIndexSchemaNodes: vi.fn(),
 }));
 
 vi.mock('@aws-sdk/client-s3', () => {
@@ -83,7 +82,6 @@ describe('schema ingestion integration - step functions path', () => {
     schemaLibMocks.storeProcessedContent.mockReset().mockResolvedValue('schemas/schema-1/content.json');
     schemaLibMocks.updateSchemaStatus.mockReset().mockResolvedValue(undefined);
     schemaLibMocks.batchWriteSchemaNodes.mockReset().mockImplementation(async (nodes: unknown[]) => ({ written: nodes.length, failed: 0 }));
-    schemaLibMocks.bulkIndexSchemaNodes.mockReset().mockImplementation(async (nodes: unknown[]) => ({ indexed: nodes.length, failed: 0 }));
   });
 
   it('500-field schema threshold is orchestrated and 23,000 schema chunks into 46x500 batches (AE-04)', async () => {
@@ -121,7 +119,7 @@ describe('schema ingestion integration - step functions path', () => {
     expect(sendMock).toHaveBeenCalledTimes(result.batchReferences.length + 1);
   }, 30_000);
 
-  it('batch worker processes one 500-node batch and writes/indexes expected counts', async () => {
+  it('batch worker processes one 500-node batch and writes expected counts', async () => {
     const batchNodes = Array.from({ length: 500 }, (_, index) => ({
       schemaId: 'schema-1',
       path: `Order.Field${index + 1}`,
@@ -154,9 +152,7 @@ describe('schema ingestion integration - step functions path', () => {
     expect(result).toEqual({
       batchIndex: 0,
       nodesWritten: 500,
-      nodesIndexed: 500,
     });
     expect(schemaLibMocks.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
-    expect(schemaLibMocks.bulkIndexSchemaNodes).toHaveBeenCalledTimes(1);
   });
 });

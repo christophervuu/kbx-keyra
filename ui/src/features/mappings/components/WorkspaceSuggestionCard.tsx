@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Loader2, RefreshCw, RotateCcw } from 'lucide
 import { useState, type MouseEvent, type ReactNode } from 'react';
 
 import type { SuggestionWorkspaceItem } from '../types';
+import { AiGeneratedStateLabel } from './AiSuggestionReviewPrimitives';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -452,6 +453,8 @@ export function WorkspaceSuggestionCard({
       )}
 
       {/* Expression comparison */}
+      <AiGeneratedStateLabel testId={`suggestion-generated-label-${targetPath}`} />
+
       <div className="mb-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
         <ExpressionBlock
           label="Current rule"

@@ -372,6 +372,34 @@ describe('useEngineValidation', () => {
     expect(result.current.error).toBeNull();
     expect(result.current.result).not.toBeNull();
   });
+
+  it('normalizes legacy persisted rule type labels for validation', async () => {
+    const config = {
+      ...createMockConfig(1),
+      rules: [
+        {
+          target: 'field0',
+          type: 'direct',
+          expression: 'source("src0")',
+        },
+      ],
+    } as unknown as MappingConfig;
+
+    const sourceSchema = createSimpleSchema();
+    const targetSchema = createTargetSchema();
+
+    const { result } = renderHook(() =>
+      useEngineValidation(config, sourceSchema, targetSchema),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.result).not.toBeNull();
+    expect(result.current.result?.valid).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

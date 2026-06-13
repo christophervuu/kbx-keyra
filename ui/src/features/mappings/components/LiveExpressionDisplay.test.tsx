@@ -11,6 +11,9 @@ import { LiveExpressionDisplay } from './LiveExpressionDisplay';
 import { LiveResultDisplay } from './LiveResultDisplay';
 import { ScalarFieldBuilder } from './ScalarFieldBuilder';
 import type { ScalarFieldBuilderProps } from './ScalarFieldBuilder';
+
+import { AdapterProvider } from '@/lib/api/adapter-provider';
+import type { ApiAdapter } from '@/lib/api/types';
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -34,14 +37,42 @@ const MOCK_SCHEMA: ParsedSchema = {
 };
 
 const DEFAULT_SCALAR_PROPS: ScalarFieldBuilderProps = {
+  mappingId: 'mapping-123',
   selectedTargetPath: 'target.email',
   selectedTargetType: 'string',
   selectedTargetRequired: false,
   currentStatus: 'unmapped',
   currentExpression: '',
   parsedSourceSchema: MOCK_SCHEMA,
-  onApply: vi.fn(),
+  updateDraft: vi.fn(),
+  revertDraft: vi.fn(),
+  getDraftExpression: () => null,
 };
+
+function renderScalarBuilder(overrides: Partial<ScalarFieldBuilderProps> = {}) {
+  const adapter: Partial<ApiAdapter> = {
+    explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' }),
+    suggestExpression: vi.fn().mockResolvedValue({
+      expression: 'source("email")',
+      explanation: 'Maps email.',
+      validation: { valid: true, diagnostics: [] },
+      readyToApply: true,
+      context: {
+        sourceNodeCount: 10,
+        includedNodeCount: 10,
+        truncated: false,
+        approxTokenCount: 128,
+        byteLength: 512,
+      },
+    }),
+  };
+
+  return render(
+    <AdapterProvider adapter={adapter as ApiAdapter}>
+      <ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} {...overrides} />
+    </AdapterProvider>,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // LiveExpressionDisplay tests
@@ -139,14 +170,14 @@ describe('LiveResultDisplay', () => {
 
 describe('ScalarFieldBuilder — UnifiedExpressionBuilder integration', () => {
   it('renders UnifiedExpressionBuilder in builder mode by default', () => {
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} />);
+    renderScalarBuilder();
     expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     expect(screen.getByTestId('unified-expression-builder')).toBeInTheDocument();
   });
 
   it('switches to editor mode when Editor toggle is clicked', async () => {
     const user = userEvent.setup();
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} />);
+    renderScalarBuilder();
     await user.click(screen.getByTestId('mode-toggle-editor'));
     expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
     expect(screen.queryByTestId('expression-builder-slot')).not.toBeInTheDocument();
@@ -154,7 +185,7 @@ describe('ScalarFieldBuilder — UnifiedExpressionBuilder integration', () => {
 
   it('switches back to builder mode when Builder toggle is clicked', async () => {
     const user = userEvent.setup();
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} />);
+    renderScalarBuilder();
     await user.click(screen.getByTestId('mode-toggle-editor'));
     await user.click(screen.getByTestId('mode-toggle-builder'));
     expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
@@ -162,7 +193,7 @@ describe('ScalarFieldBuilder — UnifiedExpressionBuilder integration', () => {
 
   it('clicking live expression Edit button switches to editor mode', async () => {
     const user = userEvent.setup();
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} currentExpression='source("email")' />);
+    renderScalarBuilder({ currentExpression: 'source("email")' });
     // Wait for expression to propagate
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
     const editBtn = screen.queryByTestId('live-expression-edit-btn');
@@ -173,19 +204,19 @@ describe('ScalarFieldBuilder — UnifiedExpressionBuilder integration', () => {
   });
 
   it('AE-11: renders same UnifiedExpressionBuilder mode tabs as ExpressionBuilderPanel', () => {
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} />);
+    renderScalarBuilder();
     expect(screen.getByTestId('mode-tab-value')).toBeInTheDocument();
     expect(screen.getByTestId('mode-tab-conditional')).toBeInTheDocument();
     expect(screen.getByTestId('mode-tab-valueMap')).toBeInTheDocument();
   });
 
   it('header target path still renders', () => {
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} />);
+    renderScalarBuilder();
     expect(screen.getByTestId('header-target-path')).toHaveTextContent('target.email');
   });
 
   it('apply button is disabled when expression is empty', () => {
-    render(<ScalarFieldBuilder {...DEFAULT_SCALAR_PROPS} />);
+    renderScalarBuilder();
     expect(screen.getByTestId('apply-btn')).toBeDisabled();
   });
 });

@@ -5,7 +5,7 @@ import {
   createMemoryRouter,
   createRoutesFromElements,
 } from 'react-router-dom';
-import { vi } from 'vitest';
+import { describe, it, vi } from 'vitest';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
@@ -28,6 +28,8 @@ const mockAdapter: ApiAdapter = {
   listSchemas: vi.fn(),
   getSchema: vi.fn().mockReturnValue(new Promise(() => {})),
   createSchema: vi.fn(),
+  updateSchema: vi.fn(),
+  markSchemaReviewed: vi.fn(),
   deleteSchema: vi.fn(),
   listMappings: vi.fn(),
   getMapping: vi.fn().mockReturnValue(new Promise(() => {})),
@@ -49,11 +51,13 @@ const mockAdapter: ApiAdapter = {
   getDeploymentDiff: vi.fn(),
   listCdmSchemas: vi.fn(),
   linkCdmSchema: vi.fn(),
+  syncAllCdmSchemas: vi.fn(),
   syncCdmSchema: vi.fn(),
   listPublishedSchemas: vi.fn(),
   publishSchemaToGitHub: vi.fn(),
   linkPublishedSchema: vi.fn(),
   autoMap: vi.fn(),
+  autoMapSection: vi.fn(),
   suggestExpression: vi.fn(),
   explainRule: vi.fn(),
   smartFix: vi.fn(),
@@ -152,7 +156,9 @@ describe('Route rendering', () => {
 
     expect(screen.getByTestId('page-create-mapping')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Create Mapping' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(
+      screen.getByText('Set up the mapping details and choose the schemas you want to map between.'),
+    ).toBeInTheDocument();
   });
 
   it('renders Mapping Editor at /projects/:projectId/mappings/:mappingId', () => {

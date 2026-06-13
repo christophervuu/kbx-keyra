@@ -5,7 +5,6 @@ import type { MappingRowData } from '../types';
 import { MappingRow } from './MappingRow';
 
 import { Button } from '@/components/Button';
-import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 
 // ---------------------------------------------------------------------------
 // Sorting
@@ -53,6 +52,7 @@ interface SortableHeaderProps {
   activeColumn: SortColumn;
   direction: SortDir;
   onSort: (col: SortColumn) => void;
+  align?: 'left' | 'center';
 }
 
 function SortableHeader({
@@ -61,19 +61,24 @@ function SortableHeader({
   activeColumn,
   direction,
   onSort,
+  align = 'left',
 }: SortableHeaderProps) {
   const isActive = column === activeColumn;
+  const isCentered = align === 'center';
+
   return (
     <th
       scope="col"
-      className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 select-none"
+      className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-400 select-none ${
+        isCentered ? 'text-center' : 'text-left'
+      }`}
     >
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`inline-flex items-center gap-1 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded ${
-          isActive ? 'text-slate-100' : ''
-        }`}
+        className={`inline-flex items-center gap-1 rounded uppercase hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+          isCentered ? 'w-full justify-center' : ''
+        } ${isActive ? 'text-slate-100' : ''}`}
         aria-label={`Sort by ${label}`}
       >
         {label}
@@ -143,79 +148,6 @@ function DeleteConfirmDialog({ mappingName, onConfirm, onCancel }: DeleteConfirm
 }
 
 // ---------------------------------------------------------------------------
-// Recently-edited mapping affordance (AE-09, AE-10)
-// ---------------------------------------------------------------------------
-
-/**
- * Formats a timestamp as a relative string (e.g. "2 hours ago").
- * Falls back to a locale date string for older entries.
- */
-function formatRelativeTime(isoTimestamp: string): string {
-  try {
-    const diff = Date.now() - new Date(isoTimestamp).getTime();
-    const minutes = Math.floor(diff / 60_000);
-    if (minutes < 1) return 'just now';
-    if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 7) return `${days} day${days !== 1 ? 's' : ''} ago`;
-    return new Date(isoTimestamp).toLocaleDateString();
-  } catch {
-    return '';
-  }
-}
-
-interface RecentlyEditedCardProps {
-  projectId: string;
-  mappings: MappingRowData[];
-}
-
-function RecentlyEditedCard({ projectId, mappings }: RecentlyEditedCardProps) {
-  const { getRecentItems } = useRecentActivity();
-
-  const recentItems = getRecentItems();
-  const mappingIds = new Set(mappings.map((m) => m.mappingId));
-
-  // Find the most recent activity entry that is a mapping in this project
-  // and still exists in the current mappings list
-  const match = recentItems.find(
-    (entry) =>
-      entry.type === 'mapping' &&
-      (entry.projectId === projectId || !entry.projectId) &&
-      mappingIds.has(entry.id),
-  );
-
-  if (!match) return null;
-
-  const editorPath = `/projects/${projectId}/mappings/${match.id}`;
-
-  return (
-    <div
-      data-testid="recently-edited-mapping"
-      className="mb-4 flex items-center justify-between rounded-md border border-slate-700 bg-slate-800/60 px-4 py-2.5"
-    >
-      <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-          Continue where you left off
-        </p>
-        <p className="mt-0.5 truncate text-sm font-medium text-slate-200">{match.name}</p>
-        <p className="text-xs text-slate-500">
-          <time dateTime={match.timestamp}>{formatRelativeTime(match.timestamp)}</time>
-        </p>
-      </div>
-      <a
-        href={editorPath}
-        className="ml-4 shrink-0 rounded px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-slate-700 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-        data-testid="recently-edited-resume-link"
-      >
-        Resume →
-      </a>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -248,6 +180,7 @@ export function MappingListSection({
 }: MappingListSectionProps) {
   const [sortCol, setSortCol] = useState<SortColumn>('updatedAt');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [query, setQuery] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<MappingRowData | null>(null);
 
   function handleSort(col: SortColumn) {
@@ -265,7 +198,18 @@ export function MappingListSection({
     setDeleteTarget(null);
   }
 
-  const sorted = sortMappings(mappings, sortCol, sortDir);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = normalizedQuery.length === 0
+    ? mappings
+    : mappings.filter((mapping) => {
+      const sourceTarget = `${mapping.sourceSchemaName ?? ''} ${mapping.targetSchemaName ?? ''}`.toLowerCase();
+      return (
+        mapping.name.toLowerCase().includes(normalizedQuery)
+        || sourceTarget.includes(normalizedQuery)
+      );
+    });
+
+  const sorted = sortMappings(filtered, sortCol, sortDir);
 
   const sortProps = {
     activeColumn: sortCol,
@@ -278,16 +222,19 @@ export function MappingListSection({
       {/* Section header — primary treatment (text-xl, AE-06 reinforcement) */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-slate-100">Mappings</h2>
-        <Button variant="primary" size="sm" onClick={onCreateMapping}>
-          <Plus size={14} aria-hidden="true" />
-          Create Mapping
-        </Button>
       </div>
 
-      {/* Recently-edited affordance (AE-09, AE-10) */}
-      {mappings.length > 0 && (
-        <RecentlyEditedCard projectId={projectId} mappings={mappings} />
-      )}
+      <div className="mb-4 flex items-center gap-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search mappings"
+          aria-label="Search mappings"
+          className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          data-testid="mappings-search-input"
+        />
+      </div>
 
       {/* Empty state */}
       {mappings.length === 0 ? (
@@ -309,33 +256,42 @@ export function MappingListSection({
         </div>
       ) : (
         /* Table */
-        <div className="overflow-x-auto rounded-lg border border-slate-700">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-lg border border-slate-700" data-testid="mappings-table-container">
+          <table className="w-full min-w-[1080px] text-left text-sm" data-testid="mappings-table">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[28%]" />
+              <col className="w-[7%]" />
+              <col className="w-[8%]" />
+              <col className="w-[11%]" />
+              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[12%]" />
+            </colgroup>
             <thead className="bg-slate-800/60">
               <tr>
-                <SortableHeader label="Name" column="name" {...sortProps} />
+                <SortableHeader label="NAME" column="name" {...sortProps} />
                 <th
                   scope="col"
                   className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
                 >
-                  Source → Target
+                  SOURCE → TARGET
                 </th>
-                <SortableHeader label="Rules" column="ruleCount" {...sortProps} />
-                <SortableHeader label="Coverage" column="coverage" {...sortProps} />
-                <SortableHeader label="Status" column="status" {...sortProps} />
+                <SortableHeader label="RULES" column="ruleCount" align="center" {...sortProps} />
+                <SortableHeader label="COVERAGE" column="coverage" align="center" {...sortProps} />
+                <SortableHeader label="STATUS" column="status" align="center" {...sortProps} />
                 <th
                   scope="col"
-                  colSpan={3}
-                  className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
+                  className="px-3 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-slate-400"
                 >
-                  Deploy
+                  DEPLOYMENT
                 </th>
-                <SortableHeader label="Last Modified" column="updatedAt" {...sortProps} />
+                <SortableHeader label="LAST MODIFIED" column="updatedAt" align="center" {...sortProps} />
                 <th
                   scope="col"
                   className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400"
                 >
-                  Actions
+                  ACTIONS
                 </th>
               </tr>
             </thead>
@@ -349,6 +305,13 @@ export function MappingListSection({
                   onDelete={(id) => setDeleteTarget(mappings.find((m) => m.mappingId === id) ?? null)}
                 />
               ))}
+              {sorted.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-3 py-6 text-center text-sm text-slate-500" data-testid="mappings-no-search-results">
+                    No mappings match your search.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

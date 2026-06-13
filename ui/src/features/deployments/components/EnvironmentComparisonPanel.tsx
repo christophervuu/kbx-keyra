@@ -34,8 +34,8 @@ const statusConfig: Record<
 // ---------------------------------------------------------------------------
 
 const PROMOTE_TARGET: Partial<Record<Environment, Environment>> = {
-  DEV: 'QA',
-  QA: 'PROD',
+  DEV: 'PREPROD',
+  PREPROD: 'PROD',
 };
 
 // ---------------------------------------------------------------------------
@@ -46,6 +46,8 @@ interface EnvCardProps {
   environment: Environment;
   sourceType: 'revision' | 'version' | null;
   sourceNumber: number | null;
+  artifactId?: string;
+  artifactHash?: string;
   deployedAt: string | null;
   status: DeploymentStatus;
   /** Whether a promote action is in progress */
@@ -57,6 +59,8 @@ function EnvCard({
   environment,
   sourceType,
   sourceNumber,
+  artifactId,
+  artifactHash,
   deployedAt,
   status,
   isPromoting,
@@ -111,6 +115,12 @@ function EnvCard({
             </time>
           </p>
         )}
+        {status !== 'not-deployed' && (
+          <p className="mt-1 text-[11px] text-slate-500" data-testid={`env-artifact-${environment}`}>
+            Artifact <span className="font-mono text-slate-300">{artifactId ?? '—'}</span>{' '}
+            · Hash <span className="font-mono text-slate-400">{artifactHash ? artifactHash.slice(0, 12) : '—'}</span>
+          </p>
+        )}
       </div>
 
       {/* Promote button — only for version-backed deployments (AE-06, AE-07) */}
@@ -148,7 +158,7 @@ export interface EnvironmentComparisonPanelProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Side-by-side DEV / QA / PROD comparison panel.
+ * Side-by-side DEV / PREPROD / PROD comparison panel.
  *
  * Shows current deployment source, staleness status, and promote button
  * (only for version-backed deployments, AE-07).
@@ -159,7 +169,7 @@ export function EnvironmentComparisonPanel({
   isPromoting,
   onPromote,
 }: EnvironmentComparisonPanelProps) {
-  const environments: Environment[] = ['DEV', 'QA', 'PROD'];
+  const environments: Environment[] = ['DEV', 'PREPROD', 'PROD'];
 
   return (
     <section aria-label="Environment comparison" data-testid="environment-comparison-panel">
@@ -175,6 +185,8 @@ export function EnvironmentComparisonPanel({
               environment={env}
               sourceType={summary?.deployment?.sourceType ?? null}
               sourceNumber={summary?.deployment?.sourceNumber ?? null}
+              artifactId={summary?.deployment?.artifactId}
+              artifactHash={summary?.deployment?.artifactHash}
               deployedAt={summary?.deployment?.deployedAt ?? null}
               status={summary?.status ?? 'not-deployed'}
               isPromoting={isPromoting}

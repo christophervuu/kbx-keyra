@@ -5,7 +5,7 @@ import type { MappingRevision } from '@/lib/types';
 
 export interface RevisionDeploySectionProps {
   revisions: readonly MappingRevision[];
-  /** When true, deploy buttons are disabled (QA/PROD environments) */
+  /** When true, deploy buttons are disabled (PREPROD/PROD environments) */
   disabled: boolean;
   /** Whether a deploy action is currently in flight */
   isDeploying: boolean;
@@ -14,7 +14,7 @@ export interface RevisionDeploySectionProps {
 
 /**
  * Lists mapping revisions with a deploy button on each row.
- * Deploy buttons are disabled when `disabled` is true (QA/PROD).
+ * Deploy buttons are disabled when `disabled` is true (PREPROD/PROD).
  * Revisions are deployable to DEV only.
  */
 export function RevisionDeploySection({

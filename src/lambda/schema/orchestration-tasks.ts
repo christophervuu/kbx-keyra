@@ -29,7 +29,6 @@ export interface ParseSchemaEvent {
 export interface AggregateBatchResult {
   readonly batchIndex: number;
   readonly nodesWritten: number;
-  readonly nodesIndexed: number;
   readonly errors?: readonly string[];
 }
 
@@ -61,6 +60,38 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const SCHEMA_BUCKET = getEnvValue('SCHEMA_BUCKET');
+
+function computeEmbeddingTelemetry(nodes: readonly {
+  readonly embeddingText?: string;
+  readonly embedding?: readonly number[];
+}[]): {
+  nodeCount: number;
+  nodesWithEmbeddingText: number;
+  nodesWithEmbeddingVector: number;
+  approxEmbeddingBytes: number;
+} {
+  let nodesWithEmbeddingText = 0;
+  let nodesWithEmbeddingVector = 0;
+  let approxEmbeddingBytes = 0;
+
+  for (const node of nodes) {
+    if (typeof node.embeddingText === 'string' && node.embeddingText.trim() !== '') {
+      nodesWithEmbeddingText += 1;
+    }
+
+    if (Array.isArray(node.embedding) && node.embedding.length > 0) {
+      nodesWithEmbeddingVector += 1;
+      approxEmbeddingBytes += node.embedding.length * 8;
+    }
+  }
+
+  return {
+    nodeCount: nodes.length,
+    nodesWithEmbeddingText,
+    nodesWithEmbeddingVector,
+    approxEmbeddingBytes,
+  };
+}
 
 function getSchemaBucketOrThrow(): string {
   const bucket = SCHEMA_BUCKET?.trim();
@@ -106,6 +137,13 @@ export async function parseSchemaTask(event: ParseSchemaEvent): Promise<{
 
   const parsed = event.format === 'xsd' ? parseXsd(content, event.schemaId) : parseJsonSchema(content, event.schemaId);
 
+  console.info('[schema-orchestration] parsed retrieval fields telemetry', {
+    schemaId: event.schemaId,
+    format: event.format,
+    fieldCount: parsed.fieldCount,
+    ...computeEmbeddingTelemetry(parsed.nodes),
+  });
+
   const chunks = chunkNodes(parsed.nodes);
   const bucket = getSchemaBucketOrThrow();
   const batchReferences: BatchReference[] = [];
@@ -144,13 +182,11 @@ export async function aggregateResultsTask(event: AggregateResultsEvent): Promis
   schemaId: string;
   fieldCount: number;
   written: number;
-  indexed: number;
   failed: number;
 }> {
   const results = event.batchResults ?? [];
 
   const written = results.reduce((sum, item) => sum + item.nodesWritten, 0);
-  const indexed = results.reduce((sum, item) => sum + item.nodesIndexed, 0);
   const failed = results.reduce((sum, item) => sum + (item.errors && item.errors.length > 0 ? 1 : 0), 0);
 
   await storeProcessedContent(event.schemaId, {
@@ -159,7 +195,6 @@ export async function aggregateResultsTask(event: AggregateResultsEvent): Promis
     batchResults: results,
     summary: {
       written,
-      indexed,
       failed,
     },
   });
@@ -168,7 +203,6 @@ export async function aggregateResultsTask(event: AggregateResultsEvent): Promis
     schemaId: event.schemaId,
     fieldCount: event.fieldCount,
     written,
-    indexed,
     failed,
   };
 }

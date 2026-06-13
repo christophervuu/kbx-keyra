@@ -28,7 +28,60 @@ interface MutableSchemaNode {
   childCount: number;
   subtreeFieldCount: number;
   embeddingText: string;
+  embedding?: readonly number[];
   readonly children: Set<string>;
+}
+
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function getEmbeddingDimension(): number {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const raw = env?.SCHEMA_NODE_EMBEDDING_DIMENSION;
+  if (!raw) {
+    return 12;
+  }
+
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 128) {
+    return 12;
+  }
+
+  return parsed;
+}
+
+function computeEmbedding(text: string, dimension: number): readonly number[] {
+  const vector = new Array<number>(dimension).fill(0);
+  const tokens = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  if (tokens.length === 0) {
+    return vector;
+  }
+
+  for (const token of tokens) {
+    const hash = hashString(token);
+    const sign = hash % 2 === 0 ? 1 : -1;
+    const index = hash % dimension;
+    vector[index] = (vector[index] ?? 0) + (sign * (1 + Math.min(token.length, 24) / 24));
+  }
+
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + (value * value), 0));
+  if (norm === 0) {
+    return vector;
+  }
+
+  return vector.map((value) => value / norm);
 }
 
 export class SchemaNodeAccumulator {
@@ -94,6 +147,7 @@ export class SchemaNodeAccumulator {
   }
 
   public finalize(): ParseResult {
+    const embeddingDimension = getEmbeddingDimension();
     const subtreeCache = new Map<string, number>();
 
     const computeSubtree = (path: string): number => {
@@ -149,6 +203,7 @@ export class SchemaNodeAccumulator {
         subtreeFieldCount: node.subtreeFieldCount,
         embeddingText: '',
       });
+      node.embedding = computeEmbedding(node.embeddingText, embeddingDimension);
     }
 
     const finalizedNodes: SchemaNode[] = this.order
@@ -167,6 +222,7 @@ export class SchemaNodeAccumulator {
         childCount: node.childCount,
         subtreeFieldCount: node.subtreeFieldCount,
         embeddingText: node.embeddingText,
+        embedding: node.embedding,
       }));
 
     return {

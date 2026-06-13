@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MappingRowData } from '../../types';
 import { MappingListSection } from '../MappingListSection';
@@ -92,20 +92,6 @@ function renderSection(
 }
 
 // ---------------------------------------------------------------------------
-// localStorage helpers for recently-edited tests
-// ---------------------------------------------------------------------------
-
-const STORAGE_KEY = 'keyra:recent-activity';
-
-function setRecentActivity(entries: object[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
-
-function clearRecentActivity() {
-  localStorage.setItem(STORAGE_KEY, '[]');
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -156,7 +142,7 @@ describe('MappingListSection', () => {
   it('clicking Name header sorts by name ascending', async () => {
     const user = userEvent.setup();
     renderSection([MAPPING_B, MAPPING_A]);
-    await user.click(screen.getByRole('button', { name: 'Sort by Name' }));
+    await user.click(screen.getByRole('button', { name: 'Sort by NAME' }));
     const rows = screen.getAllByRole('row');
     expect(within(rows[1]).getByText('Alpha')).toBeInTheDocument(); // a < b
   });
@@ -164,22 +150,13 @@ describe('MappingListSection', () => {
   it('clicking Name header twice toggles to descending', async () => {
     const user = userEvent.setup();
     renderSection([MAPPING_A, MAPPING_B]);
-    await user.click(screen.getByRole('button', { name: 'Sort by Name' }));
-    await user.click(screen.getByRole('button', { name: 'Sort by Name' }));
+    await user.click(screen.getByRole('button', { name: 'Sort by NAME' }));
+    await user.click(screen.getByRole('button', { name: 'Sort by NAME' }));
     const rows = screen.getAllByRole('row');
     expect(within(rows[1]).getByText('Beta')).toBeInTheDocument(); // b > a desc
   });
 
-  it('Create Mapping button calls onCreateMapping', async () => {
-    const onCreateMapping = vi.fn();
-    const user = userEvent.setup();
-    renderSection([MAPPING_A], { onCreateMapping });
-    const buttons = screen.getAllByRole('button', { name: /create mapping/i });
-    await user.click(buttons[0]);
-    expect(onCreateMapping).toHaveBeenCalled();
-  });
-
-  it('clicking Delete opens confirmation dialog', async () => {
+  it('clicking Delete icon opens confirmation dialog', async () => {
     const user = userEvent.setup();
     renderSection([MAPPING_A]);
     await user.click(screen.getByRole('button', { name: /delete mapping alpha/i }));
@@ -207,7 +184,7 @@ describe('MappingListSection', () => {
     expect(screen.queryByTestId('delete-confirm-dialog')).not.toBeInTheDocument();
   });
 
-  it('clicking Duplicate calls onDuplicate immediately', async () => {
+  it('clicking Duplicate icon calls onDuplicate immediately', async () => {
     const onDuplicate = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
     renderSection([MAPPING_A], { onDuplicate });
@@ -215,137 +192,73 @@ describe('MappingListSection', () => {
     expect(onDuplicate).toHaveBeenCalledWith('a');
   });
 
-  it('table has correct column headers', () => {
+  it('table has correct all-caps column headers', () => {
     renderSection([MAPPING_A]);
-    expect(screen.getByRole('button', { name: 'Sort by Name' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sort by Rules' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sort by Coverage' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sort by Status' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sort by Last Modified' })).toBeInTheDocument();
-    // Deploy column header (single header spanning 3 cols)
-    expect(screen.getByText('Deploy')).toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Recently-edited affordance (AE-09, AE-10)
-// ---------------------------------------------------------------------------
-
-describe('MappingListSection — recently-edited affordance', () => {
-  beforeEach(() => {
-    clearRecentActivity();
+    expect(screen.getByRole('button', { name: 'Sort by NAME' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort by RULES' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort by COVERAGE' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort by STATUS' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort by LAST MODIFIED' })).toBeInTheDocument();
+    // Deployment / Actions headers
+    expect(screen.getByText('DEPLOYMENT')).toBeInTheDocument();
+    expect(screen.getByText('ACTIONS')).toBeInTheDocument();
   });
 
-  it('AE-09: shows recently-edited card when matching activity exists', () => {
-    setRecentActivity([
-      {
-        type: 'mapping',
-        id: 'a',
-        projectId: 'proj-1',
-        name: 'Alpha',
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+  it('table uses full-width container and fixed minimum width for readability', () => {
+    renderSection([MAPPING_A]);
+    expect(screen.getByTestId('mappings-table-container')).toBeInTheDocument();
+    expect(screen.getByTestId('mappings-table')).toBeInTheDocument();
+    expect(screen.getByTestId('mappings-table')).toHaveClass('min-w-[1080px]');
+  });
 
+  it('centers Rules, Coverage, Status, Deployment, and Last Modified headers', () => {
     renderSection([MAPPING_A]);
 
-    expect(screen.getByTestId('recently-edited-mapping')).toBeInTheDocument();
-    expect(screen.getByText('Continue where you left off')).toBeInTheDocument();
-    const card = screen.getByTestId('recently-edited-mapping');
-    expect(within(card).getByText('Alpha')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /RULES/i })).toHaveClass('text-center');
+    expect(screen.getByRole('columnheader', { name: /COVERAGE/i })).toHaveClass('text-center');
+    expect(screen.getByRole('columnheader', { name: /STATUS/i })).toHaveClass('text-center');
+    expect(screen.getByRole('columnheader', { name: 'DEPLOYMENT' })).toHaveClass('text-center');
+    expect(screen.getByRole('columnheader', { name: /LAST MODIFIED/i })).toHaveClass('text-center');
   });
 
-  it('AE-09: Resume link navigates to Mapping Editor', () => {
-    setRecentActivity([
-      {
-        type: 'mapping',
-        id: 'a',
-        projectId: 'proj-1',
-        name: 'Alpha',
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-
-    renderSection([MAPPING_A]);
-
-    const resumeLink = screen.getByTestId('recently-edited-resume-link');
-    expect(resumeLink).toHaveAttribute('href', '/projects/proj-1/mappings/a');
-  });
-
-  it('AE-10: hides recently-edited card when no matching activity', () => {
-    // No recent activity stored
-    renderSection([MAPPING_A]);
-    expect(screen.queryByTestId('recently-edited-mapping')).not.toBeInTheDocument();
-  });
-
-  it('AE-10: hides card when recent activity is for a different project', () => {
-    setRecentActivity([
-      {
-        type: 'mapping',
-        id: 'a',
-        projectId: 'other-project',
-        name: 'Alpha',
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-
-    renderSection([MAPPING_A], { projectId: 'proj-1' });
-    expect(screen.queryByTestId('recently-edited-mapping')).not.toBeInTheDocument();
-  });
-
-  it('AE-10: hides card when recent mapping no longer exists in mappings list', () => {
-    setRecentActivity([
-      {
-        type: 'mapping',
-        id: 'deleted-mapping-id',
-        projectId: 'proj-1',
-        name: 'Deleted Mapping',
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-
-    renderSection([MAPPING_A]); // MAPPING_A has id 'a', not 'deleted-mapping-id'
-    expect(screen.queryByTestId('recently-edited-mapping')).not.toBeInTheDocument();
-  });
-
-  it('AE-10: hides card when mappings list is empty', () => {
-    setRecentActivity([
-      {
-        type: 'mapping',
-        id: 'a',
-        projectId: 'proj-1',
-        name: 'Alpha',
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-
-    renderSection([]); // empty mappings — card should not show
-    expect(screen.queryByTestId('recently-edited-mapping')).not.toBeInTheDocument();
-  });
-
-  it('shows the most recently edited mapping when multiple exist', () => {
-    const now = Date.now();
-    setRecentActivity([
-      {
-        type: 'mapping',
-        id: 'b',
-        projectId: 'proj-1',
-        name: 'Beta',
-        timestamp: new Date(now - 1000).toISOString(), // 1 second ago
-      },
-      {
-        type: 'mapping',
-        id: 'a',
-        projectId: 'proj-1',
-        name: 'Alpha',
-        timestamp: new Date(now - 60_000).toISOString(), // 1 minute ago
-      },
-    ]);
-
+  it('filters mappings by name search', async () => {
+    const user = userEvent.setup();
     renderSection([MAPPING_A, MAPPING_B]);
 
-    const card = screen.getByTestId('recently-edited-mapping');
-    // Beta is more recent
-    expect(within(card).getByText('Beta')).toBeInTheDocument();
+    await user.type(screen.getByTestId('mappings-search-input'), 'alp');
+
+    expect(screen.getByText('Alpha')).toBeInTheDocument();
+    expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('filters mappings by source/target schema search', async () => {
+    const user = userEvent.setup();
+    const sourceMatch = makeMapping({
+      mappingId: 's1',
+      name: 'Gamma',
+      sourceSchemaName: 'CustomerSource',
+      targetSchemaName: 'TargetX',
+    });
+    const other = makeMapping({
+      mappingId: 's2',
+      name: 'Delta',
+      sourceSchemaName: 'OrderSource',
+      targetSchemaName: 'TargetY',
+    });
+    renderSection([sourceMatch, other]);
+
+    await user.type(screen.getByTestId('mappings-search-input'), 'customer');
+
+    expect(screen.getByText('Gamma')).toBeInTheDocument();
+    expect(screen.queryByText('Delta')).not.toBeInTheDocument();
+  });
+
+  it('shows empty-search-result state when no mapping matches query', async () => {
+    const user = userEvent.setup();
+    renderSection([MAPPING_A]);
+
+    await user.type(screen.getByTestId('mappings-search-input'), 'zzz-no-match');
+
+    expect(screen.getByTestId('mappings-no-search-results')).toBeInTheDocument();
   });
 });

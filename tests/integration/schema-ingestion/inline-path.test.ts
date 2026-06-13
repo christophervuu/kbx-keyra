@@ -15,8 +15,6 @@ const schemaLibMocks = vi.hoisted(() => ({
   parseXsd: vi.fn(),
   getInlineFieldThreshold: vi.fn(),
   batchWriteSchemaNodes: vi.fn(),
-  ensureIndexExists: vi.fn(),
-  bulkIndexSchemaNodes: vi.fn(),
   storeProcessedContent: vi.fn(),
   updateSchemaStatus: vi.fn(),
   getSchemaMetadata: vi.fn(),
@@ -88,14 +86,12 @@ describe('schema ingestion integration - inline path', () => {
     schemaLibMocks.storeOriginalSchema.mockReset().mockResolvedValue('schemas/schema-id/original.json');
     schemaLibMocks.getInlineFieldThreshold.mockReset().mockReturnValue(500);
     schemaLibMocks.batchWriteSchemaNodes.mockReset().mockImplementation(async (nodes: unknown[]) => ({ written: nodes.length, failed: 0 }));
-    schemaLibMocks.ensureIndexExists.mockReset().mockResolvedValue(undefined);
-    schemaLibMocks.bulkIndexSchemaNodes.mockReset().mockImplementation(async (nodes: unknown[]) => ({ indexed: nodes.length, failed: 0 }));
     schemaLibMocks.storeProcessedContent.mockReset().mockResolvedValue('schemas/schema-id/content.json');
     schemaLibMocks.updateSchemaStatus.mockReset().mockResolvedValue(undefined);
     schemaLibMocks.getSchemaMetadata.mockReset().mockResolvedValue(null);
   });
 
-  it('50-field schema processes inline with node persistence + indexing expectations (AE-01)', async () => {
+  it('50-field schema processes inline with node persistence expectations (AE-01)', async () => {
     const { handler } = await importHandler();
     const schemaContent = generateJsonSchemaString(50);
 
@@ -111,7 +107,6 @@ describe('schema ingestion integration - inline path', () => {
     expect(response.statusCode).toBe(201);
     expect(schemaLibMocks.createSchemaMetadata).toHaveBeenCalledTimes(1);
     expect(schemaLibMocks.batchWriteSchemaNodes).toHaveBeenCalledTimes(1);
-    expect(schemaLibMocks.bulkIndexSchemaNodes).toHaveBeenCalledTimes(1);
     expect(startExecutionSendMock).not.toHaveBeenCalled();
 
     const writtenNodes = schemaLibMocks.batchWriteSchemaNodes.mock.calls[0]?.[0] as Array<{ path: string; depth: number; type: string }>;

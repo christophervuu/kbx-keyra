@@ -93,6 +93,10 @@ export interface SchemaNode {
    * Canonical text used for BM25 search and future embedding generation.
    */
   readonly embeddingText: string;
+  /**
+   * Optional deterministic embedding vector stored per-node in DynamoDB.
+   */
+  readonly embedding?: readonly number[];
 }
 
 /**
@@ -286,4 +290,60 @@ export interface SchemaSearchResult {
    * Optional ordered parent path chain from root to direct parent.
    */
   readonly parentChain?: readonly string[];
+}
+
+/**
+ * Runtime schema-retriever modes for AI/schema-query paths.
+ */
+export type SchemaRetrieverMode = 'dynamodb';
+
+/**
+ * Search request passed to retriever implementations.
+ */
+export interface SchemaRetrieverSearchRequest {
+  readonly schemaId: string;
+  readonly query: string;
+  readonly filters?: SchemaQueryFilters;
+  readonly limit?: number;
+  /**
+   * Optional correlation/request identifiers used for retrieval telemetry.
+   */
+  readonly requestId?: string;
+  readonly correlationId?: string;
+  /**
+   * Optional per-request override for embedding rerank.
+   *
+   * When omitted, runtime defaults are used.
+   */
+  readonly enableRerank?: boolean;
+  /**
+   * Optional per-request structural context expansion.
+   *
+   * When true, retriever may append bounded sibling/children context nodes
+   * beyond the lexical/rerank base set.
+   */
+  readonly includeContextExpansion?: boolean;
+  /**
+   * Optional non-fatal shadow telemetry callback.
+   */
+  readonly onShadowTelemetry?: (payload: {
+    readonly schemaId: string;
+    readonly queryLength: number;
+    readonly primary: 'dynamodb';
+    readonly secondary: 'dynamodb';
+    readonly sampled: boolean;
+    readonly jaccardAt10?: number;
+    readonly ndcgDeltaAt10?: number;
+    readonly timingDeltaMs?: number;
+    readonly secondaryResultCount?: number;
+    readonly secondaryFailed?: boolean;
+    readonly secondaryError?: string;
+  }) => void;
+}
+
+/**
+ * Shared schema-retriever interface used by AI and schema-query handlers.
+ */
+export interface SchemaRetriever {
+  searchSchemaNodes(request: SchemaRetrieverSearchRequest): Promise<SchemaSearchResult[]>;
 }

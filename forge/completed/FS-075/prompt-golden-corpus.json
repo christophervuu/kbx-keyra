@@ -1,0 +1,149 @@
+{
+  "corpusId": "FS-075-prompt-goldens",
+  "spec": "FS-075",
+  "specRevision": 2,
+  "updatedAt": "2026-06-02",
+  "linkedDeterministicMatrixId": "FS-075-T01-deterministic",
+  "versioningPolicy": {
+    "key": "promptId+modelRuntimeTuple",
+    "description": "Each golden case is versioned by prompt ID and model/runtime tuple to isolate drift across model/runtime changes."
+  },
+  "thresholdPolicy": {
+    "pr": {
+      "targetScore": 0.85,
+      "hardFloor": 0.6,
+      "warningBudget": 1,
+      "strictMissingRequired": false,
+      "description": "PR gate allows bounded non-deterministic drift via warning budget."
+    },
+    "release": {
+      "targetScore": 0.9,
+      "hardFloor": 0.9,
+      "warningBudget": 0,
+      "strictMissingRequired": true,
+      "description": "Pre-release gate is strict: no warnings or missing required signals unless explicitly waived."
+    }
+  },
+  "maintenanceRules": [
+    "When prompt text, prompt ID, model, or runtime profile changes, update corresponding golden case tuple and baseline output.",
+    "Do not mutate historical tuple entries in place; add a new tuple-scoped case version and keep prior tuple for comparison during migration window.",
+    "Any waiver for release mode failures must reference case IDs, tuple keys, rationale, and expiration date in release notes."
+  ],
+  "cases": [
+    {
+      "caseId": "EXPLAIN-001",
+      "featureId": "explain-rule",
+      "promptId": "explain-rule",
+      "modelRuntimeTuple": "openai/gpt-4.1-mini@ai-runtime-v1",
+      "versionKey": "explain-rule::openai/gpt-4.1-mini@ai-runtime-v1",
+      "expectedSignals": {
+        "requiredContains": [
+          "document type",
+          "credit memo",
+          "invoice"
+        ],
+        "forbiddenContains": [
+          "auto-apply",
+          "committed"
+        ]
+      },
+      "referenceOutput": "The rule checks the document type condition and returns \"Credit Memo\" for negative invoice amounts; otherwise it returns \"Invoice\" as the document type.",
+      "aeCoverage": [
+        "AE-01",
+        "AE-02"
+      ]
+    },
+    {
+      "caseId": "SUGGEST-001",
+      "featureId": "suggest-expression",
+      "promptId": "nl-to-rule",
+      "modelRuntimeTuple": "openai/gpt-4.1-mini@ai-runtime-v1",
+      "versionKey": "nl-to-rule::openai/gpt-4.1-mini@ai-runtime-v1",
+      "expectedSignals": {
+        "requiredContains": [
+          "default(",
+          "source(",
+          "usd"
+        ],
+        "forbiddenContains": [
+          "auto-commit",
+          "save immediately"
+        ]
+      },
+      "referenceOutput": "default(source(\"InvoiceCurrency\"), \"USD\")",
+      "aeCoverage": [
+        "AE-01",
+        "AE-02"
+      ]
+    },
+    {
+      "caseId": "SMARTFIX-001",
+      "featureId": "smart-fix",
+      "promptId": "smart-fix",
+      "modelRuntimeTuple": "openai/gpt-4.1@ai-runtime-v1",
+      "versionKey": "smart-fix::openai/gpt-4.1@ai-runtime-v1",
+      "expectedSignals": {
+        "requiredContains": [
+          "default(",
+          "source(",
+          "fix"
+        ],
+        "forbiddenContains": [
+          "committed",
+          "applied automatically"
+        ]
+      },
+      "referenceOutput": "Fix: use default(source(\"Invoice.Total\"), 0) so null totals no longer fail required-number validation.",
+      "aeCoverage": [
+        "AE-01",
+        "AE-02"
+      ]
+    },
+    {
+      "caseId": "AIVAL-001",
+      "featureId": "ai-validation",
+      "promptId": "validate-mappings",
+      "modelRuntimeTuple": "openai/gpt-4.1@ai-runtime-v1",
+      "versionKey": "validate-mappings::openai/gpt-4.1@ai-runtime-v1",
+      "expectedSignals": {
+        "requiredContains": [
+          "warning",
+          "recommendation",
+          "rule"
+        ],
+        "forbiddenContains": [
+          "authoritative",
+          "must block save"
+        ]
+      },
+      "referenceOutput": "Warning: Rule 4 may map a nullable source into a required target. Recommendation: add default(...) fallback and re-run deterministic validation.",
+      "aeCoverage": [
+        "AE-01",
+        "AE-02"
+      ]
+    },
+    {
+      "caseId": "AUTOMAP-001",
+      "featureId": "auto-map",
+      "promptId": "auto-map",
+      "modelRuntimeTuple": "openai/gpt-4.1@ai-runtime-v1",
+      "versionKey": "auto-map::openai/gpt-4.1@ai-runtime-v1",
+      "expectedSignals": {
+        "requiredContains": [
+          "target",
+          "expression",
+          "confidence"
+        ],
+        "forbiddenContains": [
+          "committed",
+          "saved to mapping"
+        ]
+      },
+      "referenceOutput": "{\"rules\":[{\"target\":\"Order.Header.CurrencyCode\",\"expression\":\"default(source(\\\"Invoice.Currency\\\"), \\\"USD\\\")\",\"confidence\":\"high\"}]}",
+      "aeCoverage": [
+        "AE-01",
+        "AE-02"
+      ]
+    }
+  ]
+}

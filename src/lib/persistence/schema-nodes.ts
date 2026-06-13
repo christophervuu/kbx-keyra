@@ -9,6 +9,110 @@ const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 100;
 const DEFAULT_QUERY_LIMIT = 50;
 
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function getEmbeddingDimension(): number {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const raw = env?.SCHEMA_NODE_EMBEDDING_DIMENSION;
+  if (!raw) {
+    return 12;
+  }
+
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 128) {
+    return 12;
+  }
+
+  return parsed;
+}
+
+function computeEmbedding(text: string, dimension: number): readonly number[] {
+  const vector = new Array<number>(dimension).fill(0);
+  const tokens = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+
+  if (tokens.length === 0) {
+    return vector;
+  }
+
+  for (const token of tokens) {
+    const hash = hashString(token);
+    const sign = hash % 2 === 0 ? 1 : -1;
+    const index = hash % dimension;
+    vector[index] = (vector[index] ?? 0) + (sign * (1 + Math.min(token.length, 24) / 24));
+  }
+
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + (value * value), 0));
+  if (norm === 0) {
+    return vector;
+  }
+
+  return vector.map((value) => value / norm);
+}
+
+function buildFallbackEmbeddingText(item: Pick<SchemaNodeItem, 'path' | 'fieldName' | 'type'>): string {
+  return `${item.path} | ${item.fieldName} (${item.type})`;
+}
+
+function normalizeNodeItem(raw: SchemaNodeItem): SchemaNodeItem {
+  const embeddingDimension = getEmbeddingDimension();
+  const embeddingText = typeof raw.embeddingText === 'string' && raw.embeddingText.trim() !== ''
+    ? raw.embeddingText
+    : buildFallbackEmbeddingText(raw);
+
+  const normalizedEmbedding = Array.isArray(raw.embedding)
+    ? raw.embedding.filter(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value),
+    )
+    : [];
+
+  const embedding = normalizedEmbedding.length > 0
+    ? normalizedEmbedding
+    : computeEmbedding(embeddingText, embeddingDimension);
+
+  return {
+    ...raw,
+    embeddingText,
+    embedding,
+  };
+}
+
+function logMissingRetrievalFields(stage: string, schemaId: string, items: readonly SchemaNodeItem[]): void {
+  let missingEmbeddingText = 0;
+  let missingEmbeddingVector = 0;
+
+  for (const item of items) {
+    if (!item.embeddingText || item.embeddingText.trim() === '') {
+      missingEmbeddingText += 1;
+    }
+
+    if (!Array.isArray(item.embedding) || item.embedding.length === 0) {
+      missingEmbeddingVector += 1;
+    }
+  }
+
+  if (missingEmbeddingText > 0 || missingEmbeddingVector > 0) {
+    console.warn('[schema-nodes] missing retrieval fields detected', {
+      stage,
+      schemaId,
+      totalItems: items.length,
+      missingEmbeddingText,
+      missingEmbeddingVector,
+    });
+  }
+}
+
 type BatchWriteRequest = NonNullable<BatchWriteCommandInput['RequestItems']>[string][number];
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -94,7 +198,9 @@ export async function listBySchema(schemaId: string): Promise<SchemaNodeItem[]> 
     );
 
     if (response.Items) {
-      results.push(...(response.Items as SchemaNodeItem[]));
+      const rawBatch = response.Items as SchemaNodeItem[];
+      logMissingRetrievalFields('listBySchema', schemaId, rawBatch);
+      results.push(...rawBatch.map(normalizeNodeItem));
     }
 
     lastEvaluatedKey = response.LastEvaluatedKey as Record<string, unknown> | undefined;
@@ -134,13 +240,39 @@ export async function queryContains(schemaId: string, query: string, limit = DEF
 
     if (response.Items?.length) {
       const remaining = effectiveLimit - results.length;
-      results.push(...(response.Items as SchemaNodeItem[]).slice(0, remaining));
+      const rawBatch = (response.Items as SchemaNodeItem[]).slice(0, remaining);
+      logMissingRetrievalFields('queryContains', schemaId, rawBatch);
+      const batch = rawBatch.map(normalizeNodeItem);
+      results.push(...batch);
     }
 
     lastEvaluatedKey = response.LastEvaluatedKey as Record<string, unknown> | undefined;
   } while (lastEvaluatedKey && results.length < effectiveLimit);
 
   return results;
+}
+
+export async function backfillRetrievalFields(schemaId: string): Promise<{ scanned: number; written: number }> {
+  const nodes = await listBySchema(schemaId);
+  if (nodes.length === 0) {
+    return {
+      scanned: 0,
+      written: 0,
+    };
+  }
+
+  await batchWrite(schemaId, nodes);
+
+  console.info('[schema-nodes] retrieval fields backfill completed', {
+    schemaId,
+    scanned: nodes.length,
+    written: nodes.length,
+  });
+
+  return {
+    scanned: nodes.length,
+    written: nodes.length,
+  };
 }
 
 export async function deleteBySchema(schemaId: string): Promise<void> {
@@ -193,5 +325,6 @@ export const schemaNodes = {
   batchWrite,
   listBySchema,
   queryContains,
+  backfillRetrievalFields,
   deleteBySchema,
 };
