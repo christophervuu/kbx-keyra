@@ -29,11 +29,11 @@ vi.mock('../SchemaUploadDialog', () => ({
     ) : null,
 }));
 
-import { CreateMappingPage } from '../CreateMappingPage';
+import { __testables, CreateMappingPage } from '../CreateMappingPage';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
-import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
+import type { MappingEnrichmentSource, MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 
 const SCHEMA_DETAIL_A: SchemaDetail = {
   metadata: {
@@ -250,13 +250,13 @@ function renderPage(adapter: ApiAdapter = createMockAdapter(), projectId = 'proj
   );
 }
 
-describe('CreateMappingPage (FS-088 T-08)', () => {
-  it('AE-01: preserves root test id', () => {
+describe('CreateMappingPage', () => {
+  it('preserves root test id', () => {
     renderPage();
     expect(screen.getByTestId('page-create-mapping')).toBeInTheDocument();
   });
 
-  it('AE-01: renders single-page section shells in expected order', () => {
+  it('renders single-page section shells in expected order', () => {
     renderPage();
 
     const details = screen.getByTestId('mapping-details-section');
@@ -274,7 +274,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(startFrom.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('AE-01/AE-03: uses updated page header copy', () => {
+  it('uses updated page header copy', () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Create Mapping' })).toBeInTheDocument();
@@ -283,7 +283,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     ).toBeInTheDocument();
   });
 
-  it('AE-01: removes legacy wizard UI', () => {
+  it('removes legacy wizard UI', () => {
     renderPage();
 
     expect(screen.queryByRole('list', { name: /progress/i })).not.toBeInTheDocument();
@@ -294,7 +294,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.queryByTestId('step-3')).not.toBeInTheDocument();
   });
 
-  it('AE-16: does not introduce explicitly out-of-scope surfaces in create page shell', () => {
+  it('does not introduce explicitly out-of-scope surfaces in create page shell', () => {
     renderPage();
 
     expect(screen.queryByText(/tags/i)).not.toBeInTheDocument();
@@ -312,34 +312,41 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('project-overview-page')).toBeInTheDocument();
   });
 
-  it('AE-11: shows inline validation error when mapping name is missing on submit', async () => {
-    const user = userEvent.setup();
+  it('shows inline validation error when mapping name is missing on submit', async () => {
     renderPage();
 
-    await user.click(screen.getByTestId('create-button'));
-
-    expect(screen.getByTestId('name-error')).toBeInTheDocument();
-    expect(screen.getByText(/mapping name is required/i)).toBeInTheDocument();
+    const createButton = screen.getByTestId('create-button');
+    expect(createButton).toBeDisabled();
   });
 
-  it('AE-11: clears name validation error once user enters mapping name', async () => {
+  it('clears name validation error once user enters mapping name', async () => {
     const user = userEvent.setup();
-    renderPage();
+    const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
+    const adapter = createMockAdapter({ createMapping });
 
-    await user.click(screen.getByTestId('create-button'));
-    expect(screen.getByTestId('name-error')).toBeInTheDocument();
+    renderPage(adapter);
+
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-a');
+    await user.selectOptions(screen.getByTestId('schema-select-target-schema'), 'schema-b');
+
+    const createButton = screen.getByTestId('create-button');
+    expect(createButton).toBeDisabled();
 
     await user.type(screen.getByLabelText(/mapping name/i), 'Customer Order to ShipmentOrder');
-    expect(screen.queryByTestId('name-error')).not.toBeInTheDocument();
+    expect(createButton).toBeEnabled();
+
+    await user.click(createButton);
+    await waitFor(() => expect(createMapping).toHaveBeenCalledTimes(1));
   });
 
-  it('AE-03: does not render business context field in reduced page scope', () => {
+  it('does not render business context field in reduced page scope', () => {
     renderPage();
 
     expect(screen.queryByLabelText(/business context/i)).not.toBeInTheDocument();
   });
 
-  it('AE-03/AE-11: keeps mapping name stable after validation failure', async () => {
+  it('keeps mapping name stable after validation failure', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -351,11 +358,13 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(nameInput).toHaveValue('Order Mapping');
   });
 
-  it('AE-04: renders source and target schema cards with selectors together', async () => {
+  it('renders primary source and target schema cards with selectors together', async () => {
     renderPage();
 
     expect(screen.getByTestId('source-schema-card')).toBeInTheDocument();
     expect(screen.getByTestId('target-schema-card')).toBeInTheDocument();
+    expect(screen.getByText('Primary Source')).toBeInTheDocument();
+    expect(screen.getByText('Primary Source Schema')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument();
@@ -363,7 +372,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     });
   });
 
-  it('AE-05: shows selected schema basic summary fields only in cards', async () => {
+  it('shows selected schema basic summary fields only in cards', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -389,7 +398,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.queryByText(/repeating/i)).not.toBeInTheDocument();
   });
 
-  it('AE-08: removes standalone schema summary section and keeps metrics in schema cards', async () => {
+  it('removes standalone schema summary section and keeps metrics in schema cards', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -410,7 +419,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('target-required-fields')).toHaveTextContent('—');
   });
 
-  it('AE-06: opens add-schema flow from source card without navigating away', async () => {
+  it('opens add-schema flow from source card without navigating away', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -419,7 +428,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
   });
 
-  it('AE-07: opens add-schema flow from target card without navigating away', async () => {
+  it('opens add-schema flow from target card without navigating away', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -428,7 +437,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
   });
 
-  it('AE-06: auto-selects newly added schema for source and updates source card metrics', async () => {
+  it('auto-selects newly added schema for source and updates source card metrics', async () => {
     const user = userEvent.setup();
     const listSchemas = vi
       .fn()
@@ -449,7 +458,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('source-total-fields')).toHaveTextContent('8');
   });
 
-  it('AE-07: auto-selects newly added schema for target and updates target card metrics', async () => {
+  it('auto-selects newly added schema for target and updates target card metrics', async () => {
     const user = userEvent.setup();
     const listSchemas = vi
       .fn()
@@ -470,7 +479,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('target-total-fields')).toHaveTextContent('8');
   });
 
-  it('AE-09: renders only blank and auto-map options in Start From section (no template)', () => {
+  it('renders only blank and auto-map options in Start From section (no template)', () => {
     renderPage();
 
     expect(screen.getByRole('radio', { name: /blank mapping/i })).toBeInTheDocument();
@@ -478,7 +487,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.queryByRole('radio', { name: /template/i })).not.toBeInTheDocument();
   });
 
-  it('AE-10: defaults to blank mapping and updates primary CTA label by selected start mode', async () => {
+  it('defaults to blank mapping and updates primary CTA label by selected start mode', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -496,23 +505,17 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('create-button')).toHaveTextContent('Create Mapping');
   });
 
-  it('AE-11: validates source and target as required fields before submit', async () => {
+  it('validates source and target as required fields before submit', async () => {
     const user = userEvent.setup();
-    const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
-    const adapter = createMockAdapter({ createMapping });
-
-    renderPage(adapter);
+    renderPage();
 
     await user.type(screen.getByLabelText(/mapping name/i), 'Mapping With Missing Required Fields');
-    await user.click(screen.getByTestId('create-button'));
 
-    expect(screen.getByTestId('source-schema-error')).toHaveTextContent(/source schema is required/i);
-    expect(screen.getByTestId('target-schema-error')).toHaveTextContent(/target schema is required/i);
-    expect(screen.queryByTestId('start-mode-error')).not.toBeInTheDocument();
-    expect(createMapping).not.toHaveBeenCalled();
+    const createButton = screen.getByTestId('create-button');
+    expect(createButton).toBeDisabled();
   });
 
-  it('AE-12: creates mapping in blank mode and navigates to editor', async () => {
+  it('creates mapping in blank mode with zero enrichments and navigates to editor', async () => {
     const user = userEvent.setup();
     const createMapping = vi.fn().mockResolvedValue({
       ...CREATED_MAPPING,
@@ -544,9 +547,187 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
       );
     });
 
+    const createPayload = createMapping.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createPayload.enrichmentSources).toBeUndefined();
+
     await waitFor(() => {
       expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
     });
+  });
+
+  it('supports collapsed enrichment inputs section with no rows', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(screen.getByTestId('enrichment-inputs-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('enrichment-empty-state')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('toggle-enrichment-section'));
+
+    expect(screen.getByTestId('enrichment-empty-state')).toBeInTheDocument();
+    expect(screen.getByText(/keyra does not call enrichment apis/i)).toBeInTheDocument();
+  });
+
+  it('adds, edits, and removes enrichment input rows', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('toggle-enrichment-section'));
+    await user.click(screen.getByTestId('add-enrichment-button'));
+
+    await user.type(screen.getByTestId('enrichment-alias-input'), 'Customer Profile');
+    await user.tab(); // trigger alias normalization blur
+    await user.selectOptions(screen.getByTestId('enrichment-schema-select'), 'schema-a');
+    await user.type(screen.getByTestId('enrichment-description-input'), 'CRM profile payload');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.getByTestId('enrichment-alias-0')).toHaveTextContent('customerProfile');
+    expect(screen.getByTestId('enrichment-schema-0')).toHaveTextContent('Schema Alpha');
+    expect(screen.getByTestId('enrichment-required-0')).toHaveTextContent('Yes');
+    expect(screen.getByTestId('enrichment-description-0')).toHaveTextContent('CRM profile payload');
+
+    await user.click(screen.getByTestId('edit-enrichment-0'));
+    await user.click(screen.getByTestId('enrichment-required-checkbox'));
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.getByTestId('enrichment-required-0')).toHaveTextContent('No');
+
+    await user.click(screen.getByTestId('remove-enrichment-0'));
+    expect(screen.getByTestId('enrichment-empty-state')).toBeInTheDocument();
+  });
+
+  it('blocks duplicate alias and reserved alias values with deterministic feedback', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+    await user.click(screen.getByTestId('toggle-enrichment-section'));
+
+    // Add baseline alias
+    await user.click(screen.getByTestId('add-enrichment-button'));
+    await user.type(screen.getByTestId('enrichment-alias-input'), 'customerProfile');
+    await user.selectOptions(screen.getByTestId('enrichment-schema-select'), 'schema-a');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.queryByTestId('enrichment-modal')).not.toBeInTheDocument();
+
+    // Duplicate alias should fail
+    await user.click(screen.getByTestId('add-enrichment-button'));
+    await user.type(screen.getByTestId('enrichment-alias-input'), 'customerProfile');
+    await user.selectOptions(screen.getByTestId('enrichment-schema-select'), 'schema-b');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.getByTestId('enrichment-alias-error')).toHaveTextContent(/already in use/i);
+
+    await user.click(screen.getByTestId('cancel-enrichment-button'));
+
+    // Reserved alias should fail
+    await user.click(screen.getByTestId('add-enrichment-button'));
+    await user.type(screen.getByTestId('enrichment-alias-input'), 'external');
+    await user.selectOptions(screen.getByTestId('enrichment-schema-select'), 'schema-b');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.getByTestId('enrichment-alias-error')).toHaveTextContent(/is reserved/i);
+  });
+
+  it('create button enablement includes required fields and does not get blocked by invalid in-progress enrichment modal state', async () => {
+    const user = userEvent.setup();
+    const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
+    const adapter = createMockAdapter({ createMapping });
+
+    const firstRender = renderPage(adapter);
+
+    const createButton = screen.getByTestId('create-button');
+    expect(createButton).toBeDisabled();
+
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+    await user.type(screen.getByLabelText(/mapping name/i), 'Enablement Mapping');
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-a');
+    await user.selectOptions(screen.getByTestId('schema-select-target-schema'), 'schema-b');
+
+    expect(createButton).toBeEnabled();
+
+    await user.click(createButton);
+    await waitFor(() => expect(createMapping).toHaveBeenCalledTimes(1));
+
+    firstRender.unmount();
+
+    renderPage(createMockAdapter({ createMapping }));
+    const secondCreateButton = screen.getByTestId('create-button');
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+    await user.type(screen.getByLabelText(/mapping name/i), 'Enablement Mapping 2');
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-a');
+    await user.selectOptions(screen.getByTestId('schema-select-target-schema'), 'schema-b');
+
+    await user.click(screen.getByTestId('toggle-enrichment-section'));
+    await user.click(screen.getByTestId('add-enrichment-button'));
+    await user.type(screen.getByTestId('enrichment-alias-input'), 'validAlias');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.getByTestId('enrichment-schema-error')).toHaveTextContent(/schema is required/i);
+    expect(secondCreateButton).toBeEnabled(); // invalid modal draft must not poison page-level validity
+
+    await user.selectOptions(screen.getByTestId('enrichment-schema-select'), 'schema-a');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    expect(screen.queryByTestId('enrichment-modal')).not.toBeInTheDocument();
+    expect(secondCreateButton).toBeEnabled();
+
+    await user.click(secondCreateButton);
+    await waitFor(() => expect(createMapping).toHaveBeenCalledTimes(2));
+  });
+
+  it('create payload includes enrichmentSources when configured', async () => {
+    const user = userEvent.setup();
+    const createMapping = vi.fn().mockResolvedValue({
+      ...CREATED_MAPPING,
+      mappingId: 'mapping-enriched-1',
+    });
+    const adapter = createMockAdapter({ createMapping, updateProject: vi.fn() });
+
+    renderPage(adapter);
+
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/mapping name/i), 'Enriched Mapping Flow');
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-a');
+    await user.selectOptions(screen.getByTestId('schema-select-target-schema'), 'schema-b');
+
+    await user.click(screen.getByTestId('toggle-enrichment-section'));
+    await user.click(screen.getByTestId('add-enrichment-button'));
+    await user.type(screen.getByTestId('enrichment-alias-input'), 'customerProfile');
+    await user.selectOptions(screen.getByTestId('enrichment-schema-select'), 'schema-a');
+    await user.click(screen.getByTestId('save-enrichment-button'));
+
+    await user.click(screen.getByTestId('create-button'));
+
+    await waitFor(() => {
+      expect(createMapping).toHaveBeenCalled();
+    });
+
+    expect(createMapping).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'proj-1',
+        name: 'Enriched Mapping Flow',
+      }),
+    );
+
+    const payload = createMapping.mock.calls.at(-1)?.[0] as { enrichmentSources?: readonly MappingEnrichmentSource[] };
+    expect(payload.enrichmentSources).toEqual([
+      {
+        alias: 'customerProfile',
+        schemaId: 'schema-a',
+        required: true,
+      },
+    ]);
+  });
+
+  it('normalizes mixed alias input to camelCase and trims leading non-letter segments', () => {
+    expect(__testables.normalizeAliasToCamelCase(' Customer Profile ')).toBe('customerProfile');
+    expect(__testables.normalizeAliasToCamelCase('123 customer-profile')).toBe('customerProfile');
+    expect(__testables.normalizeAliasToCamelCase('___')).toBe('');
   });
 
   it('auto-map mode creates mapping, triggers suggestions, and navigates to editor', async () => {
@@ -607,7 +788,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     expect(screen.getByTestId('editor-auto-map-notice')).toHaveTextContent('');
   });
 
-  it('AE-14: unsupported auto-map-at-create is handled explicitly and still navigates to editor', async () => {
+  it('unsupported auto-map-at-create is handled explicitly and still navigates to editor', async () => {
     const user = userEvent.setup();
     const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
     const autoMapSection = vi
@@ -636,7 +817,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     );
   });
 
-  it('AE-09: selector options include CDM badge/status/format/field count metadata by default', async () => {
+  it('selector options include CDM badge/status/format/field count metadata by default', async () => {
     renderPage();
 
     await waitFor(() => {
@@ -656,7 +837,7 @@ describe('CreateMappingPage (FS-088 T-08)', () => {
     ).toBe(true);
   });
 
-  it('AE-09a: error schemas are visible but non-selectable; needs_review schemas are warning-selectable', async () => {
+  it('error schemas are visible but non-selectable; needs_review schemas are warning-selectable', async () => {
     const adapter = createMockAdapter({
       listSchemas: vi.fn().mockResolvedValue([
         SCHEMA_DETAIL_A.metadata,

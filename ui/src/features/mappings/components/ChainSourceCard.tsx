@@ -20,11 +20,11 @@ import { Plus } from 'lucide-react';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { SourceFieldOptionRow } from './SourceFieldOptionRow';
+import { PreviewContext } from '../context/preview-context';
 import { useDropZone } from '../hooks/use-drop-zone';
 import type { SchemaPathEntry } from '../lib/autocomplete-utils';
 import { resolveFieldTestValue } from '../lib/source-field-display';
-import { PreviewContext } from '../context/preview-context';
-import { SourceFieldOptionRow } from './SourceFieldOptionRow';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,7 +37,7 @@ export interface ChainSourceCardProps {
   readonly sourceOptions?: readonly SchemaPathEntry[];
   /** Number of logic steps currently in the chain (for display). */
   readonly logicStepCount: number;
-  /** Fires when a source field is selected (click or drop). */
+  /** Fires when an input field is selected (click or drop). */
   readonly onSourceSelect: (path: string) => void;
   /** Fires when the user clicks "+ Add logic". */
   readonly onAddLogic: () => void;
@@ -52,7 +52,7 @@ export interface ChainSourceCardProps {
 // ---------------------------------------------------------------------------
 
 /**
- * ChainSourceCard — shows the selected source field and entry-point actions.
+ * ChainSourceCard — shows the selected input field and entry-point actions.
  *
  * When no source is selected, renders a drop zone with guidance text.
  * When a source is selected, renders the source chip, a status label,
@@ -81,6 +81,7 @@ export function ChainSourceCard({
   const sourceData = previewCtx?.sourceData ?? null;
 
   const hasSource = typeof sourcePath === 'string' && sourcePath.trim().length > 0;
+  const hasLogicSteps = logicStepCount > 0;
   const normalizedQuery = sourceInputValue.trim().toLowerCase();
 
   const filteredSourceOptions = useMemo(
@@ -92,14 +93,7 @@ export function ChainSourceCard({
   const visibleSourceOptions = filteredSourceOptions.slice(0, maxVisibleOptions);
 
   useEffect(() => {
-    setSourceInputValue(sourcePath ?? '');
-  }, [sourcePath]);
-
-  useEffect(() => {
-    if (!showSourceMenu) {
-      setMenuPosition(null);
-      return;
-    }
+    if (!showSourceMenu) return;
 
     const updatePosition = () => {
       const inputEl = inputRef.current;
@@ -153,18 +147,18 @@ export function ChainSourceCard({
       {...dropHandlers}
     >
       <p className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-400" data-testid="chain-source-card-guidance">
-        Source field
+        Input field
       </p>
 
       <div className="relative">
         <label htmlFor={sourceInputId} className="sr-only">
-          Search source field
+          Search input field
         </label>
         <input
           ref={inputRef}
           id={sourceInputId}
           type="text"
-          placeholder="Search source field"
+          placeholder="Search input field"
           autoComplete="off"
           className={[
             'w-full rounded border px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500',
@@ -173,8 +167,11 @@ export function ChainSourceCard({
               : 'border-slate-700 bg-slate-900',
           ].join(' ')}
           data-testid="chain-source-card-input"
-          value={sourceInputValue}
-          onFocus={() => { setShowSourceMenu(true); }}
+          value={showSourceMenu ? sourceInputValue : (sourcePath ?? sourceInputValue)}
+          onFocus={() => {
+            setSourceInputValue(sourcePath ?? '');
+            setShowSourceMenu(true);
+          }}
           onBlur={() => {
             requestAnimationFrame(() => {
               const active = document.activeElement as Node | null;
@@ -202,7 +199,7 @@ export function ChainSourceCard({
           <div
             ref={menuRef}
             role="listbox"
-            aria-label="Source field options"
+            aria-label="Input field options"
             data-testid="chain-source-card-dropdown"
             className="fixed z-[1000] max-h-48 overflow-y-auto rounded border border-slate-700 bg-slate-900/95 p-1 shadow-lg"
             style={{
@@ -212,9 +209,9 @@ export function ChainSourceCard({
             }}
           >
             {visibleSourceOptions.length === 0 ? (
-              <p className="px-2 py-3 text-center text-xs text-slate-500" data-testid="chain-source-card-no-options">
-                {sourceOptions.length === 0 ? 'No source fields available.' : 'No matching fields.'}
-              </p>
+                <p className="px-2 py-3 text-center text-xs text-slate-500" data-testid="chain-source-card-no-options">
+                  {sourceOptions.length === 0 ? 'No input fields available.' : 'No matching fields.'}
+                </p>
             ) : (
               visibleSourceOptions.map((entry) => (
                 <button
@@ -235,7 +232,7 @@ export function ChainSourceCard({
                   onClick={() => { handleSelect(entry.path); }}
                 >
                   <SourceFieldOptionRow
-                    path={entry.path}
+                    path={entry.displayPath ?? entry.path}
                     type={entry.type}
                     testValue={resolveFieldTestValue(sourceData, entry.path)}
                   />
@@ -248,7 +245,7 @@ export function ChainSourceCard({
       </div>
 
       {hasSource && showAddLogicButton && (
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-end" data-has-logic-steps={hasLogicSteps}>
           {showAddLogicButton && (
             <button
               type="button"
@@ -266,4 +263,3 @@ export function ChainSourceCard({
     </div>
   );
 }
-

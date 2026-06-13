@@ -204,6 +204,11 @@ describe('MappingListSection', () => {
     expect(screen.getByText('ACTIONS')).toBeInTheDocument();
   });
 
+  it('keeps source/target header wording and intent unchanged', () => {
+    renderSection([MAPPING_A]);
+    expect(screen.getByRole('columnheader', { name: 'SOURCE → TARGET' })).toBeInTheDocument();
+  });
+
   it('table uses full-width container and fixed minimum width for readability', () => {
     renderSection([MAPPING_A]);
     expect(screen.getByTestId('mappings-table-container')).toBeInTheDocument();

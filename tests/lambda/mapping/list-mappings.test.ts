@@ -39,6 +39,7 @@ describe('list-mappings handler', () => {
         name: 'M1',
         businessContext: 'Map invoice payload for first partner.',
         version: 1,
+        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
         status: 'draft',
         ruleCount: 0,
         coverage: 0,
@@ -56,10 +57,15 @@ describe('list-mappings handler', () => {
     const result = await handler({ body: null, pathParameters: { projectId: 'proj-1' } });
 
     expect(result.statusCode).toBe(200);
-    const parsed = JSON.parse(result.body) as Array<{ projectId: string; businessContext?: string }>;
+    const parsed = JSON.parse(result.body) as Array<{
+      projectId: string;
+      businessContext?: string;
+      enrichmentSources?: Array<{ alias: string; schemaId?: string; required?: boolean }>;
+    }>;
     expect(parsed).toHaveLength(2);
     expect(parsed.every((item) => item.projectId === 'proj-1')).toBe(true);
     expect(parsed[0]?.businessContext).toBe('Map invoice payload for first partner.');
+    expect(parsed[0]?.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
     expect(parsed[1]?.businessContext).toBeUndefined();
   });
 });

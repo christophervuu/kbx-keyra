@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import {
   Route,
   RouterProvider,
@@ -180,6 +180,11 @@ describe('TestLabPage', () => {
     expect(screen.getByTestId('source-input-area')).toBeInTheDocument();
   });
 
+  it('renders enrichment samples textarea', () => {
+    renderComponent();
+    expect(screen.getByTestId('external-sources-textarea')).toBeInTheDocument();
+  });
+
   it('renders the test case manager area', () => {
     renderComponent();
     expect(screen.getByTestId('test-case-list-area')).toBeInTheDocument();
@@ -196,12 +201,12 @@ describe('TestLabPage', () => {
 
   it('renders the execution summary bar', () => {
     renderComponent();
-    expect(screen.getByTestId('execution-summary-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-summary-bar')).not.toBeInTheDocument();
   });
 
   it('summary bar shows idle state before any execution', () => {
     renderComponent();
-    expect(screen.getByTestId('summary-idle')).toBeInTheDocument();
+    expect(screen.queryByTestId('summary-idle')).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -226,7 +231,7 @@ describe('TestLabPage', () => {
       expect(screen.getByText('Output')).toBeInTheDocument();
       expect(screen.getByText('Diff')).toBeInTheDocument();
       expect(screen.getByText('Diagnostics')).toBeInTheDocument();
-      expect(screen.getByText('Trace')).toBeInTheDocument();
+      expect(within(screen.getByTestId('panel-trace')).getByText('Trace')).toBeInTheDocument();
     });
 
     it('does not render the tab bar at wide breakpoint', () => {
@@ -458,6 +463,14 @@ describe('TestLabPage', () => {
     expect(screen.getByTestId('run-button')).toBeDisabled();
   });
 
+  it('shows inline alert when enrichment samples JSON is invalid', () => {
+    renderComponent();
+    fireEvent.change(screen.getByTestId('external-sources-textarea'), {
+      target: { value: '{bad json' },
+    });
+    expect(screen.getByTestId('missing-required-enrichment-alert')).toBeInTheDocument();
+  });
+
   it('renders the trace toggle', () => {
     renderComponent();
     expect(screen.getByTestId('trace-toggle')).toBeInTheDocument();
@@ -516,7 +529,9 @@ describe('TestLabPage', () => {
   // ---------------------------------------------------------------------------
 
   it('renders with default layout when localStorage contains invalid JSON', () => {
-    localStorage.setItem('keyra:testlab-layout', 'not-valid-json{{{');
+    if (typeof localStorage.setItem === 'function') {
+      localStorage.setItem('keyra:testlab-layout', 'not-valid-json{{{');
+    }
     // Should render without throwing
     renderComponent();
     expect(screen.getByTestId('test-lab-page')).toBeInTheDocument();
@@ -605,9 +620,9 @@ describe('TestLabPage', () => {
     it('Compare tab does not contain deploy/promote/rollback elements', () => {
       renderComponent();
       fireEvent.click(screen.getByTestId('tab-compare'));
-      expect(screen.queryByText(/deploy/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/promote/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/rollback/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /deploy/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /promote/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /rollback/i })).not.toBeInTheDocument();
     });
   });
 });

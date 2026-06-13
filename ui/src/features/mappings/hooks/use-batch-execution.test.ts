@@ -1,7 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { MappingConfig, SchemaDetail, TestCase, TestRunResult } from '@/lib/types/domain';
 import { useBatchExecution } from './use-batch-execution';
 
 // ---------------------------------------------------------------------------
@@ -13,6 +12,8 @@ vi.mock('@/lib/engine', () => ({
 }));
 
 import { executeMapping } from '@/lib/engine';
+import type { MappingConfig, SchemaDetail, TestCase, TestRunResult } from '@/lib/types/domain';
+
 const mockExecuteMapping = vi.mocked(executeMapping);
 
 // ---------------------------------------------------------------------------
@@ -46,11 +47,12 @@ function makeSchemaDetail(id: string): SchemaDetail {
   };
 }
 
-function makeTestCase(id: string, sourceData = '{"x":1}'): TestCase {
+function makeTestCase(id: string, sourceData = '{"x":1}', externalSources = '{}'): TestCase {
   return {
     id,
     name: `Case ${id}`,
     sourceData,
+    externalSources,
     createdAt: '2026-01-01T00:00:00Z',
   };
 }
@@ -189,6 +191,27 @@ describe('useBatchExecution', () => {
     expect(runResult.warningCount).toBe(1);
   });
 
+  it('passes parsed externalSources to executeMapping', async () => {
+    const onCaseComplete = vi.fn();
+    const { result } = renderHook(() =>
+      useBatchExecution({ ...defaultOptions(), onCaseComplete }),
+    );
+
+    await act(async () => {
+      await result.current.runAll([
+        makeTestCase('tc-1', '{"x":1}', '{"customerProfile":{"id":"c-1"}}'),
+      ]);
+    });
+
+    expect(mockExecuteMapping).toHaveBeenCalledWith(
+      expect.anything(),
+      { x: 1 },
+      expect.anything(),
+      expect.anything(),
+      { externalSources: { customerProfile: { id: 'c-1' } } },
+    );
+  });
+
   it('marks a case as error when sourceData is invalid JSON', async () => {
     const onCaseComplete = vi.fn();
     const { result } = renderHook(() =>
@@ -203,6 +226,41 @@ describe('useBatchExecution', () => {
     const [, runResult] = onCaseComplete.mock.calls[0] as [string, TestRunResult];
     expect(runResult.status).toBe('error');
     expect(runResult.errorCount).toBe(1);
+  });
+
+  it('marks a case as error when externalSources JSON is invalid', async () => {
+    const onCaseComplete = vi.fn();
+    const { result } = renderHook(() =>
+      useBatchExecution({ ...defaultOptions(), onCaseComplete }),
+    );
+
+    await act(async () => {
+      await result.current.runAll([makeTestCase('tc-1', '{"x":1}', '{bad json')]);
+    });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+    const [, runResult] = onCaseComplete.mock.calls[0] as [string, TestRunResult];
+    expect(runResult.status).toBe('error');
+  });
+
+  it('marks a case as error when required enrichment alias is missing', async () => {
+    const onCaseComplete = vi.fn();
+    const config = {
+      ...makeConfig(),
+      enrichmentSources: [{ alias: 'customerProfile', schemaId: 's-1', required: true }],
+    } as MappingConfig;
+
+    const { result } = renderHook(() =>
+      useBatchExecution({ ...defaultOptions(), config, onCaseComplete }),
+    );
+
+    await act(async () => {
+      await result.current.runAll([makeTestCase('tc-1', '{"x":1}', '{}')]);
+    });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+    const [, runResult] = onCaseComplete.mock.calls[0] as [string, TestRunResult];
+    expect(runResult.status).toBe('error');
   });
 
   it('marks a case as error when executeMapping throws', async () => {

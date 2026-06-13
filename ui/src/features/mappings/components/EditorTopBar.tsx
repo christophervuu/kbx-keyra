@@ -161,7 +161,7 @@ export function EditorTopBar(props: EditorTopBarProps) {
             data-testid="browse-source-button"
             aria-pressed={props.isBrowseSourceActive === true}
           >
-            Browse Source
+            Browse Inputs
           </button>
 
           {props.sampleSelectorSlot}

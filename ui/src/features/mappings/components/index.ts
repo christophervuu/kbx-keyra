@@ -115,7 +115,7 @@ export type { BottomAreaProps, BottomTabId } from './BottomArea';
 export { ArrayMappingBuilder } from './ArrayMappingBuilder';
 export type { ArrayMappingBuilderProps } from './ArrayMappingBuilder';
 export { SourceSchemaPanel } from './SourceSchemaPanel';
-export type { SourceSchemaPanelProps } from './SourceSchemaPanel';
+export type { SourceSchemaPanelProps, StagedInputField } from './SourceSchemaPanel';
 export { BuilderEmptyState } from './BuilderEmptyState';
 export type { BuilderEmptyStateProps } from './BuilderEmptyState';
 export { BreadcrumbNav } from './BreadcrumbNav';

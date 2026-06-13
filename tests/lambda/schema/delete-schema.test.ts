@@ -101,6 +101,19 @@ describe('delete-schema handler', () => {
     expect(parsed.error.message).toContain('map-1');
   });
 
+  it('enrichment-dependent schema returns 409 conflict with mapping ids', async () => {
+    sharedMocks.scan.mockResolvedValueOnce([
+      { mappingId: 'map-3', enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-1' }] },
+    ]);
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'schema-1' } });
+
+    expect(result.statusCode).toBe(409);
+    const parsed = JSON.parse(result.body) as { error: { message: string } };
+    expect(parsed.error.message).toContain('map-3');
+  });
+
   it('missing schema returns 404', async () => {
     sharedMocks.getItem.mockResolvedValueOnce(null);
 

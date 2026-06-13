@@ -115,6 +115,17 @@ export interface MappingEditorPreferences {
   readonly defaultSelectedSampleId?: string;
 }
 
+export interface MappingEnrichmentSource {
+  readonly alias: string;
+  /**
+   * Canonical enrichment entries include schemaId.
+   * Legacy compatibility aliases derived from config.externalSources may omit it.
+   */
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
+}
+
 export interface MappingConfigOptions {
   readonly unmappedTargets?: 'omit' | 'null' | 'error';
   readonly nullSubtrees?: readonly string[];
@@ -133,6 +144,7 @@ export interface MappingConfig {
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
   readonly targetSchemaRef?: SchemaRef;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config: MappingConfigOptions;
   readonly rules: readonly MappingRule[];
 }
@@ -204,6 +216,7 @@ export interface MappingMetadata {
   readonly status: MappingStatus;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly ruleCount: number;
   readonly coverage: number;
   readonly updatedAt: ISODateString;
@@ -371,6 +384,7 @@ export interface CreateMappingInput {
   readonly businessContext?: string;
   readonly sourceSchemaRef?: SchemaRef;
   readonly targetSchemaRef?: SchemaRef;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config?: MappingConfigOptions;
   readonly rules?: readonly MappingRule[];
 }
@@ -982,6 +996,7 @@ export interface SchemaSearchResult {
 export interface ServerPreviewInput {
   readonly environment: Environment;
   readonly sourceData: Readonly<Record<string, unknown>>;
+  readonly externalSources?: Readonly<Record<string, unknown>>;
 }
 
 export interface ServerPreviewResult {
@@ -998,11 +1013,22 @@ export interface ServerPreviewResult {
   };
 }
 
+export interface TestCaseInputSet {
+  readonly id: string;
+  readonly name: string;
+  readonly sourceData: string;
+  readonly externalSources: string;
+  readonly expectedOutput?: string;
+  readonly createdAt: ISODateString;
+}
+
 export interface TestCase {
   readonly id: string;
   readonly name: string;
   readonly sourceData: string;
+  readonly externalSources?: string;
   readonly expectedOutput?: string;
+  readonly inputSets?: readonly TestCaseInputSet[];
   readonly createdAt: ISODateString;
 }
 

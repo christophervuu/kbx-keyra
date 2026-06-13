@@ -245,6 +245,27 @@ describe('useServerPreview', () => {
     expect(previewFn).toHaveBeenCalledWith('my-mapping', {
       environment: 'PROD',
       sourceData: SOURCE_DATA,
+      externalSources: {},
+    });
+  });
+
+  it('passes externalSources when provided', async () => {
+    const previewFn = vi.fn().mockResolvedValue(MOCK_RESULT);
+    const adapter = makeAdapter(previewFn);
+
+    const { result } = renderHook(
+      () => useServerPreview({ mappingId: 'my-mapping', environment: 'PROD' }),
+      { wrapper: makeWrapper(adapter) },
+    );
+
+    await act(async () => {
+      await result.current.execute(SOURCE_DATA, { customerProfile: { id: 'c-1' } });
+    });
+
+    expect(previewFn).toHaveBeenCalledWith('my-mapping', {
+      environment: 'PROD',
+      sourceData: SOURCE_DATA,
+      externalSources: { customerProfile: { id: 'c-1' } },
     });
   });
 });

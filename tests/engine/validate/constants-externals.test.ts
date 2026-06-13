@@ -136,6 +136,18 @@ describe('validateConstantsAndExternals', () => {
     expect(diagnostics.map((d) => d.code).sort()).toEqual(['KEYRA-E011', 'KEYRA-E012']);
   });
 
+  it('external declaration check is deterministic across repeated validation calls', () => {
+    const config = createConfig({ externalSources: ['pricing'] });
+    const rules = [parseRule(createRule('output.p', 'external("inventory")'), 0)];
+
+    const firstRun = validateConstantsAndExternals(rules, config);
+    const secondRun = validateConstantsAndExternals(rules, config);
+
+    expect(firstRun).toEqual(secondRun);
+    expect(firstRun).toHaveLength(1);
+    expect(firstRun[0]).toMatchObject({ code: 'KEYRA-E012', severity: 'warning', ruleIndex: 0 });
+  });
+
   it('skips non-literal constant/external arguments', () => {
     const config = createConfig({ constants: {}, externalSources: [] });
 

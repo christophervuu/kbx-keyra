@@ -226,4 +226,48 @@ describe('update-mapping handler', () => {
     expect(parsed.revision).toBe(1);
     expect(sharedMocks.putObject).not.toHaveBeenCalled();
   });
+
+  it('persists enrichmentSources and compatibility externalSources on update', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      config: {
+        externalSources: ['legacyAlias'],
+      },
+      enrichmentSources: [
+        { alias: 'customerProfile', schemaId: 'schema-customer', required: true },
+      ],
+      rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"externalSources":["customerProfile","legacyAlias"]'),
+    }));
+    expect(sharedMocks.updateItem).toHaveBeenCalledWith(expect.objectContaining({
+      ExpressionAttributeValues: expect.objectContaining({
+        ':enrichmentSources': [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+      }),
+    }));
+  });
+
+  it('rejects enrichmentSources entries missing schemaId', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      enrichmentSources: [{ alias: 'customerProfile' }],
+      config: {},
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(400);
+  });
 });

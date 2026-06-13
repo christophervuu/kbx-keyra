@@ -71,9 +71,10 @@ describe('EditorTopBar', () => {
     expect(screen.getByTestId('sample-selector-slot')).toBeInTheDocument();
   });
 
-  it('renders Browse Source button in header utility area', () => {
+  it('renders Browse Inputs button in header utility area', () => {
     renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} />);
     expect(screen.getByTestId('browse-source-button')).toBeInTheDocument();
+    expect(screen.getByTestId('browse-source-button')).toHaveTextContent('Browse Inputs');
   });
 
   it('renders required/warning/error summary counts', () => {
@@ -365,7 +366,7 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('page-sample-slot')).toBeInTheDocument();
   });
 
-  it('wires Browse Source button pressed state through props', () => {
+  it('wires Browse Inputs button pressed state through props', () => {
     renderWithRouter(
       <MappingEditorPage
         projectId="proj-1"
@@ -376,7 +377,7 @@ describe('MappingEditorPage', () => {
     expect(screen.getByTestId('browse-source-button')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('calls onToggleBrowseSource when Browse Source button is clicked', () => {
+  it('calls onToggleBrowseSource when Browse Inputs button is clicked', () => {
     const onToggleBrowseSource = vi.fn();
     renderWithRouter(
       <MappingEditorPage

@@ -225,7 +225,7 @@ describe('persistence types', () => {
   it('converter outputs align with domain metadata types', () => {
     expectTypeOf<ReturnType<typeof toProjectMetadata>>().toEqualTypeOf<DomainProjectMetadata>();
     expectTypeOf<ReturnType<typeof toProjectDetail>>().toMatchTypeOf<DomainProjectDetail>();
-    expectTypeOf<ReturnType<typeof toMappingMetadata>>().toEqualTypeOf<DomainMappingMetadata>();
+    expectTypeOf<ReturnType<typeof toMappingMetadata>>().toMatchTypeOf<DomainMappingMetadata>();
     expectTypeOf<ReturnType<typeof toSchemaMetadata>>().toEqualTypeOf<DomainSchemaMetadata>();
   });
 

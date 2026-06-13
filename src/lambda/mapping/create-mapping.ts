@@ -51,8 +51,16 @@ interface MappingConfig {
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
   readonly targetSchemaRef?: SchemaRef;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config: MappingConfigOptions;
   readonly rules: readonly MappingRule[];
+}
+
+interface MappingEnrichmentSource {
+  readonly alias: string;
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
 }
 
 interface MappingMetadata {
@@ -64,11 +72,116 @@ interface MappingMetadata {
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly ruleCount: number;
   readonly coverage: number;
   readonly configS3Key: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+function uniqueAliases(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    aliases.push(value);
+  }
+
+  return aliases;
+}
+
+function normalizeLegacyExternalAliases(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueAliases(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function normalizeCanonicalEnrichmentSources(value: unknown): {
+  ok: true;
+  value: readonly MappingEnrichmentSource[];
+} | {
+  ok: false;
+  message: string;
+} {
+  if (value === undefined) {
+    return { ok: true, value: [] };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, message: 'Invalid enrichmentSources: expected array' };
+  }
+
+  const aliases = new Set<string>();
+  const normalized: MappingEnrichmentSource[] = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      return { ok: false, message: 'Invalid enrichmentSources: entries must be objects' };
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const alias = typeof candidate.alias === 'string' ? candidate.alias.trim() : '';
+    const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+
+    if (!alias) {
+      return { ok: false, message: 'Invalid enrichmentSources: alias is required' };
+    }
+
+    if (!schemaId) {
+      return { ok: false, message: `Invalid enrichmentSources: schemaId is required for alias '${alias}'` };
+    }
+
+    if (aliases.has(alias)) {
+      return { ok: false, message: `Invalid enrichmentSources: duplicate alias '${alias}'` };
+    }
+
+    aliases.add(alias);
+
+    const required = typeof candidate.required === 'boolean' ? candidate.required : true;
+    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
+    normalized.push({
+      alias,
+      schemaId,
+      required,
+      ...(description ? { description } : {}),
+    });
+  }
+
+  return { ok: true, value: normalized };
+}
+
+function deriveCompatibilityExternals(
+  enrichmentSources: readonly MappingEnrichmentSource[],
+  legacyExternalAliases: readonly string[],
+): readonly string[] {
+  return uniqueAliases([
+    ...enrichmentSources.map((source) => source.alias),
+    ...legacyExternalAliases,
+  ]);
+}
+
+function deriveEnrichmentSources(
+  canonical: readonly MappingEnrichmentSource[],
+  legacyExternalAliases: readonly string[],
+): readonly MappingEnrichmentSource[] {
+  if (canonical.length > 0) {
+    return canonical;
+  }
+
+  return legacyExternalAliases.map((alias) => ({ alias, required: false }));
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -235,9 +348,19 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   try {
+    const canonicalEnrichment = normalizeCanonicalEnrichmentSources(body?.enrichmentSources);
+    if (!canonicalEnrichment.ok) {
+      return errorResponse(ERROR_CODES.VALIDATION_ERROR, canonicalEnrichment.message, 400, false);
+    }
+
+    const legacyExternalAliases = normalizeLegacyExternalAliases((body?.config as Record<string, unknown> | undefined)?.externalSources);
+    const enrichmentSources = deriveEnrichmentSources(canonicalEnrichment.value, legacyExternalAliases);
+    const externalSources = deriveCompatibilityExternals(enrichmentSources, legacyExternalAliases);
+
     const mappingId = generateMappingId();
     const now = new Date().toISOString();
     const businessContext = normalizeOptionalBusinessContext(body?.businessContext);
+    const inputConfig = (body?.config as MappingConfigOptions | undefined) ?? {};
     const config: MappingConfig = {
       id: mappingId,
       projectId: String(body?.projectId ?? ''),
@@ -247,7 +370,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       engineVersion: typeof body?.engineVersion === 'string' ? body.engineVersion : '1.0.0',
       sourceSchemaRef: (body?.sourceSchemaRef as SchemaRef | undefined) ?? undefined,
       targetSchemaRef: (body?.targetSchemaRef as SchemaRef | undefined) ?? undefined,
-      config: (body?.config as MappingConfigOptions | undefined) ?? {},
+      enrichmentSources,
+      config: {
+        ...inputConfig,
+        externalSources,
+      },
       rules: (Array.isArray(body?.rules) ? (body?.rules as MappingRule[]) : []),
     };
 
@@ -263,6 +390,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       status: derivation.status,
       sourceSchemaId: config.sourceSchemaRef?.schemaId,
       targetSchemaId: config.targetSchemaRef?.schemaId,
+      ...(enrichmentSources.length > 0 ? { enrichmentSources } : {}),
       ruleCount: derivation.ruleCount,
       coverage: derivation.coverage,
       configS3Key,

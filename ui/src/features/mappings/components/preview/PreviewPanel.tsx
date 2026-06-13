@@ -82,6 +82,7 @@ export function PreviewPanel({
   // sourceDataRaw is driven by SourceDataInput via onRawChange callback.
   // null means empty or invalid JSON — Run is disabled, context.sourceData is null.
   const [sourceDataRaw, setSourceDataRaw] = useState<string | null>(null);
+  const [externalSourcesRaw] = useState<string | null>('{}');
 
   // Load key: incrementing this forces SourceDataInput and DiffDisplay to
   // remount with new initial values when a test case is loaded.
@@ -108,6 +109,10 @@ export function PreviewPanel({
       sourceSchemaDetail,
       targetSchemaDetail,
       sourceDataRaw,
+      externalSourcesRaw,
+      requiredEnrichmentAliases: (config?.enrichmentSources ?? [])
+        .filter((entry) => entry.required !== false)
+        .map((entry) => entry.alias),
     });
 
   const isExecuting = state.status === 'executing';
@@ -204,6 +209,7 @@ export function PreviewPanel({
         <TestCaseManager
           mappingId={mappingId}
           sourceDataRaw={sourceDataRaw}
+          externalSourcesRaw={externalSourcesRaw}
           expectedOutputRaw={currentExpectedOutput}
           onLoad={handleLoadTestCase}
         />

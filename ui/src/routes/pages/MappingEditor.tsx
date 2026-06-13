@@ -26,6 +26,7 @@ import {
   WorkspaceNoSourceDataCallout,
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
+  type StagedInputField,
   type TargetFieldStatus,
   type ConsolidatedIssueItem,
 } from '@/features/mappings/components';
@@ -867,7 +868,7 @@ export default function MappingEditor() {
   // Rules View selection state
   // ---------------------------------------------------------------------------
   const [selectedRuleIndex, setSelectedRuleIndex] = useState<number | null>(null);
-  const [stagedSourcePath, setStagedSourcePath] = useState<string | null>(null);
+  const [stagedInputField, setStagedInputField] = useState<StagedInputField | null>(null);
   const [isSourceBrowseOpen, setIsSourceBrowseOpen] = useState(false);
   const [isSourcePanelHidden, setIsSourcePanelHidden] = useState(false);
   const [isBuilderPanelHidden, setIsBuilderPanelHidden] = useState(false);
@@ -925,7 +926,7 @@ export default function MappingEditor() {
           editor.actions.commitDraft(selectedTargetPath, currentDraft);
         }
       }
-      setStagedSourcePath(null);
+      setStagedInputField(null);
       setIsBuilderPanelHidden(false);
       setIsSourcePanelHidden(false);
       setSelectedTargetPath(resolveSelectedTargetPath(path));
@@ -1123,13 +1124,14 @@ export default function MappingEditor() {
   const sourceContent = editor.parsedSourceSchema ? (
     <SourceSchemaPanel
       parsedSourceSchema={editor.parsedSourceSchema}
+      enrichmentInputGroups={editor.enrichmentInputSchemas}
       sourceSchemaName={editor.sourceSchemaName}
-      onStageField={(path) => {
+      onStageField={(field) => {
         if (view === 'rules') {
-          expressionBuilderRef.current?.insertSourceField(path);
+          expressionBuilderRef.current?.insertSourceField(field);
           return;
         }
-        setStagedSourcePath(path);
+        setStagedInputField(field);
       }}
       className="h-full"
     />
@@ -1274,6 +1276,7 @@ export default function MappingEditor() {
           ref={expressionBuilderRef}
           builderState={builderResult}
           parsedSourceSchema={editor.parsedSourceSchema}
+          enrichmentInputGroups={editor.enrichmentInputSchemas}
           sampleSourceData={null}
         />
       </div>
@@ -1329,7 +1332,7 @@ export default function MappingEditor() {
         currentStatus={selectedNodeStatus}
         currentExpression={selectedNodeExpression}
         parsedSourceSchema={editor.parsedSourceSchema}
-        stagedSourcePath={stagedSourcePath}
+        stagedSourcePath={stagedInputField?.expression ?? null}
         updateDraft={editor.actions.updateDraft}
         revertDraft={editor.actions.revertDraft}
         getDraftExpression={editor.actions.getDraftExpression}

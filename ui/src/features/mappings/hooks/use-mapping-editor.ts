@@ -183,6 +183,8 @@ export interface UseMappingEditorResult {
 
   /** Parsed source schema for UI tree display */
   parsedSourceSchema: ParsedSchema | null;
+  /** Parsed enrichment schemas keyed by enrichment alias for input browsing/building. */
+  enrichmentInputSchemas: readonly { alias: string; parsedSchema: ParsedSchema | null }[];
   /** Parsed target schema for UI tree display */
   parsedTargetSchema: ParsedSchema | null;
   /** Whether both schemas were loaded successfully (for validation) */
@@ -424,6 +426,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   const [config, setConfig] = useState<MappingConfig | null>(null);
   const [sourceSchema, setSourceSchema] = useState<SchemaDetail | null>(null);
   const [targetSchema, setTargetSchema] = useState<SchemaDetail | null>(null);
+  const [enrichmentSchemasByAlias, setEnrichmentSchemasByAlias] = useState<Record<string, SchemaDetail | null>>({});
 
   // Local editing state
   const [rules, setRules] = useState<readonly MappingRule[]>([]);
@@ -481,6 +484,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       setCurrentRevision(mappingConfig.version);
       // Clear any stale drafts on reload
       setDraftRules(new Map());
+      setEnrichmentSchemasByAlias({});
 
       // Check for a local autosaved draft (FS-063 Q4/Q5)
       try {
@@ -528,6 +532,31 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
         setTargetSchema(targetResult.value);
       }
 
+      // Load enrichment schemas for alias-scoped input browsing (best-effort).
+      const enrichmentDefs = mappingConfig.enrichmentSources ?? [];
+      const enrichmentSchemaPromises = enrichmentDefs
+        .filter((entry) => typeof entry.schemaId === 'string' && entry.schemaId.trim().length > 0)
+        .map(async (entry) => {
+          const schema = await adapter.getSchema(entry.schemaId!);
+          return { alias: entry.alias, schema };
+        });
+
+      if (enrichmentSchemaPromises.length > 0) {
+        const enrichmentResults = await Promise.allSettled(enrichmentSchemaPromises);
+        if (!mountedRef.current) return;
+
+        const next: Record<string, SchemaDetail | null> = {};
+        for (const entry of enrichmentDefs) {
+          next[entry.alias] = null;
+        }
+        for (const result of enrichmentResults) {
+          if (result.status === 'fulfilled') {
+            next[result.value.alias] = result.value.schema;
+          }
+        }
+        setEnrichmentSchemasByAlias(next);
+      }
+
       setLoadState('loaded');
     } catch (err) {
       if (!mountedRef.current) return;
@@ -558,6 +587,25 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     if (!targetSchema) return null;
     return tryParseSchema(targetSchema);
   }, [targetSchema]);
+
+  const enrichmentInputSchemas = useMemo(() => {
+    if (config === null) return [] as { alias: string; parsedSchema: ParsedSchema | null }[];
+
+    const canonical = config.enrichmentSources ?? [];
+    const compatibilityAliases = config.config.externalSources ?? [];
+    const aliasOrder = [...new Set([
+      ...canonical.map((entry) => entry.alias),
+      ...compatibilityAliases,
+    ])];
+
+    return aliasOrder.map((alias) => {
+      const detail = enrichmentSchemasByAlias[alias] ?? null;
+      return {
+        alias,
+        parsedSchema: detail ? tryParseSchema(detail) : null,
+      };
+    });
+  }, [config, enrichmentSchemasByAlias]);
 
   const schemasLoaded = sourceSchema !== null && targetSchema !== null;
 
@@ -1196,6 +1244,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     sourceSchemaDetail: sourceSchema,
     targetSchemaDetail: targetSchema,
     parsedSourceSchema,
+    enrichmentInputSchemas,
     parsedTargetSchema,
     schemasLoaded,
     saveStatus,

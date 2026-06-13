@@ -127,6 +127,74 @@ describe('create-mapping handler', () => {
     }));
   });
 
+  it('persists canonical enrichmentSources and unions compatibility externalSources', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      enrichmentSources: [
+        { alias: 'customerProfile', schemaId: 'schema-customer', required: true },
+      ],
+      config: {
+        externalSources: ['legacyAlias'],
+      },
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"enrichmentSources":[{"alias":"customerProfile","schemaId":"schema-customer","required":true}]'),
+    }));
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"externalSources":["customerProfile","legacyAlias"]'),
+    }));
+    expect(sharedMocks.putItem).toHaveBeenCalledWith(expect.objectContaining({
+      Item: expect.objectContaining({
+        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+      }),
+    }));
+  });
+
+  it('normalizes legacy-only externalSources to schema-less enrichment aliases', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      config: {
+        externalSources: ['legacyAlias'],
+      },
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    expect(sharedMocks.putItem).toHaveBeenCalledWith(expect.objectContaining({
+      Item: expect.objectContaining({
+        enrichmentSources: [{ alias: 'legacyAlias', required: false }],
+      }),
+    }));
+  });
+
+  it('rejects duplicate enrichment aliases with validation error', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      enrichmentSources: [
+        { alias: 'dup', schemaId: 'schema-a' },
+        { alias: 'dup', schemaId: 'schema-b' },
+      ],
+      rules: [],
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(400);
+  });
+
   it('loads target schema content and passes it to validate for coverage derivation', async () => {
     sharedMocks.parseBody.mockReturnValue({
       projectId: 'proj-1',

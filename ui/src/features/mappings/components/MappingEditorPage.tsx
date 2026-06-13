@@ -311,7 +311,7 @@ export function MappingEditorPage({
               >
                 <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                   <div className="flex items-center justify-between gap-2">
-                    <span>Source Fields</span>
+                    <span>Input Fields</span>
                     {onHideSourcePanel ? (
                       <button
                         type="button"

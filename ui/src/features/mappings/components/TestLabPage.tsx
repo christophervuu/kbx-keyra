@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, CheckCircle2, ArrowUpRight, RotateCcw } from 'lucide-react';
+import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { ArrowLeft, CheckCircle2, ArrowUpRight, RotateCcw } from 'lucide-react';
 
-import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
-
+import { CompareTab } from './comparison';
+import type { BatchState, SuiteSummaryRow } from './preview';
 import {
   DiagnosticsDisplay,
   DiffDisplay,
@@ -16,23 +17,22 @@ import {
   TestCaseListPanel,
   TraceDisplay,
 } from './preview';
-import type { BatchState, SuiteSummaryRow } from './preview';
-import { CompareTab } from './comparison';
 import { PreviewProvider } from '../context/preview-context';
-import { usePreviewExecution } from '../hooks/use-preview-execution';
-import { useMappingEditor } from '../hooks/use-mapping-editor';
-import { useTestLabLayout } from '../hooks/use-test-lab-layout';
-import { useTestCases } from '../hooks/use-test-cases';
-import { useTestRunResults } from '../hooks/use-test-run-results';
 import { useBatchExecution } from '../hooks/use-batch-execution';
-import { useLinkedDebugSelection } from '../hooks/use-linked-debug-selection';
 import { useComparisonSnapshots } from '../hooks/use-comparison-snapshots';
-import { computeDiff } from '@/lib/utils/json-diff';
+import { useLinkedDebugSelection } from '../hooks/use-linked-debug-selection';
+import { useMappingEditor } from '../hooks/use-mapping-editor';
+import { usePreviewExecution } from '../hooks/use-preview-execution';
+import { useTestCases } from '../hooks/use-test-cases';
+import { useTestLabLayout } from '../hooks/use-test-lab-layout';
+import { useTestRunResults } from '../hooks/use-test-run-results';
 import { formatDiffSummary } from '../lib/execution-result-utils';
 import { explainDiagnostic } from '../lib/failure-explainer';
 
+import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import type { DiffResult } from '@/lib/types/diff';
 import type { TestCase, TestRunResult } from '@/lib/types/domain';
+import { computeDiff } from '@/lib/utils/json-diff';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,7 +62,7 @@ type DragAxis = 'col' | 'row';
 
 interface UseDividerDragOptions {
   axis: DragAxis;
-  containerRef: React.RefObject<HTMLElement | null>;
+  containerRef: RefObject<HTMLElement | null>;
   clampMin: number;
   clampMax: number;
   onRatioChange: (ratio: number) => void;
@@ -82,7 +82,7 @@ function useDividerDrag({
   const [isDragging, setIsDragging] = useState(false);
 
   const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+    (e: ReactMouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragging(true);
 
@@ -128,7 +128,7 @@ function useDividerDrag({
 interface DividerProps {
   axis: DragAxis;
   isDragging: boolean;
-  onMouseDown: (e: React.MouseEvent) => void;
+  onMouseDown: (e: ReactMouseEvent<HTMLDivElement>) => void;
   testId?: string;
 }
 
@@ -186,6 +186,35 @@ function PanelLoadingState() {
   );
 }
 
+function tryParseExternalSources(
+  raw: string | null,
+): { ok: true; data: Record<string, unknown> } | { ok: false } {
+  if (raw === null || raw.trim() === '') {
+    return { ok: true, data: {} };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return { ok: true, data: parsed as Record<string, unknown> };
+    }
+    return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function formatExternalSourcesForTextarea(raw: string | null): string {
+  if (raw === null || raw.trim() === '') {
+    return '{}';
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Inner component — must be inside PreviewProvider
 // ---------------------------------------------------------------------------
@@ -204,6 +233,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   }, [editor.loadState]);
 
   const [sourceDataRaw, setSourceDataRaw] = useState<string | null>(null);
+  const [externalSourcesRaw, setExternalSourcesRaw] = useState<string | null>('{}');
+  const [externalSourcesError, setExternalSourcesError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
   const [loadedSourceData, setLoadedSourceData] = useState('');
   const [loadedExpectedOutput, setLoadedExpectedOutput] = useState<string | undefined>(undefined);
@@ -220,46 +251,45 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   // Narrow fallback tab state — only used at narrow breakpoint
   const [activeTab, setActiveTab] = useState<TabId>('output');
 
-  // Diff result computed after each successful execution when expected output exists
-  const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
+  const requiredEnrichmentAliases = (editor.config?.enrichmentSources ?? [])
+    .filter((entry) => entry.required !== false)
+    .map((entry) => entry.alias);
+
+  const parsedExternalSources = tryParseExternalSources(externalSourcesRaw);
+  const missingRequiredEnrichmentAliases = parsedExternalSources.ok
+    ? requiredEnrichmentAliases.filter((alias) => !(alias in parsedExternalSources.data))
+    : requiredEnrichmentAliases;
+  const hasMissingRequiredEnrichment = missingRequiredEnrichmentAliases.length > 0;
 
   const { state, run, autoRun, setAutoRun, traceEnabled, setTraceEnabled } = usePreviewExecution({
     config: editor.config,
     sourceSchemaDetail: editor.sourceSchemaDetail,
     targetSchemaDetail: editor.targetSchemaDetail,
     sourceDataRaw,
+    externalSourcesRaw,
+    requiredEnrichmentAliases,
   });
+
+  const diffResult = useMemo<DiffResult | null>(() => {
+    if (state.status !== 'success') {
+      return null;
+    }
+    if (loadedExpectedOutput === undefined || loadedExpectedOutput.trim() === '') {
+      return null;
+    }
+    try {
+      const parsedExpected = JSON.parse(loadedExpectedOutput);
+      return computeDiff(state.result.output, parsedExpected);
+    } catch {
+      return null;
+    }
+  }, [state, loadedExpectedOutput]);
 
   // Linked cross-panel debug selection (FS-036)
   const debugSelection = useLinkedDebugSelection(state.status);
 
   const { layout, togglePanel, setMainSplit, setColumnSplit, setRowSplit, resetLayout } = useTestLabLayout({
     traceEnabled,
-  });
-
-  // Auto-tab-switch and diff computation: fires on executing → success transition
-  const prevStatusRef = useRef<string>('idle');
-  useEffect(() => {
-    const prevStatus = prevStatusRef.current;
-    prevStatusRef.current = state.status;
-
-    if (prevStatus === 'executing' && state.status === 'success') {
-      // Compute diff if expected output is available
-      if (loadedExpectedOutput !== undefined && loadedExpectedOutput.trim() !== '') {
-        try {
-          const parsedExpected = JSON.parse(loadedExpectedOutput);
-          const result = computeDiff(state.result.output, parsedExpected);
-          setDiffResult(result);
-          // Auto-switch to diff tab
-          setActiveTab('diff');
-        } catch {
-          // Unparseable expected output — treat as no diff
-          setDiffResult(null);
-        }
-      } else {
-        setDiffResult(null);
-      }
-    }
   });
 
   // Test case CRUD
@@ -274,7 +304,6 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
       autoSelectedRef.current = true;
       handleSelectTestCase(testCases[0]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fire only once after first non-empty testCases
   }, [testCases]);
 
   // Comparison snapshots
@@ -320,7 +349,9 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     editor.config !== null &&
     editor.sourceSchemaDetail !== null &&
     editor.targetSchemaDetail !== null &&
-    sourceDataRaw !== null;
+    sourceDataRaw !== null &&
+    externalSourcesError === null &&
+    !hasMissingRequiredEnrichment;
 
   const diagnosticCount = hasResult ? (state.result.diagnostics?.length ?? 0) : 0;
 
@@ -331,6 +362,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
   function handleSelectTestCase(tc: TestCase) {
     setSelectedTestCaseId(tc.id);
     setLoadedSourceData(tc.sourceData);
+    setExternalSourcesRaw(formatExternalSourcesForTextarea(tc.externalSources ?? '{}'));
+    setExternalSourcesError(null);
     setLoadedExpectedOutput(tc.expectedOutput);
     setCurrentExpectedOutput(tc.expectedOutput ?? null);
     setLoadKey((k) => k + 1);
@@ -342,7 +375,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     setLoadedSourceData('');
     setLoadedExpectedOutput(undefined);
     setCurrentExpectedOutput(null);
-    setDiffResult(null);
+    setExternalSourcesRaw('{}');
+    setExternalSourcesError(null);
     setLoadKey((k) => k + 1);
     setActiveTab('output');
   }
@@ -364,7 +398,8 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
       setLoadedSourceData('');
       setLoadedExpectedOutput(undefined);
       setCurrentExpectedOutput(null);
-      setDiffResult(null);
+      setExternalSourcesRaw('{}');
+      setExternalSourcesError(null);
       setLoadKey((k) => k + 1);
       setActiveTab('output');
     }
@@ -374,6 +409,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
     const result = saveTestCase({
       name,
       sourceData: sourceDataRaw ?? '',
+      externalSources: externalSourcesRaw ?? '{}',
       ...(currentExpectedOutput !== null ? { expectedOutput: currentExpectedOutput } : {}),
     });
     if (result.success) {
@@ -387,9 +423,19 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
 
   // Called by CompareTab when saving a comparison with no test case loaded
   function handleSaveNewTestCaseForComparison(name: string, sourceData: string): string | null {
-    const result = saveTestCase({ name, sourceData });
+    const result = saveTestCase({ name, sourceData, externalSources: externalSourcesRaw ?? '{}' });
     if (!result.success || result.id === undefined) return null;
     return result.id;
+  }
+
+  function handleExternalSourcesChange(raw: string) {
+    setExternalSourcesRaw(raw);
+    const parsed = tryParseExternalSources(raw);
+    if (parsed.ok) {
+      setExternalSourcesError(null);
+    } else {
+      setExternalSourcesError('Enrichment samples must be a valid JSON object keyed by alias.');
+    }
   }
 
   async function handleRunAll() {
@@ -969,6 +1015,11 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
               ? 'bg-blue-600 text-white hover:bg-blue-500'
               : 'cursor-not-allowed bg-slate-800 text-slate-600',
           ].join(' ')}
+          title={
+            hasMissingRequiredEnrichment
+              ? `Missing required enrichment sample${missingRequiredEnrichmentAliases.length === 1 ? '' : 's'}: ${missingRequiredEnrichmentAliases.join(', ')}`
+              : undefined
+          }
         >
           {isExecuting ? <Spinner /> : null}
           Run
@@ -984,6 +1035,21 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
           Reset Layout
         </button>
       </div>
+
+      {(externalSourcesError !== null || hasMissingRequiredEnrichment) && (
+        <div
+          role="alert"
+          data-testid="missing-required-enrichment-alert"
+          className="border-b border-amber-700/40 bg-amber-900/20 px-4 py-2 text-xs text-amber-300"
+        >
+          {externalSourcesError ?? (
+            <>
+              Missing required enrichment sample{missingRequiredEnrichmentAliases.length === 1 ? '' : 's'}:{' '}
+              {missingRequiredEnrichmentAliases.join(', ')}.
+            </>
+          )}
+        </div>
+      )}
 
       {/* Execution summary bar — sticky, all breakpoints */}
       <ExecutionSummaryBar
@@ -1027,6 +1093,7 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
               onAddNew={handleAddNew}
               onSaveCurrentInput={handleSaveCurrentInput}
               sourceDataRaw={sourceDataRaw}
+              externalSourcesRaw={externalSourcesError === null ? externalSourcesRaw : null}
               onRunAll={() => { void handleRunAll(); }}
               onRerunFailed={() => { void handleRerunFailed(); }}
               onCancel={cancel}
@@ -1041,11 +1108,30 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
             className="flex min-h-0 flex-1 overflow-hidden py-2"
             data-testid="source-input-area"
           >
-            <SourceDataInput
-              key={loadKey}
-              onRawChange={setSourceDataRaw}
-              initialValue={loadedSourceData}
-            />
+            <div className="flex min-h-0 w-full flex-col gap-2 px-2">
+              <SourceDataInput
+                key={loadKey}
+                onRawChange={setSourceDataRaw}
+                initialValue={loadedSourceData}
+              />
+              <div className="flex min-h-[120px] flex-col gap-1" data-testid="external-sources-input-area">
+                <label htmlFor="testlab-external-sources" className="text-[11px] text-slate-400">
+                  Enrichment samples (JSON object by alias)
+                </label>
+                <textarea
+                  id="testlab-external-sources"
+                  value={externalSourcesRaw ?? ''}
+                  onChange={(e) => handleExternalSourcesChange(e.target.value)}
+                  aria-label="Enrichment samples (JSON object by alias)"
+                  aria-invalid={externalSourcesError !== null ? true : undefined}
+                  data-testid="external-sources-textarea"
+                  className={[
+                    'min-h-[96px] w-full resize-y rounded border bg-zinc-900 p-2 font-mono text-xs text-zinc-200',
+                    externalSourcesError !== null ? 'border-red-500' : 'border-zinc-700',
+                  ].join(' ')}
+                />
+              </div>
+            </div>
           </div>
         </div>
 

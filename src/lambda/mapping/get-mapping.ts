@@ -38,6 +38,7 @@ interface MappingConfig {
   readonly engineVersion: string;
   readonly sourceSchemaRef?: { readonly schemaId: string; readonly type: 'github' | 'local' | 'published'; readonly commitSha?: string };
   readonly targetSchemaRef?: { readonly schemaId: string; readonly type: 'github' | 'local' | 'published'; readonly commitSha?: string };
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config: {
     readonly unmappedTargets?: 'omit' | 'null' | 'error';
     readonly nullSubtrees?: readonly string[];
@@ -45,6 +46,97 @@ interface MappingConfig {
     readonly externalSources?: readonly string[];
   };
   readonly rules: readonly unknown[];
+}
+
+interface MappingEnrichmentSource {
+  readonly alias: string;
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
+}
+
+function uniqueAliases(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    aliases.push(value);
+  }
+
+  return aliases;
+}
+
+function normalizeLegacyExternalAliases(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueAliases(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function normalizeCanonicalEnrichmentSources(value: unknown): readonly MappingEnrichmentSource[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const aliases = new Set<string>();
+  const normalized: MappingEnrichmentSource[] = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const alias = typeof candidate.alias === 'string' ? candidate.alias.trim() : '';
+    if (!alias || aliases.has(alias)) {
+      continue;
+    }
+
+    aliases.add(alias);
+    const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+    const required = typeof candidate.required === 'boolean' ? candidate.required : true;
+    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
+    normalized.push({
+      alias,
+      ...(schemaId ? { schemaId } : {}),
+      required,
+      ...(description ? { description } : {}),
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeConfig(payload: MappingConfig): MappingConfig {
+  const legacyExternalAliases = normalizeLegacyExternalAliases(payload.config?.externalSources);
+  const canonical = normalizeCanonicalEnrichmentSources(payload.enrichmentSources);
+  const enrichmentSources = canonical.length > 0
+    ? canonical
+    : legacyExternalAliases.map((alias) => ({ alias, required: false }));
+  const externalSources = uniqueAliases([
+    ...enrichmentSources.map((source) => source.alias),
+    ...legacyExternalAliases,
+  ]);
+
+  return {
+    ...payload,
+    enrichmentSources,
+    config: {
+      ...(payload.config ?? {}),
+      externalSources,
+    },
+  };
 }
 
 function getEnvValue(key: string): string | undefined {
@@ -96,7 +188,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     const parsed = JSON.parse(content) as MappingConfig;
-    return jsonResponse(200, parsed);
+    return jsonResponse(200, normalizeConfig(parsed));
   } catch (error) {
     if (error instanceof S3ServiceError && error.appError.code === ERROR_CODES.RESOURCE_NOT_FOUND) {
       const appError = contentUnavailable(

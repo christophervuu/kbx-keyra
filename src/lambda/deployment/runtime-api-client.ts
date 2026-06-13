@@ -55,6 +55,7 @@ export interface RuntimePreviewRequest extends RuntimeClientRequestBase {
   readonly mappingId: string;
   readonly environment: RuntimeEnvironmentKey;
   readonly sourceData: Readonly<Record<string, unknown>>;
+  readonly externalSources?: Readonly<Record<string, unknown>>;
 }
 
 export interface RuntimeStatusRequest extends RuntimeClientRequestBase {
@@ -297,6 +298,7 @@ class HttpRuntimeApiClient implements RuntimeApiClient {
         mappingId: request.mappingId,
         environment: request.environment,
         sourceData: request.sourceData,
+        externalSources: request.externalSources ?? {},
       },
       config.requestTimeoutMs,
       requestId,

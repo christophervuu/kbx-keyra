@@ -6,14 +6,14 @@ import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
 import type { CurrentDeployments } from '@/lib/api/types';
 import type { AppError } from '@/lib/state/app-error';
-import type { DeployStatus } from '@/lib/types/domain';
-import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
 import type {
+  DeployStatus,
   MappingMetadata,
   ProjectDetail,
   SchemaDetail,
   SchemaRef,
 } from '@/lib/types/domain';
+import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Deployment status helpers
@@ -62,6 +62,11 @@ function buildMappingRowData(
   schemaMap: Map<string, string>,
   deployments: CurrentDeployments | null,
 ): MappingRowData {
+  const enrichmentInputs = (mapping.enrichmentSources ?? []).map((input) => ({
+    alias: input.alias,
+    schemaName: input.schemaId ? (schemaMap.get(input.schemaId) ?? 'Unknown Schema') : null,
+  }));
+
   return {
     mappingId: mapping.mappingId,
     name: mapping.name,
@@ -71,6 +76,7 @@ function buildMappingRowData(
     targetSchemaName: mapping.targetSchemaId
       ? (schemaMap.get(mapping.targetSchemaId) ?? 'Unknown Schema')
       : null,
+    enrichmentInputs,
     ruleCount: mapping.ruleCount,
     coverage: mapping.coverage,
     status: mapping.status,

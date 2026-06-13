@@ -1,5 +1,5 @@
-import { Copy, FlaskConical, Rocket, Trash2 } from 'lucide-react';
-import type { MouseEvent } from 'react';
+import { CircleHelp, Copy, FlaskConical, Rocket, Trash2 } from 'lucide-react';
+import { useId, useState, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import type { MappingRowData } from '../types';
@@ -74,6 +74,8 @@ export interface MappingRowProps {
  */
 export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: MappingRowProps) {
   const navigate = useNavigate();
+  const [showInputDetails, setShowInputDetails] = useState(false);
+  const detailsId = useId();
 
   const editorPath = `/projects/${projectId}/mappings/${mapping.mappingId}`;
   const deployPath = `/projects/${projectId}/mappings/${mapping.mappingId}/deploy`;
@@ -81,6 +83,8 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
 
   const sourceName = mapping.sourceSchemaName ?? 'No schema';
   const targetName = mapping.targetSchemaName ?? 'No schema';
+  const enrichmentCount = mapping.enrichmentInputs?.length ?? 0;
+  const hasEnrichments = enrichmentCount > 0;
 
   const coverageDisplay =
     mapping.ruleCount === 0 && mapping.coverage === 0
@@ -114,8 +118,59 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
       {/* Source → Target */}
       <td className="px-3 py-2.5 text-sm text-slate-300 whitespace-nowrap" data-testid="source-target-cell">
         <span className="inline-block max-w-[220px] truncate align-bottom" title={sourceName}>{sourceName}</span>
+        {hasEnrichments && (
+          <>
+            <span className="mx-1 text-slate-500">+</span>
+            <span className="text-slate-300" data-testid="enrichment-summary-count">
+              {enrichmentCount} enrichment{enrichmentCount === 1 ? '' : 's'}
+            </span>
+          </>
+        )}
         <span className="mx-1 text-slate-500">→</span>
         <span className="inline-block max-w-[220px] truncate align-bottom" title={targetName}>{targetName}</span>
+
+        {hasEnrichments && (
+          <span className="relative ml-1.5 inline-flex align-middle">
+            <button
+              type="button"
+              aria-label={`View mapping inputs for ${mapping.name}`}
+              aria-expanded={showInputDetails}
+              aria-controls={detailsId}
+              onClick={() => setShowInputDetails((open) => !open)}
+              className="inline-flex items-center justify-center rounded text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              data-testid={`mapping-input-details-toggle-${mapping.mappingId}`}
+            >
+              <CircleHelp size={14} aria-hidden="true" />
+            </button>
+
+            {showInputDetails && (
+              <div
+                id={detailsId}
+                role="dialog"
+                aria-label={`Input details for ${mapping.name}`}
+                className="absolute top-6 right-0 z-20 w-80 rounded-md border border-slate-700 bg-slate-900 p-3 text-xs shadow-xl"
+                data-testid={`mapping-input-details-${mapping.mappingId}`}
+              >
+                <p className="font-semibold text-slate-100">Primary source</p>
+                <p className="mt-0.5 text-slate-300">{sourceName}</p>
+
+                <p className="mt-2 font-semibold text-slate-100">Enrichment inputs</p>
+                <ul className="mt-1 list-disc pl-4 text-slate-300">
+                  {(mapping.enrichmentInputs ?? []).map((input) => (
+                    <li key={input.alias}>
+                      <span className="font-medium text-slate-200">{input.alias}</span>
+                      {' · '}
+                      <span>{input.schemaName ?? 'Unknown schema'}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <p className="mt-2 font-semibold text-slate-100">Target</p>
+                <p className="mt-0.5 text-slate-300">{targetName}</p>
+              </div>
+            )}
+          </span>
+        )}
       </td>
 
       {/* Rules */}

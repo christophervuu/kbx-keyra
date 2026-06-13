@@ -1,5 +1,5 @@
 import type { ExecutionResult } from '@keyra/engine';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import type { PreviewContextValue } from '../../../lib/types/domain';
@@ -56,17 +56,21 @@ export function PreviewProvider({ children, sourceData: controlledSourceData }: 
 
   const sourceData = controlledSourceData !== undefined ? controlledSourceData : internalSourceData;
 
-  const value: PreviewContextValue = { sourceData, isExecuting, lastResult };
+  const value: PreviewContextValue = useMemo(
+    () => ({ sourceData, isExecuting, lastResult }),
+    [sourceData, isExecuting, lastResult],
+  );
 
-  const setters: PreviewContextSetters = {
-    setSourceData: (value) => {
-      if (controlledSourceData === undefined) {
-        setInternalSourceData(value);
-      }
-    },
-    setIsExecuting,
-    setLastResult,
-  };
+  const setSourceData = useCallback((value: unknown | null) => {
+    if (controlledSourceData === undefined) {
+      setInternalSourceData(value);
+    }
+  }, [controlledSourceData]);
+
+  const setters: PreviewContextSetters = useMemo(
+    () => ({ setSourceData, setIsExecuting, setLastResult }),
+    [setSourceData, setIsExecuting, setLastResult],
+  );
 
   return (
     <PreviewContext.Provider value={value}>

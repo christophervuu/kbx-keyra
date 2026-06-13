@@ -255,6 +255,91 @@ describe('execute', () => {
     expect(result.stats?.rulesFailed).toBe(0);
   });
 
+  it('resolves enrichment field via get(external("alias"), "path")', () => {
+    const config = createMinimalConfig({
+      config: {
+        unmappedTargets: 'omit',
+        nullSubtrees: [],
+        constants: {},
+        externalSources: ['customerProfile'],
+      },
+      rules: [
+        {
+          target: 'CustomerTier',
+          type: 'string',
+          expression: 'get(external("customerProfile"), "membership.tier")',
+        },
+      ],
+    });
+
+    const result = execute(config, {}, {}, {}, {
+      externalSources: {
+        customerProfile: {
+          membership: {
+            tier: 'gold',
+          },
+        },
+      },
+    });
+
+    expect(result.output).toEqual({ CustomerTier: 'gold' });
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('evaluates mixed source() + external() expression deterministically', () => {
+    const config = createMinimalConfig({
+      config: {
+        unmappedTargets: 'omit',
+        nullSubtrees: [],
+        constants: {},
+        externalSources: ['customerProfile'],
+      },
+      rules: [
+        {
+          target: 'CompositeKey',
+          type: 'string',
+          expression:
+            'concat(cast(source("invoiceId"), "string"), "-", cast(get(external("customerProfile"), "customerId"), "string"))',
+        },
+      ],
+    });
+
+    const result = execute(
+      config,
+      { invoiceId: 42 },
+      {},
+      {},
+      { externalSources: { customerProfile: { customerId: 'cust-99' } } },
+    );
+
+    expect(result.output).toEqual({ CompositeKey: '42-cust-99' });
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('get(external("alias"), path) returns null and E012 when alias payload is missing', () => {
+    const config = createMinimalConfig({
+      config: {
+        unmappedTargets: 'omit',
+        nullSubtrees: [],
+        constants: {},
+        externalSources: ['customerProfile'],
+      },
+      rules: [
+        {
+          target: 'CustomerTier',
+          type: 'string',
+          expression: 'get(external("customerProfile"), "membership.tier")',
+        },
+      ],
+    });
+
+    const result = execute(config, {}, {}, {}, { externalSources: {} });
+
+    expect(result.output).toEqual({ CustomerTier: null });
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E012')).toBe(true);
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E018')).toBe(false);
+  });
+
   it('AE-13: resolves constants from config', () => {
     const config = createMinimalConfig({
       config: {

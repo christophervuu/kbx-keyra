@@ -75,6 +75,7 @@ Each immutable artifact includes:
 - `engineVersion`
 - `mappingConfig` (full executable snapshot)
 - `schemaRefs` with immutable provenance metadata (including commit identity where available)
+- optional `enrichmentRefs` metadata for FS-093 compatibility (`[{ alias, schemaId, required }]`)
 - `createdAt` and control-plane provenance metadata
 
 Artifact invariants:
@@ -450,3 +451,28 @@ Responsibilities:
 - deploy transport: direct request-body payload relay only in MVP
 - log retention default: 30 days (including prod unless org policy overrides)
 - data durability defaults: DynamoDB/S3 resources use retain-oriented update/delete policies in template
+
+---
+
+## 19) FS-093 enrichment snapshot compatibility addendum
+
+FS-093 requires deployment snapshot compatibility for multi-input mappings without changing deployment workflow shape.
+
+Snapshot/deploy metadata compatibility requirements:
+
+- Deployment artifact metadata should carry enrichment reference context when present:
+  - primary source schema ref
+  - target schema ref
+  - enrichment schema refs
+  - enrichment alias
+  - required flag
+
+Runtime execution compatibility note:
+
+- Runtime execution payload contract may include both primary `sourceData` and named enrichment payload map `externalSources`.
+- Runtime still executes from local deployed artifacts only; no runtime external connector calls are introduced.
+
+Contract intent:
+
+- This metadata is additive and forward-compatible.
+- Deployment page UX redesign is out of scope for FS-093; artifact metadata completeness prevents future blocker for enrichment-aware deployment inspection.

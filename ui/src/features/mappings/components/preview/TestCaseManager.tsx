@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import type { ChangeEvent } from 'react';
+
+import { useTestCases } from '../../hooks/use-test-cases';
 
 import type { TestCase } from '@/lib/types/domain';
-import { useTestCases } from '../../hooks/use-test-cases';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -20,6 +22,8 @@ export interface TestCaseManagerProps {
    * null/undefined if not provided or invalid.
    */
   expectedOutputRaw?: string | null;
+  /** Current enrichment samples JSON string (object keyed by alias). */
+  externalSourcesRaw?: string | null;
   /**
    * Called when the user selects a test case to load. The parent should
    * apply `testCase.sourceData` to the source data input and
@@ -27,6 +31,8 @@ export interface TestCaseManagerProps {
    */
   onLoad: (testCase: TestCase) => void;
 }
+
+type SelectChangeEvent = ChangeEvent<HTMLSelectElement>;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -45,6 +51,7 @@ export function TestCaseManager({
   mappingId,
   sourceDataRaw,
   expectedOutputRaw,
+  externalSourcesRaw = '{}',
   onLoad,
 }: TestCaseManagerProps) {
   const { testCases, saveTestCase, loadTestCase, deleteTestCase } = useTestCases(mappingId);
@@ -76,6 +83,7 @@ export function TestCaseManager({
     const result = saveTestCase({
       name: trimmed,
       sourceData: sourceDataRaw,
+      externalSources: externalSourcesRaw ?? '{}',
       ...(expectedOutputRaw !== null && expectedOutputRaw !== undefined
         ? { expectedOutput: expectedOutputRaw }
         : {}),
@@ -90,7 +98,7 @@ export function TestCaseManager({
     }
   }
 
-  function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
+  function handleSelectChange(e: SelectChangeEvent) {
     setSelectedId(e.target.value);
   }
 
@@ -206,7 +214,6 @@ export function TestCaseManager({
               placeholder="Test case name…"
               aria-label="Test case name"
               data-testid="save-name-input"
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               className="rounded border border-zinc-600 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
             />

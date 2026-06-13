@@ -19,6 +19,17 @@ export interface MappingEditorPreferences {
   readonly defaultSelectedSampleId?: string;
 }
 
+export interface MappingEnrichmentSource {
+  readonly alias: string;
+  /**
+   * Canonical enrichment entries include schemaId.
+   * Legacy compatibility aliases derived from config.externalSources may omit it.
+   */
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
+}
+
 export interface MappingConfigOptions {
   readonly unmappedTargets?: 'omit' | 'null' | 'error';
   readonly nullSubtrees?: readonly string[];
@@ -36,6 +47,7 @@ export interface MappingConfig {
   readonly engineVersion: string;
   readonly sourceSchemaRef?: SchemaRef;
   readonly targetSchemaRef?: SchemaRef;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config: MappingConfigOptions;
   readonly rules: readonly MappingRule[];
 }
@@ -271,6 +283,7 @@ export interface MappingItem {
   readonly version?: number;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly status: MappingStatus;
   readonly ruleCount: number;
   readonly coverage: number;
@@ -645,6 +658,7 @@ export interface CreateMappingInput {
   readonly businessContext?: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly status?: MappingStatus;
   readonly ruleCount?: number;
   readonly coverage?: number;
@@ -656,6 +670,7 @@ export interface UpdateMappingInput {
   readonly businessContext?: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly status?: MappingStatus;
   readonly ruleCount?: number;
   readonly coverage?: number;
@@ -722,6 +737,7 @@ export interface MappingMetadata {
   readonly status: MappingStatus;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly ruleCount: number;
   readonly coverage: number;
   readonly updatedAt: ISODateString;
@@ -823,6 +839,7 @@ export function toMappingMetadata(item: MappingItem): MappingMetadata {
     status: item.status,
     sourceSchemaId: item.sourceSchemaId,
     targetSchemaId: item.targetSchemaId,
+    ...(item.enrichmentSources !== undefined ? { enrichmentSources: item.enrichmentSources } : {}),
     ruleCount: item.ruleCount,
     coverage: item.coverage,
     updatedAt: item.updatedAt,

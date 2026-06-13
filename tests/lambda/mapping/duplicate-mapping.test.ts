@@ -50,6 +50,7 @@ describe('duplicate-mapping handler', () => {
       status: 'ready',
       sourceSchemaId: 'schema-a',
       targetSchemaId: 'schema-b',
+      enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
       ruleCount: 10,
       coverage: 90,
       configS3Key: 'mappings/map-1/config.json',
@@ -65,6 +66,7 @@ describe('duplicate-mapping handler', () => {
         engineVersion: '1.0.0',
         sourceSchemaRef: { schemaId: 'schema-a', type: 'local' },
         targetSchemaRef: { schemaId: 'schema-b', type: 'local' },
+        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
         config: {},
         rules: [{ target: 'Invoice.Id', type: 'string', expression: 'source("id")' }],
       }),
@@ -82,11 +84,18 @@ describe('duplicate-mapping handler', () => {
     const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
 
     expect(result.statusCode).toBe(201);
-    const parsed = JSON.parse(result.body) as { mappingId: string; name: string; version: number; ruleCount: number };
+    const parsed = JSON.parse(result.body) as {
+      mappingId: string;
+      name: string;
+      version: number;
+      ruleCount: number;
+      enrichmentSources?: Array<{ alias: string; schemaId?: string; required?: boolean }>;
+    };
     expect(parsed.mappingId).not.toBe('map-1');
     expect(parsed.name).toBe('Invoice Map (Copy)');
     expect(parsed.version).toBe(1);
     expect(parsed.ruleCount).toBe(10);
+    expect(parsed.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
   });
 
   it('missing source mapping returns 404', async () => {

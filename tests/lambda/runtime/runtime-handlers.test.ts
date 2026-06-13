@@ -108,7 +108,58 @@ describe('runtime execute/status handlers', () => {
         Key: 'runtime/snapshots/map-1/snapshot-1.json',
       }),
     );
-    expect(engineMocks.execute).toHaveBeenCalled();
+    expect(engineMocks.execute).toHaveBeenCalledWith(
+      expect.any(Object),
+      { amount: 12 },
+      null,
+      null,
+      { externalSources: {} },
+    );
+  });
+
+  it('passes externalSources to engine execution options', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      mappingId: 'map-1',
+      sourceData: { amount: 12 },
+      externalSources: { customerProfile: { customerId: 'c-1' } },
+    });
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(200);
+    expect(engineMocks.execute).toHaveBeenCalledWith(
+      expect.any(Object),
+      { amount: 12 },
+      null,
+      null,
+      { externalSources: { customerProfile: { customerId: 'c-1' } } },
+    );
+  });
+
+  it('fails preflight when required enrichment payload is missing', async () => {
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        mappingConfig: {
+          name: 'Map One',
+          version: 3,
+          engineVersion: '1.0.0',
+          enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+          config: {},
+          rules: [{ target: 'Amount', type: 'number', expression: 'source("amount")' }],
+        },
+      }),
+    );
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(400);
+    const parsed = JSON.parse(result.body) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('VALIDATION_ERROR');
+    expect(parsed.error.message).toContain('Missing required enrichment payload');
+    expect(parsed.error.message).toContain('customerProfile');
+    expect(engineMocks.execute).not.toHaveBeenCalled();
   });
 
   it('returns deterministic not-deployed error when active snapshot is missing', async () => {

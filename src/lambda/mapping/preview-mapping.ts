@@ -26,6 +26,7 @@ interface MappingMetadata {
 interface PreviewRequest {
   readonly environment: RuntimeDeploymentEnvironment;
   readonly sourceData: Readonly<Record<string, unknown>>;
+  readonly externalSources: Readonly<Record<string, unknown>>;
 }
 
 interface OrchestrationContext {
@@ -66,6 +67,12 @@ function parsePreviewRequest(body: Record<string, unknown> | null): PreviewReque
 
   const environment = parseRuntimeEnvironment(body.environment);
   const sourceData = body.sourceData;
+  const externalSourcesCandidate = body.externalSources;
+
+  const externalSources =
+    externalSourcesCandidate && typeof externalSourcesCandidate === 'object' && !Array.isArray(externalSourcesCandidate)
+      ? (externalSourcesCandidate as Readonly<Record<string, unknown>>)
+      : {};
 
   if (!environment || !sourceData || typeof sourceData !== 'object' || Array.isArray(sourceData)) {
     return null;
@@ -74,6 +81,7 @@ function parsePreviewRequest(body: Record<string, unknown> | null): PreviewReque
   return {
     environment,
     sourceData: sourceData as Readonly<Record<string, unknown>>,
+    externalSources,
   };
 }
 
@@ -146,6 +154,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           mappingId,
           environment: request.environment,
           sourceData: request.sourceData,
+          externalSources: request.externalSources,
           requestId: orchestration.requestId,
           orchestrationId: orchestration.orchestrationId,
           triggeredBy: 'system',

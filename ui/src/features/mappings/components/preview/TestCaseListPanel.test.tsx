@@ -1,9 +1,10 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { TestCase, TestRunResult } from '@/lib/types/domain';
 import type { BatchState } from './TestCaseListPanel';
 import { TestCaseListPanel } from './TestCaseListPanel';
+
+import type { TestCase, TestRunResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -45,6 +46,7 @@ const defaultProps = {
   onAddNew: vi.fn(),
   onSaveCurrentInput: vi.fn(),
   sourceDataRaw: null as string | null,
+  externalSourcesRaw: '{}' as string | null,
   onRunAll: vi.fn(),
   onRerunFailed: vi.fn(),
   onCancel: vi.fn(),
@@ -320,6 +322,11 @@ describe('TestCaseListPanel', () => {
 
   it('Save As button is disabled when sourceDataRaw is null', () => {
     renderPanel({ sourceDataRaw: null, selectedId: null });
+    expect(screen.getByTestId('save-as-button')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('Save As button is disabled when externalSourcesRaw is null', () => {
+    renderPanel({ sourceDataRaw: '{"x":1}', externalSourcesRaw: null, selectedId: null });
     expect(screen.getByTestId('save-as-button')).toHaveAttribute('aria-disabled', 'true');
   });
 

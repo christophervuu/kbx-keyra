@@ -111,6 +111,9 @@ export function useBatchExecution({
 
         const tc = cases[i];
         const start = Date.now();
+        const requiredEnrichmentAliases = (config?.enrichmentSources ?? [])
+          .filter((entry) => entry.required !== false)
+          .map((entry) => entry.alias);
 
         let result: TestRunResult;
 
@@ -123,7 +126,23 @@ export function useBatchExecution({
           parseError = true;
         }
 
-        if (parseError || config === null) {
+        let parsedExternalSources: Record<string, unknown> = {};
+        let externalsParseError = false;
+
+        try {
+          const parsed = JSON.parse(tc.externalSources ?? '{}');
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            parsedExternalSources = parsed as Record<string, unknown>;
+          } else {
+            externalsParseError = true;
+          }
+        } catch {
+          externalsParseError = true;
+        }
+
+        const missingRequired = requiredEnrichmentAliases.filter((alias) => !(alias in parsedExternalSources));
+
+        if (parseError || externalsParseError || missingRequired.length > 0 || config === null) {
           const durationMs = Date.now() - start;
           result = buildResult(tc.id, 'error', 1, 0, durationMs);
         } else {
@@ -133,6 +152,7 @@ export function useBatchExecution({
               parsedData,
               sourceSchema?.content ?? null,
               targetSchema?.content ?? null,
+              { externalSources: parsedExternalSources },
             );
 
             const durationMs = Date.now() - start;

@@ -1,12 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { usePreviewExecution } from './use-preview-execution';
 import { PreviewProvider } from '../context/preview-context';
-
-import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Mock engine
@@ -17,6 +15,8 @@ vi.mock('@/lib/engine', () => ({
 }));
 
 import { executeMapping } from '@/lib/engine';
+import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
+
 const mockExecuteMapping = vi.mocked(executeMapping);
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,8 @@ const defaultParams = () => ({
   sourceSchemaDetail: createSchemaDetail('source-1'),
   targetSchemaDetail: createSchemaDetail('target-1'),
   sourceDataRaw: '{"firstName":"Alice"}',
+  externalSourcesRaw: '{"customerProfile":{"id":"c-1"}}',
+  requiredEnrichmentAliases: [] as readonly string[],
 });
 
 // ---------------------------------------------------------------------------
@@ -186,8 +188,73 @@ describe('usePreviewExecution', () => {
       { firstName: 'Alice' },
       params.sourceSchemaDetail!.content,
       params.targetSchemaDetail!.content,
-      undefined,
+      { externalSources: { customerProfile: { id: 'c-1' } } },
     );
+  });
+
+  it('passes empty externalSources when no externalSourcesRaw is provided', () => {
+    const params = { ...defaultParams(), externalSourcesRaw: null };
+    const { result } = renderHook(() => usePreviewExecution(params), { wrapper });
+
+    act(() => { result.current.run(); });
+
+    expect(mockExecuteMapping).toHaveBeenCalledWith(
+      params.config,
+      { firstName: 'Alice' },
+      params.sourceSchemaDetail!.content,
+      params.targetSchemaDetail!.content,
+      { externalSources: {} },
+    );
+  });
+
+  it('manual run sets error when externalSourcesRaw is invalid JSON', () => {
+    const { result } = renderHook(
+      () => usePreviewExecution({ ...defaultParams(), externalSourcesRaw: '{bad json' }),
+      { wrapper },
+    );
+
+    act(() => { result.current.run(); });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error).toMatch(/Invalid enrichment JSON/i);
+    }
+  });
+
+  it('manual run sets error when externalSourcesRaw parses to non-object JSON', () => {
+    const { result } = renderHook(
+      () => usePreviewExecution({ ...defaultParams(), externalSourcesRaw: '[]' }),
+      { wrapper },
+    );
+
+    act(() => { result.current.run(); });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error).toMatch(/must be a JSON object/i);
+    }
+  });
+
+  it('manual run sets error when required enrichment aliases are missing', () => {
+    const { result } = renderHook(
+      () => usePreviewExecution({
+        ...defaultParams(),
+        externalSourcesRaw: '{"customerProfile":{"id":"c-1"}}',
+        requiredEnrichmentAliases: ['customerProfile', 'accountSettings'],
+      }),
+      { wrapper },
+    );
+
+    act(() => { result.current.run(); });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+    expect(result.current.state.status).toBe('error');
+    if (result.current.state.status === 'error') {
+      expect(result.current.state.error).toContain('Missing required enrichment sample');
+      expect(result.current.state.error).toContain('accountSettings');
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -208,8 +275,7 @@ describe('usePreviewExecution', () => {
 
   it('returns status: error with fallback message when engine throws non-Error', () => {
     mockExecuteMapping.mockImplementation(() => {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw 'string error';
+      throw new Error('string error');
     });
 
     const { result } = renderHook(() => usePreviewExecution(defaultParams()), { wrapper });
@@ -234,11 +300,14 @@ describe('usePreviewExecution', () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      { trace: true },
+      {
+        trace: true,
+        externalSources: { customerProfile: { id: 'c-1' } },
+      },
     );
   });
 
-  it('passes undefined options when traceEnabled is false', () => {
+  it('passes externalSources without trace when traceEnabled is false', () => {
     const { result } = renderHook(() => usePreviewExecution(defaultParams()), { wrapper });
 
     act(() => { result.current.run(); });
@@ -248,7 +317,7 @@ describe('usePreviewExecution', () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      undefined,
+      { externalSources: { customerProfile: { id: 'c-1' } } },
     );
   });
 

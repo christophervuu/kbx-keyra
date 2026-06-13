@@ -31,6 +31,14 @@ export interface SchemaPathEntry {
   readonly path: string;
   readonly type: string;
   readonly description?: string;
+  /** Optional display path for UI rows (e.g. alias-qualified enrichment paths). */
+  readonly displayPath?: string;
+  /** Optional input classification metadata for mixed primary/enrichment pickers. */
+  readonly inputKind?: 'primary' | 'enrichment';
+  /** Enrichment alias when inputKind === 'enrichment'. */
+  readonly alias?: string;
+  /** Precomputed DSL reference expression for this input path. */
+  readonly expression?: string;
 }
 
 // ---------------------------------------------------------------------------

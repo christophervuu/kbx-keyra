@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react';
 import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
-import type { ComparisonSnapshot, TestCase, TestRunResult } from '@/lib/types/domain';
 import {
   ComparisonSnapshotIndicator,
   ComparisonSnapshotView,
 } from '../comparison/ComparisonSnapshotView';
+
+import type { ComparisonSnapshot, TestCase, TestRunResult } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -58,6 +60,8 @@ export interface TestCaseListPanelProps {
    * is null or empty.
    */
   sourceDataRaw: string | null;
+  /** Current enrichment samples JSON string in scratchpad. */
+  externalSourcesRaw?: string | null;
   /** Called when the user clicks "Run All". */
   onRunAll: () => void;
   /** Called when the user clicks "Rerun Failed". */
@@ -69,7 +73,7 @@ export interface TestCaseListPanelProps {
   /**
    * Optional slot rendered below the batch toolbar row.
    */
-  toolbarSlot?: React.ReactNode;
+  toolbarSlot?: ReactNode;
   /**
    * Map of testCaseId → comparison snapshots for that test case.
    * Used to show the comparison indicator badge on rows with linked snapshots.
@@ -164,6 +168,7 @@ export function TestCaseListPanel({
   onAddNew,
   onSaveCurrentInput,
   sourceDataRaw,
+  externalSourcesRaw,
   onRunAll,
   onRerunFailed,
   onCancel,
@@ -200,7 +205,12 @@ export function TestCaseListPanel({
   }
 
   const isScratchpadSelected = selectedId === null;
-  const canSaveAs = isScratchpadSelected && sourceDataRaw !== null && sourceDataRaw.trim() !== '';
+  const hasExternalSourcesInput = externalSourcesRaw !== undefined;
+  const canSaveAs =
+    isScratchpadSelected &&
+    sourceDataRaw !== null &&
+    sourceDataRaw.trim() !== '' &&
+    (!hasExternalSourcesInput || externalSourcesRaw !== null);
   const hasFailedCases = Object.values(runResults).some((r) => r.status === 'fail');
   const canRunAll = testCases.length > 0 && !batchState.isRunning;
   const canRerunFailed = hasFailedCases && !batchState.isRunning;
@@ -282,7 +292,6 @@ export function TestCaseListPanel({
               placeholder="Test case name…"
               aria-label="Test case name"
               data-testid="save-as-name-input"
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               className="min-w-0 flex-1 rounded border border-zinc-600 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
             />
@@ -531,7 +540,6 @@ export function TestCaseListPanel({
                         onBlur={cancelRename}
                         aria-label="Rename test case"
                         data-testid={`rename-input-${tc.id}`}
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
                         autoFocus
                         className="min-w-0 flex-1 rounded border border-zinc-600 bg-zinc-900 px-1.5 py-0.5 text-xs text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
                       />

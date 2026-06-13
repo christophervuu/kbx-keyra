@@ -43,6 +43,16 @@ const MAPPING_META: MappingMetadata = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 
+const ENRICHED_MAPPING_META: MappingMetadata = {
+  ...MAPPING_META,
+  mappingId: 'mapping-enriched',
+  name: 'Enriched Mapping',
+  enrichmentSources: [
+    { alias: 'customerProfile', schemaId: 'schema-1', required: true },
+    { alias: 'accountSettings', schemaId: 'schema-2', required: false },
+  ],
+};
+
 const PROJECT_DETAIL: ProjectDetail = {
   projectId: 'proj-1',
   name: 'My Project',
@@ -56,6 +66,21 @@ const PROJECT_DETAIL: ProjectDetail = {
   mappings: [MAPPING_META],
 };
 
+const SCHEMA_DETAIL_2: SchemaDetail = {
+  metadata: {
+    schemaId: 'schema-2',
+    name: 'Schema Two',
+    format: 'json-schema',
+    fieldCount: 4,
+    origin: 'uploaded',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+  content: {},
+};
+
 // ---------------------------------------------------------------------------
 // Mock adapter factory
 // ---------------------------------------------------------------------------
@@ -63,7 +88,12 @@ const PROJECT_DETAIL: ProjectDetail = {
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
     listSchemas: vi.fn(),
-    getSchema: vi.fn().mockResolvedValue(SCHEMA_DETAIL),
+    getSchema: vi.fn().mockImplementation(async (schemaId: string) => {
+      if (schemaId === 'schema-2') {
+        return SCHEMA_DETAIL_2;
+      }
+      return SCHEMA_DETAIL;
+    }),
     createSchema: vi.fn(),
     deleteSchema: vi.fn(),
     listMappings: vi.fn(),
@@ -389,6 +419,47 @@ describe('ProjectOverviewPage', () => {
 
     await user.click(readyDeploy);
     expect(screen.getByTestId('mapping-deployment-page')).toBeInTheDocument();
+  });
+
+  it('renders enrichment-aware row summary and details while keeping linked schemas header metric', async () => {
+    const user = userEvent.setup();
+
+    const enrichedAdapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        linkedSchemaIds: ['schema-1', 'schema-2'],
+        schemaRefs: [
+          { schemaId: 'schema-1', type: 'published' },
+          { schemaId: 'schema-2', type: 'published' },
+        ],
+        mappings: [ENRICHED_MAPPING_META],
+      }),
+    });
+
+    renderPage(enrichedAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByText('Enriched Mapping')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Schema One')).toBeInTheDocument();
+    expect(screen.getByText('2 enrichments')).toBeInTheDocument();
+
+    const detailToggle = screen.getByRole('button', {
+      name: /view mapping inputs for enriched mapping/i,
+    });
+    await user.click(detailToggle);
+
+    const details = screen.getByRole('dialog', {
+      name: /input details for enriched mapping/i,
+    });
+    expect(within(details).getByText('customerProfile')).toBeInTheDocument();
+    expect(within(details).getByText('Primary source')).toBeInTheDocument();
+    expect(within(details).getAllByText('Schema One').length).toBeGreaterThan(0);
+    expect(within(details).getByText('accountSettings')).toBeInTheDocument();
+    expect(within(details).getByText('Schema Two')).toBeInTheDocument();
+
+    expect(screen.getByTestId('project-header-summary-line')).toHaveTextContent('1 mapping · 2 linked schemas · 0 errors');
   });
 });
 

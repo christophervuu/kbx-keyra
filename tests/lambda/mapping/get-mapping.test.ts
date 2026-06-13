@@ -69,6 +69,34 @@ describe('get-mapping handler', () => {
     expect(parsed.businessContext).toBe('Map invoice records to shipment orchestration payloads.');
   });
 
+  it('normalizes legacy externalSources into schema-less enrichmentSources', async () => {
+    sharedMocks.getItem.mockResolvedValueOnce({ mappingId: 'map-1', configS3Key: 'mappings/map-1/config.json' });
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        id: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 2,
+        engineVersion: '1.0.0',
+        config: {
+          externalSources: ['legacyAlias'],
+        },
+        rules: [],
+      }),
+    );
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    const parsed = JSON.parse(result.body) as {
+      enrichmentSources: Array<{ alias: string; required: boolean }>;
+      config: { externalSources: string[] };
+    };
+    expect(parsed.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
+    expect(parsed.config.externalSources).toEqual(['legacyAlias']);
+  });
+
   it('missing mapping returns 404', async () => {
     sharedMocks.getItem.mockResolvedValueOnce(null);
 

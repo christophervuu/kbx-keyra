@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -50,6 +50,40 @@ describe('MappingRow', () => {
     expect(screen.getByText('Schema A')).toBeInTheDocument();
     expect(screen.getByText('Schema B')).toBeInTheDocument();
     expect(screen.getByTestId('source-target-cell')).toHaveClass('whitespace-nowrap');
+  });
+
+  it('renders non-enriched summary without enrichment count/details affordance', () => {
+    renderRow();
+    expect(screen.queryByTestId('enrichment-summary-count')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /view mapping inputs/i })).not.toBeInTheDocument();
+  });
+
+  it('renders enriched summary as source + N enrichments -> target and shows input details dialog', async () => {
+    const user = userEvent.setup();
+    renderRow({
+      ...MAPPING,
+      enrichmentInputs: [
+        { alias: 'customerProfile', schemaName: 'Customer Profile' },
+        { alias: 'accountSettings', schemaName: 'Account Settings' },
+      ],
+    });
+
+    expect(screen.getByTestId('enrichment-summary-count')).toHaveTextContent('2 enrichments');
+
+    const detailsButton = screen.getByRole('button', { name: /view mapping inputs for my mapping/i });
+    await user.click(detailsButton);
+
+    const detailsDialog = screen.getByRole('dialog', { name: /input details for my mapping/i });
+    expect(detailsDialog).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Primary source')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Schema A')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Enrichment inputs')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('customerProfile')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Customer Profile')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('accountSettings')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Account Settings')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Target')).toBeInTheDocument();
+    expect(within(detailsDialog).getByText('Schema B')).toBeInTheDocument();
   });
 
   it('renders "No schema" when sourceSchemaName is null', () => {

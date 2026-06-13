@@ -27,7 +27,10 @@ export interface UseServerPreviewReturn {
    * Trigger a server-side preview execution.
    * Resolves when the call completes (success, timeout, or error).
    */
-  execute: (sourceData: Record<string, unknown>) => Promise<void>;
+  execute: (
+    sourceData: Record<string, unknown>,
+    externalSources?: Record<string, unknown>,
+  ) => Promise<void>;
   /** Last successful result, or `null` if not yet run / errored */
   result: ServerPreviewResult | null;
   /** `true` while a call is in-flight */
@@ -73,7 +76,10 @@ export function useServerPreview({
     paramsRef.current = { adapter, mappingId, environment };
   });
 
-  const execute = useCallback(async (sourceData: Record<string, unknown>): Promise<void> => {
+  const execute = useCallback(async (
+    sourceData: Record<string, unknown>,
+    externalSources: Record<string, unknown> = {},
+  ): Promise<void> => {
     const { adapter: adp, mappingId: id, environment: env } = paramsRef.current;
 
     setIsExecuting(true);
@@ -89,7 +95,7 @@ export function useServerPreview({
 
     try {
       const serverResult = await Promise.race([
-        adp.previewOnServer(id, { environment: env, sourceData }),
+        adp.previewOnServer(id, { environment: env, sourceData, externalSources }),
         timeoutPromise,
       ]);
 

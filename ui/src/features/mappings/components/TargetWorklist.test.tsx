@@ -321,6 +321,41 @@ describe('TargetWorklist', () => {
     expect(sourceCell).not.toHaveTextContent('source("customer.name")');
   });
 
+  it('shows enrichment input method label and alias-qualified source summary for enrichment-only expression', () => {
+    const rules: MappingRule[] = [
+      {
+        target: 'firstName',
+        type: 'string',
+        expression: 'get(external("customerProfile"), "name")',
+      },
+    ];
+
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+
+    const row = screen.getByTestId('target-field-row-firstName');
+    const sourceCell = row.querySelector('[data-testid="source-summary"]');
+    const methodCell = row.querySelector('[data-testid="mapping-type"]');
+
+    expect(sourceCell).toHaveTextContent('customerProfile.name');
+    expect(methodCell).toHaveTextContent('Enrichment input');
+  });
+
+  it('shows Mixed inputs method label when expression combines primary and enrichment inputs', () => {
+    const rules: MappingRule[] = [
+      {
+        target: 'firstName',
+        type: 'string',
+        expression: 'concat(source("firstName"), get(external("customerProfile"), "name"))',
+      },
+    ];
+
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} rules={rules} />);
+
+    const row = screen.getByTestId('target-field-row-firstName');
+    const methodCell = row.querySelector('[data-testid="mapping-type"]');
+    expect(methodCell).toHaveTextContent('Mixed inputs');
+  });
+
 
   it('shows children after expanding an object node', () => {
     render(<TargetWorklist {...DEFAULT_PROPS} nodes={NESTED_NODES} />);

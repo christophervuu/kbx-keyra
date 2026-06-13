@@ -296,4 +296,56 @@ describe('persistence mappings', () => {
     expect(mod.mappings.delete).toBe(mod.delete);
     expect(mod.mappings.duplicate).toBe(mod.duplicate);
   });
+
+  it('create normalizes legacy config.externalSources into compatibility enrichmentSources', async () => {
+    randomUuidMock.mockReturnValue('mapping-created-legacy-ext');
+    s3SendMock.mockResolvedValue({});
+    dynamoSendMock.mockResolvedValue({});
+    const mappings = await importMappingsModule();
+
+    const result = await mappings.create({
+      projectId: 'project-1',
+      name: 'Mapping Legacy Externals',
+      config: makeConfig({
+        config: {
+          externalSources: ['legacyAlias'],
+        },
+      }),
+    });
+
+    expect(result.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
+
+    const s3Command = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Body: string };
+    };
+    const writtenConfig = JSON.parse(s3Command.input.Body) as MappingConfig;
+    expect(writtenConfig.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
+    expect(writtenConfig.config.externalSources).toEqual(['legacyAlias']);
+  });
+
+  it('create unions canonical enrichmentSources with compatibility externalSources', async () => {
+    randomUuidMock.mockReturnValue('mapping-created-union');
+    s3SendMock.mockResolvedValue({});
+    dynamoSendMock.mockResolvedValue({});
+    const mappings = await importMappingsModule();
+
+    const result = await mappings.create({
+      projectId: 'project-1',
+      name: 'Mapping Canonical Externals',
+      config: makeConfig({
+        enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+        config: {
+          externalSources: ['legacyAlias'],
+        },
+      }),
+    });
+
+    expect(result.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
+
+    const s3Command = s3SendMock.mock.calls[0]?.[0] as {
+      input: { Body: string };
+    };
+    const writtenConfig = JSON.parse(s3Command.input.Body) as MappingConfig;
+    expect(writtenConfig.config.externalSources).toEqual(['customerProfile', 'legacyAlias']);
+  });
 });

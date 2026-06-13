@@ -254,6 +254,8 @@ describe('LocalStorageAdapter', () => {
       businessContext: 'Transform source invoice model to target shipment contract.',
       sourceSchemaRef: SOURCE_SCHEMA_REF,
       targetSchemaRef: TARGET_SCHEMA_REF,
+      enrichmentSources: [{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }],
+      config: { externalSources: ['legacyAlias'] },
       rules: [{ target: 'A', type: 'string', expression: 'static("x")' }],
     });
 
@@ -263,6 +265,9 @@ describe('LocalStorageAdapter', () => {
     const config = await adapter.getMapping(created.mappingId);
     expect(config.name).toBe('Mapping A');
     expect(config.businessContext).toBe('Transform source invoice model to target shipment contract.');
+    expect(config.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
+    expect(config.config.externalSources).toEqual(['customerProfile', 'legacyAlias']);
+    expect(created.enrichmentSources).toEqual([{ alias: 'customerProfile', schemaId: 'schema-customer', required: true }]);
     expect(created.businessContext).toBe('Transform source invoice model to target shipment contract.');
 
     const updatedConfig: MappingConfig = {
@@ -305,6 +310,28 @@ describe('LocalStorageAdapter', () => {
     const config = await adapter.getMapping(created.mappingId);
     expect(created.businessContext).toBeUndefined();
     expect(config.businessContext).toBeUndefined();
+  });
+
+  it('normalizes legacy-only config.externalSources to schema-less enrichment aliases', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const created = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Legacy Externals Mapping',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      config: { externalSources: ['legacyAlias'] },
+    });
+
+    const config = await adapter.getMapping(created.mappingId);
+    expect(config.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
+    expect(config.config.externalSources).toEqual(['legacyAlias']);
+    expect(created.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
   });
 
   it.each([
@@ -353,7 +380,7 @@ describe('LocalStorageAdapter', () => {
     [
       'previewOnServer',
       (adapter: LocalStorageAdapter) =>
-        adapter.previewOnServer('m', { environment: 'DEV', sourceData: {} }),
+        adapter.previewOnServer('m', { environment: 'DEV', sourceData: {}, externalSources: {} }),
     ],
   ])('%s uses canonical offline unsupported behavior', async (_method, invoke) => {
     const adapter = new LocalStorageAdapter();

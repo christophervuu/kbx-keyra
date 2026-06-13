@@ -33,6 +33,7 @@ interface MappingRecord {
   readonly mappingId: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: ReadonlyArray<{ readonly schemaId?: string }>;
 }
 
 interface SchemaNodeKey {
@@ -165,7 +166,11 @@ async function findDependentMappings(schemaId: string): Promise<readonly string[
   });
 
   return mappings
-    .filter((mapping) => mapping.sourceSchemaId === schemaId || mapping.targetSchemaId === schemaId)
+    .filter((mapping) => (
+      mapping.sourceSchemaId === schemaId
+      || mapping.targetSchemaId === schemaId
+      || (mapping.enrichmentSources ?? []).some((source) => source.schemaId === schemaId)
+    ))
     .map((mapping) => mapping.mappingId)
     .filter((id): id is string => typeof id === 'string' && id.trim() !== '');
 }

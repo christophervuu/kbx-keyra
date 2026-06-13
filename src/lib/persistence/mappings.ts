@@ -15,7 +15,14 @@ import {
 
 import { dynamoClient, s3Client } from './clients.js';
 import { BUCKET_NAME, TABLE_NAMES, mappingConfigKey } from './config.js';
-import type { CreateMappingInput, MappingConfig, MappingItem, MappingStatus, UpdateMappingInput } from './types.js';
+import type {
+  CreateMappingInput,
+  MappingConfig,
+  MappingEnrichmentSource,
+  MappingItem,
+  MappingStatus,
+  UpdateMappingInput,
+} from './types.js';
 import { computeConfigHash } from './hash.js';
 
 type MappingCreateInput = Omit<CreateMappingInput, 'configS3Key'> & { readonly config: MappingConfig };
@@ -77,6 +84,71 @@ function normalizeOptionalBusinessContext(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function normalizeEnrichmentSources(
+  value: readonly MappingEnrichmentSource[] | undefined,
+): readonly MappingEnrichmentSource[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((source) => ({
+    alias: source.alias,
+    ...(source.schemaId ? { schemaId: source.schemaId } : {}),
+    ...(source.required !== undefined ? { required: source.required } : {}),
+    ...(source.description ? { description: source.description } : {}),
+  }));
+}
+
+function uniqueAliases(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    aliases.push(value);
+  }
+
+  return aliases;
+}
+
+function normalizeLegacyExternalAliases(value: readonly string[] | undefined): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueAliases(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function normalizeConfigCompatibility(config: MappingConfig): MappingConfig {
+  const canonical = normalizeEnrichmentSources(config.enrichmentSources) ?? [];
+  const legacyExternalAliases = normalizeLegacyExternalAliases(config.config.externalSources);
+  const enrichmentSources = canonical.length > 0
+    ? canonical
+    : legacyExternalAliases.map((alias) => ({ alias, required: false }));
+  const externalSources = uniqueAliases([
+    ...enrichmentSources.map((source) => source.alias),
+    ...legacyExternalAliases,
+  ]);
+
+  return {
+    ...config,
+    enrichmentSources,
+    config: {
+      ...config.config,
+      externalSources,
+    },
+  };
+}
+
 async function putMappingConfig(configS3Key: string, config: MappingConfig): Promise<void> {
   await s3Client.send(
     new PutObjectCommand({
@@ -122,6 +194,7 @@ function buildMappingUpdateExpression(
     'name',
     'sourceSchemaId',
     'targetSchemaId',
+    'enrichmentSources',
     'status',
     'ruleCount',
     'coverage',
@@ -155,10 +228,13 @@ export async function create(input: MappingCreateInput): Promise<MappingItem> {
   const configS3Key = mappingConfigKey(mappingId);
   const businessContext = normalizeOptionalBusinessContext(input.businessContext)
     ?? normalizeOptionalBusinessContext(input.config.businessContext);
-  const sourceSchemaId = input.config.sourceSchemaRef?.schemaId ?? input.sourceSchemaId;
-  const targetSchemaId = input.config.targetSchemaRef?.schemaId ?? input.targetSchemaId;
-  const ruleCount = input.ruleCount ?? input.config.rules.length;
-  const configHash = await computeConfigHash(input.config);
+  const normalizedConfig = normalizeConfigCompatibility(input.config);
+  const sourceSchemaId = normalizedConfig.sourceSchemaRef?.schemaId ?? input.sourceSchemaId;
+  const targetSchemaId = normalizedConfig.targetSchemaRef?.schemaId ?? input.targetSchemaId;
+  const enrichmentSources = normalizeEnrichmentSources(input.enrichmentSources)
+    ?? normalizeEnrichmentSources(normalizedConfig.enrichmentSources);
+  const ruleCount = input.ruleCount ?? normalizedConfig.rules.length;
+  const configHash = await computeConfigHash(normalizedConfig);
   const item: MappingItem = {
     mappingId,
     projectId: input.projectId,
@@ -170,7 +246,8 @@ export async function create(input: MappingCreateInput): Promise<MappingItem> {
     configHash,
     sourceSchemaId,
     targetSchemaId,
-    status: input.status ?? inferStatus(input.config),
+    ...(enrichmentSources ? { enrichmentSources } : {}),
+    status: input.status ?? inferStatus(normalizedConfig),
     ruleCount,
     coverage: input.coverage ?? 0,
     configS3Key,
@@ -178,7 +255,7 @@ export async function create(input: MappingCreateInput): Promise<MappingItem> {
     updatedAt: timestamp,
   };
 
-  const configPayload = createConfigPayload(input.config, mappingId, input.projectId, input.name, 1);
+  const configPayload = createConfigPayload(normalizedConfig, mappingId, input.projectId, input.name, 1);
   await putMappingConfig(configS3Key, configPayload);
   await dynamoClient.send(
     new PutCommand({
@@ -233,15 +310,23 @@ export async function update(
     const nextRevision = currentRevision + 1;
     const nextName = fields.name ?? existing.name;
     const nextProjectId = existing.projectId;
-    const payload = createConfigPayload(mapRevisionToConfigVersion(config, nextRevision), mappingId, nextProjectId, nextName, nextRevision);
+    const normalizedConfig = normalizeConfigCompatibility(config);
+    const payload = createConfigPayload(mapRevisionToConfigVersion(normalizedConfig, nextRevision), mappingId, nextProjectId, nextName, nextRevision);
     await putMappingConfig(existing.configS3Key, payload);
 
     if (fields.configHash === undefined) {
       fields = {
         ...fields,
-        configHash: await computeConfigHash(config),
+        configHash: await computeConfigHash(normalizedConfig),
       };
     }
+  }
+
+  if (fields.enrichmentSources !== undefined) {
+    fields = {
+      ...fields,
+      enrichmentSources: normalizeEnrichmentSources(fields.enrichmentSources),
+    };
   }
 
   const expression = buildMappingUpdateExpression(fields);

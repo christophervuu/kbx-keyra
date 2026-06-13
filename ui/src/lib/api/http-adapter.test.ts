@@ -123,6 +123,12 @@ describe('HttpAdapter (CRUD)', () => {
       projectId: 'p-1',
       name: 'Map A',
       businessContext: 'Transform invoice payload into shipment orchestration output.',
+      enrichmentSources: [
+        { alias: 'customerProfile', schemaId: 'schema-customer', required: true },
+      ],
+      config: {
+        externalSources: ['legacyAlias'],
+      },
     };
     vi.mocked(httpRequest).mockResolvedValueOnce({ mappingId: 'm-1', name: 'Map A' });
     const adapter = new HttpAdapter(API_URL);
@@ -692,6 +698,7 @@ describe('HttpAdapter (CRUD)', () => {
     await adapter.previewOnServer('m-1', {
       environment: 'DEV',
       sourceData: { a: 1 },
+      externalSources: { customerProfile: { customerId: 'c-1' } },
     });
 
     expect(httpRequest).toHaveBeenCalledWith({
@@ -701,6 +708,7 @@ describe('HttpAdapter (CRUD)', () => {
       body: {
         environment: 'DEV',
         sourceData: { a: 1 },
+        externalSources: { customerProfile: { customerId: 'c-1' } },
       },
     });
   });

@@ -148,21 +148,33 @@ describe('SourceSchemaPanel', () => {
     const onStageField = vi.fn();
     renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField });
     fireEvent.click(screen.getByTestId('source-field-email'));
-    expect(onStageField).toHaveBeenCalledWith('email');
+    expect(onStageField).toHaveBeenCalledWith({
+      path: 'email',
+      kind: 'primary',
+      expression: 'source("email")',
+    });
   });
 
   it('fires onStageField when Enter is pressed on a leaf field', () => {
     const onStageField = vi.fn();
     renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField });
     fireEvent.keyDown(screen.getByTestId('source-field-name'), { key: 'Enter' });
-    expect(onStageField).toHaveBeenCalledWith('name');
+    expect(onStageField).toHaveBeenCalledWith({
+      path: 'name',
+      kind: 'primary',
+      expression: 'source("name")',
+    });
   });
 
   it('fires onStageField when Space is pressed on a leaf field', () => {
     const onStageField = vi.fn();
     renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField });
     fireEvent.keyDown(screen.getByTestId('source-field-name'), { key: ' ' });
-    expect(onStageField).toHaveBeenCalledWith('name');
+    expect(onStageField).toHaveBeenCalledWith({
+      path: 'name',
+      kind: 'primary',
+      expression: 'source("name")',
+    });
   });
 
   it('renders object nodes as non-draggable container buttons', () => {
@@ -207,7 +219,52 @@ describe('SourceSchemaPanel', () => {
     renderPanel({ parsedSourceSchema: FLAT_SCHEMA, onStageField: vi.fn() });
     const nameField = screen.getByTestId('source-field-name');
     expect(nameField).toHaveAttribute('role', 'button');
-    expect(nameField).toHaveAttribute('aria-label', 'Stage source field name');
+    expect(nameField).toHaveAttribute('aria-label', 'Stage input field name');
+  });
+
+  it('renders grouped input headers: Primary Source and Enrichment Input aliases', () => {
+    const enrichmentSchema: ParsedSchema = {
+      nodes: [makeLeaf('customerId', 'customerId')],
+      totalFieldCount: 1,
+      format: 'json',
+      parseTimeMs: 0,
+      inferred: false,
+    };
+
+    renderPanel({
+      parsedSourceSchema: FLAT_SCHEMA,
+      enrichmentInputGroups: [{ alias: 'customerProfile', parsedSchema: enrichmentSchema }],
+      onStageField: vi.fn(),
+    });
+
+    expect(screen.getByText('Primary Source')).toBeInTheDocument();
+    expect(screen.getByText('Enrichment Input: customerProfile')).toBeInTheDocument();
+  });
+
+  it('stages enrichment field with get(external(alias), path) expression', () => {
+    const enrichmentSchema: ParsedSchema = {
+      nodes: [makeLeaf('customerId', 'customerId')],
+      totalFieldCount: 1,
+      format: 'json',
+      parseTimeMs: 0,
+      inferred: false,
+    };
+    const onStageField = vi.fn();
+
+    renderPanel({
+      parsedSourceSchema: FLAT_SCHEMA,
+      enrichmentInputGroups: [{ alias: 'customerProfile', parsedSchema: enrichmentSchema }],
+      onStageField,
+    });
+
+    fireEvent.click(screen.getByTestId('source-field-customerId'));
+
+    expect(onStageField).toHaveBeenCalledWith({
+      path: 'customerId',
+      kind: 'enrichment',
+      alias: 'customerProfile',
+      expression: 'get(external("customerProfile"), "customerId")',
+    });
   });
 
   // ---------------------------------------------------------------------------

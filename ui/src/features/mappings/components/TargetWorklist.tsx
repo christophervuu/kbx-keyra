@@ -201,8 +201,10 @@ function inferArrayMethodLabel(expression: string | null): string {
 
 function inferSourceFields(expression: string | null): string[] {
   if (!expression) return [];
-  const matches = [...expression.matchAll(/source\("([^"]+)"\)/g)].map((match) => match[1]);
-  return [...new Set(matches)];
+  const sourceMatches = [...expression.matchAll(/source\("([^"]+)"\)/g)].map((match) => match[1]);
+  const enrichmentMatches = [...expression.matchAll(/get\(external\("([^"]+)"\),\s*"([^"]+)"\)/g)]
+    .map((match) => `${match[1]}.${match[2]}`);
+  return [...new Set([...sourceMatches, ...enrichmentMatches])];
 }
 
 function inferArraySourceSummary(expression: string | null): string {
@@ -216,6 +218,17 @@ function inferSourceSummary(expression: string | null): string {
   if (fields.length === 0) return '—';
   if (fields.length <= 2) return fields.join(', ');
   return `${fields.slice(0, 2).join(', ')} +${fields.length - 2}`;
+}
+
+function inferInputTypeLabel(expression: string | null): string {
+  if (!expression || expression.trim().length === 0) return 'Not configured';
+  const hasPrimary = /source\("[^"]+"\)/.test(expression);
+  const hasEnrichment = /get\(external\("[^"]+"\),\s*"[^"]+"\)/.test(expression);
+
+  if (hasPrimary && hasEnrichment) return 'Mixed inputs';
+  if (hasEnrichment) return 'Enrichment input';
+  if (hasPrimary) return 'Primary source';
+  return inferRuleType(expression);
 }
 
 function prioritizeArrayChildren(
@@ -317,7 +330,7 @@ function renderNode({
     : inferSourceSummary(matchingRule?.expression ?? null);
   const mappingTypeLabel = isArrayNode
     ? inferArrayMethodLabel(matchingRule?.expression ?? null)
-    : (matchingRule ? inferRuleType(matchingRule.expression) : 'Not configured');
+    : inferInputTypeLabel(matchingRule?.expression ?? null);
   const notesPreview = suggestionNotes ?? matchingRule?.description ?? null;
   const sampleOutputPreview = sampleOutputByTargetPath?.[node.path] ?? null;
   const isExpandable = node.childCount > 0;

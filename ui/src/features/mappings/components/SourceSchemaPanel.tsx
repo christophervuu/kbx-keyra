@@ -1,13 +1,10 @@
 /**
  * SourceSchemaPanel — left panel of the Mapping Editor.
  *
- * Renders the source schema as a browsable, expandable tree with a search
- * input that filters and expands-to-match using `useTreeSearch`.
- * Leaf fields are draggable (HTML5 Drag API) and click-to-stage capable.
- * Object/array nodes are expandable/collapsible but not themselves draggable.
- *
- * Drag payload: source field path string (plain text on DataTransfer).
- * Click-to-stage: fires `onStageField(path)` when a leaf is clicked.
+ * FS-093 T-08 addendum:
+ * - Guided terminology uses “Input fields” / “Browse inputs”.
+ * - Input tree is grouped by Primary Source + Enrichment Inputs aliases.
+ * - Leaf selection returns metadata so callers can generate source/external DSL.
  */
 
 import { ChevronDown, ChevronRight, GripVertical, Search, X } from 'lucide-react';
@@ -18,24 +15,45 @@ import { PreviewContext } from '../context/preview-context';
 import { useDragSource } from '../hooks/use-drag-source';
 import { resolveFieldTestValue } from '../lib/source-field-display';
 
-import { useTreeSearch } from '@/features/schemas/hooks/use-tree-search';
 import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+export type InputNodeKind = 'primary' | 'enrichment';
+
+export interface StagedInputField {
+  readonly path: string;
+  readonly kind: InputNodeKind;
+  readonly alias?: string;
+  readonly expression: string;
+}
+
+export interface InputSchemaGroup {
+  readonly key: string;
+  readonly kind: InputNodeKind;
+  readonly label: string;
+  readonly alias?: string;
+  readonly parsedSchema: ParsedSchema | null;
+  readonly sourceData?: unknown;
+}
+
 export interface SourceSchemaPanelProps {
-  /** Parsed source schema (or null when not yet loaded) */
+  /** Parsed primary source schema (or null when not yet loaded). */
   parsedSourceSchema: ParsedSchema | null;
-  /** Optional source schema display name shown in the panel header */
+  /** Optional source schema display name shown in the panel header. */
   sourceSchemaName?: string | null;
+  /** Optional enrichment input groups (alias + parsed schema). */
+  enrichmentInputGroups?: readonly { alias: string; parsedSchema: ParsedSchema | null }[];
+  /** Optional enrichment source data map for subline previews. */
+  enrichmentSourceData?: Readonly<Record<string, unknown>>;
   /**
-   * Fired when a source field is clicked (click-to-stage) or dropped.
-   * Receives the full dot-path of the field.
+   * Fires when an input field is clicked (click-to-stage) or dropped.
+   * Receives metadata for DSL generation (primary => source(), enrichment => get(external(), ...)).
    */
-  onStageField: (path: string) => void;
-  /** Optional className for the outer container */
+  onStageField: (field: StagedInputField) => void;
+  /** Optional className for the outer container. */
   className?: string;
 }
 
@@ -70,19 +88,87 @@ const TYPE_ABBREV: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function buildStagedField(kind: InputNodeKind, path: string, alias?: string): StagedInputField {
+  if (kind === 'enrichment' && alias) {
+    return {
+      path,
+      kind,
+      alias,
+      expression: `get(external("${alias}"), "${path}")`,
+    };
+  }
+  return {
+    path,
+    kind: 'primary',
+    expression: `source("${path}")`,
+  };
+}
+
+function cloneNode(node: SchemaTreeNode, children: SchemaTreeNode[]): SchemaTreeNode {
+  return {
+    ...node,
+    children,
+    childCount: children.length,
+  };
+}
+
+function filterTreeByQuery(nodes: readonly SchemaTreeNode[], query: string): SchemaTreeNode[] {
+  if (query.trim().length === 0) return [...nodes];
+  const q = query.trim().toLowerCase();
+
+  function filterNode(node: SchemaTreeNode): SchemaTreeNode | null {
+    const matchesSelf =
+      node.fieldName.toLowerCase().includes(q)
+      || node.path.toLowerCase().includes(q);
+
+    const filteredChildren = node.children
+      .map((child) => filterNode(child))
+      .filter((child): child is SchemaTreeNode => child !== null);
+
+    if (!matchesSelf && filteredChildren.length === 0) return null;
+    return cloneNode(node, filteredChildren);
+  }
+
+  return nodes
+    .map((node) => filterNode(node))
+    .filter((node): node is SchemaTreeNode => node !== null);
+}
+
+function countMatchingNodes(nodes: readonly SchemaTreeNode[]): number {
+  let count = 0;
+  const walk = (next: readonly SchemaTreeNode[]) => {
+    for (const node of next) {
+      count += 1;
+      if (node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return count;
+}
+
+function flattenTopLevel(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
+  return nodes.filter((node) => node.depth === 0);
+}
+
+// ---------------------------------------------------------------------------
 // Leaf field row (draggable)
 // ---------------------------------------------------------------------------
 
 interface LeafFieldRowProps {
-  node: SchemaTreeNode;
-  sampleValue?: string;
-  onStageField: (path: string) => void;
-  isHighlighted?: boolean;
+  readonly node: SchemaTreeNode;
+  readonly sampleValue?: string;
+  readonly stagedField: StagedInputField;
+  readonly onStageField: (field: StagedInputField) => void;
+  readonly isHighlighted?: boolean;
 }
 
 const LeafFieldRow = memo(function LeafFieldRow({
   node,
   sampleValue,
+  stagedField,
   onStageField,
   isHighlighted = false,
 }: LeafFieldRowProps) {
@@ -94,16 +180,16 @@ const LeafFieldRow = memo(function LeafFieldRow({
       data-testid={`source-field-${node.path}`}
       data-path={node.path}
       {...dragHandlers}
-      onClick={() => onStageField(node.path)}
+      onClick={() => onStageField(stagedField)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onStageField(node.path);
+          onStageField(stagedField);
         }
       }}
       tabIndex={0}
       role="button"
-      aria-label={`Stage source field ${node.path}`}
+      aria-label={`Stage input field ${node.path}`}
       style={{ paddingLeft: node.depth * 16 + 8 }}
       className={[
         'group flex min-h-[44px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
@@ -111,18 +197,14 @@ const LeafFieldRow = memo(function LeafFieldRow({
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isDragging ? 'opacity-50' : '',
         isHighlighted ? 'bg-blue-950/30' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      ].filter(Boolean).join(' ')}
     >
-      {/* Drag handle indicator */}
       <GripVertical
         size={11}
         className="shrink-0 text-slate-700 group-hover:text-slate-500"
         aria-hidden="true"
       />
 
-      {/* Field name + sample preview (target-row parity) */}
       <span className="min-w-0 flex-1" data-testid={`source-field-content-${node.path}`}>
         <span className="flex min-w-0 items-center gap-1.5">
           <span
@@ -152,10 +234,10 @@ const LeafFieldRow = memo(function LeafFieldRow({
 // ---------------------------------------------------------------------------
 
 interface ContainerNodeRowProps {
-  node: SchemaTreeNode;
-  isExpanded: boolean;
-  onToggle: (path: string) => void;
-  isHighlighted?: boolean;
+  readonly node: SchemaTreeNode;
+  readonly isExpanded: boolean;
+  readonly onToggle: (path: string) => void;
+  readonly isHighlighted?: boolean;
 }
 
 function ContainerNodeRow({
@@ -176,9 +258,7 @@ function ContainerNodeRow({
         'last:border-b-0 hover:bg-slate-800/40',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isHighlighted ? 'bg-blue-950/30' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      ].filter(Boolean).join(' ')}
     >
       {isExpanded ? (
         <ChevronDown size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
@@ -205,13 +285,14 @@ function ContainerNodeRow({
 // ---------------------------------------------------------------------------
 
 interface RenderNodeProps {
-  node: SchemaTreeNode;
-  expandedPaths: Set<string>;
-  onToggle: (path: string) => void;
-  onStageField: (path: string) => void;
-  sourceData: unknown;
-  visiblePaths: Set<string> | null;
-  matchingPaths: Set<string>;
+  readonly node: SchemaTreeNode;
+  readonly expandedPaths: Set<string>;
+  readonly onToggle: (path: string) => void;
+  readonly onStageField: (field: StagedInputField) => void;
+  readonly sourceData: unknown;
+  readonly matchingPaths: Set<string>;
+  readonly inputKind: InputNodeKind;
+  readonly alias?: string;
 }
 
 function renderNode({
@@ -220,14 +301,11 @@ function renderNode({
   onToggle,
   onStageField,
   sourceData,
-  visiblePaths,
   matchingPaths,
+  inputKind,
+  alias,
 }: RenderNodeProps): ReactNode[] {
   const rows: ReactNode[] = [];
-  // When search is active, only render nodes in the visible set
-  if (visiblePaths !== null && !visiblePaths.has(node.path)) {
-    return [];
-  }
 
   const isContainer = node.type === 'object' || node.type === 'array';
   const isExpanded = expandedPaths.has(node.path);
@@ -236,7 +314,7 @@ function renderNode({
   rows.push(
     isContainer ? (
       <ContainerNodeRow
-        key={node.path}
+        key={`${inputKind}:${alias ?? 'primary'}:${node.path}`}
         node={node}
         isExpanded={isExpanded}
         onToggle={onToggle}
@@ -244,9 +322,10 @@ function renderNode({
       />
     ) : (
       <LeafFieldRow
-        key={node.path}
+        key={`${inputKind}:${alias ?? 'primary'}:${node.path}`}
         node={node}
         sampleValue={resolveFieldTestValue(sourceData, node.path)}
+        stagedField={buildStagedField(inputKind, node.path, alias)}
         onStageField={onStageField}
         isHighlighted={isHighlighted}
       />
@@ -255,17 +334,16 @@ function renderNode({
 
   if (isContainer && isExpanded && node.children.length > 0) {
     for (const child of node.children) {
-      rows.push(
-        ...renderNode({
-          node: child,
-          expandedPaths,
-          onToggle,
-          onStageField,
-          sourceData,
-          visiblePaths,
-          matchingPaths,
-        }),
-      );
+      rows.push(...renderNode({
+        node: child,
+        expandedPaths,
+        onToggle,
+        onStageField,
+        sourceData,
+        matchingPaths,
+        inputKind,
+        alias,
+      }));
     }
   }
 
@@ -276,71 +354,115 @@ function renderNode({
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * SourceSchemaPanel — browsable, draggable source schema tree with search.
- */
 export function SourceSchemaPanel({
   parsedSourceSchema,
   sourceSchemaName = null,
+  enrichmentInputGroups = [],
+  enrichmentSourceData = {},
   onStageField,
   className = '',
 }: SourceSchemaPanelProps) {
   void sourceSchemaName;
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-
   const previewCtx = useContext(PreviewContext);
-  const sourceData = previewCtx?.sourceData ?? null;
+  const primarySourceData = previewCtx?.sourceData ?? null;
 
-  const allNodes = useMemo<SchemaTreeNode[]>(() => parsedSourceSchema?.nodes ?? [], [parsedSourceSchema]);
-  const {
-    query,
-    setQuery,
-    clearSearch,
-    isSearchActive,
-    filterResult,
-    searchExpandedPaths,
-  } = useTreeSearch(allNodes, expandedPaths, setExpandedPaths);
+  const primaryGroup: InputSchemaGroup = {
+    key: 'primary',
+    kind: 'primary',
+    label: 'Primary Source',
+    parsedSchema: parsedSourceSchema,
+    sourceData: primarySourceData,
+  };
 
-  const handleToggle = (path: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
+  const allGroups = useMemo<InputSchemaGroup[]>(() => {
+    const enrichmentGroupsMapped: InputSchemaGroup[] = enrichmentInputGroups.map((group) => ({
+      key: `enrichment:${group.alias}`,
+      kind: 'enrichment',
+      alias: group.alias,
+      label: group.alias,
+      parsedSchema: group.parsedSchema,
+      sourceData: enrichmentSourceData[group.alias] ?? null,
+    }));
+    return [primaryGroup, ...enrichmentGroupsMapped];
+  }, [enrichmentInputGroups, enrichmentSourceData, parsedSourceSchema, primarySourceData]);
+
+  const hasAnySchema = allGroups.some((group) => group.parsedSchema !== null && group.parsedSchema.nodes.length > 0);
+
+  const [query, setQuery] = useState('');
+  const [expandedByGroup, setExpandedByGroup] = useState<Record<string, Set<string>>>({});
+
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const groupsWithNodes = useMemo(() => {
+    return allGroups.map((group) => {
+      const baseNodes = group.parsedSchema?.nodes ?? [];
+      const filteredNodes = filterTreeByQuery(baseNodes, normalizedQuery);
+      const rootNodes = flattenTopLevel(filteredNodes);
+      const matchCount = countMatchingNodes(filteredNodes);
+      const matchingPaths = new Set<string>();
+
+      if (normalizedQuery.length > 0) {
+        const walk = (nodes: readonly SchemaTreeNode[]) => {
+          for (const node of nodes) {
+            if (
+              node.fieldName.toLowerCase().includes(normalizedQuery)
+              || node.path.toLowerCase().includes(normalizedQuery)
+            ) {
+              matchingPaths.add(node.path);
+            }
+            if (node.children.length > 0) walk(node.children);
+          }
+        };
+        walk(filteredNodes);
+      }
+
+      return {
+        ...group,
+        rootNodes,
+        matchCount,
+        matchingPaths,
+      };
+    });
+  }, [allGroups, normalizedQuery]);
+
+  const totalMatchCount = useMemo(
+    () => groupsWithNodes.reduce((sum, group) => sum + group.matchCount, 0),
+    [groupsWithNodes],
+  );
+
+  const isSearchActive = normalizedQuery.length > 0;
+
+  const handleToggleGroupNode = (groupKey: string, path: string) => {
+    setExpandedByGroup((prev) => {
+      const existing = prev[groupKey] ?? new Set<string>();
+      const nextSet = new Set(existing);
+      if (nextSet.has(path)) nextSet.delete(path);
+      else nextSet.add(path);
+      return { ...prev, [groupKey]: nextSet };
     });
   };
 
-  const handleStageField = (path: string) => {
-    onStageField(path);
+  const clearSearch = () => {
+    setQuery('');
   };
 
-
-  if (!parsedSourceSchema || parsedSourceSchema.nodes.length === 0) {
+  if (!hasAnySchema) {
     return (
       <div
         className={`flex h-full items-center justify-center text-xs text-slate-500 ${className}`}
         data-testid="source-schema-panel-empty"
       >
-        No source schema loaded
+        No input schema loaded
       </div>
     );
   }
-
-  // When search is active, use search-expanded paths; otherwise use manual expand state
-  const effectiveExpandedPaths = isSearchActive ? searchExpandedPaths : expandedPaths;
-  const visiblePaths = isSearchActive ? filterResult.visiblePaths : null;
-  const matchingPaths = isSearchActive ? filterResult.matchingPaths : new Set<string>();
-
-  // Render only root nodes; children rendered recursively when expanded
-  const rootNodes = parsedSourceSchema.nodes.filter((n) => n.depth === 0);
 
   return (
     <div
       data-testid="source-schema-panel"
       className={`flex flex-col overflow-hidden ${className}`}
-      aria-label="Source schema fields"
+      aria-label="Input fields"
     >
-      {/* Search header */}
       <div className="shrink-0 border-b border-slate-800 px-2 py-1.5">
         <div className="relative flex items-center">
           <Search
@@ -351,9 +473,9 @@ export function SourceSchemaPanel({
           <input
             type="search"
             role="searchbox"
-            aria-label="Search source fields"
+            aria-label="Search input fields"
             data-testid="source-search"
-            placeholder="Search fields…"
+            placeholder="Search input fields…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="h-6 w-full rounded border border-slate-700 bg-slate-800 pl-6 pr-6 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -376,37 +498,60 @@ export function SourceSchemaPanel({
             data-testid="source-search-count"
             aria-live="polite"
           >
-            {filterResult.matchCount === 0
+            {totalMatchCount === 0
               ? 'No results'
-              : `${filterResult.matchCount} result${filterResult.matchCount === 1 ? '' : 's'}`}
+              : `${totalMatchCount} result${totalMatchCount === 1 ? '' : 's'}`}
           </p>
         )}
       </div>
 
-      {/* Tree */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {isSearchActive && filterResult.matchCount === 0 ? (
+        {isSearchActive && totalMatchCount === 0 ? (
           <div
             className="flex h-full items-center justify-center text-xs text-slate-500"
             data-testid="source-search-no-results"
           >
-            No fields match &ldquo;{query}&rdquo;
+            No input fields match &ldquo;{query}&rdquo;
           </div>
         ) : (
-          rootNodes.map((node) =>
-            renderNode({
-              node,
-              expandedPaths: effectiveExpandedPaths,
-              onToggle: handleToggle,
-              onStageField: handleStageField,
-              sourceData,
-              visiblePaths,
-              matchingPaths,
-            }),
-          )
+          <div className="divide-y divide-slate-800/70">
+            {groupsWithNodes.map((group) => {
+              const expandedPaths = expandedByGroup[group.key] ?? new Set<string>();
+              const hasRows = group.rootNodes.length > 0;
+
+              return (
+                <section
+                  key={group.key}
+                  data-testid={`input-group-${group.key}`}
+                  aria-label={group.label}
+                  className="py-1"
+                >
+                  <header className="sticky top-0 z-[1] bg-slate-950/95 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    {group.kind === 'primary' ? 'Primary Source' : `Enrichment Input: ${group.label}`}
+                  </header>
+
+                  {hasRows ? (
+                    group.rootNodes.flatMap((node) => renderNode({
+                      node,
+                      expandedPaths,
+                      onToggle: (path) => handleToggleGroupNode(group.key, path),
+                      onStageField,
+                      sourceData: group.sourceData ?? null,
+                      matchingPaths: group.matchingPaths,
+                      inputKind: group.kind,
+                      alias: group.alias,
+                    }))
+                  ) : (
+                    <p className="px-3 py-2 text-xs text-slate-500" data-testid={`input-group-empty-${group.key}`}>
+                      {isSearchActive ? 'No matching fields in this input.' : 'No fields available.'}
+                    </p>
+                  )}
+                </section>
+              );
+            })}
+          </div>
         )}
       </div>
-
     </div>
   );
 }

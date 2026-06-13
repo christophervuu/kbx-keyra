@@ -4,7 +4,7 @@
 
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ChainSourceCard } from './ChainSourceCard';
@@ -37,7 +37,7 @@ function WithSourceData({
   children,
 }: {
   sourceData: unknown | null;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const { setSourceData } = usePreviewSetters();
   useEffect(() => {
@@ -67,13 +67,13 @@ describe('ChainSourceCard', () => {
   it('renders guidance text when no source is selected', () => {
     renderCard({ sourcePath: undefined });
     expect(screen.getByTestId('chain-source-card-guidance')).toHaveTextContent(
-      'Source field',
+      'Input field',
     );
   });
 
   it('keeps guidance header visible when source is selected', () => {
     renderCard({ sourcePath: 'order.customerName' });
-    expect(screen.getByTestId('chain-source-card-guidance')).toHaveTextContent('Source field');
+    expect(screen.getByTestId('chain-source-card-guidance')).toHaveTextContent('Input field');
   });
 
   it('does not show direct copy status when source has no logic steps', () => {

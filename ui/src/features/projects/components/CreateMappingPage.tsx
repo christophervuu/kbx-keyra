@@ -11,7 +11,12 @@ import { deriveEligibleTargets, saveAutoMapSuggestions } from '@/features/mappin
 import type { PersistedSuggestionItem } from '@/features/mappings/types';
 import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
 import { useAdapter } from '@/lib/api';
-import type { AutoMapSectionResult, SchemaMetadata, SchemaRef } from '@/lib/types/domain';
+import type {
+  AutoMapSectionResult,
+  MappingEnrichmentSource,
+  SchemaMetadata,
+  SchemaRef,
+} from '@/lib/types/domain';
 import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
 import { PATHS } from '@/routes/paths';
 
@@ -22,7 +27,28 @@ interface CreateMappingValidationErrors {
   startMode?: string;
 }
 
+interface EnrichmentFormValues {
+  readonly alias: string;
+  readonly schemaId: string;
+  readonly required: boolean;
+  readonly description: string;
+}
+
+interface EnrichmentFormErrors {
+  readonly alias?: string;
+  readonly schemaId?: string;
+}
+
 type AddSchemaTarget = 'source' | 'target' | null;
+type EnrichmentModalState = { readonly mode: 'add' } | { readonly mode: 'edit'; readonly index: number } | null;
+
+const RESERVED_ENRICHMENT_ALIASES = new Set([
+  'source',
+  'target',
+  'external',
+  'item',
+  'constants',
+]);
 
 export function CreateMappingPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -39,8 +65,20 @@ export function CreateMappingPage() {
   const [linkedSchemaIds, setLinkedSchemaIds] = useState<string[]>([]);
   const [schemasLoading, setSchemasLoading] = useState(true);
   const [addSchemaTarget, setAddSchemaTarget] = useState<AddSchemaTarget>(null);
+  const [enrichmentSectionExpanded, setEnrichmentSectionExpanded] = useState(false);
+  const [enrichmentSources, setEnrichmentSources] = useState<readonly MappingEnrichmentSource[]>([]);
+  const [enrichmentModal, setEnrichmentModal] = useState<EnrichmentModalState>(null);
+  const [enrichmentForm, setEnrichmentForm] = useState<EnrichmentFormValues>(emptyEnrichmentFormValues());
+  const [enrichmentFormErrors, setEnrichmentFormErrors] = useState<EnrichmentFormErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const createDisabled =
+    submitting
+    || !name.trim()
+    || !sourceSchemaId
+    || !targetSchemaId
+    || !startMode;
 
   const selectedSourceSchema = schemas.find((schema) => schema.schemaId === sourceSchemaId) ?? null;
   const selectedTargetSchema = schemas.find((schema) => schema.schemaId === targetSchemaId) ?? null;
@@ -113,7 +151,7 @@ export function CreateMappingPage() {
 
     // Future required fields wired in follow-up tasks (T-03/T-05).
     if (!sourceSchemaId) {
-      errors.sourceSchemaId = 'Source Schema is required';
+      errors.sourceSchemaId = 'Primary source schema is required';
     }
 
     if (!targetSchemaId) {
@@ -172,6 +210,7 @@ export function CreateMappingPage() {
         name: name.trim(),
         sourceSchemaRef,
         targetSchemaRef,
+        ...(enrichmentSources.length > 0 ? { enrichmentSources } : {}),
       });
 
       if (startMode === 'auto-map') {
@@ -376,9 +415,9 @@ export function CreateMappingPage() {
       </Card>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2" data-testid="schema-selection-section">
-        <Card title="Source Schema" data-testid="source-schema-card">
+        <Card title="Primary Source" data-testid="source-schema-card">
           <SchemaSelector
-            label="Source Schema"
+            label="Primary Source Schema"
             value={sourceSchemaId ?? ''}
             onChange={handleSourceSchemaChange}
             schemas={schemas}
@@ -448,6 +487,106 @@ export function CreateMappingPage() {
         </Card>
       </div>
 
+      <Card data-testid="enrichment-inputs-section">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">Enrichment inputs</h2>
+            <p className="text-xs text-slate-400">
+              Optional supplemental inputs resolved by your workflow before execution. KeyRa does not call enrichment APIs.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setEnrichmentSectionExpanded((expanded) => !expanded)}
+            aria-expanded={enrichmentSectionExpanded}
+            aria-controls="enrichment-inputs-content"
+            data-testid="toggle-enrichment-section"
+          >
+            {enrichmentSectionExpanded ? 'Hide' : 'Show'}
+          </Button>
+        </div>
+
+        {enrichmentSectionExpanded && (
+          <div id="enrichment-inputs-content" className="mt-4 space-y-3">
+            {enrichmentSources.length === 0 ? (
+              <p className="rounded-md border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-slate-400" data-testid="enrichment-empty-state">
+                No enrichment inputs configured.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-md border border-slate-700" data-testid="enrichment-table">
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead className="bg-slate-900/70 text-xs uppercase tracking-wide text-slate-400">
+                    <tr>
+                      <th scope="col" className="px-3 py-2">Alias</th>
+                      <th scope="col" className="px-3 py-2">Schema</th>
+                      <th scope="col" className="px-3 py-2">Required</th>
+                      <th scope="col" className="px-3 py-2">Description</th>
+                      <th scope="col" className="px-3 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {enrichmentSources.map((source, index) => (
+                      <tr key={`${source.alias}:${source.schemaId ?? ''}:${index}`} className="border-t border-slate-700">
+                        <td className="px-3 py-2 font-medium text-slate-100" data-testid={`enrichment-alias-${index}`}>
+                          {source.alias}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300" data-testid={`enrichment-schema-${index}`}>
+                          {schemaLabelForId(schemas, source.schemaId)}
+                        </td>
+                        <td className="px-3 py-2 text-slate-300" data-testid={`enrichment-required-${index}`}>
+                          {source.required === false ? 'No' : 'Yes'}
+                        </td>
+                        <td className="px-3 py-2 text-slate-400" data-testid={`enrichment-description-${index}`}>
+                          {source.description?.trim() ? source.description : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="inline-flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditEnrichment(index)}
+                              data-testid={`edit-enrichment-${index}`}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeEnrichment(index)}
+                              data-testid={`remove-enrichment-${index}`}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">Use stable camelCase aliases for expression references.</p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={openAddEnrichment}
+                data-testid="add-enrichment-button"
+              >
+                + Add enrichment input
+              </Button>
+            </div>
+
+          </div>
+        )}
+      </Card>
+
       <Card title="Start From" data-testid="start-from-section">
         <fieldset className="space-y-3" aria-label="Start From options">
           <label className="flex cursor-pointer items-start gap-3 rounded-md border border-slate-700 bg-slate-900/60 p-3">
@@ -507,7 +646,7 @@ export function CreateMappingPage() {
         <button
           type="button"
           onClick={() => void handleSubmitAttempt()}
-          disabled={submitting}
+          disabled={createDisabled}
           className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-60"
           data-testid="create-button"
         >
@@ -530,9 +669,329 @@ export function CreateMappingPage() {
         onClose={closeAddSchema}
         onSchemaCreated={handleSchemaCreated}
       />
+
+      {enrichmentModal !== null && (
+        <EnrichmentInputModal
+          key={enrichmentModal.mode === 'add' ? 'enrichment-add' : `enrichment-edit-${enrichmentModal.index}`}
+          mode={enrichmentModal.mode}
+          form={enrichmentForm}
+          errors={enrichmentFormErrors}
+          schemas={schemas}
+          onAliasChange={(alias) => {
+            setEnrichmentForm((previous) => ({ ...previous, alias }));
+            if (enrichmentFormErrors.alias) {
+              setEnrichmentFormErrors((previous) => ({ ...previous, alias: undefined }));
+            }
+          }}
+          onAliasBlur={() => {
+            const normalized = normalizeAliasToCamelCase(enrichmentForm.alias);
+            if (normalized !== enrichmentForm.alias) {
+              setEnrichmentForm((previous) => ({ ...previous, alias: normalized }));
+            }
+          }}
+          onSchemaChange={(schemaId) => {
+            setEnrichmentForm((previous) => ({ ...previous, schemaId }));
+            if (enrichmentFormErrors.schemaId) {
+              setEnrichmentFormErrors((previous) => ({ ...previous, schemaId: undefined }));
+            }
+          }}
+          onRequiredChange={(required) => setEnrichmentForm((previous) => ({ ...previous, required }))}
+          onDescriptionChange={(description) => setEnrichmentForm((previous) => ({ ...previous, description }))}
+          onClose={closeEnrichmentModal}
+          onSubmit={saveEnrichment}
+        />
+      )}
+    </div>
+  );
+
+  function openAddEnrichment() {
+    setEnrichmentForm(emptyEnrichmentFormValues());
+    setEnrichmentFormErrors({});
+    setEnrichmentModal({ mode: 'add' });
+  }
+
+  function openEditEnrichment(index: number) {
+    const source = enrichmentSources[index];
+    if (!source) {
+      return;
+    }
+
+    setEnrichmentForm({
+      alias: source.alias,
+      schemaId: source.schemaId ?? '',
+      required: source.required !== false,
+      description: source.description ?? '',
+    });
+    setEnrichmentFormErrors({});
+    setEnrichmentModal({ mode: 'edit', index });
+  }
+
+  function closeEnrichmentModal() {
+    setEnrichmentModal(null);
+    setEnrichmentFormErrors({});
+  }
+
+  function removeEnrichment(index: number) {
+    setEnrichmentSources((previous) => previous.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function saveEnrichment() {
+    if (enrichmentModal === null) {
+      return;
+    }
+
+    const normalizedAlias = normalizeAliasToCamelCase(enrichmentForm.alias);
+    const candidate: MappingEnrichmentSource = {
+      alias: normalizedAlias,
+      schemaId: enrichmentForm.schemaId.trim(),
+      required: enrichmentForm.required,
+      ...(enrichmentForm.description.trim().length > 0 ? { description: enrichmentForm.description.trim() } : {}),
+    };
+
+    const errors = validateEnrichmentForm(candidate, enrichmentSources, enrichmentModal.mode === 'edit' ? enrichmentModal.index : null);
+
+    if (errors.alias || errors.schemaId) {
+      setEnrichmentForm((previous) => ({ ...previous, alias: normalizedAlias }));
+      setEnrichmentFormErrors(errors);
+      return;
+    }
+
+    if (enrichmentModal.mode === 'add') {
+      setEnrichmentSources((previous) => [...previous, candidate]);
+    } else {
+      setEnrichmentSources((previous) => previous.map((entry, index) => (index === enrichmentModal.index ? candidate : entry)));
+    }
+
+    closeEnrichmentModal();
+  }
+}
+
+function emptyEnrichmentFormValues(): EnrichmentFormValues {
+  return {
+    alias: '',
+    schemaId: '',
+    required: true,
+    description: '',
+  };
+}
+
+function schemaLabelForId(schemas: readonly SchemaMetadata[], schemaId: string | undefined): string {
+  if (!schemaId) {
+    return '—';
+  }
+
+  return schemas.find((schema) => schema.schemaId === schemaId)?.name ?? schemaId;
+}
+
+function normalizeAliasToCamelCase(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^[a-z][A-Za-z0-9]*$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const withoutSymbols = trimmed.replace(/[^a-zA-Z0-9_\s-]/g, ' ');
+  const parts = withoutSymbols
+    .replace(/[_-]+/g, ' ')
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return '';
+  }
+
+  const hasSeparator = /[_\s-]/.test(withoutSymbols);
+
+  if (!hasSeparator) {
+    const single = parts[0].replace(/[^a-zA-Z0-9]/g, '');
+    const firstLetterIndex = single.search(/[a-z]/i);
+    if (firstLetterIndex === -1) {
+      return '';
+    }
+
+    const trimmedLeading = single.slice(firstLetterIndex);
+    return trimmedLeading[0].toLowerCase() + trimmedLeading.slice(1);
+  }
+
+  const normalized = parts
+    .map((part, index) => {
+      if (index === 0) {
+        return part.toLowerCase();
+      }
+
+      const lower = part.toLowerCase();
+      return lower[0]?.toUpperCase() + lower.slice(1);
+    })
+    .join('');
+
+  const firstLetterIndex = normalized.search(/[a-z]/i);
+  if (firstLetterIndex === -1) {
+    return '';
+  }
+
+  const trimmedLeading = normalized.slice(firstLetterIndex);
+  return trimmedLeading[0].toLowerCase() + trimmedLeading.slice(1);
+}
+
+function validateEnrichmentAlias(
+  alias: string,
+  existing: readonly MappingEnrichmentSource[],
+  currentIndex: number | null,
+): string | undefined {
+  if (!alias) {
+    return 'Alias is required.';
+  }
+
+  if (!/^[a-z][A-Za-z0-9]*$/.test(alias)) {
+    return 'Alias must be camelCase and start with a letter (for example: customerProfile).';
+  }
+
+  if (RESERVED_ENRICHMENT_ALIASES.has(alias)) {
+    return `Alias '${alias}' is reserved.`;
+  }
+
+  const hasDuplicate = existing.some((entry, index) => index !== currentIndex && entry.alias === alias);
+  if (hasDuplicate) {
+    return `Alias '${alias}' is already in use.`;
+  }
+
+  return undefined;
+}
+
+function validateEnrichmentForm(
+  candidate: MappingEnrichmentSource,
+  existing: readonly MappingEnrichmentSource[],
+  currentIndex: number | null,
+): EnrichmentFormErrors {
+  return {
+    alias: validateEnrichmentAlias(candidate.alias, existing, currentIndex),
+    schemaId: candidate.schemaId?.trim() ? undefined : 'Schema is required.',
+  };
+}
+
+function EnrichmentInputModal({
+  mode,
+  form,
+  errors,
+  schemas,
+  onAliasChange,
+  onAliasBlur,
+  onSchemaChange,
+  onRequiredChange,
+  onDescriptionChange,
+  onClose,
+  onSubmit,
+}: {
+  mode: 'add' | 'edit';
+  form: EnrichmentFormValues;
+  errors: EnrichmentFormErrors;
+  schemas: readonly SchemaMetadata[];
+  onAliasChange: (alias: string) => void;
+  onAliasBlur: () => void;
+  onSchemaChange: (schemaId: string) => void;
+  onRequiredChange: (required: boolean) => void;
+  onDescriptionChange: (description: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="enrichment-modal-title" data-testid="enrichment-modal">
+      <div className="w-full max-w-lg rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 id="enrichment-modal-title" className="text-base font-semibold text-slate-100">
+            {mode === 'add' ? 'Add enrichment input' : 'Edit enrichment input'}
+          </h3>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} data-testid="close-enrichment-modal">
+            Close
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="enrichment-alias" className="mb-1 block text-sm font-medium text-slate-300">Alias <span className="text-red-400" aria-hidden="true">*</span></label>
+            <input
+              id="enrichment-alias"
+              type="text"
+              value={form.alias}
+              onChange={(event) => onAliasChange(event.target.value)}
+              autoFocus
+              onBlur={onAliasBlur}
+              placeholder="customerProfile"
+              className={`w-full rounded-md border bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.alias ? 'border-red-500' : 'border-slate-600'}`}
+              aria-invalid={errors.alias ? 'true' : 'false'}
+              aria-describedby={errors.alias ? 'enrichment-alias-error' : undefined}
+              data-testid="enrichment-alias-input"
+            />
+            {errors.alias && (
+              <p id="enrichment-alias-error" role="alert" className="mt-1 text-xs text-red-400" data-testid="enrichment-alias-error">{errors.alias}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="enrichment-schema" className="mb-1 block text-sm font-medium text-slate-300">Schema <span className="text-red-400" aria-hidden="true">*</span></label>
+            <select
+              id="enrichment-schema"
+              value={form.schemaId}
+              onChange={(event) => onSchemaChange(event.target.value)}
+              className={`w-full rounded-md border bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.schemaId ? 'border-red-500' : 'border-slate-600'}`}
+              aria-invalid={errors.schemaId ? 'true' : 'false'}
+              aria-describedby={errors.schemaId ? 'enrichment-schema-error' : undefined}
+              data-testid="enrichment-schema-select"
+            >
+              <option value="">Select a schema</option>
+              {schemas.map((schema) => (
+                <option key={schema.schemaId} value={schema.schemaId} disabled={!isSchemaSelectable(schema)}>
+                  {buildSchemaOptionLabel(schema)}
+                </option>
+              ))}
+            </select>
+            {errors.schemaId && (
+              <p id="enrichment-schema-error" role="alert" className="mt-1 text-xs text-red-400" data-testid="enrichment-schema-error">{errors.schemaId}</p>
+            )}
+          </div>
+
+          <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.required}
+              onChange={(event) => onRequiredChange(event.target.checked)}
+              data-testid="enrichment-required-checkbox"
+            />
+            Required at runtime
+          </label>
+
+          <div>
+            <label htmlFor="enrichment-description" className="mb-1 block text-sm font-medium text-slate-300">Description (optional)</label>
+            <textarea
+              id="enrichment-description"
+              value={form.description}
+              onChange={(event) => onDescriptionChange(event.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Used for customer-level metadata lookups."
+              data-testid="enrichment-description-input"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} data-testid="cancel-enrichment-button">Cancel</Button>
+          <Button type="button" size="sm" onClick={onSubmit} data-testid="save-enrichment-button">
+            {mode === 'add' ? 'Add enrichment input' : 'Save changes'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
+
+export const __testables = {
+  normalizeAliasToCamelCase,
+};
 
 function parseSchemaForAutoMapTargets(schema: { metadata: SchemaMetadata; content: Readonly<Record<string, unknown>> | string }) {
   if (typeof schema.content === 'string') {

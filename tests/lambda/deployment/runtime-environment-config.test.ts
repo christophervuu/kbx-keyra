@@ -261,4 +261,46 @@ describe('runtime api client contracts', () => {
     expect(relayResult.errorCode).toBe('VALIDATION_ERROR');
     expect(relayResult.retryable).toBe(false);
   });
+
+  it('preview client sends externalSources payload', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        environment: 'DEV',
+        mappingId: 'map-1',
+        artifactId: null,
+        artifactHash: null,
+        output: {},
+        diagnostics: [],
+      }),
+      text: async () => '',
+    }));
+
+    const client = new HttpRuntimeApiClient({
+      fetchImpl,
+      env: {
+        RUNTIME_API_BASE_URL_DEV: 'https://dev.runtime.example.com',
+        RUNTIME_API_BASE_URL_PREPROD: 'https://preprod.runtime.example.com',
+        RUNTIME_API_BASE_URL_PROD: 'https://prod.runtime.example.com',
+      },
+    });
+
+    const result = await client.preview({
+      mappingId: 'map-1',
+      environment: 'DEV',
+      sourceData: { amount: 12 },
+      externalSources: { customerProfile: { id: 'c-1' } },
+      requestId: 'cp-preview-1',
+    });
+
+    expect(result.ok).toBe(true);
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1]?.body as string) ?? '{}') as {
+      externalSources?: Record<string, unknown>;
+      sourceData?: Record<string, unknown>;
+    };
+    expect(body.sourceData).toEqual({ amount: 12 });
+    expect(body.externalSources).toEqual({ customerProfile: { id: 'c-1' } });
+  });
 });

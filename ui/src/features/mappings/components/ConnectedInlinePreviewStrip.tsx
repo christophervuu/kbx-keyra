@@ -100,6 +100,7 @@ export function ConnectedInlinePreviewStrip({
   externalSourceDataRaw = null,
 }: ConnectedInlinePreviewStripProps) {
   const [sourceData, setSourceData] = useState(() => externalSourceDataRaw ?? '');
+  const externalSourcesData = '{}';
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [autoRun, setAutoRun] = useState<boolean>(readAutoRunFromStorage);
 
@@ -141,6 +142,10 @@ export function ConnectedInlinePreviewStrip({
     sourceSchemaDetail,
     targetSchemaDetail,
     sourceDataRaw: sourceData.trim() ? sourceData : null,
+    externalSourcesRaw: externalSourcesData,
+    requiredEnrichmentAliases: (config?.enrichmentSources ?? [])
+      .filter((entry) => entry.required !== false)
+      .map((entry) => entry.alias),
   });
 
   // ---------------------------------------------------------------------------

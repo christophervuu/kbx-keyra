@@ -23,11 +23,19 @@ interface MappingMetadata {
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly ruleCount: number;
   readonly coverage: number;
   readonly configS3Key: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+interface MappingEnrichmentSource {
+  readonly alias: string;
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
 }
 
 interface MappingConfig {
@@ -38,6 +46,7 @@ interface MappingConfig {
   readonly engineVersion: string;
   readonly sourceSchemaRef?: unknown;
   readonly targetSchemaRef?: unknown;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly config: Record<string, unknown>;
   readonly rules: readonly unknown[];
 }

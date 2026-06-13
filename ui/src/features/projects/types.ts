@@ -31,6 +31,7 @@ export interface MappingRowData {
   readonly name: string;
   readonly sourceSchemaName: string | null;
   readonly targetSchemaName: string | null;
+  readonly enrichmentInputs?: readonly MappingRowEnrichmentInput[];
   readonly ruleCount: number;
   readonly coverage: number;
   readonly status: string;
@@ -38,6 +39,11 @@ export interface MappingRowData {
   readonly qaDeploy: DeployStatus;
   readonly prodDeploy: DeployStatus;
   readonly updatedAt: string;
+}
+
+export interface MappingRowEnrichmentInput {
+  readonly alias: string;
+  readonly schemaName: string | null;
 }
 
 /** Form data for the Create Project flow. */

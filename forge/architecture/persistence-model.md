@@ -65,6 +65,7 @@ No GSIs. List operation uses Scan (acceptable for Phase 1 scale).
 | `version` | — | Number | Legacy compatibility alias mirroring `revision` |
 | `sourceSchemaId` | — | String (UUID) | Source schema reference |
 | `targetSchemaId` | — | String (UUID) | Target schema reference |
+| `enrichmentSources` | — | List | Canonical enrichment input metadata list (`[{ alias, schemaId, required, description? }]`) |
 | `status` | — | String | `draft` / `ready` / `has-errors` |
 | `ruleCount` | — | Number | Count of mapping rules |
 | `coverage` | — | Number | Percentage (0–100) of required target fields mapped |
@@ -354,6 +355,46 @@ No FS-092 table/key migration requirement:
 - DynamoDB PK/SK models for `Mappings`, `MappingRevisions`, and `MappingVersions` are unchanged.
 - S3 key layouts for mapping configs/revisions are unchanged.
 - FS-092 persistence changes are additive payload fields + client preference keys only.
+
+## FS-093 enrichment mapping persistence addendum
+
+FS-093 introduces multi-input mapping persistence contracts for enrichment payloads.
+
+Canonical enrichment definition model:
+
+- Mapping records/config persist `enrichmentSources[]` as canonical enrichment declarations.
+- Each canonical entry persists:
+  - `alias` (stable expression identifier)
+  - `schemaId`
+  - `required` (default `true`)
+  - optional `description`
+
+Compatibility model:
+
+- `config.externalSources` remains compatibility metadata for legacy and engine-reference continuity.
+- Persistence/read normalization rules:
+  - if `enrichmentSources` exists, it is canonical; `config.externalSources` is derived/unioned compatibility data.
+  - if only legacy `config.externalSources` exists, mapping normalizes to schema-less legacy enrichment aliases.
+  - if neither exists, enrichment model defaults to `enrichmentSources: []` and `config.externalSources: []` compatibility behavior.
+
+Schema dependency persistence contract:
+
+- Enrichment `schemaId` references are mapping dependencies equivalent to source/target references for usage analysis and delete guardrails.
+- Schema delete guard checks must include enrichment references.
+
+Preview/test sample persistence contract:
+
+- Canonical preview/test persistence shape is versioned input sets:
+  - `name`
+  - `sourceData`
+  - `externalSources`
+  - optional `expectedOutput`
+- Legacy single-source sample payloads migrate/normalize to versioned input sets with `externalSources: {}`.
+
+Revision/version snapshot compatibility:
+
+- Mapping revisions/versions continue to snapshot full config in S3; FS-093 enrichment fields are additive and included in those snapshots.
+- No PK/SK table-key migration is required for FS-093; change is payload-shape evolution within existing records.
 
 ## 6) Draft / Revision / Version Model
 

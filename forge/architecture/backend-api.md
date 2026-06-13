@@ -419,6 +419,59 @@ Validation/issues surface contract:
 - API posture remains: deterministic validation is authoritative; AI validation remains advisory/additive.
 - Raw diagnostic payloads remain available for advanced tooling, but FS-092 default UX surfaces BA-friendly issue text and severity.
 
+### FS-093 multi-input enrichment mapping contract addendum
+
+FS-093 adds canonical enrichment-input support for mappings while preserving runtime no-I/O behavior.
+
+Canonical mapping model contract:
+
+- `enrichmentSources` is the canonical mapping-level enrichment declaration.
+- Each enrichment entry includes:
+  - `alias` (required, unique in mapping, stable expression identifier)
+  - `schemaId` (required for canonical entries)
+  - `required` (defaults to `true`)
+  - optional `description`
+
+Compatibility model:
+
+- `config.externalSources` remains supported as a compatibility field.
+- When canonical `enrichmentSources` exists, backend treats it as source-of-truth and derives/normalizes compatibility `config.externalSources` for engine/runtime reference checks.
+- Legacy mappings that only contain `config.externalSources` are normalized as schema-less legacy enrichment aliases until explicitly upgraded.
+
+Mapping CRUD contract updates:
+
+- `POST /mappings` and `PUT /mappings/:id` accept enrichment metadata in additive payload form.
+- `GET /mappings/:id` and `GET /projects/:projectId/mappings` return enrichment detail/summary sufficient for UI displays (`source + N enrichments -> target`).
+- `POST /mappings/:id/duplicate` preserves enrichment metadata.
+
+Runtime execution/preview input contract:
+
+- Canonical execution request shape is:
+  - `mappingId`
+  - `sourceData`
+  - `externalSources` (named enrichment payload map)
+- Caller does not supply mapping rules/config directly for generic runtime execution.
+- Runtime resolves active mapping/snapshot by `mappingId`.
+
+Required/optional enrichment runtime policy:
+
+- Missing required enrichment payload is a deterministic **hard preflight error** (execution does not proceed).
+- Missing optional enrichment (or legacy schema-less external alias) remains warning/null behavior.
+
+Schema dependency and delete-guard contract:
+
+- Enrichment schema references are first-class mapping dependencies.
+- `DELETE /schemas/:id` conflict checks include enrichment usage references in addition to primary source/target usage.
+
+Preview/test input-set contract at API boundary:
+
+- Preview/test payloads are versioned input sets with:
+  - `name`
+  - `sourceData`
+  - `externalSources`
+  - optional `expectedOutput`
+- Legacy single-source samples normalize to input sets with `externalSources: {}`.
+
 | Handler | DynamoDB patterns |
 |---|---|
 | `project/create-project` | put project item |

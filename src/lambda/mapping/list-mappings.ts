@@ -18,9 +18,17 @@ interface MappingMetadata {
   readonly status: 'draft' | 'ready' | 'has-errors';
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
   readonly ruleCount: number;
   readonly coverage: number;
   readonly updatedAt: string;
+}
+
+interface MappingEnrichmentSource {
+  readonly alias: string;
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
 }
 
 function getEnvValue(key: string): string | undefined {

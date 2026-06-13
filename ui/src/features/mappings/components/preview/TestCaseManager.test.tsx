@@ -1,9 +1,10 @@
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TestCaseManager } from './TestCaseManager';
 import type { TestCaseManagerProps } from './TestCaseManager';
+
 import type { TestCase } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -228,6 +229,19 @@ describe('TestCaseManager', () => {
 
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as TestCase[];
     expect(stored[0].expectedOutput).toBe('{"y": 2}');
+  });
+
+  it('save includes externalSourcesRaw when provided', () => {
+    renderManager({
+      sourceDataRaw: '{"x": 1}',
+      externalSourcesRaw: '{"customerProfile":{"id":"c-1"}}',
+    });
+    fireEvent.click(screen.getByTestId('save-test-case-button'));
+    fireEvent.change(screen.getByTestId('save-name-input'), { target: { value: 'with externals' } });
+    fireEvent.click(screen.getByTestId('save-confirm-button'));
+
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as TestCase[];
+    expect(stored[0].externalSources).toBe('{"customerProfile":{"id":"c-1"}}');
   });
 
   it('quota error shown inline when storage write fails', () => {

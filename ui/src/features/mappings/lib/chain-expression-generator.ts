@@ -26,7 +26,6 @@ import type {
   ConditionLogicStep,
   ConditionOperand,
   ConditionOperatorType,
-  ElseIfStep,
   LogicStep,
   StaticValueBranch,
   TransformLogicStep,
@@ -312,7 +311,11 @@ export function generateExpressionFromChain(state: ChainBuilderState): string {
   switch (state.entryType) {
     case 'source': {
       if (!state.sourcePath || state.sourcePath.trim().length === 0) return '';
-      baseExpr = `source(${quoteString(state.sourcePath)})`;
+      const trimmedPath = state.sourcePath.trim();
+      const isExternalGetExpression = /^get\(external\("[^"]+"\),\s*"[^"]+"\)$/.test(trimmedPath);
+      baseExpr = isExternalGetExpression
+        ? trimmedPath
+        : `source(${quoteString(state.sourcePath)})`;
       break;
     }
     case 'static': {

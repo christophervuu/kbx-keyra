@@ -1,34 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { generateExpressionFromChain, generateChainExpression } from './chain-expression-generator';
+
 import {
   createEmptyChainState,
   createSourceCopyState,
   createStaticState,
   createTransformStep,
-  createEmptyConditionStep,
-  createEmptyValueMapStep,
   // FS-039 factories
   createEmptyChain,
   createFieldSourceChain,
   createStaticSourceChain,
-  createEmptyPredicate,
-  createEmptyFS039ConditionStep,
-  createEmptyFS039ValueMapStep,
 } from './chain-builder-state';
 import type {
   ChainBuilderState,
   ConditionLogicStep,
   ValueMapLogicStep,
-  ChainBranch,
   // FS-039 types
   ChainState,
-  ChainStep,
-  OperandValue,
-  Predicate,
   FS039ConditionStep,
-  FS039ValueMapStep,
-  FS039TransformStep,
 } from './chain-builder-state';
+import { generateExpressionFromChain, generateChainExpression } from './chain-expression-generator';
 
 // ---------------------------------------------------------------------------
 // AE-01: Direct source copy
@@ -58,6 +48,11 @@ describe('AE-01: direct source copy', () => {
   it('escapes double quotes in source path', () => {
     const state = createSourceCopyState('source."quoted"');
     expect(generateExpressionFromChain(state)).toBe('source("source.\\"quoted\\"")');
+  });
+
+  it('passes through enrichment get(external(...), path) expression as base source', () => {
+    const state = createSourceCopyState('get(external("profile"), "customerId")');
+    expect(generateExpressionFromChain(state)).toBe('get(external("profile"), "customerId")');
   });
 });
 

@@ -171,8 +171,39 @@ describe('preview mapping handler', () => {
     });
     expect(retryMocks.executeRuntimeOperationWithRetry).toHaveBeenCalled();
     expect(deploymentMocks.getCurrent).toHaveBeenCalledWith('map-1', 'PREPROD');
+    const retryCall = retryMocks.executeRuntimeOperationWithRetry.mock.calls[0]?.[0] as {
+      executeAttempt?: () => Promise<unknown>;
+    };
+    expect(typeof retryCall.executeAttempt).toBe('function');
     expect(orchestrationPersistenceMocks.updateStatus).toHaveBeenCalledWith(
       expect.objectContaining({ orchestrationId: 'orc-preview-1', status: 'succeeded', attemptCount: 1 }),
+    );
+  });
+
+  it('forwards externalSources payload to runtime preview call', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      environment: 'DEV',
+      sourceData: { a: 'x' },
+      externalSources: { customerProfile: { id: 'c-1' } },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    const retryCall = retryMocks.executeRuntimeOperationWithRetry.mock.calls[0]?.[0] as {
+      executeAttempt?: () => Promise<unknown>;
+    };
+    expect(typeof retryCall.executeAttempt).toBe('function');
+    await retryCall.executeAttempt?.();
+
+    expect(runtimeApiClientMocks.client.preview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mappingId: 'map-1',
+        environment: 'DEV',
+        sourceData: { a: 'x' },
+        externalSources: { customerProfile: { id: 'c-1' } },
+      }),
     );
   });
 

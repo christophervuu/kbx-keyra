@@ -135,6 +135,90 @@ interface StoredMapping {
   config: MappingConfig;
 }
 
+function uniqueAliases(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    aliases.push(value);
+  }
+
+  return aliases;
+}
+
+function normalizeLegacyExternalAliases(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueAliases(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function normalizeCanonicalEnrichmentSources(value: unknown): NonNullable<MappingConfig['enrichmentSources']> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const aliases = new Set<string>();
+  const normalized: NonNullable<MappingConfig['enrichmentSources']> = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const alias = typeof candidate.alias === 'string' ? candidate.alias.trim() : '';
+    if (!alias || aliases.has(alias)) {
+      continue;
+    }
+
+    aliases.add(alias);
+    const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+    const required = typeof candidate.required === 'boolean' ? candidate.required : true;
+    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
+    normalized.push({
+      alias,
+      ...(schemaId ? { schemaId } : {}),
+      required,
+      ...(description ? { description } : {}),
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeMappingCompatibility(config: MappingConfig): MappingConfig {
+  const canonical = normalizeCanonicalEnrichmentSources(config.enrichmentSources);
+  const legacyExternalAliases = normalizeLegacyExternalAliases(config.config?.externalSources);
+  const enrichmentSources = canonical.length > 0
+    ? canonical
+    : legacyExternalAliases.map((alias) => ({ alias, required: false }));
+  const externalSources = uniqueAliases([
+    ...enrichmentSources.map((source) => source.alias),
+    ...legacyExternalAliases,
+  ]);
+
+  return {
+    ...config,
+    enrichmentSources,
+    config: {
+      ...(config.config ?? {}),
+      externalSources,
+    },
+  };
+}
+
 function normalizeOptionalBusinessContext(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -744,7 +828,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       throw this.notFound('Mapping', id);
     }
 
-    return found.config;
+    return normalizeMappingCompatibility(found.config);
   }
 
   async createMapping(input: CreateMappingInput): Promise<MappingMetadata> {
@@ -753,7 +837,7 @@ export class LocalStorageAdapter implements ApiAdapter {
     const timestamp = this.nowIso();
     const businessContext = normalizeOptionalBusinessContext(input.businessContext);
 
-    const config: MappingConfig = {
+    const config: MappingConfig = normalizeMappingCompatibility({
       id: mappingId,
       projectId: input.projectId,
       name: input.name,
@@ -762,9 +846,10 @@ export class LocalStorageAdapter implements ApiAdapter {
       engineVersion: '2.0.0',
       ...(input.sourceSchemaRef !== undefined && { sourceSchemaRef: input.sourceSchemaRef }),
       ...(input.targetSchemaRef !== undefined && { targetSchemaRef: input.targetSchemaRef }),
+      ...(input.enrichmentSources !== undefined && { enrichmentSources: input.enrichmentSources }),
       config: input.config ?? {},
       rules: input.rules ?? [],
-    };
+    });
 
     const metadata: MappingMetadata = {
       mappingId,
@@ -775,6 +860,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       status: 'draft',
       sourceSchemaId: input.sourceSchemaRef?.schemaId ?? '',
       targetSchemaId: input.targetSchemaRef?.schemaId ?? '',
+      ...(config.enrichmentSources !== undefined ? { enrichmentSources: config.enrichmentSources } : {}),
       ruleCount: config.rules.length,
       coverage: 0,
       updatedAt: timestamp,
@@ -797,11 +883,11 @@ export class LocalStorageAdapter implements ApiAdapter {
     const timestamp = this.nowIso();
     const businessContext = normalizeOptionalBusinessContext(config.businessContext);
 
-    const nextConfig: MappingConfig = {
+    const nextConfig: MappingConfig = normalizeMappingCompatibility({
       ...config,
       id,
       projectId: config.projectId ?? current.metadata.projectId,
-    };
+    });
 
     const nextMetadata: MappingMetadata = {
       ...current.metadata,
@@ -810,6 +896,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       version: config.version,
       sourceSchemaId: config.sourceSchemaRef?.schemaId ?? current.metadata.sourceSchemaId,
       targetSchemaId: config.targetSchemaRef?.schemaId ?? current.metadata.targetSchemaId,
+      ...(nextConfig.enrichmentSources !== undefined ? { enrichmentSources: nextConfig.enrichmentSources } : {}),
       ruleCount: config.rules.length,
       updatedAt: timestamp,
     };
@@ -1171,7 +1258,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       ?? normalizeOptionalBusinessContext(original.metadata.businessContext);
 
     const config: MappingConfig = {
-      ...original.config,
+      ...normalizeMappingCompatibility(original.config),
       id: nextId,
       name: newName,
       ...(businessContext ? { businessContext } : {}),
@@ -1184,6 +1271,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       name: newName,
       ...(businessContext ? { businessContext } : {}),
       version: 1,
+      ...(config.enrichmentSources !== undefined ? { enrichmentSources: config.enrichmentSources } : {}),
       ruleCount: config.rules.length,
       updatedAt: timestamp,
     };

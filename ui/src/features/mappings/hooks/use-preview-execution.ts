@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { usePreviewSetters } from '../context/preview-context';
+
 import { executeMapping } from '@/lib/engine';
 import type { ExecutionResult } from '@/lib/engine';
 import type { MappingConfig, PreviewExecutionState, SchemaDetail } from '@/lib/types/domain';
-import { usePreviewSetters } from '../context/preview-context';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,6 +45,10 @@ export interface UsePreviewExecutionParams {
    * when no data has been entered yet.
    */
   sourceDataRaw: string | null;
+  /** Optional raw JSON object string containing enrichment payloads by alias. */
+  externalSourcesRaw?: string | null;
+  /** Required enrichment aliases that must exist in externalSources payload. */
+  requiredEnrichmentAliases?: readonly string[];
 }
 
 export interface UsePreviewExecutionResult {
@@ -92,6 +97,8 @@ export function usePreviewExecution({
   sourceSchemaDetail,
   targetSchemaDetail,
   sourceDataRaw,
+  externalSourcesRaw = null,
+  requiredEnrichmentAliases = [],
 }: UsePreviewExecutionParams): UsePreviewExecutionResult {
   const [state, setState] = useState<PreviewExecutionState>({ status: 'idle' });
   const [autoRun, setAutoRun] = useState(false);
@@ -126,21 +133,38 @@ export function usePreviewExecution({
     sourceSchemaDetail,
     targetSchemaDetail,
     sourceDataRaw,
+    externalSourcesRaw,
+    requiredEnrichmentAliases,
     traceEnabled,
     setSourceData,
     setIsExecuting,
     setLastResult,
   });
-  latestParams.current = {
+  useEffect(() => {
+    latestParams.current = {
+      config,
+      sourceSchemaDetail,
+      targetSchemaDetail,
+      sourceDataRaw,
+      externalSourcesRaw,
+      requiredEnrichmentAliases,
+      traceEnabled,
+      setSourceData,
+      setIsExecuting,
+      setLastResult,
+    };
+  }, [
     config,
     sourceSchemaDetail,
     targetSchemaDetail,
     sourceDataRaw,
+    externalSourcesRaw,
+    requiredEnrichmentAliases,
     traceEnabled,
     setSourceData,
     setIsExecuting,
     setLastResult,
-  };
+  ]);
 
   const executeNow = useCallback((options?: ExecuteOptions) => {
     const fromAutoRun = options?.fromAutoRun === true;
@@ -149,6 +173,8 @@ export function usePreviewExecution({
       sourceSchemaDetail: srcSchema,
       targetSchemaDetail: tgtSchema,
       sourceDataRaw: rawData,
+      externalSourcesRaw: rawExternalSources,
+      requiredEnrichmentAliases: requiredAliases,
       traceEnabled: trace,
       setIsExecuting: setExec,
       setLastResult: setResult,
@@ -190,19 +216,46 @@ export function usePreviewExecution({
       return;
     }
 
+    const parsedExternals = rawExternalSources === null
+      ? { ok: true as const, data: {} as Record<string, unknown> }
+      : tryParseJson(rawExternalSources);
+
+    if (!parsedExternals.ok || typeof parsedExternals.data !== 'object' || parsedExternals.data === null || Array.isArray(parsedExternals.data)) {
+      if (!fromAutoRun) {
+        setState({
+          status: 'error',
+          error: parsedExternals.ok
+            ? 'Enrichment samples must be a JSON object keyed by alias.'
+            : `Invalid enrichment JSON: ${parsedExternals.error}`,
+        });
+        setResult(null);
+      }
+      return;
+    }
+
+    const externalSources = parsedExternals.data as Record<string, unknown>;
+    const missingRequiredAliases = requiredAliases.filter((alias) => !(alias in externalSources));
+    if (missingRequiredAliases.length > 0) {
+      if (!fromAutoRun) {
+        setState({
+          status: 'error',
+          error: `Missing required enrichment sample${missingRequiredAliases.length === 1 ? '' : 's'}: ${missingRequiredAliases.join(', ')}`,
+        });
+        setResult(null);
+      }
+      return;
+    }
+
     setState({ status: 'executing' });
     setExec(true);
 
     const start = Date.now();
 
     try {
-      const result: ExecutionResult = executeMapping(
-        cfg,
-        parsed.data,
-        srcSchema.content,
-        tgtSchema.content,
-        trace ? { trace: true } : undefined,
-      );
+      const result: ExecutionResult = executeMapping(cfg, parsed.data, srcSchema.content, tgtSchema.content, {
+        ...(trace ? { trace: true } : {}),
+        externalSources,
+      });
 
       const elapsed = Date.now() - start;
 
@@ -253,7 +306,7 @@ export function usePreviewExecution({
     // Intentionally omitting executeNow from deps — it is stable and accessed
     // via the ref pattern. This effect should only fire when data inputs change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRun, config?.rules, sourceDataRaw]);
+  }, [autoRun, config?.rules, sourceDataRaw, externalSourcesRaw]);
 
   // -------------------------------------------------------------------------
   // Manual run

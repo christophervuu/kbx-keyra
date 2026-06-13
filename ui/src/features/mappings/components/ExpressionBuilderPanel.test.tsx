@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ExpressionBuilderPanel } from './ExpressionBuilderPanel';
-
+import type { ExpressionBuilderPanelRef } from './ExpressionBuilderPanel';
 import type { ExpressionBuilderResult } from '../hooks/use-expression-builder';
+
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
 
@@ -44,6 +46,20 @@ function renderPanel(state: ExpressionBuilderResult | null) {
       <ExpressionBuilderPanel builderState={state} />
     </AdapterProvider>,
   );
+}
+
+function renderPanelWithRef(state: ExpressionBuilderResult | null) {
+  const adapter: Partial<ApiAdapter> = {
+    explainRule: vi.fn().mockResolvedValue({ explanation: 'ok' }),
+    suggestExpression: vi.fn().mockResolvedValue({ expression: 'source("name")' }),
+  };
+  const ref = createRef<ExpressionBuilderPanelRef>();
+  const utils = render(
+    <AdapterProvider adapter={adapter as ApiAdapter}>
+      <ExpressionBuilderPanel builderState={state} ref={ref} />
+    </AdapterProvider>,
+  );
+  return { ref, ...utils };
 }
 
 // ---------------------------------------------------------------------------
@@ -160,5 +176,58 @@ describe('ExpressionBuilderPanel', () => {
     );
     await user.click(screen.getByText(/try builder anyway/i));
     expect(forceBuilder).toHaveBeenCalledOnce();
+  });
+
+  it('insertSourceField inserts enrichment DSL in editor mode', () => {
+    const setExpression = vi.fn();
+    const state = makeBuilderState({ mode: 'editor', expression: '', setExpression });
+    const { ref } = renderPanelWithRef(state);
+
+    ref.current?.insertSourceField({
+      path: 'customerId',
+      kind: 'enrichment',
+      alias: 'profile',
+      expression: 'get(external("profile"), "customerId")',
+    });
+
+    expect(setExpression).toHaveBeenCalledWith('get(external("profile"), "customerId")');
+  });
+
+  it('insertSourceField in builder mode sets primary source path and emits source(path)', async () => {
+    const user = userEvent.setup();
+    const setExpression = vi.fn();
+    const state = makeBuilderState({ mode: 'builder', expression: '', setExpression });
+    const { ref } = renderPanelWithRef(state);
+
+    act(() => {
+      ref.current?.insertSourceField({
+        path: 'order.id',
+        kind: 'primary',
+        expression: 'source("order.id")',
+      });
+    });
+
+    // Trigger the builder chain effect by adding a logic step (causes new chain generation)
+    await user.click(await screen.findByTestId('chain-source-card-add-logic'));
+    expect(setExpression).toHaveBeenCalledWith('source("order.id")');
+  });
+
+  it('insertSourceField in builder mode sets enrichment source path and emits get(external(...), ...)', async () => {
+    const user = userEvent.setup();
+    const setExpression = vi.fn();
+    const state = makeBuilderState({ mode: 'builder', expression: '', setExpression });
+    const { ref } = renderPanelWithRef(state);
+
+    act(() => {
+      ref.current?.insertSourceField({
+        path: 'customerId',
+        kind: 'enrichment',
+        alias: 'profile',
+        expression: 'get(external("profile"), "customerId")',
+      });
+    });
+
+    await user.click(await screen.findByTestId('chain-source-card-add-logic'));
+    expect(setExpression).toHaveBeenCalledWith('get(external("profile"), "customerId")');
   });
 });

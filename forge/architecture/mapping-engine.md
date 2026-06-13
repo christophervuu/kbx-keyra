@@ -423,6 +423,34 @@ Coverage is structural and target-required-field oriented:
 
 If no required target leaves exist, coverage is `100%` (vacuous truth). Coverage indicates rule presence, not semantic correctness of expressions.
 
+## FS-093 Enrichment Externals Contract
+
+FS-093 formalizes how enrichment inputs map onto existing engine external-source semantics while preserving the pure no-I/O boundary.
+
+Canonical engine input contract:
+
+- Engine receives:
+  - primary input as `sourceData`
+  - enrichment payloads through `options.externalSources`
+- Engine does not perform connector I/O (REST/gRPC/DynamoDB/API calls); enrichment data is caller-supplied.
+
+Validation contract:
+
+- `validate()` reference checks continue to validate `external("alias")` references against declared external aliases.
+- Mapping-layer canonical declaration is `enrichmentSources`; compatibility `config.externalSources` is passed/derived so validation remains deterministic for both canonical and legacy mappings.
+
+Execution contract:
+
+- `external("alias")` resolves values from runtime `externalSources` context.
+- `get(external("alias"), "path")` remains the canonical enrichment field-read pattern.
+- Missing required enrichment aliases are handled at runtime preflight layer before rule execution.
+- Missing optional/legacy schema-less externals remain warning/null behavior consistent with existing engine diagnostic philosophy.
+
+Compatibility notes:
+
+- Existing mappings that never use `external()` remain unchanged.
+- Legacy mappings with only `config.externalSources` remain executable through compatibility normalization at mapping/runtime layers.
+
 ### Performance Characteristics and Design Choices
 
 - Validate is synchronous and deterministic for interactive editor use.

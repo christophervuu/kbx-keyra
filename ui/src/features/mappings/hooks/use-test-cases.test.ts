@@ -55,6 +55,42 @@ describe('useTestCases', () => {
     const { result } = renderHook(() => useTestCases('mapping-1'));
     expect(result.current.testCases).toHaveLength(1);
     expect(result.current.testCases[0].name).toBe('Case 1');
+    expect(result.current.testCases[0].externalSources).toBe('{}');
+    expect(result.current.testCases[0].inputSets).toEqual([
+      {
+        id: 'tc-1',
+        name: 'Case 1',
+        sourceData: '{"x":1}',
+        externalSources: '{}',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('preserves existing inputSets when present', () => {
+    const existing = [
+      {
+        id: 'tc-1',
+        name: 'Case 1',
+        sourceData: '{"x":1}',
+        externalSources: '{}',
+        inputSets: [
+          {
+            id: 'is-1',
+            name: 'Default',
+            sourceData: '{"x":1}',
+            externalSources: '{"customer":{"id":"c-1"}}',
+            expectedOutput: '{"y":2}',
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+    localStorageMock.setItem('keyra:testcases:mapping-1', JSON.stringify(existing));
+
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+    expect(result.current.testCases[0].inputSets).toEqual(existing[0].inputSets);
   });
 
   // -------------------------------------------------------------------------
@@ -75,8 +111,29 @@ describe('useTestCases', () => {
     const saved = result.current.testCases[0];
     expect(saved.name).toBe('test1');
     expect(saved.sourceData).toBe('{"x":1}');
+    expect(saved.externalSources).toBe('{}');
     expect(saved.id).toBeTruthy();
     expect(saved.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(saved.inputSets).toHaveLength(1);
+    expect(saved.inputSets?.[0]).toMatchObject({
+      name: 'test1',
+      sourceData: '{"x":1}',
+      externalSources: '{}',
+    });
+  });
+
+  it('saves a new test case with provided externalSources payload', () => {
+    const { result } = renderHook(() => useTestCases('mapping-1'));
+
+    act(() => {
+      result.current.saveTestCase({
+        name: 'with externals',
+        sourceData: '{"x":1}',
+        externalSources: '{"customerProfile":{"id":"c-1"}}',
+      });
+    });
+
+    expect(result.current.testCases[0].externalSources).toBe('{"customerProfile":{"id":"c-1"}}');
   });
 
   it('saves a test case with optional expectedOutput', () => {
@@ -135,7 +192,7 @@ describe('useTestCases', () => {
   });
 
   it('returns success: false with error message when quota is exceeded', () => {
-    localStorageMock.setItem.mockImplementation(() => {
+    localStorageMock.setItem.mockImplementationOnce(() => {
       const err = new DOMException('QuotaExceededError', 'QuotaExceededError');
       throw err;
     });
@@ -223,6 +280,8 @@ describe('useTestCases', () => {
 
     act(() => {
       result.current.saveTestCase({ name: 'keep', sourceData: '{"keep":true}' });
+    });
+    act(() => {
       result.current.saveTestCase({ name: 'remove', sourceData: '{"remove":true}' });
     });
 
@@ -366,6 +425,8 @@ describe('useTestCases', () => {
 
     act(() => {
       result.current.saveTestCase({ name: 'first', sourceData: '{}' });
+    });
+    act(() => {
       result.current.saveTestCase({ name: 'second', sourceData: '{}' });
     });
 
@@ -459,6 +520,8 @@ describe('useTestCases', () => {
 
     act(() => {
       result.current.saveTestCase({ name: 'a', sourceData: '{}' });
+    });
+    act(() => {
       result.current.saveTestCase({ name: 'b', sourceData: '{}' });
     });
 
@@ -625,6 +688,8 @@ describe('useTestCases', () => {
 
     act(() => {
       result.current.saveTestCase({ name: 'first', sourceData: '{"first":true}' });
+    });
+    act(() => {
       result.current.saveTestCase({ name: 'second', sourceData: '{"second":true}' });
     });
 

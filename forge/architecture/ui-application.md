@@ -530,6 +530,56 @@ Deterministic-vs-AI boundary semantics:
 - AI Validation findings are additive and non-blocking guidance.
 - AI Validation failures do not mutate mapping draft state or deterministic diagnostics.
 
+### FS-093 enrichment-input UI contract addendum
+
+FS-093 adds first-class enrichment-input authoring and preview contracts while preserving existing route boundaries from FS-088 and FS-092.
+
+Create Mapping contract additions:
+
+- Create Mapping setup remains single-page (`/projects/:projectId/mappings/new`) and adds optional enrichment input configuration.
+- Enrichment inputs are configured as rows with:
+  - `alias`
+  - `schema`
+  - `required`
+  - optional `description`
+- Validation rules in guided UI:
+  - alias required, unique, stable identifier
+  - schema required
+  - reserved-name conflict detection
+- Guided UI terminology uses **Enrichment input** (not “External source”).
+
+Project Overview contract additions:
+
+- Header metric remains `linked schemas` (no source/target/enrichment metric split).
+- Mapping row summary may show `source + N enrichments -> target`.
+- Project Overview `Manage Inputs` action is deferred to Phase 2.
+
+Mapping Editor contract additions:
+
+- Input browser groups fields by:
+  - Primary source
+  - Enrichment inputs (alias-scoped groups)
+- Guided selection behavior:
+  - primary field -> `source("path")`
+  - enrichment field -> `get(external("alias"), "path")`
+- Guided UI labels use “Enrichment input”; `external(...)` terminology is reserved for Advanced Mode/raw DSL/technical diagnostics.
+- Phase 1 includes minimal mixed primary/enrichment conditional builder support; advanced/nested conditional logic is deferred to Phase 2.
+
+Preview/Test input-set contract:
+
+- Canonical preview/test sample model is versioned input sets containing:
+  - `name`
+  - `sourceData`
+  - `externalSources`
+  - optional `expectedOutput`
+- Legacy single-source samples normalize to input sets with `externalSources: {}`.
+
+Adapter/UI data-layer compatibility boundary:
+
+- Canonical mapping enrichment declaration is `enrichmentSources`.
+- Compatibility `config.externalSources` remains supported for legacy continuity and engine reference checks.
+- If both are present, UI and adapters treat `enrichmentSources` as canonical and `config.externalSources` as derived/compatibility data.
+
 ---
 
 ## State Management

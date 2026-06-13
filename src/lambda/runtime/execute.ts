@@ -16,11 +16,26 @@ import {
 interface RuntimeExecuteRequest {
   readonly mappingId: string;
   readonly sourceData: Readonly<Record<string, unknown>>;
+  readonly externalSources: Readonly<Record<string, unknown>>;
 }
 
 interface RuntimeSnapshotPayload {
   readonly mappingConfig?: unknown;
   readonly config?: unknown;
+}
+
+interface MappingEnrichmentSource {
+  readonly alias: string;
+  readonly schemaId?: string;
+  readonly required?: boolean;
+  readonly description?: string;
+}
+
+interface RuntimeMappingConfig {
+  readonly enrichmentSources?: readonly MappingEnrichmentSource[];
+  readonly config?: {
+    readonly externalSources?: readonly string[];
+  };
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -34,6 +49,12 @@ function parseExecuteRequest(body: Record<string, unknown> | null): RuntimeExecu
 
   const mappingId = body.mappingId;
   const sourceData = body.sourceData;
+  const externalSourcesCandidate = body.externalSources;
+
+  const externalSources =
+    externalSourcesCandidate && typeof externalSourcesCandidate === 'object' && !Array.isArray(externalSourcesCandidate)
+      ? (externalSourcesCandidate as Readonly<Record<string, unknown>>)
+      : {};
 
   if (!isNonEmptyString(mappingId) || !sourceData || typeof sourceData !== 'object' || Array.isArray(sourceData)) {
     return null;
@@ -42,7 +63,92 @@ function parseExecuteRequest(body: Record<string, unknown> | null): RuntimeExecu
   return {
     mappingId,
     sourceData: sourceData as Readonly<Record<string, unknown>>,
+    externalSources,
   };
+}
+
+function uniqueAliases(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    aliases.push(value);
+  }
+
+  return aliases;
+}
+
+function normalizeLegacyExternalAliases(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueAliases(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function normalizeCanonicalEnrichmentSources(value: unknown): readonly MappingEnrichmentSource[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const aliases = new Set<string>();
+  const normalized: MappingEnrichmentSource[] = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const alias = typeof candidate.alias === 'string' ? candidate.alias.trim() : '';
+    if (!alias || aliases.has(alias)) {
+      continue;
+    }
+
+    aliases.add(alias);
+    const schemaId = typeof candidate.schemaId === 'string' ? candidate.schemaId.trim() : '';
+    const required = typeof candidate.required === 'boolean' ? candidate.required : true;
+    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
+    normalized.push({
+      alias,
+      ...(schemaId ? { schemaId } : {}),
+      required,
+      ...(description ? { description } : {}),
+    });
+  }
+
+  return normalized;
+}
+
+function deriveEnrichmentSources(config: RuntimeMappingConfig): readonly MappingEnrichmentSource[] {
+  const canonical = normalizeCanonicalEnrichmentSources(config.enrichmentSources);
+  if (canonical.length > 0) {
+    return canonical;
+  }
+
+  const legacyExternalAliases = normalizeLegacyExternalAliases(config.config?.externalSources);
+  return legacyExternalAliases.map((alias) => ({ alias, required: false }));
+}
+
+function findMissingRequiredEnrichments(
+  config: RuntimeMappingConfig,
+  externalSources: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  const enrichmentSources = deriveEnrichmentSources(config);
+  return enrichmentSources
+    .filter((source) => source.required !== false)
+    .map((source) => source.alias)
+    .filter((alias) => !Object.hasOwn(externalSources, alias));
 }
 
 function parseSnapshotConfig(snapshotRaw: string): Parameters<typeof execute>[0] | null {
@@ -143,7 +249,26 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     }
 
-    const result = execute(config, request.sourceData, null, null);
+    const missingRequiredAliases = findMissingRequiredEnrichments(
+      config as RuntimeMappingConfig,
+      request.externalSources,
+    );
+
+    if (missingRequiredAliases.length > 0) {
+      const aliases = uniqueAliases(missingRequiredAliases).sort();
+      const aliasList = aliases.join(', ');
+      return errorResponse(
+        ERROR_CODES.VALIDATION_ERROR,
+        `Missing required enrichment payload(s): ${aliasList}`,
+        400,
+        false,
+        requestId,
+      );
+    }
+
+    const result = execute(config, request.sourceData, null, null, {
+      externalSources: request.externalSources,
+    });
 
     logExecute({
       requestId,
