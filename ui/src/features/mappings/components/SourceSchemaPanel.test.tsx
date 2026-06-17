@@ -151,7 +151,39 @@ describe('SourceSchemaPanel', () => {
     expect(onStageField).toHaveBeenCalledWith({
       path: 'email',
       kind: 'primary',
+      valueType: 'string',
       expression: 'source("email")',
+    });
+  });
+
+  it('renders selected visual state when a field is already in the tray', () => {
+    renderPanel({
+      parsedSourceSchema: FLAT_SCHEMA,
+      onStageField: vi.fn(),
+      selectedInputs: [{ kind: 'primary', path: 'name' }],
+    });
+
+    const row = screen.getByTestId('source-field-name');
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(row).toHaveAttribute('data-selected', 'true');
+    expect(screen.getByTestId('source-field-selected-badge-name')).toBeInTheDocument();
+  });
+
+  it('includes sampleValue metadata when source sample data is available', () => {
+    const onStageField = vi.fn();
+    renderPanel(
+      { parsedSourceSchema: FLAT_SCHEMA, onStageField },
+      { name: 'Ada Lovelace', email: 'ada@example.com' },
+    );
+
+    fireEvent.click(screen.getByTestId('source-field-name'));
+
+    expect(onStageField).toHaveBeenCalledWith({
+      path: 'name',
+      kind: 'primary',
+      valueType: 'string',
+      sampleValue: '"Ada Lovelace"',
+      expression: 'source("name")',
     });
   });
 
@@ -162,6 +194,7 @@ describe('SourceSchemaPanel', () => {
     expect(onStageField).toHaveBeenCalledWith({
       path: 'name',
       kind: 'primary',
+      valueType: 'string',
       expression: 'source("name")',
     });
   });
@@ -173,6 +206,7 @@ describe('SourceSchemaPanel', () => {
     expect(onStageField).toHaveBeenCalledWith({
       path: 'name',
       kind: 'primary',
+      valueType: 'string',
       expression: 'source("name")',
     });
   });
@@ -263,6 +297,7 @@ describe('SourceSchemaPanel', () => {
       path: 'customerId',
       kind: 'enrichment',
       alias: 'customerProfile',
+      valueType: 'string',
       expression: 'get(external("customerProfile"), "customerId")',
     });
   });

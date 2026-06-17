@@ -627,4 +627,16 @@ describe('TargetWorklist', () => {
     fireEvent.click(screen.getByTestId('target-field-row-name'));
     expect(onSelectNode).toHaveBeenCalledWith('name', 'object');
   });
+
+  it('renders condensed header columns (status, target field, notes) in condensed mode', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} condensed />);
+
+    expect(screen.getByTestId('target-worklist-container')).toHaveAttribute('data-condensed', 'true');
+    expect(screen.getByText('Status')).toBeInTheDocument();
+    expect(screen.getByText('Target field')).toBeInTheDocument();
+    expect(screen.getByText('Notes')).toBeInTheDocument();
+    expect(screen.queryByText('Source field')).not.toBeInTheDocument();
+    expect(screen.queryByText('Method')).not.toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-firstName')).toHaveAttribute('data-condensed', 'true');
+  });
 });

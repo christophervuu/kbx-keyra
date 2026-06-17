@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+
 import { ConditionBuilder } from './ConditionBuilder';
 import type { BuilderState } from '../lib/expression-generator';
 
@@ -34,6 +35,11 @@ describe('ConditionBuilder', () => {
     expect(names).toContain('gte');
     expect(names).toContain('lt');
     expect(names).toContain('lte');
+    expect(names).toContain('contains');
+    expect(names).toContain('isNull');
+    expect(names).toContain('isNotNull');
+    expect(names).toContain('isTruthy');
+    expect(names).toContain('isFalsy');
   });
 
   it('renders left and right argument slots', () => {
@@ -96,5 +102,22 @@ describe('ConditionBuilder', () => {
       />,
     );
     expect(screen.getByTestId('condition-builder')).toBeTruthy();
+  });
+
+  it('hides right operand for unary operators', () => {
+    render(
+      <ConditionBuilder
+        condition={null}
+        onChange={vi.fn()}
+        parsedSourceSchema={null}
+        arrayItemSchema={null}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/comparison function/i), {
+      target: { value: 'isNull' },
+    });
+
+    expect(screen.queryByTestId('condition-right-operand')).not.toBeInTheDocument();
   });
 });

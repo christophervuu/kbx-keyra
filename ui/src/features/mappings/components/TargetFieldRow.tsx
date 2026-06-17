@@ -56,6 +56,8 @@ export interface TargetFieldRowProps {
   onClick: () => void;
   /** Fired when the expand/collapse chevron is clicked */
   onToggleExpand?: () => void;
+  /** Compact row mode used when a target field is actively being edited. */
+  condensed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +207,7 @@ export const TargetFieldRow = memo(function TargetFieldRow({
   sampleOutputPreview,
   onClick,
   onToggleExpand,
+  condensed = false,
 }: TargetFieldRowProps) {
   const indentStyle = { paddingLeft: depth * INDENT_PX } as CSSProperties;
   const coverageRatio = coverage && coverage.total > 0
@@ -216,9 +219,11 @@ export const TargetFieldRow = memo(function TargetFieldRow({
       role="row"
       aria-selected={isSelected}
       data-testid={`target-field-row-${fieldPath}`}
+      data-condensed={condensed ? 'true' : 'false'}
       tabIndex={0}
       className={[
-        'group flex cursor-pointer items-center gap-2 border-b border-slate-900 px-2 py-2 text-sm last:border-b-0',
+        'group flex cursor-pointer items-center border-b border-slate-900 px-2 text-sm last:border-b-0',
+        condensed ? 'gap-1.5 py-1.5' : 'gap-2 py-2',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
         'hover:bg-slate-900/70',
         isSelected ? 'bg-blue-950/35 ring-1 ring-inset ring-blue-700/60' : '',
@@ -257,7 +262,7 @@ export const TargetFieldRow = memo(function TargetFieldRow({
       </span>
 
       {/* Target */}
-      <div className="min-w-0 w-[34%] shrink-0" data-testid="row-col-target">
+      <div className={`min-w-0 shrink-0 ${condensed ? 'w-[45%]' : 'w-[34%]'}`} data-testid="row-col-target">
         <div className="flex min-w-0 items-center gap-1.5" style={indentStyle}>
           <span
             className={`inline-flex min-w-[2rem] shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-medium ${TYPE_BADGE_CLASSES[fieldType]}`}
@@ -275,7 +280,7 @@ export const TargetFieldRow = memo(function TargetFieldRow({
           </p>
         </div>
         <p
-          className="ml-[2.6rem] truncate text-[11px] text-slate-500"
+          className={`truncate text-slate-500 ${condensed ? 'ml-[2.45rem] text-[10px]' : 'ml-[2.6rem] text-[11px]'}`}
           data-testid="sample-output-preview"
           title={sampleOutputPreview ?? '—'}
         >
@@ -283,24 +288,28 @@ export const TargetFieldRow = memo(function TargetFieldRow({
         </p>
       </div>
 
-      {/* Source summary */}
-      <span
-        className="min-w-0 w-[24%] shrink-0 truncate text-[11px] text-slate-300"
-        data-testid="source-summary"
-        title={sourceSummary ?? '—'}
-      >
-        {sourceSummary ?? '—'}
-      </span>
+      {!condensed && (
+        <>
+          {/* Source summary */}
+          <span
+            className="min-w-0 w-[24%] shrink-0 truncate text-[11px] text-slate-300"
+            data-testid="source-summary"
+            title={sourceSummary ?? '—'}
+          >
+            {sourceSummary ?? '—'}
+          </span>
 
-      {/* Mapping type */}
-      <span className="flex w-[16%] min-w-[120px] shrink-0 justify-center" data-testid="mapping-type">
-        <span
-          className={`inline-flex max-w-full items-center truncate rounded border px-1.5 py-0.5 text-[10px] font-medium ${methodBadgeClasses(mappingTypeLabel)}`}
-          title={mappingTypeLabel ?? 'Not configured'}
-        >
-          {mappingTypeLabel ?? 'Not configured'}
-        </span>
-      </span>
+          {/* Mapping type */}
+          <span className="flex w-[16%] min-w-[120px] shrink-0 justify-center" data-testid="mapping-type">
+            <span
+              className={`inline-flex max-w-full items-center truncate rounded border px-1.5 py-0.5 text-[10px] font-medium ${methodBadgeClasses(mappingTypeLabel)}`}
+              title={mappingTypeLabel ?? 'Not configured'}
+            >
+              {mappingTypeLabel ?? 'Not configured'}
+            </span>
+          </span>
+        </>
+      )}
 
       {/* Notes preview */}
       <span

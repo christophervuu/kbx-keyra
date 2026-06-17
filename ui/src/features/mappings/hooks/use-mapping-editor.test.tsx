@@ -1510,6 +1510,29 @@ describe('useMappingEditor', () => {
   });
 
   describe('save() with draftRules', () => {
+    it('keeps changes draft-only until save is invoked', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'source("z")');
+      });
+
+      expect(result.current.actions.getDraftExpression('A.D')).toBe('source("z")');
+      expect(result.current.rules.find((r) => r.target === 'A.D')).toBeUndefined();
+      expect(adapter.saveMapping).not.toHaveBeenCalled();
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(adapter.saveMapping).toHaveBeenCalledTimes(1);
+      expect(result.current.rules.find((r) => r.target === 'A.D')?.expression).toBe('source("z")');
+    });
+
     it('merges draft additions into saved rules on save', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {

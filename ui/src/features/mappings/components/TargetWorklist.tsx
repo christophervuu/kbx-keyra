@@ -51,6 +51,8 @@ export interface TargetWorklistProps {
   targetSchemaName?: string | null;
   /** Optional className for the outer container */
   className?: string;
+  /** Condensed table mode for focused row-editing state. */
+  condensed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +278,7 @@ interface RenderNodeProps {
   arrayChildDisplayModeByPath: Readonly<Record<string, ArrayChildDisplayMode | undefined>>;
   onSetArrayChildDisplayMode: (path: string, mode: ArrayChildDisplayMode) => void;
   collectedVisibleTargetPaths?: string[];
+  condensed?: boolean;
 }
 
 function renderNode({
@@ -295,6 +298,7 @@ function renderNode({
   arrayChildDisplayModeByPath,
   onSetArrayChildDisplayMode,
   collectedVisibleTargetPaths,
+  condensed = false,
 }: RenderNodeProps): ReactNode[] {
   const status = (statusMap.get(node.path) ?? 'unmapped') as
     | 'unmapped'
@@ -387,6 +391,7 @@ function renderNode({
       mappingTypeLabel={mappingTypeLabel}
       notesPreview={notesPreview ?? undefined}
       sampleOutputPreview={sampleOutputPreview ?? undefined}
+      condensed={condensed}
       onClick={() => onSelectNode(node.path, node.type)}
       onToggleExpand={isExpandable ? () => onToggleExpand(node.path) : undefined}
     />,
@@ -489,6 +494,7 @@ function renderNode({
             arrayChildDisplayModeByPath,
             onSetArrayChildDisplayMode,
             collectedVisibleTargetPaths,
+            condensed,
           }),
         );
       }
@@ -514,6 +520,7 @@ function renderNode({
           arrayChildDisplayModeByPath,
           onSetArrayChildDisplayMode,
           collectedVisibleTargetPaths,
+          condensed,
         }),
       );
     }
@@ -551,6 +558,7 @@ export function TargetWorklist({
   autoMapSuggestionStatusByPath,
   targetSchemaName,
   className = '',
+  condensed = false,
 }: TargetWorklistProps) {
   void targetSchemaName;
 
@@ -621,6 +629,7 @@ export function TargetWorklist({
         arrayChildDisplayModeByPath,
         onSetArrayChildDisplayMode: handleSetArrayChildDisplayMode,
         collectedVisibleTargetPaths,
+        condensed,
       }),
     );
 
@@ -644,6 +653,7 @@ export function TargetWorklist({
     autoMapSuggestionStatusByPath,
     arrayChildDisplayModeByPath,
     handleSetArrayChildDisplayMode,
+    condensed,
   ]);
 
   useEffect(() => {
@@ -671,6 +681,7 @@ export function TargetWorklist({
     <div
       className={`flex flex-col overflow-hidden ${className}`}
       data-testid="target-worklist-container"
+      data-condensed={condensed ? 'true' : 'false'}
     >
       {/* Search + filter toolbar */}
       <div className="shrink-0 border-b border-slate-800 bg-slate-950 px-2.5 py-1.5">
@@ -762,11 +773,18 @@ export function TargetWorklist({
         </div>
       </div>
 
-      <div className="grid grid-cols-[56px_minmax(220px,34%)_minmax(160px,24%)_minmax(120px,16%)_1fr] items-center gap-2 border-b border-slate-800 bg-slate-950 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+      <div
+        className={[
+          'grid items-center gap-2 border-b border-slate-800 bg-slate-950 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-slate-500',
+          condensed
+            ? 'grid-cols-[56px_45%_1fr]'
+            : 'grid-cols-[56px_minmax(220px,34%)_minmax(160px,24%)_minmax(120px,16%)_1fr]',
+        ].join(' ')}
+      >
         <span className="text-center">Status</span>
         <span>Target field</span>
-        <span>Source field</span>
-        <span className="flex min-w-[120px] justify-center">Method</span>
+        {!condensed && <span>Source field</span>}
+        {!condensed && <span className="flex min-w-[120px] justify-center">Method</span>}
         <span>Notes</span>
       </div>
 

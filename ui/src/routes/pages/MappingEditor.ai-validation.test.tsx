@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
@@ -74,6 +74,87 @@ const MOCK_TARGET_SCHEMA: SchemaDetail = {
           },
         },
       },
+    },
+  },
+};
+
+const SIMPLE_SOURCE_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'source-schema-1',
+    name: 'Source Schema',
+    format: 'json-schema',
+    fieldCount: 1,
+    origin: 'local',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: {
+    type: 'object',
+    properties: {
+      orderId: { type: 'string' },
+    },
+  },
+};
+
+const SIMPLE_TARGET_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'target-schema-1',
+    name: 'Target Schema',
+    format: 'json-schema',
+    fieldCount: 1,
+    origin: 'local',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: {
+    type: 'object',
+    properties: {
+      orderId: { type: 'string' },
+    },
+  },
+};
+
+const MULTI_SOURCE_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'source-schema-1',
+    name: 'Multi Source Schema',
+    format: 'json-schema',
+    fieldCount: 2,
+    origin: 'local',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: {
+    type: 'object',
+    properties: {
+      firstName: { type: 'string' },
+      lastName: { type: 'string' },
+    },
+  },
+};
+
+const SINGLE_TARGET_NAME_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'target-schema-1',
+    name: 'Single Target Schema',
+    format: 'json-schema',
+    fieldCount: 1,
+    origin: 'local',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: {
+    type: 'object',
+    properties: {
+      fullName: { type: 'string' },
     },
   },
 };
@@ -348,5 +429,134 @@ describe('MappingEditor AI Validation integration', () => {
     await waitFor(() => {
       expect(screen.getByTestId('deployment-route')).toBeInTheDocument();
     });
+  });
+
+  it('marks selected target row mapped immediately after source click in target view', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    const targetRow = screen.getByTestId('target-field-row-orderId');
+    expect(within(targetRow).getByTestId('status-icon-unmapped')).toBeInTheDocument();
+
+    fireEvent.click(targetRow);
+    fireEvent.click(screen.getByTestId('source-field-orderId'));
+
+    await waitFor(() => {
+      expect(within(targetRow).getByTestId('status-icon-mapped')).toBeInTheDocument();
+    });
+  });
+
+  it('uses Smart Builder as the primary guided scalar surface in target view', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-orderId'));
+
+    expect(screen.getByTestId('smart-builder-panel')).toBeInTheDocument();
+  });
+
+  it('marks selected target row unmapped immediately after removing mapping', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [
+          { target: 'orderId', type: 'string', expression: 'source("orderId")' },
+        ],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    const mappedRow = screen.getByTestId('target-field-row-orderId');
+    expect(within(mappedRow).getByTestId('status-icon-mapped')).toBeInTheDocument();
+
+    fireEvent.click(mappedRow);
+    fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+    fireEvent.click(screen.getByTestId('remove-mapping-btn'));
+    fireEvent.click(screen.getByTestId('remove-mapping-confirm'));
+
+    await waitFor(() => {
+      const unmappedRow = screen.getByTestId('target-field-row-orderId');
+      expect(within(unmappedRow).getByTestId('status-icon-unmapped')).toBeInTheDocument();
+    });
+  });
+
+  it('appends second source click (not replace) and persists composed draft only after Save', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(MULTI_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SINGLE_TARGET_NAME_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-fullName'));
+    fireEvent.click(screen.getByTestId('source-field-firstName'));
+    fireEvent.click(screen.getByTestId('source-field-lastName'));
+
+    expect(adapter.saveMapping).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('save-button'));
+
+    await waitFor(() => {
+      expect(adapter.saveMapping).toHaveBeenCalledTimes(1);
+    });
+
+    const [, payload] = (adapter.saveMapping as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      MappingConfig,
+    ];
+    const fullNameRule = payload.rules.find((rule) => rule.target === 'fullName');
+    expect(fullNameRule?.expression).toContain('source("firstName")');
+    expect(fullNameRule?.expression).toContain('source("lastName")');
   });
 });

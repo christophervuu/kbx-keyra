@@ -220,6 +220,76 @@ export { generateExpressionFromChain, generateChainExpression } from './chain-ex
 // FS-038 chain decomposer
 export { decomposeToChainState, decomposeToChain } from './chain-decomposer';
 export type { DecomposeChainResult, DecomposeChainResult039 } from './chain-decomposer';
+
+// FS-094 smart builder state + generator
+export {
+  createEmptySmartBuilderDraft,
+  createActionParameterDraft,
+  updateSmartBuilderExpression,
+  undoSmartBuilderExpression,
+  resolveOrderedInputIds,
+  setSlotScopedInput,
+  normalizeActionParameterValues,
+  validateActionParameterDraft,
+  serializeActionParameterDraft,
+  getValidatedActionParameters,
+  toSmartBuilderTransformArgsFromParameters,
+  toSmartBuilderCompositionPatchFromParameters,
+  hydrateSmartBuilderFromExpression,
+} from './smart-builder-state';
+export type {
+  BuilderValueType,
+  BuilderSourceKind,
+  BuilderArgumentValue,
+  BuilderInputTransform,
+  BuilderInput,
+  BuilderPredicate,
+  BuilderConditionClause,
+  BuilderValueMapEntry,
+  BuilderComposition,
+  DraftValidationState as SmartDraftValidationState,
+  SmartBuilderActionParameterValidationIssue,
+  SmartBuilderActionParameterValidationResult,
+  SmartBuilderActionParameterValue,
+  SmartBuilderActionParameterDraft,
+  SmartBuilderDraft,
+  SmartBuilderHydrationResult,
+} from './smart-builder-state';
+export { generateSmartBuilderExpression } from './smart-builder-expression-generator';
+export {
+  SMART_BUILDER_ACTION_CATALOG,
+  ALL_REGISTERED_DSL_FUNCTIONS,
+  UNSUPPORTED_DSL_FUNCTIONS,
+  findSmartBuilderActionById,
+  getSmartBuilderActionParameters,
+} from './smart-builder-action-catalog';
+export type {
+  SmartBuilderActionCategory,
+  SmartBuilderActionApplicability,
+  SmartBuilderActionConstraint,
+  SmartBuilderActionParameterKind,
+  SmartBuilderActionParameterOption,
+  SmartBuilderActionParameterConstraint,
+  SmartBuilderActionParameterDefinition,
+  SmartBuilderActionCatalogEntry,
+} from './smart-builder-action-catalog';
+export {
+  resolveSmartBuilderActions,
+  resolveSmartBuilderActionsFromDraft,
+} from './smart-builder-action-resolver';
+export type {
+  SmartBuilderActionContext,
+  SmartBuilderActionAvailability,
+  ResolvedSmartBuilderAction,
+} from './smart-builder-action-resolver';
+export {
+  buildSmartBuilderDslCoverage,
+  findUnregisteredFunctionsInActionCatalog,
+} from './smart-builder-dsl-coverage';
+export type {
+  DslCoverageClassification,
+  DslCoverageEntry,
+} from './smart-builder-dsl-coverage';
 // FS-047 eligible target derivation
 export { deriveEligibleTargets } from './derive-eligible-targets';
 // FS-048 T-01 auto-map workspace persistence

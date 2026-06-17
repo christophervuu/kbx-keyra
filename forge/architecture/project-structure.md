@@ -417,6 +417,8 @@ ui/
           BulkActionBar.tsx          Bulk action toolbar (appears when rules are selected: copy, duplicate, delete)
           BuilderStepIndicator.tsx   Horizontal step indicator: active/completed/pending states, clickable completed steps, aria-current="step" (T-05)
           BuilderStepIndicator.test.tsx Component tests (7 tests: rendering, step states, click navigation)
+          BuilderActionList.tsx      Smart Builder action-list surface with enabled-first grouping and unavailable reason rendering (FS-094 T-04)
+          BuilderActionList.test.tsx Component tests for enabled/unavailable sections and reason text display (FS-094 T-04)
           ConditionBuilder.tsx       Mini condition builder for filter() in array context: comparison function picker (eq/neq/gt/gte/lt/lte) + two ArgumentSlots (T-07)
           ConditionBuilder.test.tsx  Component tests (6 tests: default eq, all options, left/right slots, onChange, init from state)
           ComplexExpressionWarning.tsx Warning banner when Editor→Builder decomposition fails: reason text, "Stay in Editor" + "Try Builder anyway" buttons (T-08)
@@ -500,6 +502,10 @@ ui/
           AiSuggestionReviewPrimitives.tsx FS-074 shared AI suggestion review primitives: generated-state label copy and reusable current-vs-generated comparison block used across Suggest/SmartFix/Workspace cards
           SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
           SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
+          SmartBuilderPanel.tsx      Smart Builder shell: target-focused header, input tray + action list composition, and complex-expression Advanced fallback banner (FS-094 T-04)
+          SmartBuilderPanel.test.tsx Component tests for empty tray state and non-decomposable expression fallback banner (FS-094 T-04)
+          InputTray.tsx              Smart Builder tray surface with source-kind badges and empty/populated states (FS-094 T-04)
+          InputTray.test.tsx         Component tests for tray empty guidance and source-kind badge rendering (FS-094 T-04)
           SmartFixInline.tsx          FS-071 inline Smart Fix panel: original/suggested expression review, explanation, validation diagnostics, explicit Accept/Edit/Dismiss actions, stale mismatch re-run CTA, retry/error states
           AutoMapWorkspace.tsx         FS-048 center-panel Auto-Map workspace shell with loading/error/empty/success states, sticky header integration, toolbar/confirmation/no-source slots, and completion banner
           WorkspaceHeader.tsx          FS-048 workspace header (section path, summary counters, relative refresh timestamp, Back to Editor)
@@ -655,6 +661,15 @@ ui/
           chain-builder-state.test.ts  FS-038 unit tests for chain builder state (factory functions, completeness, summaries, type guards); FS-039 type-level and runtime tests (ChainSource variants, OperandValue all 4 kinds, FS039ConditionStep non-optional elseBranch, FS039ValueMapStep non-optional defaultValue, ChainState structural composition, post-condition/post-valueMap steps, DraftFieldState, DraftRulesMap)
           chain-expression-generator.ts  FS-038 ChainBuilderState→DSL generator (generateExpressionFromChain); FS-039 ChainState→DSL generator (generateChainExpression): handles all ChainSource variants, TransformStep nesting, ConditionStep with OperandValue resolution (currentValue substitutes accumulated chain expression, field→source(), static→literal, expression→passthrough), AND-combined predicates, else-if via multiple ConditionClause entries, ValueMapStep with recursive output chains, post-condition/post-valueMap transform steps (AE-22/AE-23)
           chain-expression-generator.test.ts  FS-038 generator tests (AE-01/02/05/06/07/08/09/18, multi-step chains, branch kinds, elseIf, literal type detection); FS-039 generator tests (ChainSource variants, all 4 OperandValue kinds, currentValue accumulator substitution, AND-combined predicates, else-if, ValueMapStep, post-condition/post-valueMap steps, nested branch chains, all operator variants)
+          smart-builder-state.ts        FS-094 smart builder draft model: SmartBuilderDraft, BuilderInput/transform/composition types, expression history + undo helpers, insertion-order resolution, slot-scoped input references, and hydration contract (guided draft vs advanced fallback with complex-expression reason)
+          smart-builder-state.test.ts   FS-094 unit tests for smart-builder draft primitives: expression history/undo, hydration for direct source + enrichment root/nested expressions, and non-decomposable advanced fallback behavior
+          smart-builder-expression-generator.ts  FS-094 deterministic SmartBuilderDraft→DSL generator: direct/concat/coalesce/math/condition/valueMap/arrayBuild/arrayMerge/advanced composition output, strict enrichment generation (`external("alias")` root, `get(external("alias"), "path")` nested), and insertion-order operand defaults when explicit ordering absent
+          smart-builder-expression-generator.test.ts  FS-094 generator tests for deterministic insertion-order semantics (concat/coalesce/math), direct source output, and enrichment root-vs-nested DSL generation
+          smart-builder-action-catalog.ts  FS-094 action catalog metadata: category grouping (text/number/date/condition/null/lookup/array/convert/advanced), DSL function linkage, constraints, unsupported pseudo-operator policy, and registered-function guard set
+          smart-builder-action-resolver.ts  FS-094 availability resolver: context-aware enabled/disabled action evaluation with deterministic user-facing disabled reasons and enabled-first sorting
+          smart-builder-action-resolver.test.ts  FS-094 resolver tests for enabled-first ordering, numeric/array disabled reasons, and availability behavior across mixed input contexts
+          smart-builder-dsl-coverage.ts   FS-094 DSL coverage accounting utility: classifies DSL functions as user-facing/input-type/advanced-only/intentionally-unsupported and validates action catalog registration integrity
+          smart-builder-dsl-coverage.test.ts  FS-094 coverage tests for complete classification output, source-access input-type mapping, and zero unregistered action-function references
           chain-summary.ts             FS-039 T-07 pure summary text renderers: summarizeSource (field/static/none), summarizeStep (transform/condition/valueMap), summarizeChain (last step or source); truncation at ~80 chars; operator labels; predicate/clause/branch summaries
           chain-summary.test.ts        FS-039 T-07 unit tests for summarizeSource, summarizeStep (all step types), summarizeChain; truncation; operator labels; unary operators; multi-clause conditions
           pipeline-expression-generator.ts  FS-023 pure state→DSL generator for unified expression builder

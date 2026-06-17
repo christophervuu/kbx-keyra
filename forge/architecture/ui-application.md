@@ -100,15 +100,19 @@ ui/src/
         tree-to-json-schema.ts Tree reconstruction + field counting utilities
         parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
 
-    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023, FS-094)
       index.ts                Feature barrel (components + hooks + utilities)
       types.ts                Feature-shared mappings types: TargetFilter/TargetSort/EditorView, linked debug selection, and comparison mode config (`COMPARISON_MODES`)
       components/
         MappingEditorPage.tsx Three-column editor shell with draggable resize handles, persistent pixel widths, source expand strip, and bottom collapse/resize behavior (FS-022)
-        SourceSchemaPanel.tsx Left column: draggable source schema tree (HTML5 DnD) with internal search input
+        SourceSchemaPanel.tsx Left column input browser: grouped Primary Source + Enrichment Input aliases, searchable schema tree, click-to-stage + drag-to-insert input selection; emits staged field metadata contract (`path`, `kind`, `alias?`, `valueType?`, `sampleValue?`, `expression`) for smart-slot routing
         TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Center panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Center panel: scalar field expression authoring + drop zone; FS-039 auto-draft model: updateDraft/revertDraft/getDraftExpression props replace onApply; Discard button reverts draft; no Apply/Next Unmapped buttons; onExpressionChange optional (used for preview debounce); compressed header (type badge left, Builder|Editor toggle in header row, ⋮ overflow menu for Remove mapping); Suggested Sources removed (FS-040); BuilderFeedbackArea pinned between header and expression area (FS-040 T-02); UnsavedDiffPanel below feedback area (FS-040 T-05); action row redesigned: Reset draft (with inline confirmation for non-trivial expressions); Explain + Suggest + Smart Fix AI slices wired (FS-041/FS-042/FS-071) with inline `ExplanationPanel` / `SuggestExpressionInline` / `SmartFixInline`; Smart Fix includes rule-diagnostic request context, validation-gated Accept, stale conflict rerun CTA, and non-mutating dismiss/error behavior
+        ScalarFieldBuilder.tsx Center panel scalar authoring shell. FS-094 replaces default scalar guided internals with `SmartBuilderPanel` (smart input tray + action list + condition slot controls) while retaining RawDslEditor as Advanced fallback and preserving draft-only-until-save semantics (`updateDraft/revertDraft/getDraftExpression`); supports focused-slot-aware staged input routing contract (`onSmartFocusedSlotChange`, `onSmartStageField`) and array-handoff callback seam to `ArrayBuilder`; existing AI slices (Explain/Suggest/Smart Fix), reset/discard behavior, and header overflow remove-action remain
+        SmartBuilderPanel.tsx FS-094 default scalar guided surface: target-focused shell + `InputTray` + `BuilderActionList`, condition slot focus controls, quick-add input kinds (fixed value/constant/expression/item/parent), deterministic array handoff notice (`Open Array Builder`), and complex-expression Advanced fallback banner
+        InputTray.tsx        FS-094 selected-input tray with source-kind badges (`SRC/ENR/CST/VAL/ITM/PAR/EXPR`) and summary metadata rendering
+        BuilderActionList.tsx FS-094 action list grouped by enabled-first ordering with deterministic disabled reasons
+        ConditionBuilder.tsx FS-094 condition mini-builder used by smart panel slot flow; guided operators map only to registered DSL output patterns (`isTruthy`/`isFalsy` compile to `not(isNull(...))` / `isNull(...)`)
         SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
         AutoMapWorkspace.tsx        FS-048 center-panel Auto-Map review workspace shell: sticky header, toolbar slot, refresh confirmation slot, no-source-data slot, loading/error/empty/list states, completion banner
         WorkspaceHeader.tsx         FS-048 workspace header (section path, summary counts, last refreshed metadata, Back to Editor)
@@ -952,7 +956,7 @@ When a target field is selected in Target View, the center builder panel renders
 | `object` | `ObjectSummaryPanel` |
 | `array` | `ArrayBuilder` |
 
-`ScalarFieldBuilder` renders within the expression-panel context — it owns its own UnifiedExpressionBuilder/RawDslEditor mode toggle and drop zone, rather than relying on a standalone Panel 4 slot.
+`ScalarFieldBuilder` renders within the expression-panel context. FS-094 default guided surface is `SmartBuilderPanel` (with `RawDslEditor` Advanced fallback), rather than a standalone Panel 4 slot.
 
 ### Array Builder Architecture Model (FS-043, updated FS-051)
 
@@ -1253,7 +1257,7 @@ Source fields in `SourceSchemaPanel` are draggable using the HTML5 Drag API (no 
 - **`useDragSource(path)`:** returns `{ isDragging, dragHandlers }` for a single draggable element
 - **`useDropZone({ onDrop })`:** returns `{ isDragOver, dropHandlers }` for a drop target; tracks enter/leave depth correctly across child elements
 - **Drop zones:** `ScalarFieldBuilder` expression area accepts drops; on drop, inserts `source("path")` into the active builder/editor slot
-- **Click-to-stage:** clicking a source field fires `onStageField(path)` — same insertion as drop
+- **Click-to-stage:** clicking a source field fires `onStageField(stagedField)` metadata contract (path/kind/alias/valueType/sample/expression); MappingEditor decides append-vs-focused-slot routing for smart builder flows
 - **Visual feedback:** drop zone highlights with `ring-1 ring-blue-500 bg-blue-950/40` on hover; source fields show grip handle + `cursor-grab`
 
 ### Resizable Panel Layout (FS-022)
@@ -1921,7 +1925,7 @@ The expression builder is a dual-surface authoring system used in two contexts:
 - **Rules View:** `ExpressionBuilderPanel` (rule-selected panel)
 - **Target View / scalar fields:** `ScalarFieldBuilder` (target-selected panel)
 
-**FS-038 update:** Both surfaces now use the new chain-based builder in builder mode (see "Chain-Based Builder Model" section below). The legacy `UnifiedExpressionBuilder` is retained in the codebase for backward compatibility but is no longer the primary builder surface.
+**FS-094 update:** Rules View continues to use chain-oriented builder/editor composition, while Target View scalar guided mode defaults to Smart Input Tray Builder (`SmartBuilderPanel`). `ChainBuilder`/`UnifiedExpressionBuilder` remain available as compatibility seams and legacy surfaces; they are not the authoritative default scalar guided architecture.
 
 #### Component hierarchy (Rules View) — FS-038
 
@@ -1934,27 +1938,56 @@ The expression builder is a dual-surface authoring system used in two contexts:
 - `ExpressionPreview`
 - `FunctionReferencePanel`
 
-#### Component hierarchy (Target View / ScalarFieldBuilder) — FS-038, updated FS-040
+#### Component hierarchy (Target View / ScalarFieldBuilder) — FS-038, updated FS-040, FS-094
 
 ```
 ScalarFieldBuilder
 ├── Header (target path, type badge, required/optional, status, Builder|Editor toggle, ⋮ overflow menu)
 │   └── HeaderOverflowMenu (Remove mapping with alertdialog confirmation)
-├── BuilderFeedbackArea (FS-040 T-02 — pinned, always visible)
-│   ├── Expression row (syntax-highlighted DSL; "Expression (incomplete)" label when chain incomplete)
-│   ├── Result row (useExpressionPreview; "Load test data" prompt when sourceData null)
-│   └── Validation row (Structure badge + Output Type badge)
-├── ValidationSummaryRow (FS-051 T-04 — pinned; hidden when no diagnostics)
-├── UnsavedDiffPanel (FS-040 T-05 — collapsible, always rendered)
-│   ├── Trigger button (aria-expanded, unsaved badge when hasUnsavedChanges)
-│   └── Expanded content (Last saved vs Current draft, status badge, Revert to saved button)
+├── ValidationSummaryRow (pinned; hidden when no diagnostics)
 ├── Expression Area (drop zone for DnD):
-│   ├── ChainBuilderShell (builder mode) — see Chain-Based Builder Model below
-│   └── RawDslEditor (editor mode)
-└── Action Row (AI buttons: Suggest, Explain, Fix placeholder; Reset draft with confirmation; Discard changes)
+│   ├── SmartBuilderPanel (default guided scalar surface, FS-094)
+│   │   ├── InputTray
+│   │   ├── BuilderActionList (enabled-first + disabled reasons)
+│   │   ├── ConditionBuilder slot-focus controls (left/right/then/else)
+│   │   ├── Quick input-kind actions (fixed value, constant, expression, item, parent)
+│   │   └── ComplexExpressionWarning fallback for non-decomposable expressions
+│   ├── ChainBuilderShell (legacy guided scalar path; compatibility seam)
+│   └── RawDslEditor (Advanced/editor mode)
+└── Action + details surfaces (AI buttons, reset/discard, details panel)
 ```
 
-Note: "Remove mapping" is in the header overflow menu (⋮), not in the action row. AI buttons are present in ScalarFieldBuilder only — intentionally omitted from ArrayBuilder until array-level AI features exist.
+Note: "Remove mapping" remains in the header overflow menu (⋮). AI buttons remain scalar-only and are intentionally omitted from ArrayBuilder until array-level AI features exist. FS-094 preserves this policy while replacing default scalar guided internals with SmartBuilderPanel.
+
+#### FS-094 Smart Input Tray Builder contracts (replacement architecture)
+
+FS-094 establishes Smart Builder as a **replacement architecture** for default scalar guided authoring. It is not an extension of `ChainBuilderState`.
+
+Canonical contracts:
+
+- **State model:** `SmartBuilderDraft` (ordered `inputs`, optional focused slot id, optional slot-scoped inputs, `composition`, generated `expression`, history, validation state).
+- **Input kinds:** `primary | enrichment | constant | static | item | parent | expression`.
+- **Selection event contract:** Source panel stages metadata objects (not plain path strings). MappingEditor/SmartBuilder owns routing decision:
+  - no focused slot -> append to tray (or create direct mapping for first input)
+  - focused slot -> fill slot-scoped reference (no top-level append for that click)
+- **Action catalog/resolver boundary:** actions are catalog-driven with enabled-first ordering and deterministic disabled reasons. Guided actions must map only to registered DSL functions.
+- **Guided validity boundary:** guided generation emits registered/valid DSL only; raw editor can be temporarily invalid while editing.
+- **Save boundary:** smart builder updates drafts immediately; persistence still occurs only on global Save.
+- **Validation boundary:** engine validation remains canonical; Smart Builder does not maintain a parallel correctness engine.
+- **Hydration boundary:** decomposable saved expressions hydrate to guided draft; non-decomposable expressions open Advanced mode with complex-expression banner.
+
+Determinism and Rev 1 decisions captured in architecture:
+
+- Input insertion order is canonical when composition-specific operand ordering is absent.
+- Tray reorder UI is deferred in Rev 1.
+- Existing `ArrayBuilder` remains the detailed deep-array editor.
+
+Enrichment + array integration contracts:
+
+- Guided label is **Enrichment input**; generated DSL uses strict enrichment forms:
+  - alias root -> `external("alias")`
+  - nested field -> `get(external("alias"), "path")`
+- Array-capable actions are represented in the action catalog; deep array authoring uses deterministic handoff to `ArrayBuilder` (`Open Array Builder`) to preserve `item()/parent()` scope semantics.
 
 #### Component hierarchy (Target View / ArrayBuilder) — FS-043, updated FS-051
 

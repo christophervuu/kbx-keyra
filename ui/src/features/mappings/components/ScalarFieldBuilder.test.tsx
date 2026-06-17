@@ -1,12 +1,11 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ScalarFieldBuilder } from './ScalarFieldBuilder';
 import type { ScalarFieldBuilderProps } from './ScalarFieldBuilder';
-import { PreviewProvider } from '../context/preview-context';
-import { usePreviewSetters } from '../context/preview-context';
+import type { SmartBuilderDraft } from '../lib/smart-builder-state';
 
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
@@ -165,14 +164,14 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('header-type-badge')).toHaveTextContent('string');
   });
 
-  it('shows Required label when required=true', () => {
+  it('shows required asterisk when required=true', () => {
     renderBuilder({ selectedTargetRequired: true });
-    expect(screen.getByTestId('header-required-label')).toHaveTextContent('Required');
+    expect(screen.getByTestId('header-required-asterisk')).toHaveTextContent('*');
   });
 
-  it('does not show required label when required=false', () => {
+  it('does not show required asterisk when required=false', () => {
     renderBuilder({ selectedTargetRequired: false });
-    expect(screen.queryByTestId('header-required-label')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('header-required-asterisk')).not.toBeInTheDocument();
   });
 
   it('shows current mapping status icon', () => {
@@ -288,7 +287,7 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('scalar-entry-mode-source')).toHaveTextContent('Source field');
     expect(screen.getByTestId('scalar-entry-mode-static')).toHaveTextContent('Static value');
     expect(screen.getByTestId('scalar-entry-mode-constant')).toHaveTextContent('Constant');
-    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('External source');
+    expect(screen.getByTestId('scalar-entry-mode-external')).toHaveTextContent('Enrichment input');
     expect(screen.getByTestId('scalar-entry-mode-unmapped')).toHaveTextContent('Leave unmapped');
     expect(screen.queryByTestId('scalar-source-field-section')).not.toBeInTheDocument();
   });
@@ -363,32 +362,39 @@ describe('ScalarFieldBuilder', () => {
     expect(updateDraft).toHaveBeenCalledWith('patient.firstName', 'external("lookupTable")');
   });
 
-  it('supports leave unmapped value source and shows BA-friendly validation copy', async () => {
+  it('supports leave unmapped value source and shows unmapped guidance copy', async () => {
     const user = userEvent.setup();
     renderBuilder({ selectedTargetRequired: true });
 
     await user.click(screen.getByTestId('scalar-entry-mode-unmapped'));
 
-    expect(screen.getByTestId('scalar-unmapped-section')).toBeInTheDocument();
-    expect(screen.getByTestId('builder-validation-message')).toHaveTextContent('Required field intentionally unmapped');
+    expect(screen.getByTestId('scalar-unmapped-section')).toHaveTextContent(
+      'This field is intentionally left unmapped. You can return later and configure it.',
+    );
   });
 
-  it('keeps advanced mode DSL hidden by default and reveals it when enabled', async () => {
+  it('uses Builder/Editor mode toggles instead of advanced mode toggle controls', async () => {
     const user = userEvent.setup();
     renderBuilder({ currentExpression: 'source("firstName")' });
 
-    expect(screen.getByTestId('advanced-mode-hidden')).toBeInTheDocument();
+    expect(screen.queryByTestId('advanced-mode-hidden')).not.toBeInTheDocument();
     expect(screen.queryByTestId('advanced-mode-dsl-panel')).not.toBeInTheDocument();
 
-    await user.click(screen.getByTestId('advanced-mode-toggle'));
-    expect(screen.getByTestId('advanced-mode-dsl-panel')).toBeInTheDocument();
+    await user.click(screen.getByTestId('mode-toggle-editor'));
+    expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
   });
 
-  it('renders builder guidance sections for output, notes, and value source label', () => {
+  it('renders collapsible details section for output and notes guidance', async () => {
+    const user = userEvent.setup();
     renderBuilder();
+
+    expect(screen.getByTestId('builder-details-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('builder-target-output')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('builder-notes-input')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('builder-details-toggle'));
     expect(screen.getByTestId('builder-target-output')).toBeInTheDocument();
     expect(screen.getByTestId('builder-notes-input')).toBeInTheDocument();
-    expect(screen.getByTestId('builder-value-source-label')).toBeInTheDocument();
   });
 
   it('switches to editor mode when Editor toggle is clicked', () => {
@@ -453,7 +459,7 @@ describe('ScalarFieldBuilder', () => {
     renderBuilder();
     expect(screen.getByTestId('ai-suggest-btn')).toHaveAttribute(
       'title',
-      'Generate a DSL expression from natural language',
+      'Generate an expression from natural language',
     );
     // Explain button tooltip depends on expression state:
     // empty expression → "No expression to explain"
@@ -1003,98 +1009,24 @@ describe('ScalarFieldBuilder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // FS-040 T-02/T-03: BuilderFeedbackArea replaces LiveResultDisplay in ScalarFieldBuilder
-  // (AE-05 / AE-06 — result display now lives in BuilderFeedbackArea)
+  // FS-040/T-02 regression guard: legacy BuilderFeedbackArea is no longer rendered
   // ---------------------------------------------------------------------------
 
-  describe('FS-040 T-02: BuilderFeedbackArea integration', () => {
-    /** Wrapper that seeds PreviewContext with a parsed sourceData value */
-    function WithSourceData({
-      sourceData,
-      children,
-    }: {
-      sourceData: unknown | null;
-      children: React.ReactNode;
-    }) {
-      const { setSourceData } = usePreviewSetters();
-      useEffect(() => {
-        setSourceData(sourceData);
-      }, [sourceData, setSourceData]);
-      return <>{children}</>;
-    }
-
-    function renderBuilderWithContext(
-      overrides: Partial<ScalarFieldBuilderProps> = {},
-      sourceData: unknown | null = null,
-    ) {
-      const props = { ...DEFAULT_PROPS, ...overrides };
-      const mockAdapter: Partial<ApiAdapter> = {
-        explainRule: vi.fn().mockResolvedValue({ explanation: 'Test explanation.' } satisfies ExplainRuleResult),
-      };
-      return render(
-        <AdapterProvider adapter={mockAdapter as ApiAdapter}>
-          <PreviewProvider>
-            <WithSourceData sourceData={sourceData}>
-              <ScalarFieldBuilder {...props} />
-            </WithSourceData>
-          </PreviewProvider>
-        </AdapterProvider>,
-      );
-    }
-
-    it('renders BuilderFeedbackArea (AE-04)', () => {
-      renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
+  describe('FS-040 T-02 regression guard', () => {
+    it('does not render legacy BuilderFeedbackArea in builder mode', () => {
+      renderBuilder();
+      expect(screen.queryByTestId('builder-feedback-area')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-compact-result-summary')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Expression feedback' })).not.toBeInTheDocument();
     });
 
-    it('BuilderFeedbackArea has correct ARIA region label', () => {
-      renderBuilderWithContext({}, null);
-      expect(screen.getByRole('region', { name: 'Expression feedback' })).toBeInTheDocument();
-    });
-
-    it('shows "Load test data to see live results." when no sourceData in context (AE-06)', () => {
-      renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('feedback-compact-result-summary')).toHaveTextContent('Result: no test data');
-    });
-
-    it('feedback result area is present in the builder (AE-05)', () => {
-      renderBuilderWithContext({}, null);
-      expect(screen.getByTestId('feedback-compact-result-summary')).toBeInTheDocument();
-    });
-
-    it('keeps feedback result area rendered when sourceData is provided (AE-05)', async () => {
-      renderBuilderWithContext({}, { firstName: 'Alice' });
-      await waitFor(() => {
-        expect(screen.getByTestId('feedback-compact-result-summary')).toBeInTheDocument();
-      });
-    });
-
-    it('renders validation structure badge', () => {
-      renderBuilderWithContext({}, null);
-      expect(screen.queryByTestId('validation-structure-badge')).not.toBeInTheDocument();
-    });
-
-    it('renders validation output type badge', () => {
-      renderBuilderWithContext({}, null);
-      expect(screen.queryByTestId('validation-output-type-badge')).not.toBeInTheDocument();
-    });
-
-    it('BuilderFeedbackArea is visible in both builder and editor modes', () => {
-      renderBuilderWithContext({}, null);
-      // Builder mode — feedback area present
-      expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
-
-      // Switch to editor mode
+    it('does not render legacy BuilderFeedbackArea in editor mode', () => {
+      renderBuilder();
       fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      // Feedback area still present
-      expect(screen.getByTestId('builder-feedback-area')).toBeInTheDocument();
-    });
 
-    it('validation tags remain hidden in editor mode', () => {
-      renderBuilderWithContext({}, null);
-      fireEvent.click(screen.getByTestId('mode-toggle-editor'));
-      expect(screen.queryByTestId('validation-structure-badge')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('validation-output-type-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('builder-feedback-area')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('feedback-compact-result-summary')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Expression feedback' })).not.toBeInTheDocument();
     });
   });
 
@@ -1334,6 +1266,64 @@ describe('ScalarFieldBuilder', () => {
 
       expect(screen.queryByTestId('explanation-panel')).not.toBeInTheDocument();
     });
+  });
+
+  it('forwards parameter editor lifecycle callbacks from smart builder panel', () => {
+    const onSmartBeginActionParameterEdit = vi.fn();
+    const onSmartUpdateActionParameterDraft = vi.fn();
+    const onSmartApplyAction = vi.fn();
+    const onSmartCancelActionParameterDraft = vi.fn();
+
+    const draft: SmartBuilderDraft = {
+      targetPath: 'patient.firstName',
+      targetType: 'string',
+      isRequired: false,
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary',
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      focusedSlotId: null,
+      slotScopedInputs: {},
+      composition: { kind: 'direct', inputId: 'a' },
+      postSteps: [],
+      expression: 'source("firstName")',
+      previousExpressions: [],
+      validation: { status: 'valid' },
+      pendingActionDraft: {
+        actionId: 'text.substring',
+        values: { start: 1 },
+        validation: { isValid: true, issues: [] },
+      },
+    };
+
+    renderBuilder({
+      preferSmartBuilder: true,
+      smartHydrationOverride: { kind: 'guided', draft },
+      onSmartBeginActionParameterEdit,
+      onSmartUpdateActionParameterDraft,
+      onSmartApplyAction,
+      onSmartCancelActionParameterDraft,
+    });
+
+    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
+    fireEvent.click(screen.getByTestId('smart-picker-action-text.substring'));
+    expect(onSmartBeginActionParameterEdit).toHaveBeenCalledWith('text.substring');
+
+    fireEvent.change(screen.getByTestId('smart-parameter-input-start'), { target: { value: '2' } });
+    expect(onSmartUpdateActionParameterDraft).toHaveBeenCalledWith('text.substring', 'start', '2');
+
+    fireEvent.click(screen.getByTestId('smart-parameter-apply'));
+    expect(onSmartApplyAction).toHaveBeenCalledWith('text.substring', undefined);
+
+    fireEvent.click(screen.getByTestId('smart-parameter-cancel'));
+    expect(onSmartCancelActionParameterDraft).toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------

@@ -34,7 +34,19 @@ import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
 import { useAutoMapWorkspace, useExpressionBuilder, useMappingEditor, useTargetStatus, useVersionHistory } from '@/features/mappings/hooks';
-import { getPendingAutoMapSession } from '@/features/mappings/lib';
+import {
+  type SmartBuilderDraft,
+  createActionParameterDraft,
+  createEmptySmartBuilderDraft,
+  generateSmartBuilderExpression,
+  getValidatedActionParameters,
+  getPendingAutoMapSession,
+  hydrateSmartBuilderFromExpression,
+  setSlotScopedInput,
+  toSmartBuilderCompositionPatchFromParameters,
+  toSmartBuilderTransformArgsFromParameters,
+  updateSmartBuilderExpression,
+} from '@/features/mappings/lib';
 import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-display';
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
@@ -175,6 +187,607 @@ function resolveValueAtPath(sourceData: unknown, fieldPath: string): unknown {
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
+}
+
+type SmartSelectionOutcome =
+  | 'created-direct-draft'
+  | 'appended-to-tray'
+  | 'filled-focused-slot';
+
+interface SmartSelectionResult {
+  readonly outcome: SmartSelectionOutcome;
+  readonly draft: SmartBuilderDraft;
+  readonly expression: string;
+}
+
+function isSameStagedAsInput(
+  input: SmartBuilderDraft['inputs'][number],
+  staged: StagedInputField,
+): boolean {
+  switch (staged.kind) {
+    case 'primary':
+      return input.sourceKind === 'primary' && input.path === staged.path;
+    case 'enrichment':
+      return input.sourceKind === 'enrichment' && input.externalName === staged.alias && input.path === staged.path;
+    case 'constant':
+      return input.sourceKind === 'constant' && input.constantName === staged.constantName;
+    case 'static':
+      return input.sourceKind === 'static' && JSON.stringify(input.staticValue ?? null) === JSON.stringify(staged.staticValue ?? null);
+    case 'item':
+      return input.sourceKind === 'item' && input.path === staged.path;
+    case 'parent':
+      return input.sourceKind === 'parent' && input.path === staged.path;
+    case 'expression':
+      return input.sourceKind === 'expression' && (input.rawExpression ?? '') === (staged.rawExpression ?? staged.expression);
+  }
+}
+
+function removeInputFromSmartDraft(
+  draft: SmartBuilderDraft,
+  inputId: string,
+): SmartBuilderDraft {
+  const remainingInputs = draft.inputs.filter((input) => input.id !== inputId);
+
+  let composition = draft.composition;
+  if (remainingInputs.length === 0) {
+    composition = null;
+  } else if (composition?.kind === 'direct' && composition.inputId === inputId) {
+    composition = { kind: 'direct', inputId: remainingInputs[0]!.id };
+  } else if (composition?.kind === 'concat') {
+    const nextIds = (composition.inputIds ?? draft.inputs.map((input) => input.id)).filter((id) => id !== inputId);
+    composition = nextIds.length <= 1
+      ? { kind: 'direct', inputId: nextIds[0] ?? remainingInputs[0]!.id }
+      : { ...composition, inputIds: nextIds };
+  }
+
+  const nextDraft = {
+    ...draft,
+    inputs: remainingInputs,
+    composition,
+  };
+
+  return updateSmartBuilderExpression(nextDraft, generateSmartBuilderExpression(nextDraft));
+}
+
+interface SmartActionMeta {
+  readonly activeActionId: string | null;
+  readonly concatSeparator: string;
+  readonly announcement: string | null;
+}
+
+function deriveSmartActionMetaFromDraft(draft: SmartBuilderDraft): SmartActionMeta {
+  const composition = draft.composition;
+  if (!composition) {
+    return { activeActionId: null, concatSeparator: ' ', announcement: null };
+  }
+
+  if (composition.kind === 'concat') {
+    return {
+      activeActionId: 'text.concat',
+      concatSeparator: composition.separator ?? ' ',
+      announcement: null,
+    };
+  }
+  if (composition.kind === 'coalesce') {
+    return { activeActionId: 'null.coalesce', concatSeparator: ' ', announcement: null };
+  }
+  if (composition.kind === 'condition') {
+    return { activeActionId: 'condition.if', concatSeparator: ' ', announcement: null };
+  }
+  if (composition.kind === 'advancedExpression') {
+    return { activeActionId: 'advanced.expression', concatSeparator: ' ', announcement: null };
+  }
+
+  return { activeActionId: null, concatSeparator: ' ', announcement: null };
+}
+
+export function applySmartActionToDraft(
+  draft: SmartBuilderDraft,
+  actionId: string,
+): SmartBuilderDraft {
+  const parameterResolution = getValidatedActionParameters({ draft, actionId });
+  if (!parameterResolution.ok) {
+    return draft;
+  }
+
+  const actionParameters = parameterResolution.values;
+  let nextDraft: SmartBuilderDraft = draft;
+
+  const applyInputTransform = (
+    functionName: string,
+    args?: readonly ({ kind: 'static'; value: unknown } | { kind: 'expression'; expression: string })[],
+  ): SmartBuilderDraft => {
+    const firstInput = draft.inputs[0];
+    if (!firstInput) return draft;
+
+    const nextInputs = draft.inputs.map((input) =>
+      input.id === firstInput.id
+        ? {
+            ...input,
+            transforms: [...input.transforms, args ? { functionName, args } : { functionName }],
+          }
+        : input,
+    );
+
+    return {
+      ...draft,
+      inputs: nextInputs,
+    };
+  };
+
+  const applyInputTransformAction = (id: string): SmartBuilderDraft | null => {
+    switch (id) {
+      case 'text.upper':
+        return applyInputTransform('upper');
+      case 'text.lower':
+        return applyInputTransform('lower');
+      case 'text.trim':
+        return applyInputTransform('trim');
+      case 'text.substring':
+        return applyInputTransform('substring', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      case 'text.replace': {
+        const mode = actionParameters.mode === 'first' ? 'replace' : 'replaceAll';
+        return applyInputTransform(mode, toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      }
+      case 'text.length':
+        return applyInputTransform('length');
+      case 'text.split':
+        return applyInputTransform('split', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      case 'number.round':
+        return applyInputTransform('round');
+      case 'number.abs':
+        return applyInputTransform('abs');
+      case 'date.format':
+        return applyInputTransform('formatDate', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      case 'array.flatten':
+        return applyInputTransform('flatten');
+      case 'array.first':
+        return applyInputTransform('first');
+      case 'array.nth':
+        return applyInputTransform('nth', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      case 'array.join':
+        return applyInputTransform('join', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      case 'array.count':
+        return applyInputTransform('count');
+      case 'array.get':
+        return applyInputTransform('get', [{ kind: 'static', value: 'field' }]);
+      case 'null.isNull':
+        return applyInputTransform('isNull');
+      case 'convert.cast':
+        return applyInputTransform('cast', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+      default:
+        return null;
+    }
+  };
+
+  switch (actionId) {
+    case 'base.direct': {
+      const first = draft.inputs[0];
+      if (!first) return draft;
+      nextDraft = {
+        ...draft,
+        composition: { kind: 'direct', inputId: first.id },
+      };
+      break;
+    }
+    case 'text.concat': {
+      if (draft.inputs.length === 0) return draft;
+      const inputIds = draft.inputs.map((input) => input.id);
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'concat',
+          inputIds,
+          separator: ' ',
+        },
+      };
+      break;
+    }
+    case 'null.coalesce': {
+      if (draft.inputs.length === 0) return draft;
+      const inputIds = draft.inputs.map((input) => input.id);
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'coalesce',
+          inputIds,
+        },
+      };
+      break;
+    }
+    case 'number.add':
+    case 'number.subtract':
+    case 'number.multiply':
+    case 'number.divide': {
+      if (draft.inputs.length === 0) return draft;
+      const operator = actionId === 'number.add'
+        ? 'add'
+        : actionId === 'number.subtract'
+          ? 'subtract'
+          : actionId === 'number.multiply'
+            ? 'multiply'
+            : 'divide';
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'math',
+          operator,
+          inputIds: draft.inputs.map((input) => input.id),
+        },
+      };
+      break;
+    }
+    case 'null.default': {
+      const first = draft.inputs[0];
+      if (!first) return draft;
+      const compositionPatch = toSmartBuilderCompositionPatchFromParameters({
+        actionId,
+        values: actionParameters,
+        firstInputId: first.id,
+      });
+      if (!compositionPatch) return draft;
+      nextDraft = {
+        ...draft,
+        composition: compositionPatch,
+      };
+      break;
+    }
+    case 'lookup.valueMap': {
+      const first = draft.inputs[0];
+      if (!first) return draft;
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'valueMap',
+          inputId: first.id,
+          mappings: [],
+          fallback: { kind: 'static', value: '' },
+        },
+      };
+      break;
+    }
+    case 'condition.compare':
+    case 'condition.if': {
+      const left = draft.inputs[0];
+      const right = draft.inputs[1];
+      if (!left) return draft;
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'condition',
+          clauses: [{
+            predicates: [{
+              left: { kind: 'input', inputId: left.id },
+              operator: 'eq',
+              right: right ? { kind: 'input', inputId: right.id } : { kind: 'static', value: '' },
+            }],
+            thenOutput: { kind: 'static', value: '' },
+          }],
+          elseOutput: { kind: 'static', value: '' },
+        },
+      };
+      break;
+    }
+    case 'condition.truthy': {
+      const first = draft.inputs[0];
+      if (!first) return draft;
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'condition',
+          clauses: [{
+            predicates: [{
+              left: { kind: 'input', inputId: first.id },
+              operator: 'isTruthy',
+            }],
+            thenOutput: { kind: 'static', value: '' },
+          }],
+          elseOutput: { kind: 'static', value: '' },
+        },
+      };
+      break;
+    }
+    case 'text.upper': {
+      nextDraft = applyInputTransform('upper');
+      break;
+    }
+    case 'text.phoneDigits': {
+      const firstInput = draft.inputs[0];
+      if (!firstInput) return draft;
+
+      const nextInputs = draft.inputs.map((input) =>
+        input.id === firstInput.id
+          ? {
+              ...input,
+              transforms: [
+                ...input.transforms,
+                { functionName: 'trim' },
+                { functionName: 'replaceAll', args: [{ kind: 'static', value: '(' }, { kind: 'static', value: '' }] },
+                { functionName: 'replaceAll', args: [{ kind: 'static', value: ')' }, { kind: 'static', value: '' }] },
+                { functionName: 'replaceAll', args: [{ kind: 'static', value: '-' }, { kind: 'static', value: '' }] },
+                { functionName: 'replaceAll', args: [{ kind: 'static', value: ' ' }, { kind: 'static', value: '' }] },
+              ],
+            }
+          : input,
+      );
+
+      nextDraft = {
+        ...draft,
+        inputs: nextInputs,
+      };
+      break;
+    }
+    case 'text.lower':
+    case 'text.trim':
+    case 'text.substring':
+    case 'text.replace':
+    case 'text.length':
+    case 'text.split':
+    case 'number.round':
+    case 'number.abs':
+    case 'date.format':
+    case 'array.flatten':
+    case 'array.first':
+    case 'array.nth':
+    case 'array.join':
+    case 'array.count':
+    case 'array.get':
+    case 'null.isNull':
+    case 'convert.cast': {
+      const transformed = applyInputTransformAction(actionId);
+      if (transformed === null) return draft;
+      nextDraft = transformed;
+      break;
+    }
+    case 'array.array': {
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'arrayBuild',
+          inputIds: draft.inputs.map((input) => input.id),
+        },
+      };
+      break;
+    }
+    case 'array.merge': {
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'arrayMerge',
+          inputIds: draft.inputs.map((input) => input.id),
+        },
+      };
+      break;
+    }
+    case 'advanced.expression': {
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'advancedExpression',
+          expression: draft.expression,
+        },
+      };
+      break;
+    }
+    default:
+      return draft;
+  }
+
+  return updateSmartBuilderExpression(nextDraft, generateSmartBuilderExpression(nextDraft));
+}
+
+function createBuilderInputId(existingIds: readonly string[]): string {
+  let next = existingIds.length + 1;
+  let candidate = `input-${next}`;
+  const seen = new Set(existingIds);
+  while (seen.has(candidate)) {
+    next += 1;
+    candidate = `input-${next}`;
+  }
+  return candidate;
+}
+
+function mapStagedToBuilderInput(
+  staged: StagedInputField,
+  inputId: string,
+): ReturnType<typeof createEmptySmartBuilderDraft>['inputs'][number] {
+  if (staged.kind === 'constant') {
+    return {
+      id: inputId,
+      sourceKind: 'constant',
+      label: staged.label ?? staged.constantName ?? 'Constant',
+      constantName: staged.constantName,
+      valueType: staged.valueType ?? 'unknown',
+      sampleValue: staged.sampleValue,
+      transforms: [],
+    };
+  }
+
+  if (staged.kind === 'static') {
+    return {
+      id: inputId,
+      sourceKind: 'static',
+      label: staged.label ?? 'Fixed value',
+      staticValue: staged.staticValue,
+      valueType: staged.valueType ?? 'unknown',
+      sampleValue: staged.sampleValue,
+      transforms: [],
+    };
+  }
+
+  if (staged.kind === 'item' || staged.kind === 'parent') {
+    return {
+      id: inputId,
+      sourceKind: staged.kind,
+      label: staged.label ?? staged.path,
+      path: staged.path,
+      valueType: staged.valueType ?? 'unknown',
+      sampleValue: staged.sampleValue,
+      transforms: [],
+    };
+  }
+
+  if (staged.kind === 'expression') {
+    return {
+      id: inputId,
+      sourceKind: 'expression',
+      label: staged.label ?? 'Expression input',
+      rawExpression: staged.rawExpression ?? staged.expression,
+      valueType: staged.valueType ?? 'unknown',
+      sampleValue: staged.sampleValue,
+      transforms: [],
+    };
+  }
+
+  if (staged.kind === 'enrichment') {
+    return {
+      id: inputId,
+      sourceKind: 'enrichment',
+      label: staged.alias ? `${staged.alias}.${staged.path}` : staged.path,
+      externalName: staged.alias,
+      path: staged.path,
+      valueType: staged.valueType ?? 'unknown',
+      sampleValue: staged.sampleValue,
+      transforms: [],
+    };
+  }
+
+  return {
+    id: inputId,
+    sourceKind: 'primary',
+    label: staged.path,
+    path: staged.path,
+    valueType: staged.valueType ?? 'unknown',
+    sampleValue: staged.sampleValue,
+    transforms: [],
+  };
+}
+
+export function applyStagedInputToSmartDraft(params: {
+  readonly draft: SmartBuilderDraft;
+  readonly staged: StagedInputField;
+}): SmartSelectionResult {
+  const { draft, staged } = params;
+
+  const existingMatch = draft.inputs.find((input) => isSameStagedAsInput(input, staged));
+  if (existingMatch && !draft.focusedSlotId) {
+    const toggled = removeInputFromSmartDraft(draft, existingMatch.id);
+    return {
+      outcome: 'appended-to-tray',
+      draft: toggled,
+      expression: toggled.expression,
+    };
+  }
+
+  const nextInput = mapStagedToBuilderInput(
+    staged,
+    createBuilderInputId(draft.inputs.map((input) => input.id)),
+  );
+
+  if (draft.focusedSlotId && draft.focusedSlotId.trim().length > 0) {
+    const focusedSlotId = draft.focusedSlotId;
+    let nextDraft: SmartBuilderDraft = setSlotScopedInput(draft, focusedSlotId, nextInput);
+
+    const argumentFromFocusedInput = {
+      kind: 'expression' as const,
+      expression: staged.expression,
+    };
+
+    if (focusedSlotId.startsWith('condition:')) {
+      const composition = nextDraft.composition?.kind === 'condition'
+        ? nextDraft.composition
+        : {
+            kind: 'condition' as const,
+            clauses: [{
+              predicates: [{
+                left: { kind: 'static' as const, value: '' },
+                operator: 'eq' as const,
+                right: { kind: 'static' as const, value: '' },
+              }],
+              thenOutput: { kind: 'static' as const, value: '' },
+            }],
+            elseOutput: { kind: 'static' as const, value: '' },
+          };
+
+      const [firstClause, ...remainingClauses] = composition.clauses;
+      const [firstPredicate, ...remainingPredicates] = firstClause.predicates;
+
+      const updatedPredicate =
+        focusedSlotId === 'condition:left'
+          ? { ...firstPredicate, left: argumentFromFocusedInput }
+          : focusedSlotId === 'condition:right'
+            ? { ...firstPredicate, right: argumentFromFocusedInput }
+            : firstPredicate;
+
+      const updatedClause = {
+        ...firstClause,
+        predicates: [updatedPredicate, ...remainingPredicates],
+        thenOutput: focusedSlotId === 'condition:then'
+          ? argumentFromFocusedInput
+          : firstClause.thenOutput,
+      };
+
+      nextDraft = {
+        ...nextDraft,
+        composition: {
+          ...composition,
+          clauses: [updatedClause, ...remainingClauses],
+          elseOutput: focusedSlotId === 'condition:else'
+            ? argumentFromFocusedInput
+            : composition.elseOutput,
+        },
+      };
+    }
+
+    const expression = generateSmartBuilderExpression(nextDraft);
+    const withExpression = updateSmartBuilderExpression(nextDraft, expression);
+    return {
+      outcome: 'filled-focused-slot',
+      draft: withExpression,
+      expression: withExpression.expression,
+    };
+  }
+
+  if (draft.inputs.length === 0) {
+    const directDraft = {
+      ...draft,
+      inputs: [nextInput],
+      composition: { kind: 'direct' as const, inputId: nextInput.id },
+    };
+    const expression = generateSmartBuilderExpression(directDraft);
+    const withExpression = updateSmartBuilderExpression(directDraft, expression);
+    return {
+      outcome: 'created-direct-draft',
+      draft: withExpression,
+      expression: withExpression.expression,
+    };
+  }
+
+  const appended = {
+    ...draft,
+    inputs: [...draft.inputs, nextInput],
+    composition: draft.composition,
+  };
+  const expression = generateSmartBuilderExpression(appended);
+  const withExpression = updateSmartBuilderExpression(appended, expression);
+  return {
+    outcome: 'appended-to-tray',
+    draft: withExpression,
+    expression: withExpression.expression,
+  };
+}
+
+export function shouldUseArrayBuilderForSmartDraft(
+  draft: SmartBuilderDraft,
+): boolean {
+  const hasArraySourceKind = draft.inputs.some((input) =>
+    input.sourceKind === 'item' || input.sourceKind === 'parent',
+  );
+  const hasArrayTypeInput = draft.inputs.some((input) => input.valueType === 'array');
+  const compositionKind = draft.composition?.kind;
+  const hasArrayComposition = compositionKind === 'arrayBuild' || compositionKind === 'arrayMerge';
+
+  return draft.targetType === 'array' || hasArraySourceKind || hasArrayTypeInput || hasArrayComposition;
 }
 
 // ---------------------------------------------------------------------------
@@ -869,6 +1482,32 @@ export default function MappingEditor() {
   // ---------------------------------------------------------------------------
   const [selectedRuleIndex, setSelectedRuleIndex] = useState<number | null>(null);
   const [stagedInputField, setStagedInputField] = useState<StagedInputField | null>(null);
+  const smartDraftByTargetRef = useRef(new Map<string, ReturnType<typeof createEmptySmartBuilderDraft>>());
+  const [smartDraftByTargetState, setSmartDraftByTargetState] = useState<Record<string, SmartBuilderDraft>>({});
+  const [smartActionMetaByTarget, setSmartActionMetaByTarget] = useState<Record<string, SmartActionMeta>>({});
+
+  const setSmartDraftForTarget = useCallback((targetPath: string, draft: SmartBuilderDraft) => {
+    smartDraftByTargetRef.current.set(targetPath, draft);
+    setSmartDraftByTargetState((prev) => ({ ...prev, [targetPath]: draft }));
+    setSmartActionMetaByTarget((prev) => {
+      const derived = deriveSmartActionMetaFromDraft(draft);
+      return {
+        ...prev,
+        [targetPath]: {
+          ...(prev[targetPath] ?? { activeActionId: null, concatSeparator: ' ', announcement: null }),
+          activeActionId: derived.activeActionId,
+          concatSeparator: derived.concatSeparator,
+        },
+      };
+    });
+  }, []);
+
+  const handleSmartFocusedSlotChange = useCallback((targetPath: string, slotId: string | null) => {
+    const existing = smartDraftByTargetRef.current.get(targetPath);
+    if (!existing) return;
+    const nextDraft = { ...existing, focusedSlotId: slotId };
+    setSmartDraftForTarget(targetPath, nextDraft);
+  }, [setSmartDraftForTarget]);
   const [isSourceBrowseOpen, setIsSourceBrowseOpen] = useState(false);
   const [isSourcePanelHidden, setIsSourcePanelHidden] = useState(false);
   const [isBuilderPanelHidden, setIsBuilderPanelHidden] = useState(false);
@@ -939,6 +1578,16 @@ export default function MappingEditor() {
     [editor.config, editor.rules],
   );
 
+  const effectiveRulesByTarget = useMemo(() => {
+    const map = new Map<string, typeof effectiveRules[number][]>();
+    for (const rule of effectiveRules) {
+      const bucket = map.get(rule.target) ?? [];
+      bucket.push(rule);
+      map.set(rule.target, bucket);
+    }
+    return map;
+  }, [effectiveRules]);
+
   // ---------------------------------------------------------------------------
   // Derived: target status map (for ObjectSummaryPanel child info)
   // ---------------------------------------------------------------------------
@@ -957,6 +1606,14 @@ export default function MappingEditor() {
 
     for (const [path, indexes] of ruleIndexesByTarget.entries()) {
       if (!statusMap.has(path)) continue;
+
+      const rulesAtPath = effectiveRulesByTarget.get(path) ?? [];
+      const hasNonEmptyExpression = rulesAtPath.some((rule) => rule.expression.trim().length > 0);
+      if (!hasNonEmptyExpression) {
+        statusMap.set(path, 'unmapped');
+        continue;
+      }
+
       let hasErrorDiagnostics = false;
       let hasWarningDiagnostics = false;
       for (const ruleIndex of indexes) {
@@ -979,7 +1636,7 @@ export default function MappingEditor() {
       }
     }
     return statusMap;
-  }, [editor.parsedTargetSchema, effectiveRules, editor.validation]);
+  }, [editor.parsedTargetSchema, effectiveRules, effectiveRulesByTarget, editor.validation]);
 
   // Leaf-field coverage map — used by ObjectSummaryPanel for accurate x/y ratio
   const { coverageMap: leafCoverageMap } = useTargetStatus(
@@ -1028,6 +1685,133 @@ export default function MappingEditor() {
     return editor.validation.diagnosticsForRule(selectedRuleIndexForSmartFix);
   }, [editor.validation, selectedRuleIndexForSmartFix]);
 
+  const resolveSmartDraftForTarget = useCallback((targetPath: string) => {
+    const existing = smartDraftByTargetRef.current.get(targetPath);
+    if (existing) return { draft: existing, guided: true as const };
+
+    const node = editor.parsedTargetSchema
+      ? findNodeByPath(editor.parsedTargetSchema.nodes, targetPath)
+      : undefined;
+
+    const targetType = node ? toTargetFieldType(node.type) : 'string';
+    const isRequired = node?.isRequired ?? false;
+    const effectiveExpression = editor.actions.getDraftExpression(targetPath)
+      ?? editor.rules.find((rule) => rule.target === targetPath)?.expression
+      ?? '';
+
+    const hydrated = hydrateSmartBuilderFromExpression({
+      expression: effectiveExpression,
+      targetPath,
+      targetType,
+      isRequired,
+      sourceValueTypeByPath: Object.fromEntries(
+        (editor.parsedSourceSchema?.nodes ?? []).map((sourceNode) => [
+          sourceNode.path,
+          toTargetFieldType(sourceNode.type),
+        ]),
+      ),
+    });
+
+    if (hydrated.kind === 'advanced') {
+      return { draft: null, guided: false as const };
+    }
+
+    setSmartDraftForTarget(targetPath, hydrated.draft);
+    return { draft: hydrated.draft, guided: true as const };
+  }, [editor.actions, editor.parsedSourceSchema?.nodes, editor.parsedTargetSchema, editor.rules, setSmartDraftForTarget]);
+
+  const selectedNodeSmartHydration = useMemo(() => {
+    if (!selectedNode) return null;
+    const existing = smartDraftByTargetState[selectedNode.path];
+    if (!existing) return null;
+    return { kind: 'guided' as const, draft: existing };
+  }, [selectedNode, smartDraftByTargetState]);
+
+  const clearSmartParameterDraftForTarget = useCallback((targetPath: string) => {
+    const existing = smartDraftByTargetRef.current.get(targetPath);
+    if (!existing || existing.pendingActionDraft === null) return;
+    const nextDraft = {
+      ...existing,
+      pendingActionDraft: null,
+    };
+    setSmartDraftForTarget(targetPath, nextDraft);
+  }, [setSmartDraftForTarget]);
+
+  const beginSmartParameterEditForTarget = useCallback((input: {
+    targetPath: string;
+    actionId: string;
+    values?: Readonly<Record<string, string | number | boolean>>;
+  }) => {
+    const resolved = resolveSmartDraftForTarget(input.targetPath);
+    if (!resolved.guided || resolved.draft === null) return;
+
+    const pendingActionDraft = createActionParameterDraft({
+      actionId: input.actionId,
+      values: input.values,
+    });
+
+    const nextDraft = {
+      ...resolved.draft,
+      pendingActionDraft,
+    };
+    setSmartDraftForTarget(input.targetPath, nextDraft);
+  }, [resolveSmartDraftForTarget, setSmartDraftForTarget]);
+
+  const updateSmartParameterDraftValueForTarget = useCallback((input: {
+    targetPath: string;
+    actionId: string;
+    fieldId: string;
+    value: string | number | boolean | '';
+  }) => {
+    const resolved = resolveSmartDraftForTarget(input.targetPath);
+    if (!resolved.guided || resolved.draft === null) return;
+
+    const current = resolved.draft.pendingActionDraft;
+    if (!current || current.actionId !== input.actionId) return;
+
+    const nextValues: Record<string, string | number | boolean> = {
+      ...current.values,
+    };
+
+    if (input.value === '') {
+      delete nextValues[input.fieldId];
+    } else {
+      nextValues[input.fieldId] = input.value;
+    }
+
+    const pendingActionDraft = createActionParameterDraft({
+      actionId: input.actionId,
+      values: nextValues,
+    });
+
+    const nextDraft = {
+      ...resolved.draft,
+      pendingActionDraft,
+    };
+    setSmartDraftForTarget(input.targetPath, nextDraft);
+  }, [resolveSmartDraftForTarget, setSmartDraftForTarget]);
+
+  const resetSmartParameterDraftForTarget = useCallback((targetPath: string, actionId: string) => {
+    beginSmartParameterEditForTarget({
+      targetPath,
+      actionId,
+    });
+  }, [beginSmartParameterEditForTarget]);
+
+  const selectedInputsForSourcePanel = useMemo(() => {
+    if (!selectedTargetPath) return [] as { kind: 'primary' | 'enrichment' | 'constant' | 'static' | 'item' | 'parent' | 'expression'; path: string; alias?: string }[];
+    const draft = smartDraftByTargetState[selectedTargetPath];
+    if (!draft) return [] as { kind: 'primary' | 'enrichment' | 'constant' | 'static' | 'item' | 'parent' | 'expression'; path: string; alias?: string }[];
+
+    return draft.inputs
+      .filter((input) => input.path)
+      .map((input) => ({
+        kind: input.sourceKind,
+        path: input.path ?? '',
+        alias: input.externalName,
+      }));
+  }, [selectedTargetPath, smartDraftByTargetState]);
+
   const autoMapSuggestionStatusByPath = useMemo(() => {
     const statusMap: Record<string, 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale'> = {};
     for (const item of autoMapWorkspace.items) {
@@ -1055,7 +1839,11 @@ export default function MappingEditor() {
     const nodes = editor.parsedTargetSchema?.nodes ?? [];
     const requiredLeaves = nodes.filter((node) => node.childCount === 0 && node.isRequired);
 
-    const mappedTargets = new Set(effectiveRules.map((rule) => rule.target));
+    const mappedTargets = new Set(
+      effectiveRules
+        .filter((rule) => rule.expression.trim().length > 0)
+        .map((rule) => rule.target),
+    );
     const requiredMapped = requiredLeaves.filter((node) => mappedTargets.has(node.path)).length;
 
     let warnings = 0;
@@ -1126,12 +1914,28 @@ export default function MappingEditor() {
       parsedSourceSchema={editor.parsedSourceSchema}
       enrichmentInputGroups={editor.enrichmentInputSchemas}
       sourceSchemaName={editor.sourceSchemaName}
+      selectedInputs={selectedInputsForSourcePanel}
       onStageField={(field) => {
         if (view === 'rules') {
           expressionBuilderRef.current?.insertSourceField(field);
           return;
         }
-        setStagedInputField(field);
+
+        if (!selectedTargetPath) {
+          setStagedInputField(field);
+          return;
+        }
+
+        const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+        if (!resolved.guided || resolved.draft === null) {
+          setStagedInputField(field);
+          return;
+        }
+
+        const nextSelection = applyStagedInputToSmartDraft({ draft: resolved.draft, staged: field });
+        setSmartDraftForTarget(selectedTargetPath, nextSelection.draft);
+        editor.actions.updateDraft(selectedTargetPath, nextSelection.expression);
+        setStagedInputField(null);
       }}
       className="h-full"
     />
@@ -1188,6 +1992,7 @@ export default function MappingEditor() {
         rules={effectiveRules}
         validationResult={editor.validation.result ?? null}
         selectedPath={selectedTargetPath}
+        condensed={selectedNode !== null && !isBuilderPanelHidden}
         groupingMode="schema"
         onSelectNode={handleSelectTargetNode}
         onClearSelection={() => setSelectedTargetPath(null)}
@@ -1326,6 +2131,7 @@ export default function MappingEditor() {
       <ScalarFieldBuilder
         key={selectedNode.path}
         mappingId={mappingId}
+        preferSmartBuilder
         selectedTargetPath={selectedNode.path}
         selectedTargetType={toTargetFieldType(selectedNode.type)}
         selectedTargetRequired={selectedNode.isRequired}
@@ -1342,6 +2148,177 @@ export default function MappingEditor() {
         currentRuleIndex={selectedRuleIndexForSmartFix}
         currentRuleDiagnostics={selectedRuleDiagnosticsForSmartFix}
         currentRuleVersion={editor.currentRevision}
+        onSmartFocusedSlotChange={handleSmartFocusedSlotChange}
+        onSmartStageField={(field) => {
+          if (!selectedTargetPath) {
+            setStagedInputField(field);
+            return;
+          }
+
+          const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+          if (!resolved.guided || resolved.draft === null) {
+            setStagedInputField(field);
+            return;
+          }
+
+          const nextSelection = applyStagedInputToSmartDraft({ draft: resolved.draft, staged: field });
+          setSmartDraftForTarget(selectedTargetPath, nextSelection.draft);
+          editor.actions.updateDraft(selectedTargetPath, nextSelection.expression);
+          setStagedInputField(null);
+        }}
+        onSmartInputToggle={(input) => {
+          if (!selectedTargetPath) return;
+          const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+          if (!resolved.guided || resolved.draft === null) return;
+
+          const nextDraft = removeInputFromSmartDraft(resolved.draft, input.id);
+          setSmartDraftForTarget(selectedTargetPath, nextDraft);
+          editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
+        }}
+        onSmartInputRemove={(inputId) => {
+          if (!selectedTargetPath) return;
+          const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+          if (!resolved.guided || resolved.draft === null) return;
+
+          const nextDraft = removeInputFromSmartDraft(resolved.draft, inputId);
+          setSmartDraftForTarget(selectedTargetPath, nextDraft);
+          editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
+        }}
+        onSmartApplyAction={(actionId, options) => {
+          if (!selectedTargetPath) return;
+          const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+          if (!resolved.guided || resolved.draft === null) return;
+
+          const nextDraftApplied = applySmartActionToDraft(resolved.draft, actionId);
+          const editingStepIndex = options?.editingStepIndex ?? null;
+
+          let nextDraft = nextDraftApplied;
+          if (editingStepIndex !== null && editingStepIndex >= 0) {
+            const previousTransforms = resolved.draft.inputs[0]?.transforms ?? [];
+            const appliedTransforms = nextDraftApplied.inputs[0]?.transforms ?? [];
+            const replacementStep = appliedTransforms[appliedTransforms.length - 1];
+            if (replacementStep) {
+              const updatedTransforms = previousTransforms.map((step, index) => (
+                index === editingStepIndex ? replacementStep : step
+              ));
+              const nextInputs = nextDraftApplied.inputs.map((input, inputIndex) => (
+                inputIndex === 0 ? { ...input, transforms: updatedTransforms } : input
+              ));
+              const replacedDraft = {
+                ...nextDraftApplied,
+                inputs: nextInputs,
+                pendingActionDraft: null,
+              };
+              nextDraft = updateSmartBuilderExpression(replacedDraft, generateSmartBuilderExpression(replacedDraft));
+            }
+          }
+
+          if (nextDraft === resolved.draft) {
+            return;
+          }
+
+          const nextDraftCleared = {
+            ...nextDraft,
+            pendingActionDraft: null,
+          };
+          setSmartDraftForTarget(selectedTargetPath, nextDraftCleared);
+          editor.actions.updateDraft(selectedTargetPath, nextDraftCleared.expression);
+
+          const actionLabel =
+            actionId === 'text.concat'
+              ? 'Combine text'
+              : actionId === 'text.upper'
+                ? 'Uppercase'
+                : actionId === 'text.lower'
+                  ? 'Lowercase'
+              : actionId === 'text.trim'
+                ? 'Trim spaces'
+                : actionId === 'text.phoneDigits'
+                  ? 'Normalize phone digits'
+                    : actionId;
+
+          setSmartActionMetaByTarget((prev) => ({
+            ...prev,
+            [selectedTargetPath]: {
+              ...(prev[selectedTargetPath] ?? { activeActionId: null, concatSeparator: ' ' }),
+              activeActionId: actionId,
+              announcement: `Applied ${actionLabel}. Draft saved.`,
+            },
+          }));
+        }}
+        onSmartBeginActionParameterEdit={(actionId, values) => {
+          if (!selectedTargetPath) return;
+          beginSmartParameterEditForTarget({
+            targetPath: selectedTargetPath,
+            actionId,
+            values,
+          });
+        }}
+        onSmartUpdateActionParameterDraft={(actionId, fieldId, value) => {
+          if (!selectedTargetPath) return;
+          updateSmartParameterDraftValueForTarget({
+            targetPath: selectedTargetPath,
+            actionId,
+            fieldId,
+            value,
+          });
+        }}
+        onSmartResetActionParameterDraft={(actionId) => {
+          if (!selectedTargetPath) return;
+          resetSmartParameterDraftForTarget(selectedTargetPath, actionId);
+        }}
+        onSmartCancelActionParameterDraft={() => {
+          if (!selectedTargetPath) return;
+          clearSmartParameterDraftForTarget(selectedTargetPath);
+        }}
+        smartActiveActionId={smartActionMetaByTarget[selectedNode.path]?.activeActionId ?? null}
+        smartActionAnnouncement={smartActionMetaByTarget[selectedNode.path]?.announcement ?? null}
+        smartConcatSeparator={smartActionMetaByTarget[selectedNode.path]?.concatSeparator ?? ' '}
+        onSmartConcatSeparatorChange={(separator) => {
+          if (!selectedTargetPath) return;
+          const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+          if (!resolved.guided || resolved.draft === null) return;
+
+          if (resolved.draft.composition?.kind !== 'concat') return;
+
+          const nextDraft = updateSmartBuilderExpression(
+            {
+              ...resolved.draft,
+              composition: {
+                ...resolved.draft.composition,
+                separator,
+              },
+            },
+            generateSmartBuilderExpression({
+              ...resolved.draft,
+              composition: {
+                ...resolved.draft.composition,
+                separator,
+              },
+            }),
+          );
+          setSmartDraftForTarget(selectedTargetPath, nextDraft);
+          editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
+          setSmartActionMetaByTarget((prev) => ({
+            ...prev,
+            [selectedTargetPath]: {
+              ...(prev[selectedTargetPath] ?? { activeActionId: 'text.concat', concatSeparator: ' ' }),
+              activeActionId: 'text.concat',
+              concatSeparator: separator,
+              announcement: 'Updated separator. Draft saved.',
+            },
+          }));
+        }}
+        onRequestArrayBuilderHandoff={() => {
+          const currentTargetPath = selectedNode?.path ?? selectedTargetPath;
+          if (!currentTargetPath || !editor.parsedTargetSchema) {
+            return;
+          }
+
+          const nextPath = resolveBuilderTargetPath(editor.parsedTargetSchema.nodes, currentTargetPath);
+          setSelectedTargetPath(nextPath);
+        }}
+        smartHydrationOverride={selectedNodeSmartHydration}
         savedRules={editor.rules}
         className="h-full"
       />
@@ -1446,6 +2423,7 @@ export default function MappingEditor() {
         isBrowseSourceActive={panelMode !== 'overview'}
         hideSourcePanel={isSourcePanelHidden}
         hideBuilderPanel={isBuilderPanelHidden}
+        targetPanelCondensed={selectedNode !== null && !isBuilderPanelHidden}
         onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
         onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />

@@ -126,6 +126,8 @@ export interface MappingEditorPageProps {
   onHideSourcePanel?: () => void;
   /** Fired when Builder panel close button is clicked */
   onHideBuilderPanel?: () => void;
+  /** Condensed target-worklist columns for focused row-editing state. */
+  targetPanelCondensed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +215,7 @@ export function MappingEditorPage({
   hideBuilderPanel = false,
   onHideSourcePanel,
   onHideBuilderPanel,
+  targetPanelCondensed = false,
 }: MappingEditorPageProps) {
   // FS-092: in-page bottom preview section is intentionally removed from Mapping Editor.
   // Keep prop for backward compatibility with existing call sites.
@@ -225,7 +228,7 @@ export function MappingEditorPage({
   const mappingCardWidthClass = isOverview
     ? 'w-[min(78%,1200px)]'
     : showBuilderCard
-      ? 'w-[56%]'
+      ? (targetPanelCondensed ? 'w-[44%]' : 'w-[56%]')
       : 'w-[68%]';
 
   return (
@@ -333,7 +336,10 @@ export function MappingEditorPage({
 
             {showBuilderCard && (
               <section
-                className="flex h-full min-h-0 w-[24%] min-w-[300px] flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out"
+                className={[
+                  'flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out',
+                  targetPanelCondensed ? 'w-[36%] min-w-[420px]' : 'w-[24%] min-w-[300px]',
+                ].join(' ')}
                 data-testid="builder-card"
               >
                 <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">

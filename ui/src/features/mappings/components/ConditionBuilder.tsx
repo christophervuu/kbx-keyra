@@ -5,7 +5,8 @@
  * inside a map/filter array context.
  *
  * Renders:
- *  - A comparison function picker (eq, neq, gt, gte, lt, lte)
+ *  - A comparison function picker (eq, neq, gt, gte, lt, lte, contains,
+ *    isNull, isNotNull, isTruthy, isFalsy)
  *  - Two ArgumentSlots: left (typically item()) and right (literal or item())
  *
  * Generates a BuilderState like:
@@ -17,10 +18,10 @@
 
 import { useCallback, useState } from 'react';
 
-import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
+import { ArgumentSlot, type ArrayContext } from './ArgumentSlot';
 import type { BuilderArgument, BuilderState } from '../lib/expression-generator';
-import type { ArrayContext } from './ArgumentSlot';
-import { ArgumentSlot } from './ArgumentSlot';
+
+import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,6 +34,11 @@ const COMPARISON_FUNCTIONS = [
   { name: 'gte', label: '≥ greater than or equal' },
   { name: 'lt', label: '< less than' },
   { name: 'lte', label: '≤ less than or equal' },
+  { name: 'contains', label: 'contains' },
+  { name: 'isNull', label: 'is missing' },
+  { name: 'isNotNull', label: 'is not missing' },
+  { name: 'isTruthy', label: 'has value' },
+  { name: 'isFalsy', label: 'missing value' },
 ] as const;
 
 type ComparisonFunctionName = (typeof COMPARISON_FUNCTIONS)[number]['name'];
@@ -77,8 +83,16 @@ function buildCondition(
   left: BuilderArgument | undefined,
   right: BuilderArgument | undefined,
 ): BuilderState | null {
-  if (!left || !right) return null;
+  if (!left) return null;
+  if (fn === 'isNull' || fn === 'isNotNull' || fn === 'isTruthy' || fn === 'isFalsy') {
+    return { functionName: fn, arguments: [left] };
+  }
+  if (!right) return null;
   return { functionName: fn, arguments: [left, right] };
+}
+
+function isUnaryComparison(fn: ComparisonFunctionName): boolean {
+  return fn === 'isNull' || fn === 'isNotNull' || fn === 'isTruthy' || fn === 'isFalsy';
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +134,7 @@ export function ConditionBuilder({
   const handleFnChange = useCallback(
     (fn: ComparisonFunctionName) => {
       setSelectedFn(fn);
-      emitChange(fn, leftArg, rightArg);
+      emitChange(fn, leftArg, isUnaryComparison(fn) ? undefined : rightArg);
     },
     [leftArg, rightArg, emitChange],
   );
@@ -128,7 +142,7 @@ export function ConditionBuilder({
   const handleLeftChange = useCallback(
     (arg: BuilderArgument) => {
       setLeftArg(arg);
-      emitChange(selectedFn, arg, rightArg);
+      emitChange(selectedFn, arg, isUnaryComparison(selectedFn) ? undefined : rightArg);
     },
     [selectedFn, rightArg, emitChange],
   );
@@ -140,6 +154,8 @@ export function ConditionBuilder({
     },
     [selectedFn, leftArg, emitChange],
   );
+
+  const rightOperandHidden = isUnaryComparison(selectedFn);
 
   return (
     <div className="flex flex-col gap-3" data-testid="condition-builder">
@@ -174,17 +190,19 @@ export function ConditionBuilder({
       </div>
 
       {/* Right operand */}
-      <div className="flex flex-col gap-1">
-        <span className="text-xs text-zinc-400 uppercase tracking-wide">Right operand</span>
-        <ArgumentSlot
-          parameter={RIGHT_PARAM}
-          value={rightArg}
-          onChange={handleRightChange}
-          parsedSourceSchema={parsedSourceSchema}
-          arrayContext={arrayContext}
-          nestingLevel={1}
-        />
-      </div>
+      {!rightOperandHidden && (
+        <div className="flex flex-col gap-1" data-testid="condition-right-operand">
+          <span className="text-xs text-zinc-400 uppercase tracking-wide">Right operand</span>
+          <ArgumentSlot
+            parameter={RIGHT_PARAM}
+            value={rightArg}
+            onChange={handleRightChange}
+            parsedSourceSchema={parsedSourceSchema}
+            arrayContext={arrayContext}
+            nestingLevel={1}
+          />
+        </div>
+      )}
     </div>
   );
 }

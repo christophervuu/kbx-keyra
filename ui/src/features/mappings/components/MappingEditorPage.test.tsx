@@ -425,4 +425,22 @@ describe('MappingEditorPage', () => {
     expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
   });
+
+  it('uses wider builder card and narrower mapping card when targetPanelCondensed=true in row-editing mode', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        targetPanelCondensed={true}
+      />,
+    );
+
+    const mappingCard = screen.getByTestId('mapping-fields-card');
+    const builderCard = screen.getByTestId('builder-card');
+
+    expect(mappingCard.className).toContain('w-[44%]');
+    expect(builderCard.className).toContain('w-[36%]');
+    expect(builderCard.className).toContain('min-w-[420px]');
+  });
 });

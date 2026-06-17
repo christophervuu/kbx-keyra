@@ -9,7 +9,7 @@
 
 import { ChevronDown, ChevronRight, GripVertical, Search, X } from 'lucide-react';
 import { memo, useContext, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 
 import { PreviewContext } from '../context/preview-context';
 import { useDragSource } from '../hooks/use-drag-source';
@@ -21,12 +21,25 @@ import type { ParsedSchema, SchemaTreeNode } from '@/lib/types/domain';
 // Types
 // ---------------------------------------------------------------------------
 
-export type InputNodeKind = 'primary' | 'enrichment';
+export type InputNodeKind =
+  | 'primary'
+  | 'enrichment'
+  | 'constant'
+  | 'static'
+  | 'item'
+  | 'parent'
+  | 'expression';
 
 export interface StagedInputField {
   readonly path: string;
   readonly kind: InputNodeKind;
+  readonly label?: string;
   readonly alias?: string;
+  readonly constantName?: string;
+  readonly staticValue?: unknown;
+  readonly rawExpression?: string;
+  readonly valueType?: SchemaTreeNode['type'];
+  readonly sampleValue?: unknown;
   readonly expression: string;
 }
 
@@ -53,6 +66,12 @@ export interface SourceSchemaPanelProps {
    * Receives metadata for DSL generation (primary => source(), enrichment => get(external(), ...)).
    */
   onStageField: (field: StagedInputField) => void;
+  /** Optional smart-tray selected inputs for selected-state highlighting. */
+  selectedInputs?: readonly {
+    kind: InputNodeKind;
+    path: string;
+    alias?: string;
+  }[];
   /** Optional className for the outer container. */
   className?: string;
 }
@@ -91,18 +110,34 @@ const TYPE_ABBREV: Record<string, string> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function buildStagedField(kind: InputNodeKind, path: string, alias?: string): StagedInputField {
+function buildStagedField(
+  kind: InputNodeKind,
+  path: string,
+  options?: {
+    readonly alias?: string;
+    readonly valueType?: SchemaTreeNode['type'];
+    readonly sampleValue?: unknown;
+  },
+): StagedInputField {
+  const alias = options?.alias;
+  const valueType = options?.valueType;
+  const sampleValue = options?.sampleValue;
+
   if (kind === 'enrichment' && alias) {
     return {
       path,
       kind,
       alias,
+      ...(valueType ? { valueType } : {}),
+      ...(sampleValue !== undefined ? { sampleValue } : {}),
       expression: `get(external("${alias}"), "${path}")`,
     };
   }
   return {
     path,
     kind: 'primary',
+    ...(valueType ? { valueType } : {}),
+    ...(sampleValue !== undefined ? { sampleValue } : {}),
     expression: `source("${path}")`,
   };
 }
@@ -163,6 +198,7 @@ interface LeafFieldRowProps {
   readonly stagedField: StagedInputField;
   readonly onStageField: (field: StagedInputField) => void;
   readonly isHighlighted?: boolean;
+  readonly isSelected?: boolean;
 }
 
 const LeafFieldRow = memo(function LeafFieldRow({
@@ -171,8 +207,18 @@ const LeafFieldRow = memo(function LeafFieldRow({
   stagedField,
   onStageField,
   isHighlighted = false,
+  isSelected = false,
 }: LeafFieldRowProps) {
   const { isDragging, dragHandlers } = useDragSource(node.path);
+
+  const handleClick = (e: MouseEvent<HTMLDivElement>) => {
+    // Ignore the synthetic click emitted after a drag gesture.
+    if (isDragging) {
+      e.preventDefault();
+      return;
+    }
+    onStageField(stagedField);
+  };
 
   return (
     <div
@@ -180,7 +226,7 @@ const LeafFieldRow = memo(function LeafFieldRow({
       data-testid={`source-field-${node.path}`}
       data-path={node.path}
       {...dragHandlers}
-      onClick={() => onStageField(stagedField)}
+      onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -190,6 +236,8 @@ const LeafFieldRow = memo(function LeafFieldRow({
       tabIndex={0}
       role="button"
       aria-label={`Stage input field ${node.path}`}
+      aria-pressed={isSelected}
+      data-selected={isSelected ? 'true' : 'false'}
       style={{ paddingLeft: node.depth * 16 + 8 }}
       className={[
         'group flex min-h-[44px] cursor-grab items-center gap-1.5 border-b border-slate-800/50 py-1.5 pr-2 text-sm',
@@ -197,6 +245,7 @@ const LeafFieldRow = memo(function LeafFieldRow({
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
         isDragging ? 'opacity-50' : '',
         isHighlighted ? 'bg-blue-950/30' : '',
+        isSelected ? 'ring-1 ring-inset ring-emerald-500 bg-emerald-950/25' : '',
       ].filter(Boolean).join(' ')}
     >
       <GripVertical
@@ -216,6 +265,14 @@ const LeafFieldRow = memo(function LeafFieldRow({
           <span className="truncate font-mono text-xs text-slate-200" title={node.path}>
             {node.fieldName}
           </span>
+          {isSelected && (
+            <span
+              className="rounded bg-emerald-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300"
+              data-testid={`source-field-selected-badge-${node.path}`}
+            >
+              In tray
+            </span>
+          )}
         </span>
         <p
           className="ml-[2.6rem] truncate text-[11px] text-slate-500"
@@ -293,6 +350,11 @@ interface RenderNodeProps {
   readonly matchingPaths: Set<string>;
   readonly inputKind: InputNodeKind;
   readonly alias?: string;
+  readonly selectedInputs: readonly {
+    kind: InputNodeKind;
+    path: string;
+    alias?: string;
+  }[];
 }
 
 function renderNode({
@@ -304,12 +366,19 @@ function renderNode({
   matchingPaths,
   inputKind,
   alias,
+  selectedInputs,
 }: RenderNodeProps): ReactNode[] {
   const rows: ReactNode[] = [];
 
   const isContainer = node.type === 'object' || node.type === 'array';
   const isExpanded = expandedPaths.has(node.path);
   const isHighlighted = matchingPaths.has(node.path);
+  const isSelected = selectedInputs.some((selected) =>
+    selected.kind === inputKind
+    && selected.path === node.path
+    && (inputKind !== 'enrichment' || selected.alias === alias),
+  );
+  const sampleValue = !isContainer ? resolveFieldTestValue(sourceData, node.path) : undefined;
 
   rows.push(
     isContainer ? (
@@ -324,10 +393,15 @@ function renderNode({
       <LeafFieldRow
         key={`${inputKind}:${alias ?? 'primary'}:${node.path}`}
         node={node}
-        sampleValue={resolveFieldTestValue(sourceData, node.path)}
-        stagedField={buildStagedField(inputKind, node.path, alias)}
+        sampleValue={sampleValue}
+        stagedField={buildStagedField(inputKind, node.path, {
+          alias,
+          valueType: node.type,
+          sampleValue,
+        })}
         onStageField={onStageField}
         isHighlighted={isHighlighted}
+        isSelected={isSelected}
       />
     ),
   );
@@ -343,6 +417,7 @@ function renderNode({
         matchingPaths,
         inputKind,
         alias,
+        selectedInputs,
       }));
     }
   }
@@ -360,21 +435,21 @@ export function SourceSchemaPanel({
   enrichmentInputGroups = [],
   enrichmentSourceData = {},
   onStageField,
+  selectedInputs = [],
   className = '',
 }: SourceSchemaPanelProps) {
   void sourceSchemaName;
   const previewCtx = useContext(PreviewContext);
   const primarySourceData = previewCtx?.sourceData ?? null;
 
-  const primaryGroup: InputSchemaGroup = {
-    key: 'primary',
-    kind: 'primary',
-    label: 'Primary Source',
-    parsedSchema: parsedSourceSchema,
-    sourceData: primarySourceData,
-  };
-
   const allGroups = useMemo<InputSchemaGroup[]>(() => {
+    const primaryGroup: InputSchemaGroup = {
+      key: 'primary',
+      kind: 'primary',
+      label: 'Primary Source',
+      parsedSchema: parsedSourceSchema,
+      sourceData: primarySourceData,
+    };
     const enrichmentGroupsMapped: InputSchemaGroup[] = enrichmentInputGroups.map((group) => ({
       key: `enrichment:${group.alias}`,
       kind: 'enrichment',
@@ -540,6 +615,7 @@ export function SourceSchemaPanel({
                       matchingPaths: group.matchingPaths,
                       inputKind: group.kind,
                       alias: group.alias,
+                      selectedInputs,
                     }))
                   ) : (
                     <p className="px-3 py-2 text-xs text-slate-500" data-testid={`input-group-empty-${group.key}`}>
