@@ -81,9 +81,19 @@ export type BuilderComposition =
     }
   | { readonly kind: 'coalesce'; readonly inputIds?: readonly string[]; readonly fallback?: BuilderArgumentValue }
   | {
+      readonly kind: 'default';
+      readonly inputId: string;
+      readonly fallback: BuilderArgumentValue;
+    }
+  | {
       readonly kind: 'math';
-      readonly operator: 'add' | 'subtract' | 'multiply' | 'divide';
+      readonly operator?: 'add' | 'subtract' | 'multiply' | 'divide';
       readonly inputIds?: readonly string[];
+      readonly startInputId?: string;
+      readonly operations?: readonly {
+        readonly operator: 'add' | 'subtract' | 'multiply' | 'divide';
+        readonly inputId: string;
+      }[];
     }
   | { readonly kind: 'condition'; readonly clauses: readonly BuilderConditionClause[]; readonly elseOutput: BuilderArgumentValue }
   | {
@@ -518,6 +528,10 @@ export function toSmartBuilderTransformArgsFromParameters(input: {
       const outputFormat = typeof values.outputFormat === 'string' ? values.outputFormat : 'YYYY-MM-DD';
       return [{ kind: 'static', value: inputFormat }, { kind: 'static', value: outputFormat }];
     }
+    case 'number.round': {
+      const decimals = typeof values.decimals === 'number' ? values.decimals : 0;
+      return [{ kind: 'static', value: decimals }];
+    }
     case 'array.nth': {
       const index = typeof values.index === 'number' ? values.index : 0;
       return [{ kind: 'static', value: index }];
@@ -549,8 +563,8 @@ export function toSmartBuilderCompositionPatchFromParameters(input: {
         ? values.fallbackExpression
         : '""';
       return {
-        kind: 'coalesce',
-        inputIds: [input.firstInputId],
+        kind: 'default',
+        inputId: input.firstInputId,
         fallback: toArgumentValueFromDslExpression(fallbackRaw),
       };
     }
@@ -629,9 +643,15 @@ export function hydrateSmartBuilderFromExpression(input: {
     return { kind: 'advanced', expression, reason: 'parse-failed' };
   }
 
-  const hydrated = hydrateFromSupportedExpression(expression, {
-    resolveSourceValueType: (path) => input.sourceValueTypeByPath?.[path] ?? 'unknown',
+  const resolveSourceValueType = (path: string): BuilderValueType => input.sourceValueTypeByPath?.[path] ?? 'unknown';
+
+  const hydratedDefault = hydrateDefaultCompositionFromExpression(expression, {
+    resolveSourceValueType,
   });
+
+  const hydrated = hydratedDefault
+    ? hydratedDefault.primaryInput
+    : hydrateFromSupportedExpression(expression, { resolveSourceValueType });
   if (!hydrated) {
     return { kind: 'advanced', expression, reason: 'complex-expression' };
   }
@@ -639,7 +659,13 @@ export function hydrateSmartBuilderFromExpression(input: {
   const draft: SmartBuilderDraft = {
     ...createEmptySmartBuilderDraft(input),
     inputs: [hydrated],
-    composition: { kind: 'direct', inputId: hydrated.id },
+    composition: hydratedDefault
+      ? {
+          kind: 'default',
+          inputId: hydrated.id,
+          fallback: hydratedDefault.fallback,
+        }
+      : { kind: 'direct', inputId: hydrated.id },
   };
   const generated = generateSmartBuilderExpression(draft);
 
@@ -651,6 +677,87 @@ export function hydrateSmartBuilderFromExpression(input: {
       validation: generated ? { status: 'valid' } : { status: 'pending' },
     },
   };
+}
+
+function hydrateDefaultCompositionFromExpression(
+  expression: string,
+  options?: {
+    resolveSourceValueType?: (path: string) => BuilderValueType;
+  },
+): { readonly primaryInput: BuilderInput; readonly fallback: BuilderArgumentValue } | null {
+  const defaultMatch = expression.match(/^default\((source\("[\s\S]+"\)|external\("[\s\S]+"\)|get\(external\("[\s\S]+"\),\s*"[\s\S]+"\)),\s*([\s\S]+)\)$/);
+  if (!defaultMatch) return null;
+
+  const primaryExpression = defaultMatch[1]?.trim() ?? '';
+  const fallbackExpression = defaultMatch[2]?.trim() ?? '';
+  if (!primaryExpression || !fallbackExpression) return null;
+
+  const primaryInput = hydrateFromSupportedExpression(primaryExpression, options);
+  if (!primaryInput) return null;
+
+  return {
+    primaryInput,
+    fallback: toArgumentValueFromHydratedExpression(fallbackExpression),
+  };
+}
+
+function toArgumentValueFromHydratedExpression(rawExpression: string): BuilderArgumentValue {
+  const expression = rawExpression.trim();
+  const quoted = expression.match(/^"([\s\S]*)"$/);
+  if (quoted) {
+    return {
+      kind: 'static',
+      value: quoted[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\') ?? '',
+    };
+  }
+
+  if (expression === 'null') return { kind: 'static', value: null };
+  if (expression === 'true') return { kind: 'static', value: true };
+  if (expression === 'false') return { kind: 'static', value: false };
+  if (expression.length > 0 && Number.isFinite(Number(expression))) {
+    return { kind: 'static', value: Number(expression) };
+  }
+
+  const fallbackInput = hydrateFromSupportedExpression(expression);
+  if (fallbackInput) {
+    return { kind: 'expression', expression: inputExpressionFromBuilderInput(fallbackInput) };
+  }
+
+  return { kind: 'expression', expression };
+}
+
+function inputExpressionFromBuilderInput(input: BuilderInput): string {
+  if (input.sourceKind === 'primary' && input.path) {
+    return `source("${input.path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+  }
+  if (input.sourceKind === 'enrichment' && input.externalName && input.path) {
+    return `get(external("${input.externalName.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"), "${input.path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+  }
+  if (input.sourceKind === 'enrichment' && input.externalName) {
+    return `external("${input.externalName.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+  }
+  if (input.sourceKind === 'constant' && input.constantName) {
+    return `constant("${input.constantName.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+  }
+  if (input.sourceKind === 'item' && input.path) {
+    return `item("${input.path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+  }
+  if (input.sourceKind === 'parent' && input.path) {
+    return `parent("${input.path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+  }
+  if (input.sourceKind === 'expression' && input.rawExpression) {
+    return input.rawExpression;
+  }
+  if (input.sourceKind === 'static') {
+    if (input.staticValue === null) return 'static(null)';
+    if (typeof input.staticValue === 'string') {
+      return `static("${input.staticValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+    }
+    if (typeof input.staticValue === 'number' || typeof input.staticValue === 'boolean') {
+      return `static(${String(input.staticValue)})`;
+    }
+  }
+  return '';
 }
 
 function hydrateFromSupportedExpression(

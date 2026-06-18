@@ -90,6 +90,31 @@ describe('generateSmartBuilderExpression', () => {
     );
   });
 
+  it('generates default(primary, fallback) for default composition', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'preferred',
+          sourceKind: 'primary',
+          label: 'preferredName',
+          path: 'preferredName',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'default',
+        inputId: 'preferred',
+        fallback: { kind: 'expression', expression: 'source("legalName")' },
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'default(source("preferredName"), source("legalName"))',
+    );
+  });
+
   it('uses insertion order for math composition by default', () => {
     const draft: SmartBuilderDraft = {
       ...createEmptySmartBuilderDraft({
@@ -119,6 +144,131 @@ describe('generateSmartBuilderExpression', () => {
     };
 
     expect(generateSmartBuilderExpression(draft)).toBe('add(source("subtotal"), source("tax"))');
+  });
+
+  it('generates ordered calculation nesting for subtotal + tax - discount', () => {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.net',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary',
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number',
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary',
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number',
+          transforms: [],
+        },
+        {
+          id: 'discount',
+          sourceKind: 'primary',
+          label: 'discount',
+          path: 'discount',
+          valueType: 'number',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math',
+        startInputId: 'subtotal',
+        operations: [
+          { operator: 'add', inputId: 'tax' },
+          { operator: 'subtract', inputId: 'discount' },
+        ],
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'subtract(add(source("subtotal"), source("tax")), source("discount"))',
+    );
+  });
+
+  it('generates ordered calculation nesting for subtotal - discount + tax', () => {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.net',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary',
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number',
+          transforms: [],
+        },
+        {
+          id: 'discount',
+          sourceKind: 'primary',
+          label: 'discount',
+          path: 'discount',
+          valueType: 'number',
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary',
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math',
+        startInputId: 'subtotal',
+        operations: [
+          { operator: 'subtract', inputId: 'discount' },
+          { operator: 'add', inputId: 'tax' },
+        ],
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'add(subtract(source("subtotal"), source("discount")), source("tax"))',
+    );
+  });
+
+  it('applies output steps after base composition in deterministic order', () => {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.total',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'amount',
+          sourceKind: 'primary',
+          label: 'amount',
+          path: 'amount',
+          valueType: 'number',
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct', inputId: 'amount' },
+      postSteps: [
+        { functionName: 'round' },
+        { functionName: 'cast', args: [{ kind: 'static', value: 'string' }] },
+      ],
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'cast(round(source("amount")), "string")',
+    );
   });
 
   it('generates enrichment root alias as external("alias")', () => {

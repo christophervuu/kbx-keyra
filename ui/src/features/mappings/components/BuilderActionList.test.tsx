@@ -11,6 +11,7 @@ function makeAction(overrides: Partial<ResolvedSmartBuilderAction>): ResolvedSma
       label: 'Combine text',
       category: 'text',
       appliesTo: 'tray',
+      role: 'mappingMethod',
       dslFunctions: ['concat'],
       ...overrides.action,
     },
@@ -24,9 +25,9 @@ function makeAction(overrides: Partial<ResolvedSmartBuilderAction>): ResolvedSma
 describe('BuilderActionList', () => {
   it('renders enabled actions first section and unavailable section with reason text', () => {
     const actions: ResolvedSmartBuilderAction[] = [
-      makeAction({ action: { id: 'condition.if', label: 'Conditional output', category: 'condition', appliesTo: 'tray', dslFunctions: ['if'] } }),
+      makeAction({ action: { id: 'condition.if', label: 'Conditional output', category: 'condition', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['if'] } }),
       makeAction({
-        action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['add'] },
+        action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['add'] },
         availability: { enabled: false, reason: 'Unavailable: Convert to number first.' },
       }),
     ];
@@ -46,7 +47,7 @@ describe('BuilderActionList', () => {
       <BuilderActionList
         actions={[
           makeAction({
-            action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['add'] },
+            action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['add'] },
             availability: { enabled: false, reason: 'Unavailable: numeric input required.' },
           }),
         ]}
@@ -60,7 +61,7 @@ describe('BuilderActionList', () => {
     const onApplyAction = vi.fn();
     render(
       <BuilderActionList
-        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', dslFunctions: ['concat'] } })]}
+        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } })]}
         onApplyAction={onApplyAction}
       />, 
     );
@@ -71,9 +72,9 @@ describe('BuilderActionList', () => {
 
   it('hides disabled actions by default and reveals them via search', () => {
     const actions: ResolvedSmartBuilderAction[] = [
-      makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', dslFunctions: ['concat'] } }),
+      makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } }),
       makeAction({
-        action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['add'] },
+        action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['add'] },
         availability: { enabled: false, reason: 'Unavailable: Convert to number first.' },
       }),
     ];
@@ -88,7 +89,7 @@ describe('BuilderActionList', () => {
   it('marks active action as pressed', () => {
     render(
       <BuilderActionList
-        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', dslFunctions: ['concat'] } })]}
+        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } })]}
         activeActionId="text.concat"
       />,
     );

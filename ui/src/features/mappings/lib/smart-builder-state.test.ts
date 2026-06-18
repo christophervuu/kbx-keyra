@@ -63,6 +63,42 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toBe('source("firstName")');
   });
 
+  it('hydrates default(source("x"), "literal") into guided default composition', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'default(source("firstName"), "UNKNOWN")',
+      targetPath: 'target.firstName',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition).toEqual({
+      kind: 'default',
+      inputId: 'input-1',
+      fallback: { kind: 'static', value: 'UNKNOWN' },
+    });
+    expect(result.draft.expression).toBe('default(source("firstName"), "UNKNOWN")');
+  });
+
+  it('hydrates default(source("x"), source("y")) into guided default composition', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'default(source("preferredName"), source("legalName"))',
+      targetPath: 'target.name',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition).toEqual({
+      kind: 'default',
+      inputId: 'input-1',
+      fallback: { kind: 'expression', expression: 'source("legalName")' },
+    });
+    expect(result.draft.expression).toBe('default(source("preferredName"), source("legalName"))');
+  });
+
   it('hydrates supported direct enrichment root expressions into guided draft', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'external("carrier")',
@@ -311,7 +347,21 @@ describe('smart-builder-state', () => {
     ]);
   });
 
-  it('maps null.default parameter payload into coalesce composition patch', () => {
+  it('maps number.round parameter payload into output-step args with default decimals', () => {
+    const defaultArgs = toSmartBuilderTransformArgsFromParameters({
+      actionId: 'number.round',
+      values: {},
+    });
+    const explicitArgs = toSmartBuilderTransformArgsFromParameters({
+      actionId: 'number.round',
+      values: { decimals: 2 },
+    });
+
+    expect(defaultArgs).toEqual([{ kind: 'static', value: 0 }]);
+    expect(explicitArgs).toEqual([{ kind: 'static', value: 2 }]);
+  });
+
+  it('maps null.default parameter payload into default composition patch', () => {
     const composition = toSmartBuilderCompositionPatchFromParameters({
       actionId: 'null.default',
       firstInputId: 'input-1',
@@ -321,8 +371,8 @@ describe('smart-builder-state', () => {
     });
 
     expect(composition).toEqual({
-      kind: 'coalesce',
-      inputIds: ['input-1'],
+      kind: 'default',
+      inputId: 'input-1',
       fallback: { kind: 'static', value: 'N/A' },
     });
   });

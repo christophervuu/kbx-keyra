@@ -249,4 +249,33 @@ describe('smart-builder-action-resolver', () => {
     expect(substring?.availability.enabled).toBe(false);
     expect(substring?.availability.reason).toContain('Start index is required');
   });
+
+  it('exposes action role taxonomy for mapping method, parameter action, and output step', () => {
+    const resolved = resolveSmartBuilderActions({
+      targetType: 'number',
+      isRequired: false,
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary',
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number',
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary',
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number',
+          transforms: [],
+        },
+      ],
+    });
+
+    expect(resolved.find((entry) => entry.action.id === 'text.concat')?.action.role).toBe('mappingMethod');
+    expect(resolved.find((entry) => entry.action.id === 'number.add')?.action.role).toBe('methodParameterAction');
+    expect(resolved.find((entry) => entry.action.id === 'number.round')?.action.role).toBe('outputStep');
+  });
 });

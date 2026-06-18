@@ -15,6 +15,14 @@ export type SmartBuilderActionCategory =
 
 export type SmartBuilderActionApplicability = 'input' | 'tray' | 'target' | 'array-scope';
 
+export type BuilderActionRole =
+  | 'inputTransform'
+  | 'mappingMethod'
+  | 'methodParameterAction'
+  | 'outputStep'
+  | 'conditionPredicate'
+  | 'arrayAction';
+
 export interface SmartBuilderActionConstraint {
   readonly minInputs?: number;
   readonly maxInputs?: number;
@@ -62,6 +70,7 @@ export interface SmartBuilderActionCatalogEntry {
   readonly label: string;
   readonly category: SmartBuilderActionCategory;
   readonly appliesTo: SmartBuilderActionApplicability;
+  readonly role: BuilderActionRole;
   readonly dslFunctions: readonly string[];
   readonly constraints?: SmartBuilderActionConstraint;
   readonly parameters?: readonly SmartBuilderActionParameterDefinition[];
@@ -73,15 +82,16 @@ export const UNSUPPORTED_DSL_FUNCTIONS = {
 
 export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEntry[] = [
   // text
-  { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', dslFunctions: ['concat'], constraints: { minInputs: 2 } },
-  { id: 'text.upper', label: 'Uppercase', category: 'text', appliesTo: 'input', dslFunctions: ['upper'], constraints: { minInputs: 1, maxInputs: 1 } },
-  { id: 'text.lower', label: 'Lowercase', category: 'text', appliesTo: 'input', dslFunctions: ['lower'], constraints: { minInputs: 1, maxInputs: 1 } },
-  { id: 'text.trim', label: 'Trim spaces', category: 'text', appliesTo: 'input', dslFunctions: ['trim'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'], constraints: { minInputs: 2 } },
+  { id: 'text.upper', label: 'Uppercase', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['upper'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'text.lower', label: 'Lowercase', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['lower'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'text.trim', label: 'Trim spaces', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['trim'], constraints: { minInputs: 1, maxInputs: 1 } },
   {
     id: 'text.substring',
     label: 'Extract substring',
     category: 'text',
     appliesTo: 'input',
+    role: 'inputTransform',
     dslFunctions: ['substring'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
@@ -107,6 +117,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     label: 'Replace text',
     category: 'text',
     appliesTo: 'input',
+    role: 'inputTransform',
     dslFunctions: ['replace', 'replaceAll'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
@@ -139,13 +150,14 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
       },
     ],
   },
-  { id: 'text.phoneDigits', label: 'Normalize phone digits', category: 'text', appliesTo: 'input', dslFunctions: ['trim', 'replaceAll'], constraints: { minInputs: 1, maxInputs: 1 } },
-  { id: 'text.length', label: 'Text length', category: 'text', appliesTo: 'input', dslFunctions: ['length'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'text.phoneDigits', label: 'Normalize phone digits', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['trim', 'replaceAll'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'text.length', label: 'Text length', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['length'], constraints: { minInputs: 1, maxInputs: 1 } },
   {
     id: 'text.split',
     label: 'Split text',
     category: 'text',
     appliesTo: 'input',
+    role: 'inputTransform',
     dslFunctions: ['split'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
@@ -167,12 +179,30 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
   },
 
   // number
-  { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['add'], constraints: { minInputs: 2 } },
-  { id: 'number.subtract', label: 'Subtract numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['subtract'], constraints: { minInputs: 2 } },
-  { id: 'number.multiply', label: 'Multiply numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['multiply'], constraints: { minInputs: 2 } },
-  { id: 'number.divide', label: 'Divide numbers', category: 'number', appliesTo: 'tray', dslFunctions: ['divide'], constraints: { minInputs: 2 } },
-  { id: 'number.round', label: 'Round number', category: 'number', appliesTo: 'input', dslFunctions: ['round'], constraints: { minInputs: 1, maxInputs: 1 } },
-  { id: 'number.abs', label: 'Absolute value', category: 'number', appliesTo: 'input', dslFunctions: ['abs'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['add'], constraints: { minInputs: 2 } },
+  { id: 'number.subtract', label: 'Subtract numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['subtract'], constraints: { minInputs: 2 } },
+  { id: 'number.multiply', label: 'Multiply numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['multiply'], constraints: { minInputs: 2 } },
+  { id: 'number.divide', label: 'Divide numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['divide'], constraints: { minInputs: 2 } },
+  {
+    id: 'number.round',
+    label: 'Round number',
+    category: 'number',
+    appliesTo: 'input',
+    role: 'outputStep',
+    dslFunctions: ['round'],
+    constraints: { minInputs: 1, maxInputs: 1 },
+    parameters: [
+      {
+        id: 'decimals',
+        label: 'Decimal places',
+        kind: 'integer',
+        required: false,
+        defaultValue: 0,
+        constraints: { min: 0 },
+      },
+    ],
+  },
+  { id: 'number.abs', label: 'Absolute value', category: 'number', appliesTo: 'input', role: 'outputStep', dslFunctions: ['abs'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // date
   {
@@ -180,12 +210,13 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     label: 'Format date',
     category: 'date',
     appliesTo: 'input',
+    role: 'inputTransform',
     dslFunctions: ['formatDate'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
       {
         id: 'inputFormat',
-        label: 'Input format',
+        label: 'Source date format',
         kind: 'string',
         required: true,
         defaultValue: 'ISO8601',
@@ -201,7 +232,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
       },
       {
         id: 'outputFormat',
-        label: 'Output format',
+        label: 'Target date format',
         kind: 'string',
         required: true,
         defaultValue: 'YYYY-MM-DD',
@@ -222,6 +253,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     label: 'Date difference',
     category: 'date',
     appliesTo: 'tray',
+    role: 'mappingMethod',
     dslFunctions: ['dateDiffSeconds'],
     constraints: { minInputs: 2 },
     parameters: [
@@ -242,9 +274,9 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
   },
 
   // condition
-  { id: 'condition.if', label: 'Conditional output', category: 'condition', appliesTo: 'tray', dslFunctions: ['if', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull', 'not', 'and', 'or'] },
-  { id: 'condition.compare', label: 'Compare inputs', category: 'condition', appliesTo: 'tray', dslFunctions: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
-  { id: 'condition.truthy', label: 'Is present / has value', category: 'condition', appliesTo: 'input', dslFunctions: ['not', 'isNull'] },
+  { id: 'condition.if', label: 'Conditional output', category: 'condition', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['if', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'isNull', 'not', 'and', 'or'] },
+  { id: 'condition.compare', label: 'Compare inputs', category: 'condition', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
+  { id: 'condition.truthy', label: 'Is present / has value', category: 'condition', appliesTo: 'input', role: 'conditionPredicate', dslFunctions: ['not', 'isNull'] },
 
   // null
   {
@@ -252,6 +284,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     label: 'Default if missing',
     category: 'null',
     appliesTo: 'input',
+    role: 'outputStep',
     dslFunctions: ['default'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
@@ -265,25 +298,26 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
       },
     ],
   },
-  { id: 'null.coalesce', label: 'Use first available', category: 'null', appliesTo: 'tray', dslFunctions: ['coalesce'], constraints: { minInputs: 2 } },
-  { id: 'null.isNull', label: 'Is missing', category: 'null', appliesTo: 'input', dslFunctions: ['isNull'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'null.coalesce', label: 'Use first available', category: 'null', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['coalesce'], constraints: { minInputs: 2 } },
+  { id: 'null.isNull', label: 'Is missing', category: 'null', appliesTo: 'input', role: 'conditionPredicate', dslFunctions: ['isNull'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // lookup
-  { id: 'lookup.valueMap', label: 'Map values', category: 'lookup', appliesTo: 'input', dslFunctions: ['valueMap'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'lookup.valueMap', label: 'Map values', category: 'lookup', appliesTo: 'input', role: 'mappingMethod', dslFunctions: ['valueMap'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // array
-  { id: 'array.map', label: 'Map array', category: 'array', appliesTo: 'array-scope', dslFunctions: ['map'], constraints: { minInputs: 1, requiresArrayContext: true } },
-  { id: 'array.filter', label: 'Filter array', category: 'array', appliesTo: 'array-scope', dslFunctions: ['filter'], constraints: { minInputs: 1, requiresArrayContext: true } },
-  { id: 'array.find', label: 'Find in array', category: 'array', appliesTo: 'array-scope', dslFunctions: ['find'], constraints: { minInputs: 1, requiresArrayContext: true } },
-  { id: 'array.array', label: 'Build array', category: 'array', appliesTo: 'tray', dslFunctions: ['array'], constraints: { minInputs: 1 } },
-  { id: 'array.merge', label: 'Merge arrays', category: 'array', appliesTo: 'tray', dslFunctions: ['merge'], constraints: { minInputs: 2 } },
-  { id: 'array.flatten', label: 'Flatten arrays', category: 'array', appliesTo: 'input', dslFunctions: ['flatten'], constraints: { minInputs: 1, maxInputs: 1 } },
-  { id: 'array.first', label: 'First item', category: 'array', appliesTo: 'input', dslFunctions: ['first'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'array.map', label: 'Map array', category: 'array', appliesTo: 'array-scope', role: 'arrayAction', dslFunctions: ['map'], constraints: { minInputs: 1, requiresArrayContext: true } },
+  { id: 'array.filter', label: 'Filter array', category: 'array', appliesTo: 'array-scope', role: 'arrayAction', dslFunctions: ['filter'], constraints: { minInputs: 1, requiresArrayContext: true } },
+  { id: 'array.find', label: 'Find in array', category: 'array', appliesTo: 'array-scope', role: 'arrayAction', dslFunctions: ['find'], constraints: { minInputs: 1, requiresArrayContext: true } },
+  { id: 'array.array', label: 'Build array', category: 'array', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['array'], constraints: { minInputs: 1 } },
+  { id: 'array.merge', label: 'Merge arrays', category: 'array', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['merge'], constraints: { minInputs: 2 } },
+  { id: 'array.flatten', label: 'Flatten arrays', category: 'array', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['flatten'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'array.first', label: 'First item', category: 'array', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['first'], constraints: { minInputs: 1, maxInputs: 1 } },
   {
     id: 'array.nth',
     label: 'Nth item',
     category: 'array',
     appliesTo: 'input',
+    role: 'inputTransform',
     dslFunctions: ['nth'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
@@ -302,6 +336,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     label: 'Join array',
     category: 'array',
     appliesTo: 'input',
+    role: 'inputTransform',
     dslFunctions: ['join'],
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
@@ -314,8 +349,8 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
       },
     ],
   },
-  { id: 'array.count', label: 'Count items', category: 'array', appliesTo: 'input', dslFunctions: ['count'], constraints: { minInputs: 1, maxInputs: 1 } },
-  { id: 'array.get', label: 'Get field from object', category: 'array', appliesTo: 'input', dslFunctions: ['get'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'array.count', label: 'Count items', category: 'array', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['count'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'array.get', label: 'Get field from object', category: 'array', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['get'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // convert
   {
@@ -323,6 +358,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     label: 'Convert type',
     category: 'convert',
     appliesTo: 'input',
+    role: 'outputStep',
     dslFunctions: ['cast'],
     constraints: { minInputs: 1, maxInputs: 1, allowedTargetTypes: ['string', 'number', 'boolean'] },
     parameters: [
@@ -342,7 +378,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
   },
 
   // advanced
-  { id: 'advanced.expression', label: 'Edit expression', category: 'advanced', appliesTo: 'target', dslFunctions: [] },
+  { id: 'advanced.expression', label: 'Edit expression', category: 'advanced', appliesTo: 'target', role: 'mappingMethod', dslFunctions: [] },
 ];
 
 export const ALL_REGISTERED_DSL_FUNCTIONS = new Set(DSL_FUNCTION_CATALOG.map((entry) => entry.name));

@@ -50,7 +50,7 @@ export function BuilderActionList({
   }, [disabled, normalizedQuery]);
 
   const addNextStep = filteredEnabled.filter((entry) => STEP_ACTION_IDS.has(entry.action.id));
-  const changeBase = filteredEnabled.filter((entry) => !STEP_ACTION_IDS.has(entry.action.id));
+  const changeMethod = filteredEnabled.filter((entry) => !STEP_ACTION_IDS.has(entry.action.id));
 
   return (
     <section className={className} data-testid="smart-action-list" aria-label="Builder actions">
@@ -99,8 +99,8 @@ export function BuilderActionList({
                 onApplyAction={onApplyAction}
               />
               <ActionList
-                title="Change base mapping"
-                entries={changeBase}
+                title="Change mapping method"
+                entries={changeMethod}
                 activeActionId={activeActionId}
                 onApplyAction={onApplyAction}
               />

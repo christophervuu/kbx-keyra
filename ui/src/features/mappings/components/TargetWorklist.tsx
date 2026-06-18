@@ -100,11 +100,88 @@ function toFieldType(type: SchemaTreeNode['type']): TargetFieldType {
 }
 
 /**
- * Returns only root-level nodes (depth === 0) from the flat list.
- * The tree is rendered recursively from root nodes using `node.children`.
+ * Normalizes schema nodes into a root-only tree with consistent children/depth.
+ * Supports both flattened and hierarchical input shapes.
  */
-function getRootNodes(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
-  return nodes.filter((n) => n.depth === 0);
+function normalizeSchemaNodesToTree(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
+  type MutableNode = SchemaTreeNode & { children: SchemaTreeNode[] };
+
+  const flattened: SchemaTreeNode[] = [];
+  const seenFromInput = new Set<string>();
+  const walk = (next: readonly SchemaTreeNode[]) => {
+    for (const node of next) {
+      if (seenFromInput.has(node.path)) continue;
+      seenFromInput.add(node.path);
+      flattened.push(node);
+      if (node.children.length > 0) {
+        walk(node.children);
+      }
+    }
+  };
+  walk(nodes);
+
+  const nodeByPath = new Map<string, MutableNode>();
+  const orderByPath = new Map<string, number>();
+
+  flattened.forEach((node, index) => {
+    orderByPath.set(node.path, index);
+    if (!nodeByPath.has(node.path)) {
+      nodeByPath.set(node.path, {
+        ...node,
+        children: [],
+        childCount: 0,
+      });
+    }
+  });
+
+  const roots: MutableNode[] = [];
+  for (const node of flattened) {
+    const current = nodeByPath.get(node.path);
+    if (!current) continue;
+
+    const explicitParentPath = typeof node.parentPath === 'string' && node.parentPath.trim().length > 0
+      ? node.parentPath.trim()
+      : null;
+    const inferredParentPath = node.path.includes('.')
+      ? node.path.slice(0, node.path.lastIndexOf('.'))
+      : null;
+
+    const parentPath = [explicitParentPath, inferredParentPath]
+      .filter((path, index, arr): path is string => Boolean(path) && arr.indexOf(path) === index)
+      .find((path) => path !== node.path && nodeByPath.has(path));
+
+    const parent = parentPath ? nodeByPath.get(parentPath) : undefined;
+    if (parent) {
+      parent.children.push(current);
+      parent.childCount = parent.children.length;
+      continue;
+    }
+
+    roots.push(current);
+  }
+
+  const sortByInputOrder = (list: MutableNode[]) => {
+    list.sort((a, b) => (orderByPath.get(a.path) ?? 0) - (orderByPath.get(b.path) ?? 0));
+    for (const node of list) {
+      if (node.children.length > 0) {
+        sortByInputOrder(node.children as MutableNode[]);
+      }
+    }
+  };
+  sortByInputOrder(roots);
+
+  const assignDepth = (list: MutableNode[], depth: number) => {
+    for (const node of list) {
+      node.depth = depth;
+      node.childCount = node.children.length;
+      if (node.children.length > 0) {
+        assignDepth(node.children as MutableNode[], depth + 1);
+      }
+    }
+  };
+  assignDepth(roots, 0);
+
+  return roots;
 }
 
 /**
@@ -570,7 +647,9 @@ export function TargetWorklist({
     Record<string, ArrayChildDisplayMode | undefined>
   >({});
 
-  const { statusMap, coverageMap } = useTargetStatus(rules, validationResult, nodes);
+  const treeNodes = useMemo(() => normalizeSchemaNodesToTree(nodes), [nodes]);
+
+  const { statusMap, coverageMap } = useTargetStatus(rules, validationResult, treeNodes);
   const rulesByTarget = useMemo(() => {
     const map = new Map<string, MappingRule>();
     for (const rule of rules) {
@@ -581,7 +660,7 @@ export function TargetWorklist({
     return map;
   }, [rules]);
 
-  const rootNodes = useMemo(() => getRootNodes(nodes), [nodes]);
+  const rootNodes = treeNodes;
 
   const groupedRoots = useMemo(
     () => applyGrouping(rootNodes, groupingMode, statusMap),
@@ -666,7 +745,7 @@ export function TargetWorklist({
   const isFiltering = searchQuery.trim().length > 0 || activeFilterTab !== 'all';
   const activeFilterLabel = FILTER_TABS.find((tab) => tab.value === activeFilterTab)?.label ?? 'All';
 
-  if (nodes.length === 0) {
+  if (treeNodes.length === 0) {
     return (
       <div
         className={`flex h-full items-center justify-center text-sm text-slate-500 ${className}`}

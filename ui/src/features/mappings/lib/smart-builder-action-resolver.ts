@@ -66,6 +66,9 @@ function availabilityForAction(
   }
 
   const inputCount = context.inputs.length;
+  const effectiveInputCount = action.role === 'outputStep'
+    ? (inputCount > 0 ? 1 : 0)
+    : inputCount;
   const constraints = action.constraints;
 
   if (
@@ -102,6 +105,15 @@ function availabilityForAction(
   // Category heuristics for actionable guidance
   switch (action.category) {
     case 'number':
+      if (action.role === 'outputStep') {
+        if (context.targetType !== 'number') {
+          return {
+            enabled: false,
+            reason: 'Unavailable: output step requires number target.',
+          };
+        }
+        break;
+      }
       if (inputCount > 0 && !hasNumberInputs(context.inputs)) {
         const first = context.inputs[0];
         return {
@@ -151,13 +163,13 @@ function availabilityForAction(
       break;
   }
 
-  if (constraints?.minInputs !== undefined && inputCount < constraints.minInputs) {
+  if (constraints?.minInputs !== undefined && effectiveInputCount < constraints.minInputs) {
     return {
       enabled: false,
       reason: `Unavailable: requires at least ${constraints.minInputs} input${constraints.minInputs > 1 ? 's' : ''}.`,
     };
   }
-  if (constraints?.maxInputs !== undefined && inputCount > constraints.maxInputs) {
+  if (constraints?.maxInputs !== undefined && effectiveInputCount > constraints.maxInputs) {
     return {
       enabled: false,
       reason: `Unavailable: supports at most ${constraints.maxInputs} input${constraints.maxInputs > 1 ? 's' : ''}.`,

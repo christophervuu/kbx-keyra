@@ -26,7 +26,15 @@ interface SmartBuilderPanelProps {
   readonly onRequestArrayBuilderHandoff?: () => void;
   readonly onInputToggle?: (input: BuilderInput) => void;
   readonly onInputRemove?: (inputId: string) => void;
-  readonly onApplyAction?: (actionId: string, options?: { editingStepIndex?: number }) => void;
+  readonly onApplyAction?: (
+    actionId: string,
+    options?: {
+      editingStepIndex?: number;
+      editingStepScope?: 'input-transform' | 'output-step';
+      calculationInputId?: string;
+      setAsStartInputId?: string;
+    },
+  ) => void;
   readonly onBeginActionParameterEdit?: (
     actionId: string,
     values?: Readonly<Record<string, SmartBuilderActionParameterValue>>,
@@ -67,10 +75,11 @@ export function SmartBuilderPanel({
 }: SmartBuilderPanelProps) {
   const [showAddInput, setShowAddInput] = useState(false);
   const [showConditionEditor, setShowConditionEditor] = useState(false);
-  const [pickerMode, setPickerMode] = useState<'base' | 'step' | null>(null);
+  const [pickerMode, setPickerMode] = useState<'base' | 'transform' | 'step' | null>(null);
   const [pickerQuery, setPickerQuery] = useState('');
   const [expandedDisabledId, setExpandedDisabledId] = useState<string | null>(null);
   const [parameterEditorStepIndex, setParameterEditorStepIndex] = useState<number | null>(null);
+  const [parameterEditorStepScope, setParameterEditorStepScope] = useState<'input-transform' | 'output-step' | null>(null);
   const [openParameterDropdownId, setOpenParameterDropdownId] = useState<string | null>(null);
   const [parameterDropdownPosition, setParameterDropdownPosition] = useState<{
     readonly top: number;
@@ -133,53 +142,152 @@ export function SmartBuilderPanel({
 
   const shouldRenderConditionEditor = conditionComposition !== null || showConditionEditor;
 
-  const baseActionId = (() => {
+  const mappingMethodId = (() => {
     const composition = hydration.draft.composition;
-    if (!composition || composition.kind === 'direct') return 'base.direct';
+    if (!composition) return 'base.none';
+    if (composition.kind === 'direct' || composition.kind === 'default') return 'base.direct';
     if (composition.kind === 'concat') return 'text.concat';
     if (composition.kind === 'coalesce') return 'null.coalesce';
     if (composition.kind === 'condition') return 'condition.compare';
     if (composition.kind === 'valueMap') return 'lookup.valueMap';
     if (composition.kind === 'advancedExpression') return 'advanced.expression';
     if (composition.kind === 'math') {
-      return composition.operator === 'add'
-        ? 'number.add'
-        : composition.operator === 'subtract'
-          ? 'number.subtract'
-          : composition.operator === 'multiply'
-            ? 'number.multiply'
-            : 'number.divide';
+      const firstOperator = composition.operations?.[0]?.operator ?? composition.operator;
+      const hasSingleOperation = (composition.operations?.length ?? 0) === 1
+        || ((composition.inputIds?.length ?? 0) === 2 && typeof composition.operator === 'string');
+      if (hasSingleOperation && firstOperator) {
+        if (firstOperator === 'add') return 'number.add';
+        if (firstOperator === 'subtract') return 'number.subtract';
+        if (firstOperator === 'multiply') return 'number.multiply';
+        if (firstOperator === 'divide') return 'number.divide';
+      }
+      return 'base.calculation';
     }
-    return 'base.direct';
+    return 'base.none';
   })();
 
-  const baseActionLabel =
-    baseActionId === 'text.concat'
+  const mappingMethodLabel =
+    mappingMethodId === 'text.concat'
       ? 'Combine text'
-      : baseActionId === 'null.coalesce'
+      : mappingMethodId === 'null.coalesce'
         ? 'Use first available'
-        : baseActionId === 'condition.compare'
+        : mappingMethodId === 'condition.compare'
           ? 'Compare inputs'
-          : baseActionId === 'lookup.valueMap'
+          : mappingMethodId === 'lookup.valueMap'
             ? 'Map values'
-            : baseActionId === 'advanced.expression'
+            : mappingMethodId === 'advanced.expression'
               ? 'Edit expression'
-              : baseActionId === 'number.add'
-                ? 'Add numbers'
-                : baseActionId === 'number.subtract'
-                  ? 'Subtract numbers'
-                  : baseActionId === 'number.multiply'
-                    ? 'Multiply numbers'
-                    : baseActionId === 'number.divide'
-                      ? 'Divide numbers'
-                      : 'Direct mapping';
+              : mappingMethodId === 'base.calculation'
+                ? 'Calculation'
+                : mappingMethodId === 'number.add'
+                  ? 'Add numbers'
+                  : mappingMethodId === 'number.subtract'
+                    ? 'Subtract numbers'
+                    : mappingMethodId === 'number.multiply'
+                      ? 'Multiply numbers'
+                      : mappingMethodId === 'number.divide'
+                        ? 'Divide numbers'
+                        : mappingMethodId === 'base.none'
+                          ? 'Needs action'
+                        : 'Direct mapping';
+  const isMethodNeedsAction = mappingMethodId === 'base.none';
+
+  const defaultFallback = hydration.draft.composition?.kind === 'default'
+    ? hydration.draft.composition.fallback
+    : null;
+
+  const defaultPrimaryInput = (() => {
+    if (hydration.draft.composition?.kind === 'default') {
+      return hydration.draft.inputs.find((input) => input.id === hydration.draft.composition?.inputId) ?? hydration.draft.inputs[0] ?? null;
+    }
+    if (mappingMethodId === 'base.direct') {
+      return hydration.draft.inputs[0] ?? null;
+    }
+    return null;
+  })();
+
+  const defaultFallbackExpression = (() => {
+    if (!defaultFallback) return '""';
+    if (defaultFallback.kind === 'static') {
+      if (typeof defaultFallback.value === 'string') {
+        return `"${defaultFallback.value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      }
+      if (defaultFallback.value === null) return 'null';
+      return String(defaultFallback.value);
+    }
+    return defaultFallback.expression;
+  })();
+
+  const defaultFallbackLabel = (() => {
+    if (!defaultFallback) return null;
+    if (defaultFallback.kind === 'static') {
+      if (typeof defaultFallback.value === 'string') return `"${defaultFallback.value}"`;
+      if (defaultFallback.value === null) return 'null';
+      return String(defaultFallback.value);
+    }
+    return defaultFallback.expression;
+  })();
+
+  const calculationRows = (() => {
+    const composition = hydration.draft.composition;
+    if (composition?.kind !== 'math') return null;
+
+    if (composition.startInputId && composition.operations) {
+      const start = hydration.draft.inputs.find((input) => input.id === composition.startInputId);
+      if (!start) return null;
+
+      return {
+        start,
+        operations: composition.operations
+          .map((operation) => {
+            const input = hydration.draft.inputs.find((entry) => entry.id === operation.inputId);
+            return input ? { operator: operation.operator, input } : null;
+          })
+          .filter((row): row is { operator: 'add' | 'subtract' | 'multiply' | 'divide'; input: BuilderInput } => Boolean(row)),
+      };
+    }
+
+    const orderedInputs = (composition.inputIds ?? hydration.draft.inputs.map((input) => input.id))
+      .map((id) => hydration.draft.inputs.find((input) => input.id === id))
+      .filter((input): input is BuilderInput => Boolean(input));
+    const [start, ...rest] = orderedInputs;
+    if (!start) return null;
+    return {
+      start,
+      operations: rest.map((input) => ({
+        operator: composition.operator ?? 'add',
+        input,
+      })),
+    };
+  })();
+
+  const calculationLiteralDivideByZero = (() => {
+    if (!calculationRows) return false;
+    return calculationRows.operations.some((operation) =>
+      operation.operator === 'divide'
+      && operation.input.sourceKind === 'static'
+      && Number(operation.input.staticValue) === 0,
+    );
+  })();
 
   const usedInputIds = (() => {
     const composition = hydration.draft.composition;
     if (!composition) return new Set<string>();
 
     if (composition.kind === 'direct') return new Set([composition.inputId]);
-    if (composition.kind === 'concat' || composition.kind === 'coalesce' || composition.kind === 'math' || composition.kind === 'arrayBuild' || composition.kind === 'arrayMerge') {
+    if (composition.kind === 'concat' || composition.kind === 'coalesce' || composition.kind === 'arrayBuild' || composition.kind === 'arrayMerge') {
+      const ids = composition.inputIds ?? hydration.draft.inputs.map((input) => input.id);
+      return new Set(ids);
+    }
+    if (composition.kind === 'default') {
+      const ids = new Set<string>([composition.inputId]);
+      if (composition.fallback.kind === 'input') ids.add(composition.fallback.inputId);
+      return ids;
+    }
+    if (composition.kind === 'math') {
+      if (composition.startInputId && composition.operations) {
+        return new Set([composition.startInputId, ...composition.operations.map((entry) => entry.inputId)]);
+      }
       const ids = composition.inputIds ?? hydration.draft.inputs.map((input) => input.id);
       return new Set(ids);
     }
@@ -206,7 +314,7 @@ export function SmartBuilderPanel({
 
   const composePreview = (() => {
     if (hydration.draft.inputs.length === 0) return '--';
-    if (baseActionId === 'text.concat') {
+    if (mappingMethodId === 'text.concat') {
       const separatorLabel = concatSeparator === ' '
         ? '[space]'
         : concatSeparator === ', '
@@ -221,36 +329,50 @@ export function SmartBuilderPanel({
       }
       return hydration.draft.inputs.map((input) => input.label).join(` + ${separatorLabel} + `);
     }
-    if (baseActionId === 'null.coalesce') {
+    if (mappingMethodId === 'null.coalesce') {
       return hydration.draft.inputs.map((input) => input.label).join(' -> first available');
     }
-    if (baseActionId === 'number.add') {
-      return hydration.draft.inputs.map((input) => input.label).join(' + ');
+    if ((mappingMethodId === 'base.calculation'
+      || mappingMethodId === 'number.add'
+      || mappingMethodId === 'number.subtract'
+      || mappingMethodId === 'number.multiply'
+      || mappingMethodId === 'number.divide') && calculationRows) {
+      const symbol = (operator: 'add' | 'subtract' | 'multiply' | 'divide') => (
+        operator === 'add' ? '+' : operator === 'subtract' ? '-' : operator === 'multiply' ? '×' : '÷'
+      );
+      return [
+        calculationRows.start.label,
+        ...calculationRows.operations.map((operation) => `${symbol(operation.operator)} ${operation.input.label}`),
+      ].join(' ');
     }
-    if (baseActionId === 'number.subtract') {
-      return hydration.draft.inputs.map((input) => input.label).join(' - ');
+    if (mappingMethodId === 'base.direct') {
+      return defaultPrimaryInput?.label ?? hydration.draft.inputs[0]?.label ?? '--';
     }
-    if (baseActionId === 'number.multiply') {
-      return hydration.draft.inputs.map((input) => input.label).join(' × ');
-    }
-    if (baseActionId === 'number.divide') {
-      return hydration.draft.inputs.map((input) => input.label).join(' ÷ ');
-    }
-    if (baseActionId === 'base.direct') {
-      return hydration.draft.inputs[0]?.label ?? '--';
+    if (mappingMethodId === 'base.none') {
+      return 'Choose how selected inputs should be used.';
     }
     return hydration.draft.inputs.map((input) => input.label).join(', ');
   })();
 
+  const shouldRenderMethodPreview = mappingMethodId !== 'base.direct';
+
   const basePickerActions = (() => {
     const options = [
-      { id: 'base.direct', label: 'Direct mapping', enabled: hydration.draft.inputs.length > 0, reason: 'Select at least one input first.' },
-      { id: 'text.concat', label: 'Combine text' },
-      { id: 'null.coalesce', label: 'Use first available' },
+      {
+        id: 'base.direct',
+        label: 'Direct mapping',
+        enabled: hydration.draft.inputs.length === 1,
+        reason: hydration.draft.inputs.length === 0
+          ? 'Select at least one input first.'
+          : 'Direct mapping is only valid with exactly one input.',
+      },
+      { id: 'base.calculation', label: 'Calculation' },
       { id: 'number.add', label: 'Add numbers' },
       { id: 'number.subtract', label: 'Subtract numbers' },
       { id: 'number.multiply', label: 'Multiply numbers' },
       { id: 'number.divide', label: 'Divide numbers' },
+      { id: 'text.concat', label: 'Combine text' },
+      { id: 'null.coalesce', label: 'Use first available' },
       { id: 'condition.compare', label: 'Compare inputs' },
       { id: 'lookup.valueMap', label: 'Map values' },
       { id: 'advanced.expression', label: 'Edit expression' },
@@ -261,6 +383,15 @@ export function SmartBuilderPanel({
         return { id: option.id, label: option.label, enabled: option.enabled, reason: option.reason };
       }
       const resolved = resolvedById.get(option.id);
+      if (option.id === 'base.calculation') {
+        const numericCount = hydration.draft.inputs.filter((input) => input.valueType === 'number').length;
+        return {
+          id: option.id,
+          label: option.label,
+          enabled: numericCount >= 2,
+          reason: numericCount >= 2 ? undefined : 'Requires at least two numeric inputs.',
+        };
+      }
       return {
         id: option.id,
         label: option.label,
@@ -270,9 +401,14 @@ export function SmartBuilderPanel({
     });
   })();
 
-  const stepPickerActions = (() => {
+  const transformPickerActions = (() => {
+    if (mappingMethodId === 'base.none') {
+      return [] as { id: string; label: string; enabled: boolean; reason: string }[];
+    }
     const options = actions
-      .filter((entry) => entry.action.appliesTo === 'input' && entry.action.id !== 'advanced.expression')
+      .filter((entry) =>
+        entry.action.role === 'inputTransform'
+        && entry.action.id !== 'advanced.expression')
       .map((entry) => ({ id: entry.action.id, label: entry.action.label }));
     const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
     return options.map((option) => {
@@ -286,7 +422,37 @@ export function SmartBuilderPanel({
     });
   })();
 
-  const activePickerActions = pickerMode === 'base' ? basePickerActions : pickerMode === 'step' ? stepPickerActions : [];
+  const stepPickerActions = (() => {
+    if (mappingMethodId === 'base.none') {
+      return [] as { id: string; label: string; enabled: boolean; reason: string }[];
+    }
+    const options = actions
+      .filter((entry) =>
+        entry.action.role === 'outputStep'
+        && entry.action.id !== 'advanced.expression'
+        && entry.action.id !== 'null.default')
+      .map((entry) => ({ id: entry.action.id, label: entry.action.label }));
+    const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
+    return options.map((option) => {
+      const resolved = resolvedById.get(option.id);
+      return {
+        id: option.id,
+        label: option.label,
+        enabled: resolved?.availability.enabled ?? false,
+        reason: resolved?.availability.reason ?? 'Unavailable in current context.',
+      };
+    });
+  })();
+
+  const effectivePickerMode = pickerMode ?? (isMethodNeedsAction ? 'base' : null);
+  const activePickerActions =
+    effectivePickerMode === 'base'
+      ? basePickerActions
+      : effectivePickerMode === 'transform'
+        ? transformPickerActions
+        : effectivePickerMode === 'step'
+          ? stepPickerActions
+          : [];
   const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
   const visibleEnabledPickerActions = activePickerActions.filter((action) => {
     if (!action.enabled) return false;
@@ -366,6 +532,12 @@ export function SmartBuilderPanel({
           },
         };
       }
+      case 'round': {
+        return {
+          actionId: 'number.round',
+          values: { decimals: asStaticNumber(0) ?? 0 },
+        };
+      }
       case 'nth': {
         return {
           actionId: 'array.nth',
@@ -382,6 +554,24 @@ export function SmartBuilderPanel({
         return {
           actionId: 'convert.cast',
           values: { targetType: asStaticString(0) ?? 'string' },
+        };
+      }
+      case 'default': {
+        const fallbackArg = args[0];
+        const fallbackExpression = fallbackArg?.kind === 'expression'
+          ? fallbackArg.expression
+          : fallbackArg?.kind === 'input'
+            ? ''
+            : typeof fallbackArg?.value === 'string'
+              ? `"${fallbackArg.value}"`
+              : typeof fallbackArg?.value === 'number' || typeof fallbackArg?.value === 'boolean'
+                ? String(fallbackArg.value)
+                : fallbackArg?.value === null
+                  ? 'null'
+                  : '""';
+        return {
+          actionId: 'null.default',
+          values: { fallbackExpression },
         };
       }
       default:
@@ -418,6 +608,169 @@ export function SmartBuilderPanel({
     && activeDropdownOptions.length > 0,
   );
 
+  const isDefaultFallbackParameterEditor = pendingActionDraft?.actionId === 'null.default';
+
+  const parameterEditorBlock = pendingActionDraft && pendingParameterDefinitions.length > 0
+    ? (
+      <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-parameter-editor">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400" data-testid="smart-parameter-editor-title">
+          Configure {pendingActionLabel}
+        </p>
+
+        <div className="mt-2 space-y-2" data-testid="smart-parameter-fields">
+          {pendingParameterDefinitions.map((definition) => {
+            const rawValue = pendingActionDraft.values[definition.id];
+            const fieldError = actionParameterIssuesByFieldId.get(definition.id);
+            const sharedInputClassName = [
+              'h-8 w-full rounded border bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none',
+              fieldError ? 'border-red-700 focus:border-red-500' : 'border-slate-700 focus:border-blue-500',
+            ].join(' ');
+
+            return (
+              <div key={definition.id} data-testid={`smart-parameter-field-${definition.id}`}>
+                <label className="mb-1 block text-[11px] text-slate-300" htmlFor={`smart-parameter-input-${definition.id}`}>
+                  {definition.label}{definition.required ? ' *' : ''}
+                </label>
+
+                {definition.kind === 'enum' ? (
+                  <select
+                    id={`smart-parameter-input-${definition.id}`}
+                    data-testid={`smart-parameter-input-${definition.id}`}
+                    className={sharedInputClassName}
+                    value={typeof rawValue === 'string' ? rawValue : ''}
+                    onChange={(event) => {
+                      onUpdateActionParameterDraft?.(pendingActionDraft.actionId, definition.id, event.target.value);
+                    }}
+                  >
+                    {(definition.options ?? []).map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                ) : definition.kind === 'boolean' ? (
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-200" htmlFor={`smart-parameter-input-${definition.id}`}>
+                    <input
+                      id={`smart-parameter-input-${definition.id}`}
+                      data-testid={`smart-parameter-input-${definition.id}`}
+                      type="checkbox"
+                      checked={Boolean(rawValue)}
+                      onChange={(event) => {
+                        onUpdateActionParameterDraft?.(pendingActionDraft.actionId, definition.id, event.target.checked);
+                      }}
+                    />
+                    {definition.description ?? 'Enabled'}
+                  </label>
+                ) : (
+                  (() => {
+                    const hasStringOptions = definition.kind === 'string' && (definition.options?.length ?? 0) > 0;
+
+                    return (
+                      <input
+                        id={`smart-parameter-input-${definition.id}`}
+                        data-testid={`smart-parameter-input-${definition.id}`}
+                        type={definition.kind === 'number' || definition.kind === 'integer' ? 'number' : 'text'}
+                        step={definition.kind === 'integer' ? 1 : undefined}
+                        min={definition.constraints?.min}
+                        max={definition.constraints?.max}
+                        value={rawValue === undefined ? '' : String(rawValue)}
+                        onFocus={(event) => {
+                          if (hasStringOptions) {
+                            openParameterDropdown(definition.id, event.currentTarget);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape' && hasStringOptions) {
+                            setOpenParameterDropdownId((current) => (current === definition.id ? null : current));
+                            setParameterDropdownPosition(null);
+                          }
+                        }}
+                        onChange={(event) => {
+                          const nextValue: SmartBuilderActionParameterValue | '' = event.target.value;
+                          onUpdateActionParameterDraft?.(pendingActionDraft.actionId, definition.id, nextValue);
+                          if (hasStringOptions) {
+                            openParameterDropdown(definition.id, event.currentTarget);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!hasStringOptions) return;
+                          window.setTimeout(() => {
+                            setOpenParameterDropdownId((current) => (current === definition.id ? null : current));
+                            setParameterDropdownPosition(null);
+                          }, 80);
+                        }}
+                        className={sharedInputClassName}
+                      />
+                    );
+                  })()
+                )}
+
+                {fieldError && (
+                  <p className="mt-1 text-[11px] text-red-400" data-testid={`smart-parameter-error-${definition.id}`}>
+                    {fieldError}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {!pendingActionDraft.validation.isValid && (
+          <p className="mt-2 text-[11px] text-red-400" data-testid="smart-parameter-editor-error">
+            Fix highlighted fields before applying.
+          </p>
+        )}
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="smart-parameter-apply"
+            className="rounded border border-blue-700 bg-blue-900/30 px-2 py-1 text-[11px] text-blue-100 enabled:hover:bg-blue-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!pendingActionDraft.validation.isValid}
+            onClick={() => {
+              onApplyAction?.(pendingActionDraft.actionId, parameterEditorStepIndex === null
+                ? undefined
+                : {
+                  editingStepIndex: parameterEditorStepIndex,
+                  ...(parameterEditorStepScope ? { editingStepScope: parameterEditorStepScope } : {}),
+                });
+              if (pendingActionDraft.actionId === 'null.default') {
+                onConditionFocusedSlotChange?.(null);
+              }
+              setParameterEditorStepIndex(null);
+              setParameterEditorStepScope(null);
+            }}
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            data-testid="smart-parameter-reset"
+            className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+            onClick={() => {
+              onResetActionParameterDraft?.(pendingActionDraft.actionId);
+            }}
+          >
+            Reset defaults
+          </button>
+          <button
+            type="button"
+            data-testid="smart-parameter-cancel"
+            className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+              onClick={() => {
+                if (pendingActionDraft.actionId === 'null.default') {
+                  onConditionFocusedSlotChange?.(null);
+                }
+                setParameterEditorStepIndex(null);
+                setParameterEditorStepScope(null);
+                onCancelActionParameterDraft?.();
+              }}
+            >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+    : null;
+
   return (
     <section
       className={`flex h-full flex-col ${className}`}
@@ -431,18 +784,10 @@ export function SmartBuilderPanel({
           <InputTray
             inputs={hydration.draft.inputs}
             onRemoveInput={onInputRemove}
+            onToggleAddInput={() => setShowAddInput((prev) => !prev)}
           />
 
           <div className="mt-2" data-testid="smart-add-input-section">
-            <button
-              type="button"
-              data-testid="smart-add-input-toggle"
-              className="rounded border border-slate-700 px-2 py-1.5 text-xs text-slate-200 hover:border-slate-500"
-              onClick={() => setShowAddInput((prev) => !prev)}
-            >
-              + Add input
-            </button>
-
             {showAddInput && (
               <div className="mt-2 rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-add-input-options">
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Add input</p>
@@ -596,29 +941,81 @@ export function SmartBuilderPanel({
           )}
         </div>
 
-        <div className="rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-mapping-recipe">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Mapping recipe</p>
+        {hydration.draft.inputs.length > 0 && (
+          <div className="rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-mapping-recipe">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Mapping method</p>
 
-          <div className="flex items-center justify-between" data-testid="smart-recipe-base-row">
-            <p className="text-[11px] uppercase tracking-wide text-slate-500">Base</p>
-            <button
-              type="button"
-              data-testid="smart-recipe-change-base"
-              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-              onClick={() => {
-                setPickerMode((prev) => (prev === 'base' ? null : 'base'));
-                setPickerQuery('');
-                setExpandedDisabledId(null);
-              }}
-            >
-              Change
-            </button>
-          </div>
+            <div className="flex items-center justify-between" data-testid="smart-recipe-base-row">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Method</p>
+              {!isMethodNeedsAction && (
+              <button
+                type="button"
+                data-testid="smart-recipe-change-base"
+                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                onClick={() => {
+                  setPickerMode((prev) => (prev === 'base' ? null : 'base'));
+                  setPickerQuery('');
+                  setExpandedDisabledId(null);
+                }}
+              >
+                Change method
+              </button>
+              )}
+            </div>
 
-          <p className="mt-1 text-xs text-slate-100" data-testid="smart-recipe-base-label">{baseActionLabel}</p>
-          <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-preview">{composePreview}</p>
+            <p className="mt-1 text-xs text-slate-100" data-testid="smart-recipe-base-label">{mappingMethodLabel}</p>
+            {shouldRenderMethodPreview && (
+              <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-preview">{composePreview}</p>
+            )}
 
-          {baseActionId === 'text.concat' && (
+            {mappingMethodId === 'base.direct' && (
+              <div className="mt-3" data-testid="smart-missing-value-section">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Fallback</p>
+                  <button
+                    type="button"
+                    data-testid="smart-missing-value-add-change"
+                    className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                    onClick={() => {
+                      onConditionFocusedSlotChange?.('fallback:default');
+                      onBeginActionParameterEdit?.('null.default', {
+                        fallbackExpression: defaultFallbackExpression,
+                      });
+                    }}
+                  >
+                    {defaultFallback ? 'Change fallback' : 'Add fallback'}
+                  </button>
+                </div>
+
+                {defaultFallbackLabel ? (
+                  <p className="mt-1 break-all text-xs text-slate-400" data-testid="smart-missing-value-current">
+                    {defaultFallbackLabel}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-100" data-testid="smart-missing-value-none">None</p>
+                )}
+
+                {isDefaultFallbackParameterEditor && parameterEditorBlock}
+
+                {defaultFallback && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="smart-missing-value-remove"
+                      className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                      onClick={() => {
+                        onConditionFocusedSlotChange?.(null);
+                        onApplyAction?.('base.direct');
+                      }}
+                    >
+                      Remove fallback
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mappingMethodId === 'text.concat' && (
             <div className="mt-2" data-testid="smart-concat-separator-controls">
               <p className="mb-1 text-[11px] text-slate-400">Separator</p>
               <div className="flex flex-wrap gap-1.5">
@@ -642,55 +1039,207 @@ export function SmartBuilderPanel({
             </div>
           )}
 
-          <div className="mt-3" data-testid="smart-recipe-steps">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Steps</p>
-              <button
-                type="button"
-                data-testid="smart-recipe-add-step"
-                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                onClick={() => {
-                  setPickerMode((prev) => (prev === 'step' ? null : 'step'));
-                  setPickerQuery('');
-                  setExpandedDisabledId(null);
-                }}
-              >
-                + Add step
-              </button>
-            </div>
-            {(hydration.draft.inputs[0]?.transforms.length ?? 0) === 0 ? (
-              <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-steps-none">None</p>
-            ) : (
-              <ol className="mt-1 space-y-1 text-xs text-slate-300" data-testid="smart-recipe-steps-list">
-                {(hydration.draft.inputs[0]?.transforms ?? []).map((step, index) => (
-                  <li key={`${step.functionName}-${index}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
+          {!isMethodNeedsAction && (
+            <>
+              <div className="mt-3" data-testid="smart-recipe-input-transforms">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Input transforms</p>
+                  <button
+                    type="button"
+                    data-testid="smart-recipe-add-transform"
+                    className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                    onClick={() => {
+                      setPickerMode((prev) => (prev === 'transform' ? null : 'transform'));
+                      setPickerQuery('');
+                      setExpandedDisabledId(null);
+                    }}
+                  >
+                    + Add input transform
+                  </button>
+                </div>
+                {(hydration.draft.inputs[0]?.transforms.length ?? 0) === 0 ? (
+                  <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-input-transforms-none">None</p>
+                ) : (
+                  <ol className="mt-1 space-y-1 text-xs text-slate-300" data-testid="smart-recipe-input-transforms-list">
+                    {(hydration.draft.inputs[0]?.transforms ?? []).map((step, index) => (
+                      <li key={`${step.functionName}-${index}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{index + 1}. {step.functionName}</span>
+                          {(() => {
+                            const parameterized = resolveParameterizedActionForTransformStep(step);
+                            if (!parameterized) return null;
+                            return (
+                              <button
+                                type="button"
+                                data-testid={`smart-recipe-input-transform-edit-${index}`}
+                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                                onClick={() => {
+                                  onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
+                                  setParameterEditorStepIndex(index);
+                                  setParameterEditorStepScope('input-transform');
+                                }}
+                              >
+                                Edit
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+
+              {(mappingMethodId === 'base.calculation'
+                || mappingMethodId === 'number.add'
+                || mappingMethodId === 'number.subtract'
+                || mappingMethodId === 'number.multiply'
+                || mappingMethodId === 'number.divide') && calculationRows && (
+                <div className="mt-3 rounded border border-slate-800 bg-slate-950/30 px-2 py-2" data-testid="smart-calculation-editor">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Formula</p>
+                  <div className="mt-1 space-y-1 text-xs text-slate-300" data-testid="smart-calculation-rows">
                     <div className="flex items-center justify-between gap-2">
-                      <span>{index + 1}. {step.functionName}</span>
-                      {(() => {
-                        const parameterized = resolveParameterizedActionForTransformStep(step);
-                        if (!parameterized) return null;
-                        return (
+                      <span>
+                        Start with <span className="font-medium text-slate-100">{calculationRows.start.label}</span>
+                      </span>
+                      <button
+                        type="button"
+                        data-testid={`smart-calculation-set-start-${calculationRows.start.id}`}
+                        className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                        onClick={() => onApplyAction?.('number.add', { setAsStartInputId: calculationRows.start.id })}
+                      >
+                        Starting value
+                      </button>
+                    </div>
+                    {calculationRows.operations.map((row) => (
+                      <div key={`${row.operator}-${row.input.id}`} className="space-y-1 rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            {row.operator === 'add' ? '+' : row.operator === 'subtract' ? '-' : row.operator === 'multiply' ? '×' : '÷'}{' '}
+                            <span className="font-medium text-slate-100">{row.input.label}</span>
+                          </span>
                           <button
                             type="button"
-                            data-testid={`smart-recipe-step-edit-${index}`}
+                            data-testid={`smart-calculation-set-start-${row.input.id}`}
                             className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                            onClick={() => {
-                              onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
-                              setParameterEditorStepIndex(index);
-                            }}
+                            onClick={() => onApplyAction?.('number.add', { setAsStartInputId: row.input.id })}
                           >
-                            Edit
+                            Set as start
                           </button>
-                        );
-                      })()}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1" data-testid={`smart-calculation-operators-${row.input.id}`}>
+                          <button
+                            type="button"
+                            data-testid={`smart-calculation-operator-add-${row.input.id}`}
+                            className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'add' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                            onClick={() => onApplyAction?.('number.add', { calculationInputId: row.input.id })}
+                          >
+                            + Add
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`smart-calculation-operator-subtract-${row.input.id}`}
+                            className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'subtract' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                            onClick={() => onApplyAction?.('number.subtract', { calculationInputId: row.input.id })}
+                          >
+                            − Subtract
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`smart-calculation-operator-multiply-${row.input.id}`}
+                            className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'multiply' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                            onClick={() => onApplyAction?.('number.multiply', { calculationInputId: row.input.id })}
+                          >
+                            × Multiply
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`smart-calculation-operator-divide-${row.input.id}`}
+                            className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'divide' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                            onClick={() => onApplyAction?.('number.divide', { calculationInputId: row.input.id })}
+                          >
+                            ÷ Divide
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {calculationLiteralDivideByZero && (
+                    <p className="mt-2 text-[11px] text-amber-300" data-testid="smart-calculation-divide-by-zero-warning">
+                      Warning: calculation divides by a literal 0 operand.
+                    </p>
+                  )}
+                  {hydration.draft.expression.trim().length > 0 && (
+                    <p className="mt-2 break-all font-mono text-[11px] text-slate-400" data-testid="smart-calculation-expression-preview">
+                      {hydration.draft.expression}
+                    </p>
+                  )}
+                </div>
+              )}
 
-          {unusedInputs.length > 0 && (
+              <div className="mt-3" data-testid="smart-recipe-steps">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Output steps</p>
+                  <button
+                    type="button"
+                    data-testid="smart-recipe-add-step"
+                    className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                    onClick={() => {
+                      setPickerMode((prev) => (prev === 'step' ? null : 'step'));
+                      setPickerQuery('');
+                      setExpandedDisabledId(null);
+                    }}
+                  >
+                    + Add output step
+                  </button>
+                </div>
+                {hydration.draft.postSteps.length === 0 ? (
+                  <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-steps-none">None</p>
+                ) : (
+                  <ol className="mt-1 space-y-1 text-xs text-slate-300" data-testid="smart-recipe-steps-list">
+                    {hydration.draft.postSteps.map((step, index) => (
+                      <li key={`${step.functionName}-${index}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{index + 1}. {step.functionName}</span>
+                          {(() => {
+                            const parameterized = resolveParameterizedActionForTransformStep(step);
+                            if (!parameterized) return null;
+                            return (
+                              <button
+                                type="button"
+                                data-testid={`smart-recipe-step-edit-${index}`}
+                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                                onClick={() => {
+                                  onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
+                                  setParameterEditorStepIndex(index);
+                                  setParameterEditorStepScope('output-step');
+                                }}
+                              >
+                                Edit
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </>
+          )}
+
+          {isMethodNeedsAction && hydration.draft.inputs.length >= 2 && (
+            <div
+              className="mt-2 rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1.5"
+              data-testid="smart-base-needs-action"
+            >
+              <p className="text-[11px] text-amber-200">
+                Multiple inputs selected. Choose a mapping method.
+              </p>
+            </div>
+          )}
+
+          {!isMethodNeedsAction && unusedInputs.length > 0 && (
             <div className="mt-2 rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1.5" data-testid="smart-unused-input-notice">
               <p className="text-[11px] text-amber-200">{unusedInputs.length} selected input{unusedInputs.length === 1 ? ' is' : 's are'} not used.</p>
               {canSuggestCombineText && (
@@ -703,171 +1252,78 @@ export function SmartBuilderPanel({
                   Combine selected text
                 </button>
               )}
-            </div>
-          )}
-
-          {pendingActionDraft && pendingParameterDefinitions.length > 0 && (
-            <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-parameter-editor">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400" data-testid="smart-parameter-editor-title">
-                Configure {pendingActionLabel}
-              </p>
-
-              <div className="mt-2 space-y-2" data-testid="smart-parameter-fields">
-                {pendingParameterDefinitions.map((definition) => {
-                  const rawValue = pendingActionDraft.values[definition.id];
-                  const fieldError = actionParameterIssuesByFieldId.get(definition.id);
-                  const sharedInputClassName = [
-                    'h-8 w-full rounded border bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none',
-                    fieldError ? 'border-red-700 focus:border-red-500' : 'border-slate-700 focus:border-blue-500',
-                  ].join(' ');
-
-                  return (
-                    <div key={definition.id} data-testid={`smart-parameter-field-${definition.id}`}>
-                      <label className="mb-1 block text-[11px] text-slate-300" htmlFor={`smart-parameter-input-${definition.id}`}>
-                        {definition.label}{definition.required ? ' *' : ''}
-                      </label>
-
-                      {definition.kind === 'enum' ? (
-                        <select
-                          id={`smart-parameter-input-${definition.id}`}
-                          data-testid={`smart-parameter-input-${definition.id}`}
-                          className={sharedInputClassName}
-                          value={typeof rawValue === 'string' ? rawValue : ''}
-                          onChange={(event) => {
-                            onUpdateActionParameterDraft?.(pendingActionDraft.actionId, definition.id, event.target.value);
-                          }}
+              {(mappingMethodId === 'base.calculation'
+                || mappingMethodId === 'number.add'
+                || mappingMethodId === 'number.subtract'
+                || mappingMethodId === 'number.multiply'
+                || mappingMethodId === 'number.divide') && (
+                <div className="mt-1 space-y-1" data-testid="smart-unused-input-calculation-actions">
+                  {unusedInputs.map((input) => (
+                    <div key={input.id} className="rounded border border-amber-800/60 px-2 py-1">
+                      <p className="text-[11px] text-amber-100">{input.label} is not used in this calculation yet.</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          data-testid={`smart-unused-input-add-${input.id}`}
+                          className="rounded border border-amber-700 px-2 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/30"
+                          onClick={() => onApplyAction?.('number.add', { calculationInputId: input.id })}
                         >
-                          {(definition.options ?? []).map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      ) : definition.kind === 'boolean' ? (
-                        <label className="inline-flex items-center gap-2 text-xs text-slate-200" htmlFor={`smart-parameter-input-${definition.id}`}>
-                          <input
-                            id={`smart-parameter-input-${definition.id}`}
-                            data-testid={`smart-parameter-input-${definition.id}`}
-                            type="checkbox"
-                            checked={Boolean(rawValue)}
-                            onChange={(event) => {
-                              onUpdateActionParameterDraft?.(pendingActionDraft.actionId, definition.id, event.target.checked);
-                            }}
-                          />
-                          {definition.description ?? 'Enabled'}
-                        </label>
-                      ) : (
-                        (() => {
-                          const hasStringOptions = definition.kind === 'string' && (definition.options?.length ?? 0) > 0;
-
-                          return (
-                            <input
-                              id={`smart-parameter-input-${definition.id}`}
-                              data-testid={`smart-parameter-input-${definition.id}`}
-                              type={definition.kind === 'number' || definition.kind === 'integer' ? 'number' : 'text'}
-                              step={definition.kind === 'integer' ? 1 : undefined}
-                              min={definition.constraints?.min}
-                              max={definition.constraints?.max}
-                              value={rawValue === undefined ? '' : String(rawValue)}
-                              onFocus={(event) => {
-                                if (hasStringOptions) {
-                                  openParameterDropdown(definition.id, event.currentTarget);
-                                }
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Escape' && hasStringOptions) {
-                                  setOpenParameterDropdownId((current) => (current === definition.id ? null : current));
-                                  setParameterDropdownPosition(null);
-                                }
-                              }}
-                              onChange={(event) => {
-                                const nextValue: SmartBuilderActionParameterValue | '' = event.target.value;
-                                onUpdateActionParameterDraft?.(pendingActionDraft.actionId, definition.id, nextValue);
-                                if (hasStringOptions) {
-                                  openParameterDropdown(definition.id, event.currentTarget);
-                                }
-                              }}
-                              onBlur={() => {
-                                if (!hasStringOptions) return;
-                                window.setTimeout(() => {
-                                  setOpenParameterDropdownId((current) => (current === definition.id ? null : current));
-                                  setParameterDropdownPosition(null);
-                                }, 80);
-                              }}
-                              className={sharedInputClassName}
-                            />
-                          );
-                        })()
-                      )}
-
-                      {fieldError && (
-                        <p className="mt-1 text-[11px] text-red-400" data-testid={`smart-parameter-error-${definition.id}`}>
-                          {fieldError}
-                        </p>
-                      )}
+                          + Add
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`smart-unused-input-subtract-${input.id}`}
+                          className="rounded border border-amber-700 px-2 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/30"
+                          onClick={() => onApplyAction?.('number.subtract', { calculationInputId: input.id })}
+                        >
+                          − Subtract
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`smart-unused-input-multiply-${input.id}`}
+                          className="rounded border border-amber-700 px-2 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/30"
+                          onClick={() => onApplyAction?.('number.multiply', { calculationInputId: input.id })}
+                        >
+                          × Multiply
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`smart-unused-input-divide-${input.id}`}
+                          className="rounded border border-amber-700 px-2 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/30"
+                          onClick={() => onApplyAction?.('number.divide', { calculationInputId: input.id })}
+                        >
+                          ÷ Divide
+                        </button>
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-
-              {!pendingActionDraft.validation.isValid && (
-                <p className="mt-2 text-[11px] text-red-400" data-testid="smart-parameter-editor-error">
-                  Fix highlighted fields before applying.
-                </p>
+                  ))}
+                </div>
               )}
-
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  data-testid="smart-parameter-apply"
-                  className="rounded border border-blue-700 bg-blue-900/30 px-2 py-1 text-[11px] text-blue-100 enabled:hover:bg-blue-900/50 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!pendingActionDraft.validation.isValid}
-                  onClick={() => {
-                    onApplyAction?.(pendingActionDraft.actionId, parameterEditorStepIndex === null
-                      ? undefined
-                      : { editingStepIndex: parameterEditorStepIndex });
-                    setParameterEditorStepIndex(null);
-                  }}
-                >
-                  Apply
-                </button>
-                <button
-                  type="button"
-                  data-testid="smart-parameter-reset"
-                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                  onClick={() => {
-                    onResetActionParameterDraft?.(pendingActionDraft.actionId);
-                  }}
-                >
-                  Reset defaults
-                </button>
-                <button
-                  type="button"
-                  data-testid="smart-parameter-cancel"
-                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                  onClick={() => {
-                    setParameterEditorStepIndex(null);
-                    onCancelActionParameterDraft?.();
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
           )}
 
-          {pickerMode !== null && (
-            <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid={`smart-${pickerMode}-picker`}>
-              <div className="mb-1 flex items-center justify-between">
+          {!isDefaultFallbackParameterEditor && parameterEditorBlock}
+
+            {effectivePickerMode !== null && (
+              <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid={`smart-${effectivePickerMode}-picker`}>
+                <div className="mb-1 flex items-center justify-between">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  {pickerMode === 'base' ? 'Change base mapping' : 'Add step'}
+                  {effectivePickerMode === 'base'
+                    ? 'Choose mapping method'
+                    : effectivePickerMode === 'transform'
+                      ? 'Add input transform'
+                      : 'Add output step'}
                 </p>
-                <button
-                  type="button"
-                  className="text-[11px] text-slate-500 hover:text-slate-300"
-                  data-testid="smart-picker-close"
-                  onClick={() => setPickerMode(null)}
-                >
-                  Close
-                </button>
+                {!isMethodNeedsAction && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-slate-500 hover:text-slate-300"
+                    data-testid="smart-picker-close"
+                    onClick={() => setPickerMode(null)}
+                  >
+                    Close
+                  </button>
+                )}
               </div>
 
               <input
@@ -894,6 +1350,7 @@ export function SmartBuilderPanel({
                       if (parameterDefinitions.length > 0) {
                         onBeginActionParameterEdit?.(action.id);
                         setParameterEditorStepIndex(null);
+                        setParameterEditorStepScope(null);
                         setPickerMode(null);
                         return;
                       }
@@ -904,6 +1361,7 @@ export function SmartBuilderPanel({
                       }
                       onApplyAction?.(action.id);
                       setParameterEditorStepIndex(null);
+                      setParameterEditorStepScope(null);
                       setPickerMode(null);
                     }}
                   >
@@ -912,8 +1370,8 @@ export function SmartBuilderPanel({
                 ))}
               </div>
 
-              {(normalizedPickerQuery.length > 0 && visibleDisabledPickerActions.length > 0) && (
-                <ul className="mt-2 space-y-1.5" data-testid="smart-picker-disabled-actions">
+                {(normalizedPickerQuery.length > 0 && visibleDisabledPickerActions.length > 0) && (
+                  <ul className="mt-2 space-y-1.5" data-testid="smart-picker-disabled-actions">
                   {visibleDisabledPickerActions.map((action) => {
                     const expanded = expandedDisabledId === action.id;
                     return (
@@ -935,11 +1393,12 @@ export function SmartBuilderPanel({
                       </li>
                     );
                   })}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {hasEnabledArrayActions && (
           <div

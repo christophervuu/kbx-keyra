@@ -44,6 +44,20 @@ const NESTED_NODES: SchemaTreeNode[] = (() => {
   return [nameNode, ...nameChildren, makeNode('age', 'age', 'number', 0)];
 })();
 
+const FLATTENED_NESTED_NODES: SchemaTreeNode[] = [
+  { ...makeNode('name', 'name', 'object', 0, false), childCount: 2, children: [] },
+  makeNode('name.first', 'first', 'string', 1, true),
+  makeNode('name.last', 'last', 'string', 1, false),
+  makeNode('age', 'age', 'number', 0),
+];
+
+const FLATTENED_WITH_MISSING_PARENT_NODES: SchemaTreeNode[] = [
+  { ...makeNode('profile', 'profile', 'object', 0, false), childCount: 2, children: [] },
+  { ...makeNode('profile.name', 'name', 'string', 1, false), parentPath: null },
+  { ...makeNode('profile.email', 'email', 'string', 1, false), parentPath: '' },
+  makeNode('status', 'status', 'string', 0),
+];
+
 const makeArrayTree = (arrayPath: string, childCount: number): SchemaTreeNode[] => {
   const children = Array.from({ length: childCount }, (_, index) =>
     makeNode(`${arrayPath}.field${index + 1}`, `field${index + 1}`, 'string', 1, index % 3 === 0),
@@ -204,6 +218,35 @@ describe('TargetWorklist', () => {
     // Expand the name node
     fireEvent.click(screen.getByTestId('expand-toggle-name'));
     expect(screen.getByTestId('coverage-text')).toHaveTextContent('1/2');
+  });
+
+  it('reconstructs flattened target object hierarchy and reveals child rows on expand', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLATTENED_NESTED_NODES} />);
+
+    expect(screen.queryByTestId('target-field-row-name.first')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('expand-toggle-name'));
+    expect(screen.getByTestId('target-field-row-name.first')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-name.last')).toBeInTheDocument();
+  });
+
+  it('indents target child rows under reconstructed object parent', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLATTENED_NESTED_NODES} />);
+
+    fireEvent.click(screen.getByTestId('expand-toggle-name'));
+    const parentContent = screen.getByTestId('target-field-row-name').querySelector('[data-testid="row-col-target"] > div');
+    const childContent = screen.getByTestId('target-field-row-name.first').querySelector('[data-testid="row-col-target"] > div');
+
+    expect(parentContent).toHaveStyle({ paddingLeft: '0px' });
+    expect(childContent).toHaveStyle({ paddingLeft: '16px' });
+  });
+
+  it('infers dotted-path parent for target rows when parentPath is missing', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={FLATTENED_WITH_MISSING_PARENT_NODES} />);
+
+    expect(screen.queryByTestId('target-field-row-profile.name')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('expand-toggle-profile'));
+    expect(screen.getByTestId('target-field-row-profile.name')).toBeInTheDocument();
+    expect(screen.getByTestId('target-field-row-profile.email')).toBeInTheDocument();
   });
 
   it('shows mapped status for array item descendants when array target has a rule', () => {

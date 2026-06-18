@@ -70,6 +70,70 @@ const NESTED_SCHEMA: ParsedSchema = {
   inferred: false,
 };
 
+const FLATTENED_NESTED_SCHEMA: ParsedSchema = {
+  nodes: [
+    {
+      ...OBJECT_NODE,
+      children: [],
+      childCount: 1,
+    },
+    {
+      ...NESTED_LEAF,
+      depth: 1,
+      parentPath: 'address',
+      children: [],
+      childCount: 0,
+    },
+    LEAF_A,
+  ],
+  totalFieldCount: 3,
+  format: 'json',
+  parseTimeMs: 0,
+  inferred: false,
+};
+
+const FLATTENED_WITH_MISSING_PARENT_SCHEMA: ParsedSchema = {
+  nodes: [
+    {
+      path: 'profile',
+      fieldName: 'profile',
+      type: 'object',
+      depth: 0,
+      isArray: false,
+      isRequired: false,
+      parentPath: null,
+      childCount: 2,
+      children: [],
+    },
+    {
+      path: 'profile.name',
+      fieldName: 'name',
+      type: 'string',
+      depth: 1,
+      isArray: false,
+      isRequired: false,
+      parentPath: null,
+      childCount: 0,
+      children: [],
+    },
+    {
+      path: 'profile.email',
+      fieldName: 'email',
+      type: 'string',
+      depth: 1,
+      isArray: false,
+      isRequired: false,
+      parentPath: '',
+      childCount: 0,
+      children: [],
+    },
+  ],
+  totalFieldCount: 3,
+  format: 'json',
+  parseTimeMs: 0,
+  inferred: false,
+};
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -247,6 +311,34 @@ describe('SourceSchemaPanel', () => {
 
     fireEvent.click(container);
     expect(container).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('reconstructs flattened object hierarchy and shows child fields on expand', () => {
+    renderPanel({ parsedSourceSchema: FLATTENED_NESTED_SCHEMA, onStageField: vi.fn() });
+
+    expect(screen.queryByTestId('source-field-address.city')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('source-container-address'));
+    expect(screen.getByTestId('source-field-address.city')).toBeInTheDocument();
+  });
+
+  it('indents reconstructed child rows under their parent object', () => {
+    renderPanel({ parsedSourceSchema: FLATTENED_NESTED_SCHEMA, onStageField: vi.fn() });
+
+    const parent = screen.getByTestId('source-container-address');
+    fireEvent.click(parent);
+    const child = screen.getByTestId('source-field-address.city');
+
+    expect(parent).toHaveStyle({ paddingLeft: '4px' });
+    expect(child).toHaveStyle({ paddingLeft: '24px' });
+  });
+
+  it('infers dotted-path parent when parentPath is missing and expands profile children', () => {
+    renderPanel({ parsedSourceSchema: FLATTENED_WITH_MISSING_PARENT_SCHEMA, onStageField: vi.fn() });
+
+    expect(screen.queryByTestId('source-field-profile.name')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('source-container-profile'));
+    expect(screen.getByTestId('source-field-profile.name')).toBeInTheDocument();
+    expect(screen.getByTestId('source-field-profile.email')).toBeInTheDocument();
   });
 
   it('leaf fields have role=button and aria-label', () => {

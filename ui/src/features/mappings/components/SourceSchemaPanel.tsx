@@ -184,8 +184,85 @@ function countMatchingNodes(nodes: readonly SchemaTreeNode[]): number {
   return count;
 }
 
-function flattenTopLevel(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
-  return nodes.filter((node) => node.depth === 0);
+function normalizeSchemaNodesToTree(nodes: readonly SchemaTreeNode[]): SchemaTreeNode[] {
+  type MutableNode = SchemaTreeNode & { children: SchemaTreeNode[] };
+
+  const flattened: SchemaTreeNode[] = [];
+  const seenFromInput = new Set<string>();
+  const walk = (next: readonly SchemaTreeNode[]) => {
+    for (const node of next) {
+      if (seenFromInput.has(node.path)) continue;
+      seenFromInput.add(node.path);
+      flattened.push(node);
+      if (node.children.length > 0) {
+        walk(node.children);
+      }
+    }
+  };
+  walk(nodes);
+
+  const nodeByPath = new Map<string, MutableNode>();
+  const orderByPath = new Map<string, number>();
+
+  flattened.forEach((node, index) => {
+    orderByPath.set(node.path, index);
+    if (!nodeByPath.has(node.path)) {
+      nodeByPath.set(node.path, {
+        ...node,
+        children: [],
+        childCount: 0,
+      });
+    }
+  });
+
+  const roots: MutableNode[] = [];
+  for (const node of flattened) {
+    const current = nodeByPath.get(node.path);
+    if (!current) continue;
+
+    const explicitParentPath = typeof node.parentPath === 'string' && node.parentPath.trim().length > 0
+      ? node.parentPath.trim()
+      : null;
+    const inferredParentPath = node.path.includes('.')
+      ? node.path.slice(0, node.path.lastIndexOf('.'))
+      : null;
+
+    const parentPath = [explicitParentPath, inferredParentPath]
+      .filter((path, index, arr): path is string => Boolean(path) && arr.indexOf(path) === index)
+      .find((path) => path !== node.path && nodeByPath.has(path));
+
+    const parent = parentPath ? nodeByPath.get(parentPath) : undefined;
+    if (parent) {
+      parent.children.push(current);
+      parent.childCount = parent.children.length;
+      continue;
+    }
+
+    roots.push(current);
+  }
+
+  const sortByInputOrder = (list: MutableNode[]) => {
+    list.sort((a, b) => (orderByPath.get(a.path) ?? 0) - (orderByPath.get(b.path) ?? 0));
+    for (const node of list) {
+      if (node.children.length > 0) {
+        sortByInputOrder(node.children as MutableNode[]);
+      }
+    }
+  };
+  sortByInputOrder(roots);
+
+  const assignDepth = (list: MutableNode[], depth: number) => {
+    for (const node of list) {
+      node.depth = depth;
+      node.childCount = node.children.length;
+      if (node.children.length > 0) {
+        assignDepth(node.children as MutableNode[], depth + 1);
+      }
+    }
+  };
+  assignDepth(roots, 0);
+
+  return roots;
 }
 
 // ---------------------------------------------------------------------------
@@ -470,9 +547,9 @@ export function SourceSchemaPanel({
 
   const groupsWithNodes = useMemo(() => {
     return allGroups.map((group) => {
-      const baseNodes = group.parsedSchema?.nodes ?? [];
+      const baseNodes = normalizeSchemaNodesToTree(group.parsedSchema?.nodes ?? []);
       const filteredNodes = filterTreeByQuery(baseNodes, normalizedQuery);
-      const rootNodes = flattenTopLevel(filteredNodes);
+      const rootNodes = filteredNodes;
       const matchCount = countMatchingNodes(filteredNodes);
       const matchingPaths = new Set<string>();
 

@@ -75,6 +75,19 @@ function inputExpression(input: BuilderInput): string {
   return expression;
 }
 
+function applyTransformStepsToExpression(
+  expression: string,
+  steps: readonly { readonly functionName: string; readonly args?: readonly BuilderArgumentValue[] },
+  draft: SmartBuilderDraft,
+): string {
+  let nextExpression = expression;
+  for (const step of steps) {
+    const argExpressions = (step.args ?? []).map((arg) => argumentValueToExpression(draft, arg));
+    nextExpression = `${step.functionName}(${[nextExpression, ...argExpressions].filter(Boolean).join(', ')})`;
+  }
+  return nextExpression;
+}
+
 function resolveInputReferences(
   expression: string,
   draft: SmartBuilderDraft,
@@ -136,41 +149,103 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
   const composition = draft.composition;
   if (!composition) return '';
 
+  let baseExpression = '';
+
   switch (composition.kind) {
     case 'advancedExpression':
-      return composition.expression;
+      baseExpression = composition.expression;
+      break;
     case 'direct': {
       const input = findInput(draft, composition.inputId);
-      return input ? inputExpression(input) : '';
+      baseExpression = input ? inputExpression(input) : '';
+      break;
     }
     case 'concat': {
       const expressions = resolveInputExpressions(draft, composition.inputIds);
-      if (expressions.length === 0) return '';
-      if (!composition.separator) return `concat(${expressions.join(', ')})`;
+      if (expressions.length === 0) {
+        baseExpression = '';
+        break;
+      }
+      if (!composition.separator) {
+        baseExpression = `concat(${expressions.join(', ')})`;
+        break;
+      }
       const withSeparators = expressions.flatMap((expr, index) =>
         index === expressions.length - 1 ? [expr] : [expr, quote(composition.separator)],
       );
-      return `concat(${withSeparators.join(', ')})`;
+      baseExpression = `concat(${withSeparators.join(', ')})`;
+      break;
     }
     case 'coalesce': {
       const expressions = resolveInputExpressions(draft, composition.inputIds);
       const withFallback = composition.fallback
         ? [...expressions, argumentValueToExpression(draft, composition.fallback)]
         : expressions;
-      return withFallback.length > 0 ? `coalesce(${withFallback.join(', ')})` : '';
+      baseExpression = withFallback.length > 0 ? `coalesce(${withFallback.join(', ')})` : '';
+      break;
+    }
+    case 'default': {
+      const primary = findInput(draft, composition.inputId);
+      if (!primary) {
+        baseExpression = '';
+        break;
+      }
+      const primaryExpr = inputExpression(primary);
+      if (!primaryExpr) {
+        baseExpression = '';
+        break;
+      }
+      const fallbackExpr = argumentValueToExpression(draft, composition.fallback);
+      baseExpression = `default(${primaryExpr}, ${fallbackExpr})`;
+      break;
     }
     case 'math': {
+      if (composition.startInputId && composition.operations && composition.operations.length > 0) {
+        const startInput = findInput(draft, composition.startInputId);
+        if (!startInput) {
+          baseExpression = '';
+          break;
+        }
+        let acc = inputExpression(startInput);
+        if (!acc) {
+          baseExpression = '';
+          break;
+        }
+
+        for (const operation of composition.operations) {
+          const operandInput = findInput(draft, operation.inputId);
+          if (!operandInput) continue;
+          const operandExpression = inputExpression(operandInput);
+          if (!operandExpression) continue;
+          acc = `${operation.operator}(${acc}, ${operandExpression})`;
+        }
+
+        baseExpression = acc;
+        break;
+      }
+
       const expressions = resolveInputExpressions(draft, composition.inputIds);
-      if (expressions.length === 0) return '';
-      if (expressions.length === 1) return expressions[0];
+      if (expressions.length === 0) {
+        baseExpression = '';
+        break;
+      }
+      if (expressions.length === 1) {
+        baseExpression = expressions[0] ?? '';
+        break;
+      }
       const [first, ...rest] = expressions;
-      return rest.reduce(
-        (acc, current) => `${composition.operator}(${acc}, ${current})`,
+      const operator = composition.operator ?? 'add';
+      baseExpression = rest.reduce(
+        (acc, current) => `${operator}(${acc}, ${current})`,
         first,
       );
+      break;
     }
     case 'condition': {
-      if (composition.clauses.length === 0) return '';
+      if (composition.clauses.length === 0) {
+        baseExpression = '';
+        break;
+      }
 
       const elseExpression = argumentValueToExpression(draft, composition.elseOutput);
       const folded = [...composition.clauses].reverse().reduce((elseExpr, clause) => {
@@ -180,11 +255,15 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         return `if(${predicateExpr}, ${thenExpr}, ${elseExpr})`;
       }, elseExpression);
 
-      return resolveInputReferences(folded, draft);
+      baseExpression = resolveInputReferences(folded, draft);
+      break;
     }
     case 'valueMap': {
       const source = findInput(draft, composition.inputId);
-      if (!source) return '';
+      if (!source) {
+        baseExpression = '';
+        break;
+      }
       const sourceExpr = inputExpression(source);
       const mappings = composition.mappings
         .filter((entry) => entry.whenValue.trim().length > 0)
@@ -193,15 +272,22 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         );
       const mappingExpr = `{${mappings.join(', ')}}`;
       const fallbackExpr = argumentValueToExpression(draft, composition.fallback);
-      return `valueMap(${sourceExpr}, ${mappingExpr}, ${fallbackExpr})`;
+      baseExpression = `valueMap(${sourceExpr}, ${mappingExpr}, ${fallbackExpr})`;
+      break;
     }
     case 'arrayBuild': {
       const expressions = resolveInputExpressions(draft, composition.inputIds);
-      return `array(${expressions.join(', ')})`;
+      baseExpression = `array(${expressions.join(', ')})`;
+      break;
     }
     case 'arrayMerge': {
       const expressions = resolveInputExpressions(draft, composition.inputIds);
-      return `merge(${expressions.join(', ')})`;
+      baseExpression = `merge(${expressions.join(', ')})`;
+      break;
     }
   }
+
+  if (!baseExpression) return baseExpression;
+  if (draft.postSteps.length === 0) return baseExpression;
+  return applyTransformStepsToExpression(baseExpression, draft.postSteps, draft);
 }

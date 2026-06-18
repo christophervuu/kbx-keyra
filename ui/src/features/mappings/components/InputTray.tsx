@@ -4,6 +4,7 @@ interface InputTrayProps {
   readonly inputs: readonly BuilderInput[];
   readonly className?: string;
   readonly onRemoveInput?: (inputId: string) => void;
+  readonly onToggleAddInput?: () => void;
 }
 
 const SOURCE_KIND_BADGES: Record<BuilderInput['sourceKind'], { short: string; tone: string; label: string }> = {
@@ -16,7 +17,25 @@ const SOURCE_KIND_BADGES: Record<BuilderInput['sourceKind'], { short: string; to
   expression: { short: 'EXPR', tone: 'bg-fuchsia-900/50 text-fuchsia-200', label: 'Expression input' },
 };
 
-export function InputTray({ inputs, className = '', onRemoveInput }: InputTrayProps) {
+const TYPE_BADGES: Record<BuilderInput['valueType'], { short: string; tone: string; label: string }> = {
+  string: { short: 'STR', tone: 'bg-blue-900/60 text-blue-300', label: 'String' },
+  number: { short: 'NUM', tone: 'bg-green-900/60 text-green-300', label: 'Number' },
+  integer: { short: 'INT', tone: 'bg-green-900/60 text-green-300', label: 'Integer' },
+  boolean: { short: 'BOL', tone: 'bg-purple-900/60 text-purple-300', label: 'Boolean' },
+  object: { short: 'OBJ', tone: 'bg-slate-700/80 text-slate-300', label: 'Object' },
+  array: { short: 'ARR', tone: 'bg-amber-900/60 text-amber-300', label: 'Array' },
+  null: { short: 'NUL', tone: 'bg-slate-800/60 text-slate-400', label: 'Null' },
+  any: { short: 'ANY', tone: 'bg-slate-700/80 text-slate-300', label: 'Any' },
+  union: { short: 'UNI', tone: 'bg-slate-700/80 text-slate-300', label: 'Union' },
+  unknown: { short: 'UNK', tone: 'bg-slate-700/80 text-slate-300', label: 'Unknown' },
+};
+
+export function InputTray({
+  inputs,
+  className = '',
+  onRemoveInput,
+  onToggleAddInput,
+}: InputTrayProps) {
   const resolveSummary = (input: BuilderInput): string => {
     switch (input.sourceKind) {
       case 'enrichment':
@@ -36,7 +55,16 @@ export function InputTray({ inputs, className = '', onRemoveInput }: InputTrayPr
     <section className={className} data-testid="smart-input-tray" aria-label="Selected inputs">
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Input tray</p>
-        <p className="text-xs text-slate-500" data-testid="smart-input-tray-count">{inputs.length} selected</p>
+        {onToggleAddInput && (
+          <button
+            type="button"
+            data-testid="smart-add-input-toggle"
+            className="rounded border border-slate-700 px-2 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+            onClick={onToggleAddInput}
+          >
+            Add Input
+          </button>
+        )}
       </div>
 
       {inputs.length === 0 ? (
@@ -49,7 +77,8 @@ export function InputTray({ inputs, className = '', onRemoveInput }: InputTrayPr
       ) : (
         <ul className="space-y-2" data-testid="smart-input-tray-list">
           {inputs.map((input) => {
-            const badge = SOURCE_KIND_BADGES[input.sourceKind];
+            const sourceBadge = SOURCE_KIND_BADGES[input.sourceKind];
+            const typeBadge = TYPE_BADGES[input.valueType] ?? TYPE_BADGES.unknown;
             return (
               <li
                 key={input.id}
@@ -57,10 +86,11 @@ export function InputTray({ inputs, className = '', onRemoveInput }: InputTrayPr
                 data-testid={`smart-input-tray-item-${input.id}`}
               >
                 <span
-                  className={`inline-flex min-w-[2.7rem] justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${badge.tone}`}
-                  aria-label={badge.label}
+                  data-testid={`smart-input-tray-type-${input.id}`}
+                  className={`inline-flex min-w-[2.7rem] justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${typeBadge.tone}`}
+                  aria-label={`Type: ${typeBadge.label}`}
                 >
-                  {badge.short}
+                  {typeBadge.short}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium text-slate-100" title={input.label}>{input.label}</p>
@@ -68,6 +98,13 @@ export function InputTray({ inputs, className = '', onRemoveInput }: InputTrayPr
                     {resolveSummary(input)}
                   </p>
                 </div>
+                <span
+                  data-testid={`smart-input-tray-source-kind-${input.id}`}
+                  className={`inline-flex min-w-[2.7rem] shrink-0 justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${sourceBadge.tone}`}
+                  aria-label={sourceBadge.label}
+                >
+                  {sourceBadge.short}
+                </span>
                 {onRemoveInput && (
                   <button
                     type="button"

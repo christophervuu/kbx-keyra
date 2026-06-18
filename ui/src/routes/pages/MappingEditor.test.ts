@@ -191,12 +191,8 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(second.outcome).toBe('appended-to-tray');
     expect(second.draft.inputs).toHaveLength(2);
     expect(second.draft.inputs.map((input) => input.path)).toEqual(['firstName', 'lastName']);
-    expect(second.draft.composition).toEqual({
-      kind: 'direct',
-      inputId: second.draft.inputs[0]?.id,
-    });
-    expect(second.expression).toContain('source("firstName")');
-    expect(second.expression).not.toContain('source("lastName")');
+    expect(second.draft.composition).toBeNull();
+    expect(second.expression).toBe('');
   });
 
   it('does not implicitly concat when two numeric inputs are staged', () => {
@@ -228,11 +224,8 @@ describe('applyStagedInputToSmartDraft', () => {
 
     expect(second.outcome).toBe('appended-to-tray');
     expect(second.draft.inputs).toHaveLength(2);
-    expect(second.draft.composition).toEqual({
-      kind: 'direct',
-      inputId: second.draft.inputs[0]?.id,
-    });
-    expect(second.expression).toBe('source("subtotal")');
+    expect(second.draft.composition).toBeNull();
+    expect(second.expression).toBe('');
   });
 
   it('fills focused slot without appending top-level tray input', () => {
@@ -306,6 +299,52 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(result.expression).toContain('eq(source("leftEmail"), source("rightEmail"))');
     expect(result.expression).toContain('"MATCH"');
     expect(result.expression).toContain('"NO_MATCH"');
+  });
+
+  it('routes focused fallback:default staged input into default fallback slot', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'preferredName',
+          path: 'preferredName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      focusedSlotId: 'fallback:default',
+      composition: {
+        kind: 'default' as const,
+        inputId: 'input-1',
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+      },
+    };
+
+    const result = applyStagedInputToSmartDraft({
+      draft,
+      staged: {
+        path: 'legalName',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("legalName")',
+      },
+    });
+
+    expect(result.outcome).toBe('filled-focused-slot');
+    expect(result.draft.inputs).toHaveLength(1);
+    expect(result.draft.slotScopedInputs?.['fallback:default']?.path).toBe('legalName');
+    expect(result.draft.composition).toEqual({
+      kind: 'default',
+      inputId: 'input-1',
+      fallback: { kind: 'expression', expression: 'source("legalName")' },
+    });
+    expect(result.expression).toBe('default(source("preferredName"), source("legalName"))');
   });
 
   it('maps staged constant/static/expression kinds into tray inputs and DSL', () => {
@@ -442,7 +481,7 @@ describe('applyStagedInputToSmartDraft', () => {
       },
     });
 
-    expect(second.expression).toBe('source("firstName")');
+    expect(second.expression).toBe('');
   });
 
   it('toggles off an already-added source field instead of duplicating it', () => {
@@ -748,7 +787,7 @@ describe('applySmartActionToDraft', () => {
     };
 
     const next = applySmartActionToDraft(draft, 'null.default');
-    expect(next.expression).toBe('coalesce(source("preferredName"), "UNKNOWN")');
+    expect(next.expression).toBe('default(source("preferredName"), "UNKNOWN")');
   });
 
   it('applies date.format with explicit input/output format parameters', () => {
@@ -840,5 +879,195 @@ describe('applySmartActionToDraft', () => {
     const next = applySmartActionToDraft(draft, 'base.direct');
     expect(next.composition).toEqual({ kind: 'direct', inputId: 'a' });
     expect(next.expression).toBe('source("firstName")');
+  });
+
+  it('adds subtract operand to existing calculation without replacing calculation base', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.net',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'discount',
+          sourceKind: 'primary' as const,
+          label: 'discount',
+          path: 'discount',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'add' as const, inputId: 'tax' }],
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'number.subtract', {
+      calculationInputId: 'discount',
+    });
+
+    expect(next.composition?.kind).toBe('math');
+    if (next.composition?.kind !== 'math') return;
+    expect(next.composition.startInputId).toBe('subtotal');
+    expect(next.composition.operations).toEqual([
+      { operator: 'add', inputId: 'tax' },
+      { operator: 'subtract', inputId: 'discount' },
+    ]);
+    expect(next.expression).toBe(
+      'subtract(add(source("subtotal"), source("tax")), source("discount"))',
+    );
+  });
+
+  it('supports expressing a-b and b-a by setting calculation start input', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.delta',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'a',
+          path: 'a',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'b',
+          path: 'b',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'a',
+        operations: [{ operator: 'subtract' as const, inputId: 'b' }],
+      },
+    };
+
+    expect(draft.expression).toBe('');
+    const aMinusB = applySmartActionToDraft(draft, 'number.subtract', {
+      calculationInputId: 'b',
+    });
+    expect(aMinusB.expression).toBe('subtract(source("a"), source("b"))');
+
+    const bMinusA = applySmartActionToDraft(aMinusB, 'number.add', {
+      setAsStartInputId: 'b',
+    });
+    const normalized = applySmartActionToDraft(bMinusA, 'number.subtract', {
+      calculationInputId: 'a',
+    });
+    expect(normalized.expression).toBe('subtract(source("b"), source("a"))');
+  });
+
+  it('applies output-step actions as post steps instead of replacing composition', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.netLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'add' as const, inputId: 'tax' }],
+      },
+      expression: 'add(source("subtotal"), source("tax"))',
+    };
+
+    const rounded = applySmartActionToDraft(draft, 'number.round');
+    expect(rounded.composition?.kind).toBe('math');
+    expect(rounded.postSteps).toEqual([{ functionName: 'round', args: [{ kind: 'static', value: 0 }] }]);
+    expect(rounded.expression).toBe('round(add(source("subtotal"), source("tax")), 0)');
+
+    const roundedTwoDecimals = applySmartActionToDraft({
+      ...draft,
+      pendingActionDraft: {
+        actionId: 'number.round',
+        values: { decimals: 2 },
+        validation: { isValid: true, issues: [] },
+      },
+    }, 'number.round');
+    expect(roundedTwoDecimals.expression).toBe('round(add(source("subtotal"), source("tax")), 2)');
+
+    const casted = applySmartActionToDraft(roundedTwoDecimals, 'convert.cast');
+    expect(casted.composition?.kind).toBe('math');
+    expect(casted.expression).toBe('cast(round(add(source("subtotal"), source("tax")), 2), "string")');
+  });
+
+  it('maps null.default to default composition, not output-step wrapping', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'name',
+          sourceKind: 'primary' as const,
+          label: 'name',
+          path: 'name',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'name' },
+      pendingActionDraft: {
+        actionId: 'null.default',
+        values: { fallbackExpression: '"UNKNOWN"' },
+        validation: { isValid: true, issues: [] },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'null.default');
+    expect(next.composition).toEqual({
+      kind: 'default',
+      inputId: 'name',
+      fallback: { kind: 'static', value: 'UNKNOWN' },
+    });
+    expect(next.expression).toBe('default(source("name"), "UNKNOWN")');
   });
 });

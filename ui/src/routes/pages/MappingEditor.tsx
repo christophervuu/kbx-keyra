@@ -43,7 +43,6 @@ import {
   getPendingAutoMapSession,
   hydrateSmartBuilderFromExpression,
   setSlotScopedInput,
-  toSmartBuilderCompositionPatchFromParameters,
   toSmartBuilderTransformArgsFromParameters,
   updateSmartBuilderExpression,
 } from '@/features/mappings/lib';
@@ -238,6 +237,10 @@ function removeInputFromSmartDraft(
     composition = nextIds.length <= 1
       ? { kind: 'direct', inputId: nextIds[0] ?? remainingInputs[0]!.id }
       : { ...composition, inputIds: nextIds };
+  } else if (composition?.kind === 'default' && composition.inputId === inputId) {
+    composition = remainingInputs.length > 0
+      ? { kind: 'direct', inputId: remainingInputs[0]!.id }
+      : null;
   }
 
   const nextDraft = {
@@ -281,9 +284,35 @@ function deriveSmartActionMetaFromDraft(draft: SmartBuilderDraft): SmartActionMe
   return { activeActionId: null, concatSeparator: ' ', announcement: null };
 }
 
+function toArgumentValueFromDslExpression(raw: string): { kind: 'static'; value: unknown } | { kind: 'expression'; expression: string } {
+  const expression = raw.trim();
+  const quoted = expression.match(/^"([\s\S]*)"$/);
+  if (quoted) {
+    return {
+      kind: 'static',
+      value: quoted[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\') ?? '',
+    };
+  }
+
+  if (expression === 'null') return { kind: 'static', value: null };
+  if (expression === 'true') return { kind: 'static', value: true };
+  if (expression === 'false') return { kind: 'static', value: false };
+  if (expression.length > 0 && Number.isFinite(Number(expression))) {
+    return { kind: 'static', value: Number(expression) };
+  }
+
+  return { kind: 'expression', expression };
+}
+
 export function applySmartActionToDraft(
   draft: SmartBuilderDraft,
   actionId: string,
+  options?: {
+    readonly calculationInputId?: string;
+    readonly setAsStartInputId?: string;
+    readonly editingStepIndex?: number;
+    readonly editingStepScope?: 'input-transform' | 'output-step';
+  },
 ): SmartBuilderDraft {
   const parameterResolution = getValidatedActionParameters({ draft, actionId });
   if (!parameterResolution.ok) {
@@ -293,10 +322,50 @@ export function applySmartActionToDraft(
   const actionParameters = parameterResolution.values;
   let nextDraft: SmartBuilderDraft = draft;
 
+  const toMathOperator = (id: string): 'add' | 'subtract' | 'multiply' | 'divide' =>
+    id === 'number.add'
+      ? 'add'
+      : id === 'number.subtract'
+        ? 'subtract'
+        : id === 'number.multiply'
+          ? 'multiply'
+          : 'divide';
+
+  const normalizeMathComposition = (
+    sourceDraft: SmartBuilderDraft,
+  ): {
+    readonly startInputId: string;
+    readonly operations: readonly { readonly operator: 'add' | 'subtract' | 'multiply' | 'divide'; readonly inputId: string }[];
+  } | null => {
+    const composition = sourceDraft.composition;
+    if (composition?.kind === 'math' && composition.startInputId && composition.operations) {
+      return {
+        startInputId: composition.startInputId,
+        operations: composition.operations,
+      };
+    }
+
+    const orderedIds = sourceDraft.inputs.map((input) => input.id);
+    if (orderedIds.length === 0) return null;
+    const startInputId = orderedIds[0]!;
+    const fallbackOperator = composition?.kind === 'math' ? (composition.operator ?? 'add') : 'add';
+    const operations = orderedIds
+      .slice(1)
+      .map((inputId) => ({ operator: fallbackOperator, inputId }));
+
+    return {
+      startInputId,
+      operations,
+    };
+  };
+
   const applyInputTransform = (
     functionName: string,
     args?: readonly ({ kind: 'static'; value: unknown } | { kind: 'expression'; expression: string })[],
   ): SmartBuilderDraft => {
+    if (options?.editingStepScope === 'output-step') {
+      return draft;
+    }
     const firstInput = draft.inputs[0];
     if (!firstInput) return draft;
 
@@ -312,6 +381,25 @@ export function applySmartActionToDraft(
     return {
       ...draft,
       inputs: nextInputs,
+    };
+  };
+
+  const applyOutputStep = (
+    functionName: string,
+    args?: readonly ({ kind: 'static'; value: unknown } | { kind: 'expression'; expression: string } | { kind: 'input'; inputId: string })[],
+  ): SmartBuilderDraft => {
+    const nextStep = args ? { functionName, args } : { functionName };
+    const editingStepIndex = options?.editingStepIndex;
+    if (editingStepIndex !== undefined && editingStepIndex >= 0 && editingStepIndex < draft.postSteps.length) {
+      return {
+        ...draft,
+        postSteps: draft.postSteps.map((step, index) => (index === editingStepIndex ? nextStep : step)),
+      };
+    }
+
+    return {
+      ...draft,
+      postSteps: [...draft.postSteps, nextStep],
     };
   };
 
@@ -334,9 +422,9 @@ export function applySmartActionToDraft(
       case 'text.split':
         return applyInputTransform('split', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
       case 'number.round':
-        return applyInputTransform('round');
+        return applyOutputStep('round', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
       case 'number.abs':
-        return applyInputTransform('abs');
+        return applyOutputStep('abs');
       case 'date.format':
         return applyInputTransform('formatDate', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
       case 'array.flatten':
@@ -354,13 +442,31 @@ export function applySmartActionToDraft(
       case 'null.isNull':
         return applyInputTransform('isNull');
       case 'convert.cast':
-        return applyInputTransform('cast', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
+        return applyOutputStep('cast', toSmartBuilderTransformArgsFromParameters({ actionId: id, values: actionParameters }));
       default:
         return null;
     }
   };
 
   switch (actionId) {
+    case 'base.calculation': {
+      if (draft.inputs.length < 2) return draft;
+      const orderedIds = draft.inputs.map((input) => input.id);
+      const startInputId = orderedIds[0]!;
+      const operations = orderedIds.slice(1).map((inputId) => ({
+        operator: 'add' as const,
+        inputId,
+      }));
+      nextDraft = {
+        ...draft,
+        composition: {
+          kind: 'math',
+          startInputId,
+          operations,
+        },
+      };
+      break;
+    }
     case 'base.direct': {
       const first = draft.inputs[0];
       if (!first) return draft;
@@ -400,35 +506,88 @@ export function applySmartActionToDraft(
     case 'number.multiply':
     case 'number.divide': {
       if (draft.inputs.length === 0) return draft;
-      const operator = actionId === 'number.add'
-        ? 'add'
-        : actionId === 'number.subtract'
-          ? 'subtract'
-          : actionId === 'number.multiply'
-            ? 'multiply'
-            : 'divide';
+      const operator = toMathOperator(actionId);
+
+      const normalizedMath = normalizeMathComposition(draft);
+      if (!normalizedMath) return draft;
+
+      const setAsStartInputId = options?.setAsStartInputId;
+      if (setAsStartInputId) {
+        const isKnownInput = draft.inputs.some((input) => input.id === setAsStartInputId);
+        if (!isKnownInput) return draft;
+
+        const existingWithoutStart = normalizedMath.operations.filter((entry) => entry.inputId !== setAsStartInputId);
+        const updatedOperations = [
+          ...existingWithoutStart,
+          ...(normalizedMath.startInputId !== setAsStartInputId
+            ? [{ operator: 'add' as const, inputId: normalizedMath.startInputId }]
+            : []),
+        ];
+
+        nextDraft = {
+          ...draft,
+          composition: {
+            kind: 'math',
+            startInputId: setAsStartInputId,
+            operations: updatedOperations,
+          },
+        };
+        break;
+      }
+
+      const explicitInputId = options?.calculationInputId;
+      const unusedInputId = explicitInputId
+        ?? draft.inputs.find((input) =>
+          input.id !== normalizedMath.startInputId
+          && !normalizedMath.operations.some((entry) => entry.inputId === input.id))?.id;
+
+      if (!unusedInputId) {
+        const updatedOperations = normalizedMath.operations.length > 0
+          ? normalizedMath.operations.map((entry, index, arr) =>
+            index === arr.length - 1 ? { ...entry, operator } : entry)
+          : normalizedMath.operations;
+
+        nextDraft = {
+          ...draft,
+          composition: {
+            kind: 'math',
+            startInputId: normalizedMath.startInputId,
+            operations: updatedOperations,
+          },
+        };
+        break;
+      }
+
+      const existingOperationIndex = normalizedMath.operations.findIndex((entry) => entry.inputId === unusedInputId);
+      const updatedOperations = existingOperationIndex >= 0
+        ? normalizedMath.operations.map((entry, index) =>
+          index === existingOperationIndex ? { ...entry, operator } : entry)
+        : [...normalizedMath.operations, { operator, inputId: unusedInputId }];
+
       nextDraft = {
         ...draft,
         composition: {
           kind: 'math',
-          operator,
-          inputIds: draft.inputs.map((input) => input.id),
+          startInputId: normalizedMath.startInputId,
+          operations: updatedOperations,
         },
       };
       break;
     }
     case 'null.default': {
-      const first = draft.inputs[0];
-      if (!first) return draft;
-      const compositionPatch = toSmartBuilderCompositionPatchFromParameters({
-        actionId,
-        values: actionParameters,
-        firstInputId: first.id,
-      });
-      if (!compositionPatch) return draft;
+      const primaryInput = draft.inputs[0];
+      if (!primaryInput) return draft;
+      const fallbackRaw = typeof actionParameters.fallbackExpression === 'string'
+        ? actionParameters.fallbackExpression
+        : '""';
+      const fallbackArgument = toArgumentValueFromDslExpression(fallbackRaw);
       nextDraft = {
         ...draft,
-        composition: compositionPatch,
+        composition: {
+          kind: 'default',
+          inputId: primaryInput.id,
+          fallback: fallbackArgument,
+        },
       };
       break;
     }
@@ -737,6 +896,20 @@ export function applyStagedInputToSmartDraft(params: {
             : composition.elseOutput,
         },
       };
+    } else if (focusedSlotId === 'fallback:default') {
+      const primaryInputId = nextDraft.composition?.kind === 'default'
+        ? nextDraft.composition.inputId
+        : nextDraft.inputs[0]?.id;
+      if (primaryInputId) {
+        nextDraft = {
+          ...nextDraft,
+          composition: {
+            kind: 'default',
+            inputId: primaryInputId,
+            fallback: argumentFromFocusedInput,
+          },
+        };
+      }
     }
 
     const expression = generateSmartBuilderExpression(nextDraft);
@@ -766,7 +939,7 @@ export function applyStagedInputToSmartDraft(params: {
   const appended = {
     ...draft,
     inputs: [...draft.inputs, nextInput],
-    composition: draft.composition,
+    composition: draft.composition?.kind === 'direct' ? null : draft.composition,
   };
   const expression = generateSmartBuilderExpression(appended);
   const withExpression = updateSmartBuilderExpression(appended, expression);
@@ -2189,11 +2362,12 @@ export default function MappingEditor() {
           const resolved = resolveSmartDraftForTarget(selectedTargetPath);
           if (!resolved.guided || resolved.draft === null) return;
 
-          const nextDraftApplied = applySmartActionToDraft(resolved.draft, actionId);
+          const nextDraftApplied = applySmartActionToDraft(resolved.draft, actionId, options);
           const editingStepIndex = options?.editingStepIndex ?? null;
+          const editingStepScope = options?.editingStepScope ?? null;
 
           let nextDraft = nextDraftApplied;
-          if (editingStepIndex !== null && editingStepIndex >= 0) {
+          if (editingStepScope !== 'output-step' && editingStepIndex !== null && editingStepIndex >= 0) {
             const previousTransforms = resolved.draft.inputs[0]?.transforms ?? [];
             const appliedTransforms = nextDraftApplied.inputs[0]?.transforms ?? [];
             const replacementStep = appliedTransforms[appliedTransforms.length - 1];
@@ -2227,15 +2401,17 @@ export default function MappingEditor() {
           const actionLabel =
             actionId === 'text.concat'
               ? 'Combine text'
-              : actionId === 'text.upper'
-                ? 'Uppercase'
-                : actionId === 'text.lower'
-                  ? 'Lowercase'
-              : actionId === 'text.trim'
-                ? 'Trim spaces'
-                : actionId === 'text.phoneDigits'
-                  ? 'Normalize phone digits'
-                    : actionId;
+              : actionId === 'base.calculation'
+                ? 'Calculation'
+                : actionId === 'text.upper'
+                  ? 'Uppercase'
+                  : actionId === 'text.lower'
+                    ? 'Lowercase'
+                    : actionId === 'text.trim'
+                      ? 'Trim spaces'
+                      : actionId === 'text.phoneDigits'
+                        ? 'Normalize phone digits'
+                        : actionId;
 
           setSmartActionMetaByTarget((prev) => ({
             ...prev,

@@ -23,9 +23,11 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-builder-panel')).toBeInTheDocument();
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('Other ways to fill this field');
     expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-mapping-recipe')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
     expect(screen.getByTestId('smart-add-input-toggle')).toBeInTheDocument();
     expect(screen.queryByText('Smart Builder')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mapping method')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Base$/)).not.toBeInTheDocument();
   });
 
   it('renders complex-expression banner for non-decomposable hydration and allows advanced entry', () => {
@@ -59,11 +61,12 @@ describe('SmartBuilderPanel', () => {
     expect(onEnterAdvancedMode).toHaveBeenCalled();
   });
 
-  it('opens add-step picker and applies an input transform action', () => {
+  it('opens add-output-step picker and launches parameter editor for round', () => {
     const onApplyAction = vi.fn();
+    const onBeginActionParameterEdit = vi.fn();
     const draft = createEmptySmartBuilderDraft({
-      targetPath: 'customer.emailUpper',
-      targetType: 'string',
+      targetPath: 'order.total',
+      targetType: 'number',
       isRequired: false,
     });
 
@@ -75,28 +78,31 @@ describe('SmartBuilderPanel', () => {
           {
             id: 'input-1',
             sourceKind: 'primary' as const,
-            label: 'email',
-            path: 'email',
-            valueType: 'string' as const,
+            label: 'subtotal',
+            path: 'subtotal',
+            valueType: 'number' as const,
             transforms: [],
           },
         ],
+        composition: { kind: 'direct' as const, inputId: 'input-1' },
       },
     };
 
     render(
       <SmartBuilderPanel
-        targetPath="customer.emailUpper"
-        targetType="string"
+        targetPath="order.total"
+        targetType="number"
         hydration={hydrated}
         onApplyAction={onApplyAction}
+        onBeginActionParameterEdit={onBeginActionParameterEdit}
       />,
     );
 
     fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
-    fireEvent.click(screen.getByTestId('smart-picker-action-text.upper'));
+    fireEvent.click(screen.getByTestId('smart-picker-action-number.round'));
 
-    expect(onApplyAction).toHaveBeenCalledWith('text.upper');
+    expect(onBeginActionParameterEdit).toHaveBeenCalledWith('number.round');
+    expect(onApplyAction).not.toHaveBeenCalled();
   });
 
   it('emits staged fields for smart tray input-kind quick actions', () => {
@@ -220,6 +226,38 @@ describe('SmartBuilderPanel', () => {
     expect(onRequestArrayBuilderHandoff).toHaveBeenCalled();
   });
 
+  it('hides duplicate preview line for direct mapping', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.issuedDate',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'issuedOn',
+          path: 'issuedOn',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.issuedDate"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Direct mapping');
+    expect(screen.queryByTestId('smart-recipe-base-preview')).not.toBeInTheDocument();
+  });
+
   it('renders mapping recipe section with concat preview and separator controls when concat is active', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -262,7 +300,38 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-concat-separator-controls')).toBeInTheDocument();
   });
 
-  it('shows combine-text shortcut only for string multi-input trays', () => {
+  it('shows mapping method section once at least one input exists', () => {
+    const oneInputDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.fullName"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: oneInputDraft }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-mapping-recipe')).toBeInTheDocument();
+  });
+
+  it('shows mapping-method chooser by default for string multi-input trays', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.fullName',
@@ -287,7 +356,7 @@ describe('SmartBuilderPanel', () => {
           transforms: [],
         },
       ],
-      composition: { kind: 'direct' as const, inputId: 'a' },
+      composition: null,
     };
 
     render(
@@ -298,12 +367,18 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Direct mapping');
-    expect(screen.getByTestId('smart-unused-input-notice')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-unused-input-combine')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Needs action');
+    expect(screen.getByText('Method')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-base-needs-action')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-base-picker')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-change-base')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-input-transforms')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-unused-input-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-unused-input-combine')).not.toBeInTheDocument();
   });
 
-  it('does not show combine-text shortcut for numeric multi-input trays', () => {
+  it('keeps unused-input notice hidden for numeric needs-action trays', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.total',
@@ -328,7 +403,7 @@ describe('SmartBuilderPanel', () => {
           transforms: [],
         },
       ],
-      composition: { kind: 'direct' as const, inputId: 'a' },
+      composition: null,
     };
 
     render(
@@ -339,11 +414,54 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    expect(screen.getByTestId('smart-unused-input-notice')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-unused-input-notice')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-unused-input-combine')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-base-needs-action')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-base-picker')).toBeInTheDocument();
   });
 
-  it('shows substring action in add-step picker so function is available', () => {
+  it('hides output-step section when mapping method needs action', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.total',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: null,
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="order.total"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-add-step')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-step-picker')).not.toBeInTheDocument();
+  });
+
+  it('does not show substring action in add-output-step picker', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.emailDomain',
@@ -374,10 +492,10 @@ describe('SmartBuilderPanel', () => {
     fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
 
-    expect(screen.getByTestId('smart-picker-action-text.substring')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-text.substring')).not.toBeInTheDocument();
   });
 
-  it('reveals unavailable action in search with deterministic reason text', () => {
+  it('does not surface input-transform unavailable rows in output-step picker', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.emailDomain',
@@ -416,16 +534,14 @@ describe('SmartBuilderPanel', () => {
     fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
 
-    const disabledRow = screen.getByTestId('smart-picker-disabled-text.substring');
-    expect(disabledRow).toBeInTheDocument();
-    fireEvent.click(within(disabledRow).getByRole('button'));
-    expect(disabledRow).toHaveTextContent('Start index is required.');
+    expect(screen.queryByTestId('smart-picker-disabled-text.substring')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-text.substring')).not.toBeInTheDocument();
   });
 
-  it('opens parameter editor for parameterized actions instead of one-click apply', () => {
+  it('opens missing-value fallback editor from mapping method card', () => {
     const onApplyAction = vi.fn();
     const onBeginActionParameterEdit = vi.fn();
+    const onConditionFocusedSlotChange = vi.fn();
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.emailDomain',
@@ -452,14 +568,250 @@ describe('SmartBuilderPanel', () => {
         hydration={{ kind: 'guided', draft }}
         onApplyAction={onApplyAction}
         onBeginActionParameterEdit={onBeginActionParameterEdit}
+        onConditionFocusedSlotChange={onConditionFocusedSlotChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-missing-value-add-change'));
+
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith('fallback:default');
+    expect(onBeginActionParameterEdit).toHaveBeenCalledWith('null.default', {
+      fallbackExpression: '""',
+    });
+    expect(onApplyAction).not.toHaveBeenCalled();
+  });
+  it('renders fallback section with right-aligned Add fallback and none state for direct mapping', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.emailDomain',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'email',
+          path: 'email',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.emailDomain"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-missing-value-section')).toBeInTheDocument();
+    expect(screen.getByText('Fallback')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-missing-value-copy')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-missing-value-none')).toHaveTextContent('None');
+    expect(screen.getByTestId('smart-missing-value-add-change')).toHaveTextContent('Add fallback');
+  });
+
+  it('renders Change/Remove fallback controls when default fallback exists', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'preferredName',
+          path: 'preferredName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'default' as const,
+        inputId: 'a',
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.name"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-missing-value-add-change')).toHaveTextContent('Change fallback');
+    expect(screen.getByTestId('smart-missing-value-remove')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-missing-value-current')).toHaveTextContent('"UNKNOWN"');
+
+    fireEvent.click(screen.getByTestId('smart-missing-value-remove'));
+    expect(onApplyAction).toHaveBeenCalledWith('base.direct');
+  });
+
+  it('renders null.default parameter editor inside fallback section', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'name',
+          path: 'name',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'default' as const, inputId: 'a', fallback: { kind: 'static' as const, value: '' } },
+      pendingActionDraft: {
+        actionId: 'null.default',
+        values: { fallbackExpression: '"N/A"' },
+        validation: { isValid: true, issues: [] },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.name"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    const fallbackSection = screen.getByTestId('smart-missing-value-section');
+    expect(within(fallbackSection).getByTestId('smart-parameter-editor')).toBeInTheDocument();
+    expect(screen.getAllByTestId('smart-parameter-editor')).toHaveLength(1);
+  });
+
+  it('clears fallback slot focus after applying null.default parameters', () => {
+    const onApplyAction = vi.fn();
+    const onConditionFocusedSlotChange = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'name',
+          path: 'name',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'default' as const, inputId: 'a', fallback: { kind: 'static' as const, value: '' } },
+      pendingActionDraft: {
+        actionId: 'null.default',
+        values: { fallbackExpression: '"N/A"' },
+        validation: { isValid: true, issues: [] },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.name"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+        onConditionFocusedSlotChange={onConditionFocusedSlotChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-parameter-apply'));
+
+    expect(onApplyAction).toHaveBeenCalledWith('null.default', undefined);
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith(null);
+  });
+
+  it('shows formatDate in add-input-transform picker and not in output-step picker', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.issuedDate',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'issuedOn',
+          path: 'issuedOn',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.issuedDate"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
       />,
     );
 
     fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
-    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
-    fireEvent.click(screen.getByTestId('smart-picker-action-text.substring'));
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'format' } });
+    expect(screen.queryByTestId('smart-picker-action-date.format')).not.toBeInTheDocument();
 
-    expect(onBeginActionParameterEdit).toHaveBeenCalledWith('text.substring');
+    fireEvent.click(screen.getByTestId('smart-recipe-add-transform'));
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'format' } });
+    expect(screen.getByTestId('smart-picker-action-date.format')).toBeInTheDocument();
+  });
+
+  it('opens parameter editor for date.format from input-transform picker', () => {
+    const onBeginActionParameterEdit = vi.fn();
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.issuedDate',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'issuedOn',
+          path: 'issuedOn',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.issuedDate"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onBeginActionParameterEdit={onBeginActionParameterEdit}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-recipe-add-transform'));
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'format' } });
+    fireEvent.click(screen.getByTestId('smart-picker-action-date.format'));
+
+    expect(onBeginActionParameterEdit).toHaveBeenCalledWith('date.format');
     expect(onApplyAction).not.toHaveBeenCalled();
   });
 
@@ -550,7 +902,7 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-step-edit-0'));
+    fireEvent.click(screen.getByTestId('smart-recipe-input-transform-edit-0'));
 
     expect(onBeginActionParameterEdit).toHaveBeenCalledWith('text.substring', { start: 1, length: 4 });
   });
@@ -591,7 +943,7 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-step-edit-0'));
+    fireEvent.click(screen.getByTestId('smart-recipe-input-transform-edit-0'));
 
     expect(onBeginActionParameterEdit).toHaveBeenCalledWith('date.format', {
       inputFormat: 'YYYY/MM/DD',
@@ -695,77 +1047,65 @@ describe('SmartBuilderPanel', () => {
     expect(screen.queryByTestId('smart-parameter-dropdown-inputFormat')).not.toBeInTheDocument();
   });
 
-  it('keeps all math base actions visible after composition apply', () => {
-    const cases = [
-      {
-        operator: 'add' as const,
-        expectedLabel: 'Add numbers',
-        expectedPreview: 'subtotal + tax',
-      },
-      {
-        operator: 'subtract' as const,
-        expectedLabel: 'Subtract numbers',
-        expectedPreview: 'subtotal - tax',
-      },
-      {
-        operator: 'multiply' as const,
-        expectedLabel: 'Multiply numbers',
-        expectedPreview: 'subtotal × tax',
-      },
-      {
-        operator: 'divide' as const,
-        expectedLabel: 'Divide numbers',
-        expectedPreview: 'subtotal ÷ tax',
-      },
-    ];
-
-    for (const testCase of cases) {
-      const draft = {
-        ...createEmptySmartBuilderDraft({
-          targetPath: 'gross',
-          targetType: 'number',
-          isRequired: false,
-        }),
-        inputs: [
-          {
-            id: 'a',
-            sourceKind: 'primary' as const,
-            label: 'subtotal',
-            path: 'subtotal',
-            valueType: 'number' as const,
-            transforms: [],
-          },
-          {
-            id: 'b',
-            sourceKind: 'primary' as const,
-            label: 'tax',
-            path: 'tax',
-            valueType: 'number' as const,
-            transforms: [],
-          },
-        ],
-        composition: {
-          kind: 'math' as const,
-          operator: testCase.operator,
-          inputIds: ['a', 'b'],
+  it('renders calculation method label, ordered preview, and formula rows', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
         },
-      };
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'discount',
+          sourceKind: 'primary' as const,
+          label: 'discount',
+          path: 'discount',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [
+          { operator: 'add' as const, inputId: 'tax' },
+          { operator: 'subtract' as const, inputId: 'discount' },
+        ],
+      },
+    };
 
-      const { unmount } = render(
-        <SmartBuilderPanel
-          targetPath="gross"
-          targetType="number"
-          hydration={{ kind: 'guided', draft }}
-        />,
-      );
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
 
-      expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent(testCase.expectedLabel);
-      expect(screen.getByTestId('smart-recipe-base-preview')).toHaveTextContent(testCase.expectedPreview);
-      unmount();
-    }
+    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Calculation');
+    expect(screen.getByTestId('smart-recipe-change-base')).toHaveTextContent('Change method');
+    expect(screen.getByTestId('smart-recipe-base-preview')).toHaveTextContent('subtotal + tax - discount');
+    expect(screen.getByTestId('smart-calculation-editor')).toBeInTheDocument();
+    expect(screen.getByText('Formula')).toBeInTheDocument();
   });
 
-  it('does not show tray/base actions in add-step picker, including math and condition', () => {
+  it('shows only output-step actions in add-output-step picker (not mapping methods)', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.total',
@@ -806,9 +1146,13 @@ describe('SmartBuilderPanel', () => {
     expect(screen.queryByTestId('smart-picker-action-number.add')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-number.subtract')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-condition.if')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-text.upper')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'round' } });
+    expect(screen.getByTestId('smart-picker-action-number.round')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'default' } });
+    expect(screen.queryByTestId('smart-picker-action-null.default')).not.toBeInTheDocument();
   });
-
-  it('shows math actions in base picker so base composition is explicit', () => {
+  it('shows calculation and binary math methods in method picker', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.total',
@@ -845,9 +1189,242 @@ describe('SmartBuilderPanel', () => {
     );
 
     fireEvent.click(screen.getByTestId('smart-recipe-change-base'));
+    expect(screen.getByTestId('smart-picker-action-base.calculation')).toBeInTheDocument();
     expect(screen.getByTestId('smart-picker-action-number.add')).toBeInTheDocument();
     expect(screen.getByTestId('smart-picker-action-number.subtract')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-picker-action-number.multiply')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-picker-action-number.divide')).toBeInTheDocument();
+  });
+
+  it('shows divide-by-zero warning for literal zero denominator in calculation rows', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'zero',
+          sourceKind: 'static' as const,
+          label: '0',
+          staticValue: 0,
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'divide' as const, inputId: 'zero' }],
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-calculation-divide-by-zero-warning')).toBeInTheDocument();
+  });
+
+  it('renders unused numeric input actions for adding new formula terms', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'fee',
+          sourceKind: 'primary' as const,
+          label: 'fee',
+          path: 'fee',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'add' as const, inputId: 'tax' }],
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-unused-input-subtract-fee'));
+    expect(onApplyAction).toHaveBeenCalledWith('number.subtract', { calculationInputId: 'fee' });
+  });
+
+  it('shows formula above output steps for calculation methods', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'divide' as const, inputId: 'tax' }],
+      },
+      postSteps: [{ functionName: 'round', args: [{ kind: 'static' as const, value: 2 }] }],
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    const formula = screen.getByTestId('smart-calculation-editor');
+    const steps = screen.getByTestId('smart-recipe-steps');
+    const pos = formula.compareDocumentPosition(steps);
+    expect((pos & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+    expect(screen.getByTestId('smart-recipe-steps-list')).toHaveTextContent('round');
+  });
+
+  it('hydrates round output-step edit values and decimals parameter field', () => {
+    const onBeginActionParameterEdit = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'subtotal' },
+      postSteps: [{ functionName: 'round', args: [{ kind: 'static' as const, value: 2 }] }],
+      pendingActionDraft: {
+        actionId: 'number.round',
+        values: { decimals: 2 },
+        validation: { isValid: true, issues: [] },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+        onBeginActionParameterEdit={onBeginActionParameterEdit}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-recipe-step-edit-0'));
+    expect(onBeginActionParameterEdit).toHaveBeenCalledWith('number.round', { decimals: 2 });
+
+    expect(screen.getByTestId('smart-parameter-field-decimals')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-parameter-input-decimals')).toHaveValue(2);
+  });
+
+  it('lets users change operator for an existing formula term explicitly', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'add' as const, inputId: 'tax' }],
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-calculation-operator-subtract-tax'));
+    expect(onApplyAction).toHaveBeenCalledWith('number.subtract', { calculationInputId: 'tax' });
   });
 });

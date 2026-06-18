@@ -160,7 +160,15 @@ export interface ScalarFieldBuilderProps {
   /** Explicit remove behavior from tray cards. */
   onSmartInputRemove?: (inputId: string) => void;
   /** Apply smart-builder action from action list. */
-  onSmartApplyAction?: (actionId: string, options?: { editingStepIndex?: number }) => void;
+  onSmartApplyAction?: (
+    actionId: string,
+    options?: {
+      editingStepIndex?: number;
+      editingStepScope?: 'input-transform' | 'output-step';
+      calculationInputId?: string;
+      setAsStartInputId?: string;
+    },
+  ) => void;
   onSmartBeginActionParameterEdit?: (
     actionId: string,
     values?: Readonly<Record<string, SmartBuilderActionParameterValue>>,
