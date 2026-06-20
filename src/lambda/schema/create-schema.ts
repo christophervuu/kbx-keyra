@@ -292,6 +292,14 @@ function estimateFieldCount(content: string, format: SchemaFormat): number {
   return (propertyMatches?.length ?? 0) + (itemMatches?.length ?? 0);
 }
 
+function asOptionalFieldCount(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+
+  return Math.floor(value);
+}
+
 function childCountFromSchema(schema: Record<string, unknown>): number {
   const properties = schema.properties;
   if (typeof properties !== 'object' || properties === null) {
@@ -440,7 +448,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const sampleId = generateSchemaId();
     const now = new Date().toISOString();
     const estimated = estimateFieldCount(content, format);
-    const inline = estimated <= INLINE_THRESHOLD;
+    const requestedFieldCount = asOptionalFieldCount(bodyRecord.fieldCount);
+    const resolvedFieldCount = estimated > 0 ? estimated : (requestedFieldCount ?? 0);
+    const inline = resolvedFieldCount <= INLINE_THRESHOLD;
 
     const nodes = inline
       ? (format === 'json-schema' ? generateJsonSchemaNodes(schemaId, content) : generateXsdNodes(schemaId, content))
@@ -480,7 +490,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       format,
       dataFormat: toDataFormat(format),
       sourceKind,
-      fieldCount: inline ? nodes.length : 0,
+      fieldCount: inline ? Math.max(nodes.length, resolvedFieldCount) : 0,
       origin: normalizeSchemaOrigin(origin),
       status: inline ? 'ready' : 'ingesting',
       ...(body?.scope !== undefined ? { scope: asSchemaScope(body?.scope) } : {}),
@@ -525,7 +535,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         });
       }
     } else {
-      console.log('Schema async ingestion kickoff intended', { schemaId, estimatedFieldCount: estimated });
+      console.log('Schema async ingestion kickoff intended', {
+        schemaId,
+        estimatedFieldCount: estimated,
+        requestedFieldCount,
+      });
     }
 
     if (projectId) {

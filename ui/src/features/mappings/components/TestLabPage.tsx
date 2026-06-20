@@ -956,7 +956,10 @@ function TestLabInner({ projectId, mappingId }: TestLabPageProps) {
               data-testid="jump-to-rule-button"
               onClick={() => {
                 navigate(editorUrl, {
-                  state: { selectedTargetPath: debugSelection.selection!.targetPath },
+                  state: {
+                    selectedTargetPath: debugSelection.selection!.targetPath,
+                    externalSourcesRaw,
+                  },
                 });
               }}
               className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-400 ring-1 ring-blue-500/40 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"

@@ -474,6 +474,7 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         name: schemaName.trim(),
         format: mapped.format,
         origin: mapped.origin,
+        fieldCount: activeInfo.fieldCount,
         ownership: 'user',
         readonly: false,
         sourceKind: mapped.sourceKind,

@@ -527,6 +527,8 @@ export function SourceSchemaPanel({
       parsedSchema: parsedSourceSchema,
       sourceData: primarySourceData,
     };
+
+    const configuredAliases = new Set(enrichmentInputGroups.map((group) => group.alias));
     const enrichmentGroupsMapped: InputSchemaGroup[] = enrichmentInputGroups.map((group) => ({
       key: `enrichment:${group.alias}`,
       kind: 'enrichment',
@@ -535,10 +537,28 @@ export function SourceSchemaPanel({
       parsedSchema: group.parsedSchema,
       sourceData: enrichmentSourceData[group.alias] ?? null,
     }));
-    return [primaryGroup, ...enrichmentGroupsMapped];
+
+    const payloadOnlyAliases = Object.keys(enrichmentSourceData)
+      .filter((alias) => !configuredAliases.has(alias));
+    const payloadOnlyGroups: InputSchemaGroup[] = payloadOnlyAliases.map((alias) => ({
+      key: `enrichment:${alias}`,
+      kind: 'enrichment',
+      alias,
+      label: alias,
+      parsedSchema: null,
+      sourceData: enrichmentSourceData[alias] ?? null,
+    }));
+
+    return [primaryGroup, ...enrichmentGroupsMapped, ...payloadOnlyGroups];
   }, [enrichmentInputGroups, enrichmentSourceData, parsedSourceSchema, primarySourceData]);
 
   const hasAnySchema = allGroups.some((group) => group.parsedSchema !== null && group.parsedSchema.nodes.length > 0);
+  const hasPayloadOnlyEnrichmentAlias = allGroups.some((group) => (
+    group.kind === 'enrichment'
+    && group.parsedSchema === null
+    && group.sourceData !== null
+    && group.sourceData !== undefined
+  ));
 
   const [query, setQuery] = useState('');
   const [expandedByGroup, setExpandedByGroup] = useState<Record<string, Set<string>>>({});
@@ -598,7 +618,7 @@ export function SourceSchemaPanel({
     setQuery('');
   };
 
-  if (!hasAnySchema) {
+  if (!hasAnySchema && !hasPayloadOnlyEnrichmentAlias) {
     return (
       <div
         className={`flex h-full items-center justify-center text-xs text-slate-500 ${className}`}
@@ -696,7 +716,11 @@ export function SourceSchemaPanel({
                     }))
                   ) : (
                     <p className="px-3 py-2 text-xs text-slate-500" data-testid={`input-group-empty-${group.key}`}>
-                      {isSearchActive ? 'No matching fields in this input.' : 'No fields available.'}
+                      {isSearchActive
+                        ? 'No matching fields in this input.'
+                        : group.kind === 'enrichment' && group.parsedSchema === null
+                          ? 'Schema required to browse fields for this enrichment alias.'
+                          : 'No fields available.'}
                     </p>
                   )}
                 </section>

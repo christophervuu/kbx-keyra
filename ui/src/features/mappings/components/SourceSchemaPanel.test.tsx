@@ -394,6 +394,18 @@ describe('SourceSchemaPanel', () => {
     });
   });
 
+  it('shows payload-only enrichment alias with schema-required hint', () => {
+    renderPanel({
+      parsedSourceSchema: null,
+      enrichmentSourceData: { customerProfile: { customerId: 'c-1' } },
+      onStageField: vi.fn(),
+    });
+
+    expect(screen.queryByTestId('source-schema-panel-empty')).not.toBeInTheDocument();
+    expect(screen.getByText('Enrichment Input: customerProfile')).toBeInTheDocument();
+    expect(screen.getByText('Schema required to browse fields for this enrichment alias.')).toBeInTheDocument();
+  });
+
   // ---------------------------------------------------------------------------
   // Internal search
   // ---------------------------------------------------------------------------

@@ -551,7 +551,12 @@ export class LocalStorageAdapter implements ApiAdapter {
       schemaId,
       name: input.name,
       format: input.format,
-      fieldCount: 0,
+      fieldCount:
+        typeof input.fieldCount === 'number'
+        && Number.isFinite(input.fieldCount)
+        && input.fieldCount >= 0
+          ? Math.floor(input.fieldCount)
+          : 0,
       origin: normalizeSchemaOrigin(input.origin),
       ownership: normalizeSchemaOwnership({
         ownership: input.ownership,

@@ -61,6 +61,7 @@ export function CreateMappingPage() {
   const [startMode, setStartMode] = useState<'blank' | 'auto-map' | null>('blank');
   const [validationErrors, setValidationErrors] = useState<CreateMappingValidationErrors>({});
   const [schemas, setSchemas] = useState<SchemaMetadata[]>([]);
+  const [derivedFieldCounts, setDerivedFieldCounts] = useState<Record<string, number>>({});
   const [projectNameLabel, setProjectNameLabel] = useState<string | undefined>(undefined);
   const [linkedSchemaIds, setLinkedSchemaIds] = useState<string[]>([]);
   const [schemasLoading, setSchemasLoading] = useState(true);
@@ -82,9 +83,59 @@ export function CreateMappingPage() {
 
   const selectedSourceSchema = schemas.find((schema) => schema.schemaId === sourceSchemaId) ?? null;
   const selectedTargetSchema = schemas.find((schema) => schema.schemaId === targetSchemaId) ?? null;
+  const sourceTotalFields = getSchemaFieldCountForDisplay(selectedSourceSchema, derivedFieldCounts);
+  const targetTotalFields = getSchemaFieldCountForDisplay(selectedTargetSchema, derivedFieldCounts);
 
   const sourceRequiredFields = getRequiredFieldCount(selectedSourceSchema);
   const targetRequiredFields = getRequiredFieldCount(selectedTargetSchema);
+
+  useEffect(() => {
+    const selectedSchemas = [selectedSourceSchema, selectedTargetSchema].filter((schema): schema is SchemaMetadata => schema !== null);
+    const pendingSchemas = selectedSchemas.filter((schema) => schema.fieldCount === 0 && derivedFieldCounts[schema.schemaId] === undefined);
+
+    if (pendingSchemas.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadSelectedFieldCountFallbacks() {
+      const nextEntries = await Promise.all(
+        pendingSchemas.map(async (schema) => {
+          try {
+            const detail = await adapter.getSchema(schema.schemaId);
+            return [schema.schemaId, deriveFieldCountFromSchemaDetail(detail)] as const;
+          } catch {
+            return [schema.schemaId, 0] as const;
+          }
+        }),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setDerivedFieldCounts((previous) => {
+        const next = { ...previous };
+        let changed = false;
+
+        for (const [schemaId, count] of nextEntries) {
+          if (next[schemaId] !== count) {
+            next[schemaId] = count;
+            changed = true;
+          }
+        }
+
+        return changed ? next : previous;
+      });
+    }
+
+    void loadSelectedFieldCountFallbacks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, derivedFieldCounts, selectedSourceSchema, selectedTargetSchema]);
 
   useEffect(() => {
     if (!projectId) {
@@ -428,6 +479,7 @@ export function CreateMappingPage() {
 
           <SchemaDetailsCardContent
             schema={selectedSourceSchema}
+            totalFieldCount={sourceTotalFields}
             requiredFieldCount={sourceRequiredFields}
             testIdPrefix="source"
           />
@@ -463,6 +515,7 @@ export function CreateMappingPage() {
 
           <SchemaDetailsCardContent
             schema={selectedTargetSchema}
+            totalFieldCount={targetTotalFields}
             requiredFieldCount={targetRequiredFields}
             testIdPrefix="target"
           />
@@ -1009,6 +1062,41 @@ function parseSchemaForAutoMapTargets(schema: { metadata: SchemaMetadata; conten
   return parseJsonSchema(schema.content);
 }
 
+function deriveFieldCountFromSchemaDetail(schema: { metadata: SchemaMetadata; content: Readonly<Record<string, unknown>> | string }): number {
+  try {
+    if (schema.metadata.origin === 'inferred') {
+      const inferredFormat = schema.metadata.dataFormat === 'xml' ? 'xml' : 'json';
+      const rawContent = typeof schema.content === 'string' ? schema.content : JSON.stringify(schema.content);
+      return parseInferredSchema(rawContent, inferredFormat).nodes.length;
+    }
+
+    if (schema.metadata.format === 'xsd') {
+      const rawXsd = typeof schema.content === 'string' ? schema.content : JSON.stringify(schema.content);
+      return parseXsd(rawXsd).nodes.length;
+    }
+
+    return parseJsonSchema(schema.content).nodes.length;
+  } catch {
+    return 0;
+  }
+}
+
+function getSchemaFieldCountForDisplay(
+  schema: SchemaMetadata | null,
+  derivedFieldCounts: Readonly<Record<string, number>>,
+): number {
+  if (!schema) {
+    return 0;
+  }
+
+  const derivedCount = derivedFieldCounts[schema.schemaId];
+  if (typeof derivedCount === 'number' && Number.isFinite(derivedCount) && derivedCount >= 0) {
+    return derivedCount;
+  }
+
+  return schema.fieldCount;
+}
+
 function persistCreateTimeAutoMapSuggestions(mappingId: string, result: AutoMapSectionResult): void {
   const persistedItems: PersistedSuggestionItem[] = result.suggestions.map((suggestion) => ({
     targetPath: suggestion.target,
@@ -1124,10 +1212,12 @@ function SchemaSelector({
 
 function SchemaDetailsCardContent({
   schema,
+  totalFieldCount,
   requiredFieldCount,
   testIdPrefix,
 }: {
   schema: SchemaMetadata | null;
+  totalFieldCount: number;
   requiredFieldCount: number | undefined;
   testIdPrefix: 'source' | 'target';
 }) {
@@ -1139,7 +1229,7 @@ function SchemaDetailsCardContent({
     <>
       <dl className="mt-4 space-y-2 text-sm">
         <SummaryItem label="Schema name" value={schema.name} testId={`${testIdPrefix}-schema-name`} />
-        <SummaryItem label="Total fields" value={schema.fieldCount} testId={`${testIdPrefix}-total-fields`} />
+        <SummaryItem label="Total fields" value={totalFieldCount} testId={`${testIdPrefix}-total-fields`} />
         <SummaryItem label="Required fields" value={formatMetricValue(requiredFieldCount)} testId={`${testIdPrefix}-required-fields`} />
         <SummaryItem label="Format" value={formatSchemaFormat(schema.format, schema.dataFormat)} testId={`${testIdPrefix}-format`} />
         <SummaryItem label="Origin" value={formatSchemaOrigin(schema.origin)} testId={`${testIdPrefix}-origin`} />
@@ -1193,12 +1283,9 @@ function isSchemaSelectable(schema: SchemaMetadata): boolean {
 }
 
 function buildSchemaOptionLabel(schema: SchemaMetadata): string {
-  const ownership = schema.origin === 'cdm' ? 'CDM' : 'User';
-  const status = formatSchemaStatus(schema.status);
   const format = formatSchemaFormat(schema.format, schema.dataFormat);
-  const fields = `${schema.fieldCount} field${schema.fieldCount === 1 ? '' : 's'}`;
 
-  return `${schema.name} • ${ownership} • ${status} • ${format} • ${fields}`;
+  return `${schema.name} • ${format}`;
 }
 
 function formatSchemaOrigin(origin: SchemaMetadata['origin']): string {

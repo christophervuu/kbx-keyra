@@ -654,6 +654,9 @@ describe('SchemaUploadDialog — paste mode', () => {
     renderDialog(adapter);
 
     await user.click(screen.getByTestId('mode-tab-paste'));
+    await waitFor(() => {
+      expect(screen.getByTestId('paste-input')).toBeInTheDocument();
+    });
 
     const textarea = screen.getByTestId('paste-input');
     fireEvent.change(textarea, { target: { value: SAMPLE_JSON } });
@@ -670,6 +673,7 @@ describe('SchemaUploadDialog — paste mode', () => {
         expect.objectContaining({
           format: 'json-schema',
           origin: 'inferred',
+          fieldCount: expect.any(Number),
           ownership: 'user',
           readonly: false,
           sourceKind: 'inferred_from_json',
@@ -679,6 +683,10 @@ describe('SchemaUploadDialog — paste mode', () => {
         }),
       );
     });
+
+    const firstCall = createSchema.mock.calls[0]?.[0] as { fieldCount?: number } | undefined;
+    expect(typeof firstCall?.fieldCount).toBe('number');
+    expect((firstCall?.fieldCount ?? 0)).toBeGreaterThan(0);
   });
 
   it('metadata mapping is correct for JSON Schema, XSD, sample JSON, and sample XML', async () => {
@@ -819,6 +827,9 @@ describe('SchemaUploadDialog — schema name field', () => {
     renderDialog(adapter);
 
     await user.click(screen.getByTestId('mode-tab-paste'));
+    await waitFor(() => {
+      expect(screen.getByTestId('paste-input')).toBeInTheDocument();
+    });
 
     const textarea = screen.getByTestId('paste-input');
     fireEvent.change(textarea, { target: { value: VALID_JSON_SCHEMA } });

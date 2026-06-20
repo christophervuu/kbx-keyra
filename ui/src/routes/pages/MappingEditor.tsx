@@ -103,14 +103,34 @@ export function resolveInitialSelectedSampleId(params: {
 
 function collectTargetSchemaPaths(nodes: readonly SchemaTreeNode[]): string[] {
   const paths: string[] = [];
+  const seen = new Set<string>();
   function walk(current: readonly SchemaTreeNode[]) {
     for (const node of current) {
+      if (seen.has(node.path)) {
+        continue;
+      }
+
+      seen.add(node.path);
       paths.push(node.path);
       if (node.children.length > 0) walk(node.children);
     }
   }
   walk(nodes);
   return paths;
+}
+
+export function buildSampleOutputByTargetPath(
+  nodes: readonly SchemaTreeNode[],
+  executionOutput: unknown,
+): Record<string, string | null> {
+  const next: Record<string, string | null> = {};
+  const targetPaths = collectTargetSchemaPaths(nodes);
+
+  for (const path of targetPaths) {
+    next[path] = resolveFieldTestValue(executionOutput, path) ?? null;
+  }
+
+  return next;
 }
 
 function WorkspaceNoSourceDataSlot() {
@@ -186,6 +206,18 @@ function resolveValueAtPath(sourceData: unknown, fieldPath: string): unknown {
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
+}
+
+function tryParseEnrichmentSourceData(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 type SmartSelectionOutcome =
@@ -1030,6 +1062,7 @@ export default function MappingEditor() {
   const [samplePayloadCache, setSamplePayloadCache] = useState<Record<string, { raw: string; parsed: unknown | null }>>({});
   const [localSamplePayloadsBySchema, setLocalSamplePayloadsBySchema] = useState<Record<string, readonly SchemaSamplePayloadMetadata[]>>({});
   const [projectName, setProjectName] = useState<string>('Project');
+  const [routeEnrichmentSourceData, setRouteEnrichmentSourceData] = useState<Record<string, unknown>>({});
 
   const sourceSchemaMetadata = editor.sourceSchemaDetail?.metadata ?? null;
   const sourceSchemaId = sourceSchemaMetadata?.schemaId ?? null;
@@ -1308,11 +1341,7 @@ export default function MappingEditor() {
         editor.targetSchemaDetail.content,
       );
 
-      const next: Record<string, string | null> = {};
-      for (const node of editor.parsedTargetSchema.nodes) {
-        next[node.path] = resolveFieldTestValue(execution.output, node.path) ?? null;
-      }
-      return next;
+      return buildSampleOutputByTargetPath(editor.parsedTargetSchema.nodes, execution.output);
     } catch {
       return undefined;
     }
@@ -1642,7 +1671,15 @@ export default function MappingEditor() {
 
   // Consume jump-to-rule route state from TestLabPage (FS-036 T-07)
   useEffect(() => {
-    const incomingPath = (location.state as Record<string, unknown> | null)?.selectedTargetPath;
+    const navState = location.state as Record<string, unknown> | null;
+    const incomingPath = navState?.selectedTargetPath;
+    const incomingExternalSourcesRaw = navState?.externalSourcesRaw;
+
+    if (typeof incomingExternalSourcesRaw === 'string') {
+      const parsed = tryParseEnrichmentSourceData(incomingExternalSourcesRaw);
+      setRouteEnrichmentSourceData(parsed ?? {});
+    }
+
     if (incomingPath && typeof incomingPath === 'string') {
       setSelectedTargetPath(resolveSelectedTargetPath(incomingPath));
       // Clear the state to prevent stale re-application on refresh
@@ -2086,6 +2123,7 @@ export default function MappingEditor() {
     <SourceSchemaPanel
       parsedSourceSchema={editor.parsedSourceSchema}
       enrichmentInputGroups={editor.enrichmentInputSchemas}
+      enrichmentSourceData={routeEnrichmentSourceData}
       sourceSchemaName={editor.sourceSchemaName}
       selectedInputs={selectedInputsForSourcePanel}
       onStageField={(field) => {

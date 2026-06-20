@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildSampleOutputByTargetPath,
   applySmartActionToDraft,
   applyStagedInputToSmartDraft,
   resolveBuilderTargetPath,
@@ -57,6 +58,30 @@ describe('resolveBuilderTargetPath', () => {
 
   it('returns the original path when node cannot be resolved', () => {
     expect(resolveBuilderTargetPath(TARGET_NODES, 'unknown.path')).toBe('unknown.path');
+  });
+});
+
+describe('buildSampleOutputByTargetPath', () => {
+  it('includes nested child paths when schema node list is root-only hierarchical', () => {
+    const transactionChildren = [
+      makeNode('transaction.id', 'id', 'string', 1),
+      makeNode('transaction.createdDate', 'createdDate', 'string', 1),
+    ];
+    const transactionRoot = makeNode('transaction', 'transaction', 'object', 0, transactionChildren);
+    const rootOnlyNodes: SchemaTreeNode[] = [transactionRoot];
+
+    const output = {
+      transaction: {
+        id: 'tx-1001',
+        createdDate: '2026-06-19',
+      },
+    };
+
+    const sampleOutput = buildSampleOutputByTargetPath(rootOnlyNodes, output);
+
+    expect(sampleOutput['transaction']).toContain('{"id":"tx-1001"');
+    expect(sampleOutput['transaction.id']).toBe('"tx-1001"');
+    expect(sampleOutput['transaction.createdDate']).toBe('"2026-06-19"');
   });
 });
 

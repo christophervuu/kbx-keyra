@@ -135,6 +135,29 @@ const SCHEMA_DETAIL_ERROR: SchemaDetail = {
   content: {},
 };
 
+const SCHEMA_DETAIL_ZERO_COUNT: SchemaDetail = {
+  metadata: {
+    schemaId: 'schema-zero',
+    name: 'Schema Zero Count',
+    format: 'json-schema',
+    dataFormat: 'json',
+    fieldCount: 0,
+    origin: 'uploaded',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  },
+  content: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      status: { type: 'string' },
+      amount: { type: 'number' },
+    },
+  },
+};
+
 const CREATED_MAPPING: MappingMetadata = {
   mappingId: 'new-mapping-1',
   projectId: 'proj-1',
@@ -817,7 +840,7 @@ describe('CreateMappingPage', () => {
     );
   });
 
-  it('selector options include CDM badge/status/format/field count metadata by default', async () => {
+  it('selector options include schema name and format only', async () => {
     renderPage();
 
     await waitFor(() => {
@@ -830,10 +853,10 @@ describe('CreateMappingPage', () => {
     expect(
       sourceOptions.some((text) =>
         text.includes('Schema Beta')
-        && text.includes('CDM')
-        && text.includes('Ready')
         && text.includes('XML')
-        && text.includes('2 fields')),
+        && !text.includes('CDM')
+        && !text.includes('Ready')
+        && !text.includes('fields')),
     ).toBe(true);
   });
 
@@ -868,5 +891,32 @@ describe('CreateMappingPage', () => {
     expect(targetSelect.value).toBe('schema-needs-review');
     expect(screen.getByTestId('target-status')).toHaveTextContent('Ready');
     expect(screen.queryByTestId('target-needs-review-warning')).not.toBeInTheDocument();
+  });
+
+  it('falls back to schema detail parsing when selected schema fieldCount is zero', async () => {
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([
+        SCHEMA_DETAIL_A.metadata,
+        SCHEMA_DETAIL_ZERO_COUNT.metadata,
+      ]),
+      getSchema: vi.fn().mockImplementation(async (id: string) => {
+        if (id === 'schema-zero') {
+          return SCHEMA_DETAIL_ZERO_COUNT;
+        }
+
+        return SCHEMA_DETAIL_A;
+      }),
+    });
+    const user = userEvent.setup();
+
+    renderPage(adapter);
+
+    await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-zero');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('source-total-fields')).toHaveTextContent('3');
+    });
   });
 });

@@ -165,6 +165,28 @@ describe('create-schema handler', () => {
     expect(sharedMocks.putObject).toHaveBeenCalledTimes(2);
   });
 
+  it('uses provided fieldCount fallback when parser estimate is zero', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      name: 'Sample JSON Upload',
+      format: 'json-schema',
+      origin: 'inferred',
+      inferred: true,
+      fieldCount: 5,
+      content: {
+        customerId: 'abc-123',
+        total: 42,
+      },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    const parsed = JSON.parse(result.body) as { fieldCount: number; status: string };
+    expect(parsed.status).toBe('ready');
+    expect(parsed.fieldCount).toBe(5);
+  });
+
   it('missing required fields returns 400 validation error', async () => {
     sharedMocks.requireFields.mockReturnValue({
       ok: false,

@@ -393,6 +393,7 @@ export interface CreateSchemaInput {
   readonly name: string;
   readonly format: SchemaFormat;
   readonly origin: SchemaOrigin;
+  readonly fieldCount?: number;
   readonly ownership?: SchemaOwnership;
   readonly sourceKind?: SchemaSourceKind;
   readonly readonly?: boolean;
