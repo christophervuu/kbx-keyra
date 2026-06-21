@@ -250,7 +250,6 @@ describe('runtime api client contracts', () => {
         config: {},
         rules: [],
       },
-      createdAt: new Date().toISOString(),
     });
 
     expect(relayResult.ok).toBe(false);
@@ -296,7 +295,13 @@ describe('runtime api client contracts', () => {
     });
 
     expect(result.ok).toBe(true);
-    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1]?.body as string) ?? '{}') as {
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const firstCall = fetchImpl.mock.calls[0] as unknown as [string, { body?: string } | undefined] | undefined;
+    if (!firstCall) {
+      throw new Error('Expected preview request call.');
+    }
+    const requestInit = firstCall[1];
+    const body = JSON.parse((requestInit?.body ?? '{}')) as {
       externalSources?: Record<string, unknown>;
       sourceData?: Record<string, unknown>;
     };

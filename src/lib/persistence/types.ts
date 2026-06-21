@@ -13,6 +13,10 @@ export interface MappingRule {
   readonly type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | 'any';
   readonly expression: string;
   readonly description?: string;
+  readonly valueTableRef?: {
+    readonly scope: 'inline';
+  } | MappingRuleProjectValueTableRef;
+  readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
 }
 
 export interface MappingEditorPreferences {
@@ -53,6 +57,164 @@ export interface MappingConfig {
 }
 
 export type MappingStatus = 'draft' | 'ready' | 'has-errors';
+
+export type ValueTableValueType = 'string' | 'number' | 'boolean';
+
+export type ValueTablePrimitiveValue = string | number | boolean;
+
+export type ValueTableStatus = 'active' | 'archived';
+
+export interface ValueTableSideDefinition {
+  readonly key: string;
+  readonly label: string;
+  readonly type: ValueTableValueType;
+}
+
+export interface ProjectValueTableRevisionRow {
+  readonly id: string;
+  readonly sideAValue: ValueTablePrimitiveValue;
+  readonly sideBValue: ValueTablePrimitiveValue;
+  readonly description?: string;
+}
+
+export interface ValueTableDirectionSupport {
+  readonly aToB: boolean;
+  readonly bToA: boolean;
+}
+
+export interface ValueTableItem {
+  readonly valueTableId: string;
+  readonly projectId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly currentRevision: number;
+  readonly currentRowCount: number;
+  readonly status: ValueTableStatus;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+  readonly updatedAt: ISODateString;
+  readonly updatedBy?: string;
+}
+
+export interface ValueTableRevisionItem {
+  readonly valueTableId: string;
+  readonly revision: number;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rowCount: number;
+  readonly directionSupport: ValueTableDirectionSupport;
+  readonly rowsS3Key: string;
+  readonly contentHash: string;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+}
+
+export interface ProjectValueTable {
+  readonly id: string;
+  readonly projectId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly currentRevision: number;
+  readonly status: ValueTableStatus;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+  readonly updatedAt: ISODateString;
+  readonly updatedBy?: string;
+}
+
+export interface ProjectValueTableRevision {
+  readonly valueTableId: string;
+  readonly revision: number;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+  readonly rowCount: number;
+  readonly directionSupport: ValueTableDirectionSupport;
+  readonly contentHash?: string;
+  readonly rowsS3Key?: string;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+}
+
+export interface CreateValueTableInput {
+  readonly projectId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+  readonly createdBy?: string;
+}
+
+export interface CreateValueTableRevisionInput {
+  readonly valueTableId: string;
+  readonly expectedCurrentRevision?: number;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+  readonly createdBy?: string;
+}
+
+export interface ValueTableResolvedEntry {
+  readonly in: ValueTablePrimitiveValue;
+  readonly out: ValueTablePrimitiveValue;
+  readonly rowId: string;
+}
+
+export type ValueTableNoMatchMode = 'return_null' | 'return_input' | 'fallback_value';
+
+export interface MappingRuleNoMatchBehavior {
+  readonly mode: ValueTableNoMatchMode;
+  readonly fallbackValue?: ValueTablePrimitiveValue;
+}
+
+export interface MappingRuleProjectValueTableRef {
+  readonly scope: 'project';
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly inputType: ValueTableValueType;
+  readonly outputType: ValueTableValueType;
+  readonly resolvedEntries: readonly ValueTableResolvedEntry[];
+  readonly sourceMeta?: {
+    readonly tableName?: string;
+    readonly revisionCreatedAt?: ISODateString;
+  };
+}
+
+export interface ResolveValueTableReferenceInput {
+  readonly projectId: string;
+  readonly valueTableId?: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+}
+
+export interface ValueTableUsageEntry {
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly mappingId: string;
+  readonly mappingName?: string;
+  readonly mappingVersion?: number;
+  readonly pinnedRevision: number;
+  readonly direction: 'a_to_b' | 'b_to_a';
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly newerRevisionAvailable: boolean;
+  readonly latestRevision: number;
+  readonly latestDirectionSupported?: boolean;
+  readonly updatedAt?: ISODateString;
+}
 
 export type SchemaFormat = 'json-schema' | 'xsd';
 
@@ -843,6 +1005,24 @@ export function toMappingMetadata(item: MappingItem): MappingMetadata {
     ruleCount: item.ruleCount,
     coverage: item.coverage,
     updatedAt: item.updatedAt,
+  };
+}
+
+export function toProjectValueTable(item: ValueTableItem): ProjectValueTable {
+  return {
+    id: item.valueTableId,
+    projectId: item.projectId,
+    key: item.key,
+    name: item.name,
+    ...(item.description ? { description: item.description } : {}),
+    sideA: item.sideA,
+    sideB: item.sideB,
+    currentRevision: item.currentRevision,
+    status: item.status,
+    createdAt: item.createdAt,
+    ...(item.createdBy ? { createdBy: item.createdBy } : {}),
+    updatedAt: item.updatedAt,
+    ...(item.updatedBy ? { updatedBy: item.updatedBy } : {}),
   };
 }
 

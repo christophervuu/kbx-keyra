@@ -18,6 +18,7 @@ import NotFound from '@/routes/pages/NotFound';
 import ProjectDeployments from '@/routes/pages/ProjectDeployments';
 import ProjectOverview from '@/routes/pages/ProjectOverview';
 import ProjectSettings from '@/routes/pages/ProjectSettings';
+import ProjectValueMappings from '@/routes/pages/ProjectValueMappings';
 import SchemaDetail from '@/routes/pages/SchemaDetail';
 import SchemaLibrary from '@/routes/pages/SchemaLibrary';
 import Settings from '@/routes/pages/Settings';
@@ -30,13 +31,28 @@ const mockAdapter: ApiAdapter = {
   createSchema: vi.fn(),
   updateSchema: vi.fn(),
   markSchemaReviewed: vi.fn(),
+  addSchemaSample: vi.fn(),
+  deleteSchemaSample: vi.fn(),
+  getSchemaSamplePayload: vi.fn(),
   deleteSchema: vi.fn(),
   listMappings: vi.fn(),
   getMapping: vi.fn().mockReturnValue(new Promise(() => {})),
   createMapping: vi.fn(),
   updateMapping: vi.fn(),
+  saveMapping: vi.fn(),
   deleteMapping: vi.fn(),
   duplicateMapping: vi.fn(),
+  listMappingVersions: vi.fn(),
+  getMappingVersion: vi.fn(),
+  listVersions: vi.fn().mockResolvedValue([]),
+  getVersion: vi.fn(),
+  listMappingRevisions: vi.fn(),
+  getMappingRevision: vi.fn(),
+  createMappingVersion: vi.fn(),
+  listRevisions: vi.fn().mockResolvedValue([]),
+  getRevision: vi.fn(),
+  createVersion: vi.fn(),
+  saveMappingVersion: vi.fn(),
   listProjects: vi.fn(),
   getProject: vi.fn().mockReturnValue(new Promise(() => {})),
   createProject: vi.fn(),
@@ -49,6 +65,16 @@ const mockAdapter: ApiAdapter = {
   promote: vi.fn(),
   rollback: vi.fn(),
   getDeploymentDiff: vi.fn(),
+  deployMapping: vi.fn(),
+  promoteDeployment: vi.fn(),
+  rollbackDeployment: vi.fn(),
+  listDeployments: vi.fn().mockResolvedValue([]),
+  getCurrentDeployments: vi.fn().mockResolvedValue({
+    DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
+    PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
+    PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+    QA: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
+  }),
   listCdmSchemas: vi.fn(),
   linkCdmSchema: vi.fn(),
   syncAllCdmSchemas: vi.fn(),
@@ -65,7 +91,20 @@ const mockAdapter: ApiAdapter = {
   querySchemaNodes: vi.fn(),
   listActivity: vi.fn(),
   previewOnServer: vi.fn(),
-} as ApiAdapter;
+  listProjectValueTables: vi.fn().mockResolvedValue([]),
+  getProjectValueTable: vi.fn(),
+  getProjectValueTableRevision: vi.fn(),
+  createProjectValueTable: vi.fn(),
+  createProjectValueTableRevision: vi.fn(),
+  duplicateProjectValueTable: vi.fn(),
+  archiveProjectValueTable: vi.fn(),
+  deleteProjectValueTable: vi.fn(),
+  listProjectValueTableUsage: vi.fn().mockResolvedValue([]),
+  getProjectValueTableRevisionDiff: vi.fn(),
+  exportProjectValueTableCsv: vi.fn(),
+  importProjectValueTableCsv: vi.fn(),
+  resolveProjectValueTableReference: vi.fn(),
+};
 
 function renderWithRouter(path: string) {
   const router = createMemoryRouter(
@@ -76,6 +115,7 @@ function renderWithRouter(path: string) {
         <Route path="/projects/:projectId" element={<ProjectOverview />} />
         <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
         <Route path="/projects/:projectId/deployments" element={<ProjectDeployments />} />
+        <Route path="/projects/:projectId/value-mappings" element={<ProjectValueMappings />} />
         <Route path="/projects/:projectId/mappings/new" element={<CreateMapping />} />
         <Route path="/projects/:projectId/mappings/:mappingId" element={<MappingEditor />} />
         <Route
@@ -115,24 +155,20 @@ describe('Route rendering', () => {
     renderWithRouter('/');
 
     expect(screen.getByTestId('page-home-dashboard')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Home Dashboard' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
   });
 
   it('renders Create Project at /projects/new', () => {
     renderWithRouter('/projects/new');
 
     expect(screen.getByTestId('page-create-project')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Create Project' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create New Project' })).toBeInTheDocument();
   });
 
   it('renders Project Overview at /projects/:projectId', () => {
     renderWithRouter('/projects/abc-123');
 
     expect(screen.getByTestId('page-project-overview')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Project Overview' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(screen.getByTestId('project-overview-skeleton')).toBeInTheDocument();
   });
 
   it('renders Project Settings at /projects/:projectId/settings', () => {
@@ -149,6 +185,13 @@ describe('Route rendering', () => {
     expect(screen.getByTestId('page-project-deployments')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Project Deployments' })).toBeInTheDocument();
     expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+  });
+
+  it('renders Project Value Mappings at /projects/:projectId/value-mappings', () => {
+    renderWithRouter('/projects/abc-123/value-mappings');
+
+    expect(screen.getByTestId('page-project-value-mappings')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Value Mappings' })).toBeInTheDocument();
   });
 
   it('renders Create Mapping at /projects/:projectId/mappings/new', () => {
@@ -171,9 +214,8 @@ describe('Route rendering', () => {
   it('renders Mapping Deployment at /projects/:projectId/mappings/:mappingId/deploy', () => {
     renderWithRouter('/projects/abc-123/mappings/map-456/deploy');
 
-    expect(screen.getByTestId('page-mapping-deployment')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Mapping Deployment' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-page')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Deploy Mapping' })).toBeInTheDocument();
   });
 
   it('renders Schema Library at /schemas', () => {
@@ -181,15 +223,14 @@ describe('Route rendering', () => {
 
     expect(screen.getByTestId('page-schema-library')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Schema Library' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(screen.getByTestId('schema-library-skeleton')).toBeInTheDocument();
   });
 
   it('renders Schema Detail at /schemas/:schemaId', () => {
     renderWithRouter('/schemas/schema-789');
 
     expect(screen.getByTestId('page-schema-detail')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Schema Detail' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(screen.getByTestId('schema-detail-skeleton')).toBeInTheDocument();
   });
 
   it('renders Template Library at /templates', () => {

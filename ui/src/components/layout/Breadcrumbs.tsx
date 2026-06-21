@@ -77,6 +77,12 @@ function buildProjectHierarchyBreadcrumbs(
     return crumbs;
   }
 
+  // /projects/:projectId/value-mappings
+  if (section === 'value-mappings') {
+    crumbs.push({ label: 'Value Mappings' });
+    return crumbs;
+  }
+
   // /projects/:projectId/mappings/:mappingId[/deploy]
   if (section === 'mappings') {
     crumbs.push({ label: 'Mappings' });

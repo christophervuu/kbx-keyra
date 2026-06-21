@@ -168,6 +168,35 @@ function parseSnapshotConfig(snapshotRaw: string): Parameters<typeof execute>[0]
   return null;
 }
 
+function hasUnresolvedProjectValueTableReferences(config: Parameters<typeof execute>[0]): boolean {
+  const rules = Array.isArray((config as { rules?: unknown }).rules)
+    ? ((config as { rules: readonly unknown[] }).rules)
+    : [];
+
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') {
+      continue;
+    }
+
+    const valueTableRef = (rule as { valueTableRef?: unknown }).valueTableRef;
+    if (!valueTableRef || typeof valueTableRef !== 'object') {
+      continue;
+    }
+
+    const scope = (valueTableRef as { scope?: unknown }).scope;
+    if (scope !== 'project') {
+      continue;
+    }
+
+    const resolvedEntries = (valueTableRef as { resolvedEntries?: unknown }).resolvedEntries;
+    if (!Array.isArray(resolvedEntries)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function logExecute(fields: {
   requestId: string;
   mappingId: string;
@@ -249,13 +278,23 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       );
     }
 
+    if (hasUnresolvedProjectValueTableReferences(config)) {
+      return errorResponse(
+        ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
+        `Runtime snapshot is missing resolved project value-table entries: ${request.mappingId}:${active.activeSnapshotId}`,
+        500,
+        false,
+        requestId,
+      );
+    }
+
     const missingRequiredAliases = findMissingRequiredEnrichments(
       config as RuntimeMappingConfig,
       request.externalSources,
     );
 
     if (missingRequiredAliases.length > 0) {
-      const aliases = uniqueAliases(missingRequiredAliases).sort();
+      const aliases = [...uniqueAliases(missingRequiredAliases)].sort();
       const aliasList = aliases.join(', ');
       return errorResponse(
         ERROR_CODES.VALIDATION_ERROR,

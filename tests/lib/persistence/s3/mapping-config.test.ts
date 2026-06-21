@@ -102,4 +102,12 @@ describe('persistence s3/mapping-config', () => {
     expect(mod.mappingConfig.get).toBe(mod.get);
     expect(mod.mappingConfig.delete).toBe(mod.delete);
   });
+
+  it('exports named operation aliases', async () => {
+    const mod = await importModule();
+
+    expect(mod.putMappingConfig).toBe(mod.put);
+    expect(mod.getMappingConfig).toBe(mod.get);
+    expect(mod.deleteMappingConfig).toBe(mod.delete);
+  });
 });

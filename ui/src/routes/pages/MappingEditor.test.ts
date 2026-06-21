@@ -1095,4 +1095,109 @@ describe('applySmartActionToDraft', () => {
     });
     expect(next.expression).toBe('default(source("name"), "UNKNOWN")');
   });
+
+  it('builds project-scoped value map with explicit no-match modes', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'status' },
+    };
+
+    const projectSelection = {
+      ref: {
+        scope: 'project' as const,
+        valueTableId: 'vt-1',
+        tableKey: 'status_codes',
+        revision: 3,
+        inputSideKey: 'code',
+        outputSideKey: 'label',
+      },
+      tableName: 'Status Codes',
+      tableStatus: 'active' as const,
+      currentRevision: 4,
+      directionSupport: { aToB: true, bToA: true },
+    };
+
+    const withReturnInput = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      valueMapScope: 'project',
+      valueMapProjectSelection: projectSelection,
+      valueMapNoMatchMode: 'return_input',
+    });
+
+    expect(withReturnInput.composition?.kind).toBe('valueMap');
+    if (withReturnInput.composition?.kind !== 'valueMap') return;
+    expect(withReturnInput.composition.scope).toBe('project');
+    expect(withReturnInput.composition.project?.ref.valueTableId).toBe('vt-1');
+    expect(withReturnInput.composition.noMatchBehavior).toEqual({ mode: 'return_input' });
+
+    const withFallbackValue = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      valueMapScope: 'project',
+      valueMapProjectSelection: projectSelection,
+      valueMapNoMatchMode: 'fallback_value',
+      valueMapFallbackValue: 'UNKNOWN',
+    });
+
+    expect(withFallbackValue.composition?.kind).toBe('valueMap');
+    if (withFallbackValue.composition?.kind !== 'valueMap') return;
+    expect(withFallbackValue.composition.noMatchBehavior).toEqual({
+      mode: 'fallback_value',
+      fallbackValue: 'UNKNOWN',
+    });
+    expect(withFallbackValue.expression).toContain('valueTable(');
+  });
+
+  it('preserves existing inline mappings when re-applying value-map action', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'status',
+        scope: 'inline' as const,
+        project: null,
+        mappings: [{ whenValue: 'A', output: { kind: 'static' as const, value: 'Alpha' } }],
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      valueMapScope: 'inline',
+    });
+
+    expect(next.composition?.kind).toBe('valueMap');
+    if (next.composition?.kind !== 'valueMap') return;
+    expect(next.composition.scope).toBe('inline');
+    expect(next.composition.project).toBeNull();
+    expect(next.composition.mappings).toEqual([
+      { whenValue: 'A', output: { kind: 'static', value: 'Alpha' } },
+    ]);
+    expect(next.expression).toContain('"A": "Alpha"');
+  });
 });

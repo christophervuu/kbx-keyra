@@ -584,6 +584,52 @@ Adapter/UI data-layer compatibility boundary:
 - Compatibility `config.externalSources` remains supported for legacy continuity and engine reference checks.
 - If both are present, UI and adapters treat `enrichmentSources` as canonical and `config.externalSources` as derived/compatibility data.
 
+### FS-096 project value-table UI contract addendum
+
+FS-096 adds reusable project-level value tables while preserving deterministic/offline execution and explicit adoption semantics.
+
+Project-level management route contract:
+
+- Canonical route: `/projects/:projectId/value-mappings`.
+- Surface responsibilities:
+  - list/search/sort/select project value tables
+  - create table + create immutable next revision from editor modal
+  - usage visibility (`mappingId`, pinned revision, direction, newer revision availability)
+  - CSV export/import and clipboard paste workflows
+  - archive/delete controls with conflict/usage guard outcomes
+
+Project Overview integration contract:
+
+- Project Overview exposes a value-mappings summary card with:
+  - active-table count
+  - total usage count
+  - navigation action to `/projects/:projectId/value-mappings`
+
+Mapping Editor + Smart Builder contract additions:
+
+- Map-values authoring supports two scopes:
+  - inline map object (legacy-compatible)
+  - project value table (new)
+- For project tables, authoring captures and persists on rule:
+  - pinned `valueTableRef` (`valueTableId`, `tableKey`, `revision`, `inputSideKey`, `outputSideKey`, typed `resolvedEntries`)
+  - per-rule `noMatchBehavior` (`return_null | return_input | fallback_value`)
+- Direction selection is explicit and side-label driven; invalid directions are disabled in guided UI.
+- Archived tables are not selectable for new selections; existing pinned mappings remain executable.
+
+Pinned revision/adoption UX contract:
+
+- Mapping rules remain pinned to their saved revision until explicit user adoption.
+- When a newer table revision exists, Mapping Editor surfaces `newerRevisionAvailable` metadata.
+- Adoption is an explicit confirmation action that:
+  - repins rule reference to selected/newer revision
+  - marks mapping unsaved/changed
+  - requires normal Save flow to persist
+
+Adapter parity + offline determinism:
+
+- `ApiAdapter` exposes equivalent value-table methods in `HttpAdapter` and `LocalStorageAdapter`.
+- Offline/browser execution continues using embedded `resolvedEntries` in mapping config; no runtime table fetches are introduced.
+
 ---
 
 ## State Management

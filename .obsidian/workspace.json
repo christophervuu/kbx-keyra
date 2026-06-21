@@ -11,10 +11,14 @@
             "id": "6f9518702ec634e2",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "forge/active/FS-096/tasks/T-10.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "T-10"
             }
           }
         ]
@@ -177,5 +181,27 @@
     }
   },
   "active": "6f9518702ec634e2",
-  "lastOpenFiles": []
+  "lastOpenFiles": [
+    "forge/active/FS-096/tasks/T-09.md",
+    "forge/active/FS-096/tasks/T-08.md",
+    "forge/active/FS-096/tasks/T-07.md",
+    "forge/active/FS-096/tasks/T-10.md",
+    "forge/active/FS-096/tasks/T-01.md",
+    "ui/src/features/projects/components/__tests__/ProjectValueMappingsPage.test.tsx",
+    "ui/src/features/projects/components/__tests__/ValueMappingsSummaryCard.test.tsx",
+    "ui/src/routes/pages/ProjectValueMappings.tsx",
+    "ui/src/features/projects/components/ProjectValueMappingsPage.tsx",
+    "ui/src/features/projects/components/ValueMappingsSummaryCard.tsx",
+    "tests/lib/persistence/value-tables.test.ts",
+    "tests/lib/persistence/s3/value-table-revisions.test.ts",
+    "src/lib/persistence/value-tables.ts",
+    "src/lib/persistence/s3/value-table-revisions.ts",
+    "tests/lambda/project/value-tables.test.ts",
+    "forge/active/FS-096/tasks/T-06.md",
+    "forge/active/FS-096/tasks/T-05.md",
+    "forge/active/FS-096/tasks/T-04.md",
+    "forge/active/FS-096/tasks/T-03.md",
+    "forge/active/FS-096/tasks/T-02.md",
+    "forge/active/FS-096/spec.md"
+  ]
 }

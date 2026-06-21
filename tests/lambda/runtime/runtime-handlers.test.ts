@@ -21,6 +21,10 @@ const deploymentsMocks = vi.hoisted(() => ({
   listDeploymentHistory: vi.fn(),
 }));
 
+const valueTablesMocks = vi.hoisted(() => ({
+  resolveReference: vi.fn(),
+}));
+
 const engineMocks = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
@@ -31,6 +35,9 @@ const s3ClientMocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
 vi.mock('../../../src/lib/persistence/deployments.js', () => deploymentsMocks);
+vi.mock('../../../src/lib/persistence/value-tables.js', () => ({
+  valueTables: valueTablesMocks,
+}));
 vi.mock('../../../src/engine/index.js', () => engineMocks);
 vi.mock('../../../src/lib/persistence/clients.js', () => ({
   s3Client: s3ClientMocks,
@@ -172,6 +179,78 @@ describe('runtime execute/status handlers', () => {
     expect(JSON.parse(result.body).error.code).toBe('SOURCE_NOT_FOUND');
     expect(sharedMocks.getObject).not.toHaveBeenCalled();
     expect(engineMocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('fails with snapshot integrity error when project value-table resolved entries are missing', async () => {
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        mappingConfig: {
+          name: 'Map One',
+          version: 3,
+          engineVersion: '1.0.0',
+          config: {},
+          rules: [{
+            target: 'Amount',
+            type: 'number',
+            expression: 'valueMap(source("status"), valueTable("order-status", "code", "label"), "UNKNOWN")',
+            valueTableRef: {
+              scope: 'project',
+              valueTableId: 'vt-1',
+              tableKey: 'order-status',
+              revision: 2,
+              inputSideKey: 'code',
+              outputSideKey: 'label',
+              inputType: 'string',
+              outputType: 'string',
+            },
+          }],
+        },
+      }),
+    );
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(500);
+    const parsed = JSON.parse(result.body) as { error: { code: string; message: string } };
+    expect(parsed.error.code).toBe('SNAPSHOT_INTEGRITY_ERROR');
+    expect(parsed.error.message).toContain('missing resolved project value-table entries');
+    expect(engineMocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('runtime execute never invokes value table persistence lookups', async () => {
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        mappingConfig: {
+          name: 'Map One',
+          version: 3,
+          engineVersion: '1.0.0',
+          config: {},
+          rules: [{
+            target: 'Amount',
+            type: 'number',
+            expression: 'valueMap(source("status"), valueTable("order-status", "code", "label"), "UNKNOWN")',
+            valueTableRef: {
+              scope: 'project',
+              valueTableId: 'vt-1',
+              tableKey: 'order-status',
+              revision: 2,
+              inputSideKey: 'code',
+              outputSideKey: 'label',
+              inputType: 'string',
+              outputType: 'string',
+              resolvedEntries: [{ in: 'A', out: 'OPEN', rowId: 'r1' }],
+            },
+          }],
+        },
+      }),
+    );
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(200);
+    expect(valueTablesMocks.resolveReference).not.toHaveBeenCalled();
   });
 
   it('returns status not-deployed shape when pointer is missing', async () => {

@@ -451,6 +451,49 @@ Compatibility notes:
 - Existing mappings that never use `external()` remain unchanged.
 - Legacy mappings with only `config.externalSources` remain executable through compatibility normalization at mapping/runtime layers.
 
+## FS-096 Project Value-Table Contract
+
+FS-096 extends lookup semantics to support reusable project tables while preserving engine purity/no-I/O behavior.
+
+DSL/function contract additions:
+
+- `valueMap(value, mappings, fallback?)` now accepts `mappings` as either:
+  - inline object literal (legacy behavior), or
+  - `valueTable(tableKey, inputSideKey, outputSideKey)` expression.
+- `valueTable(...)` resolves against the current rule's embedded project `valueTableRef` metadata and produces an object-compatible lookup surface.
+
+Rule model additions (engine config shape):
+
+- Optional `rule.valueTableRef` supports project-pinned references:
+  - `scope`, `valueTableId`, `tableKey`, `revision`, `inputSideKey`, `outputSideKey`, `inputType`, `outputType`, `resolvedEntries[]`
+- Optional `rule.noMatchBehavior` supports deterministic no-match behavior:
+  - `return_null`
+  - `return_input`
+  - `fallback_value` (type-checked)
+
+Validation contract additions (`validateValueTables` pass):
+
+- `KEYRA-E060`: invalid `valueMap` mappings argument shape.
+- `KEYRA-E061`: invalid/unknown table key shape or mismatched table key.
+- `KEYRA-E062`: missing pinned revision/resolved entries.
+- `KEYRA-E063`: same-side input/output direction.
+- `KEYRA-E064`: side/type mismatch.
+- `KEYRA-E065`: duplicate input-side values for selected direction.
+- `KEYRA-E066`: fallback mode missing required `fallbackValue`.
+- `KEYRA-E067`: fallback value type mismatch.
+- Diagnostics retain rule/path/expression context and stable code semantics.
+
+Execution contract additions (`lookup.ts`):
+
+- For project table refs, `valueMap` matches against embedded `resolvedEntries` only.
+- On no match, emits `KEYRA-W003` and applies rule-level `noMatchBehavior` deterministically.
+- Inline object-literal `valueMap` behavior remains backward compatible.
+
+No-I/O invariant (engine boundary):
+
+- Engine does not fetch project value tables, revisions, or external storage.
+- All project-table runtime data must be embedded in mapping config before engine execution.
+
 ### Performance Characteristics and Design Choices
 
 - Validate is synchronous and deterministic for interactive editor use.

@@ -209,7 +209,6 @@ describe('deployment handlers', () => {
       sourceConfigHash: 'abc',
       engineVersion: '1.0.0',
       mappingConfig: { id: 'config' },
-      createdAt: '2026-06-03T00:00:00.000Z',
     });
     runtimeRelayMocks.assertArtifactPayloadWithinLimit.mockReset().mockReturnValue({
       ok: true,
@@ -313,6 +312,20 @@ describe('deployment handlers', () => {
       expect.objectContaining({ operation: 'deploy', orchestrationId: 'orc-1', requestId: 'req-123' }),
     );
     expect(retryMocks.executeRuntimeOperationWithRetry).toHaveBeenCalled();
+  });
+
+  it('deploy handler builds deterministic artifact independent of invocation time', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    const { handler } = await importDeployHandler();
+
+    await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+    const firstArtifact = runtimeRelayMocks.relayClient.pushArtifact.mock.calls[0]?.[1];
+
+    runtimeRelayMocks.relayClient.pushArtifact.mockClear();
+    await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+    const secondArtifact = runtimeRelayMocks.relayClient.pushArtifact.mock.calls[0]?.[1];
+
+    expect(firstArtifact).toEqual(secondArtifact);
   });
 
   it('deploy handler rejects oversize runtime artifact payload', async () => {

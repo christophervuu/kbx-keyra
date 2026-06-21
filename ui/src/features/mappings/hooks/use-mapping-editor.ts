@@ -48,6 +48,8 @@ export interface MappingEditorActions {
   addRule: (rule: Pick<MappingRule, 'target' | 'expression' | 'description'>) => void;
   /** Update an existing rule at index */
   updateRule: (index: number, rule: Pick<MappingRule, 'target' | 'expression' | 'description'>) => void;
+  /** Update an existing rule by target path (or append if missing). */
+  updateRuleByTarget: (targetPath: string, patch: Partial<MappingRule>) => void;
   /** Delete a rule by index */
   deleteRule: (index: number) => void;
   /** Delete the rule for a given target path (T-08) */
@@ -306,6 +308,90 @@ function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
   }
 }
 
+function collectJsonSchemaTypes(
+  schema: unknown,
+  pathPrefix: string,
+  map: Map<string, MappingRule['type']>,
+): void {
+  if (!schema || typeof schema !== 'object') return;
+  const node = schema as Record<string, unknown>;
+  const properties = node.properties;
+  if (!properties || typeof properties !== 'object') return;
+
+  for (const [field, child] of Object.entries(properties as Record<string, unknown>)) {
+    const path = pathPrefix ? `${pathPrefix}.${field}` : field;
+    if (child && typeof child === 'object') {
+      const childNode = child as Record<string, unknown>;
+      const rawType = typeof childNode.type === 'string' ? childNode.type : null;
+      const normalizedType: MappingRule['type'] =
+        rawType === 'integer'
+          ? 'number'
+          : rawType === 'string'
+            || rawType === 'number'
+            || rawType === 'boolean'
+            || rawType === 'object'
+            || rawType === 'array'
+            || rawType === 'null'
+            || rawType === 'any'
+              ? rawType
+              : 'string';
+      map.set(path, normalizedType);
+      collectJsonSchemaTypes(child, path, map);
+    }
+  }
+}
+
+function normalizeSchemaNodeType(type: string | null): MappingRule['type'] {
+  if (type === 'integer') return 'number';
+  if (
+    type === 'string'
+    || type === 'number'
+    || type === 'boolean'
+    || type === 'object'
+    || type === 'array'
+    || type === 'null'
+    || type === 'any'
+  ) {
+    return type;
+  }
+  return 'string';
+}
+
+function buildTargetTypeByPathFromSchema(
+  parsedTargetSchema: ParsedSchema | null,
+  targetSchema: SchemaDetail | null,
+): ReadonlyMap<string, MappingRule['type']> {
+  const map = new Map<string, MappingRule['type']>();
+
+  for (const node of parsedTargetSchema?.nodes ?? []) {
+    map.set(node.path, normalizeSchemaNodeType(node.type));
+  }
+
+  if (targetSchema?.metadata.format === 'json-schema') {
+    collectJsonSchemaTypes(targetSchema.content, '', map);
+  }
+
+  return map;
+}
+
+function normalizeRuleTypesByTargetSchema(
+  rules: readonly MappingRule[],
+  targetTypeByPath: ReadonlyMap<string, MappingRule['type']>,
+): readonly MappingRule[] {
+  let changed = false;
+  const normalized = rules.map((rule) => {
+    const targetType = targetTypeByPath.get(rule.target);
+    if (!targetType || rule.type === targetType) return rule;
+    changed = true;
+    return {
+      ...rule,
+      type: targetType,
+    };
+  });
+
+  return changed ? normalized : rules;
+}
+
 /**
  * Converts schema detail content to an engine-compatible schema payload for
  * validation. Inferred schemas store sample payload text as content; for engine
@@ -343,6 +429,7 @@ function getValidationSchemaContent(
 function mergeDraftsIntoRules(
   savedRules: readonly MappingRule[],
   draftRules: ReadonlyMap<string, string>,
+  targetTypeByPath?: ReadonlyMap<string, MappingRule['type']>,
 ): MappingRule[] {
   // Start with a mutable copy of saved rules
   let result: MappingRule[] = [...savedRules];
@@ -358,7 +445,11 @@ function mergeDraftsIntoRules(
         result[idx] = { ...result[idx]!, expression };
       } else {
         // Append new rule
-        result.push({ target: targetPath, type: 'string', expression });
+        result.push({
+          target: targetPath,
+          type: targetTypeByPath?.get(targetPath) ?? 'string',
+          expression,
+        });
       }
     }
   }
@@ -475,17 +566,6 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
       if (!mountedRef.current) return;
 
-      setConfig(mappingConfig);
-      setRules(mappingConfig.rules);
-      setLastSavedRules(mappingConfig.rules);
-      setConfigOptions(mappingConfig.config);
-      setLastSavedConfigOptions(mappingConfig.config);
-      setVersion(mappingConfig.version);
-      setCurrentRevision(mappingConfig.version);
-      // Clear any stale drafts on reload
-      setDraftRules(new Map());
-      setEnrichmentSchemasByAlias({});
-
       // Check for a local autosaved draft (FS-063 Q4/Q5)
       try {
         const storedDraftRaw = localStorage.getItem(`keyra:draft:${mappingId}`);
@@ -525,12 +605,39 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
       if (!mountedRef.current) return;
 
-      if (sourceResult.status === 'fulfilled') {
-        setSourceSchema(sourceResult.value);
-      }
-      if (targetResult.status === 'fulfilled') {
-        setTargetSchema(targetResult.value);
-      }
+      const resolvedSourceSchema = sourceResult.status === 'fulfilled'
+        ? sourceResult.value
+        : null;
+      const resolvedTargetSchema = targetResult.status === 'fulfilled'
+        ? targetResult.value
+        : null;
+      const normalizedRules = normalizeRuleTypesByTargetSchema(
+        mappingConfig.rules,
+        buildTargetTypeByPathFromSchema(
+          resolvedTargetSchema ? tryParseSchema(resolvedTargetSchema) : null,
+          resolvedTargetSchema,
+        ),
+      );
+      const normalizedConfig: MappingConfig = normalizedRules === mappingConfig.rules
+        ? mappingConfig
+        : {
+          ...mappingConfig,
+          rules: normalizedRules,
+        };
+
+      setConfig(normalizedConfig);
+      setRules(normalizedRules);
+      setLastSavedRules(normalizedRules);
+      setConfigOptions(normalizedConfig.config);
+      setLastSavedConfigOptions(normalizedConfig.config);
+      setVersion(normalizedConfig.version);
+      setCurrentRevision(normalizedConfig.version);
+      // Clear any stale drafts on reload
+      setDraftRules(new Map());
+      setEnrichmentSchemasByAlias({});
+
+      setSourceSchema(resolvedSourceSchema);
+      setTargetSchema(resolvedTargetSchema);
 
       // Load enrichment schemas for alias-scoped input browsing (best-effort).
       const enrichmentDefs = mappingConfig.enrichmentSources ?? [];
@@ -588,6 +695,10 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     return tryParseSchema(targetSchema);
   }, [targetSchema]);
 
+  const targetTypeByPath = useMemo<ReadonlyMap<string, MappingRule['type']>>(() => {
+    return buildTargetTypeByPathFromSchema(parsedTargetSchema, targetSchema);
+  }, [parsedTargetSchema, targetSchema]);
+
   const enrichmentInputSchemas = useMemo(() => {
     if (config === null) return [] as { alias: string; parsedSchema: ParsedSchema | null }[];
 
@@ -618,10 +729,10 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   const validationConfig = useMemo<MappingConfig | null>(() => {
     if (!config) return null;
     const effectiveRules = draftRules.size > 0
-      ? mergeDraftsIntoRules(rules, draftRules)
+      ? mergeDraftsIntoRules(rules, draftRules, targetTypeByPath)
       : rules;
     return { ...config, rules: effectiveRules, config: configOptions };
-  }, [config, rules, draftRules, configOptions]);
+  }, [config, rules, draftRules, configOptions, targetTypeByPath]);
 
   const sourceSchemaContent = useMemo(
     () => getValidationSchemaContent(sourceSchema, parsedSourceSchema),
@@ -677,7 +788,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
     const timer = setTimeout(() => {
       const effectiveRules =
-        draftRules.size > 0 ? mergeDraftsIntoRules(rules, draftRules) : [...rules];
+        draftRules.size > 0 ? mergeDraftsIntoRules(rules, draftRules, targetTypeByPath) : [...rules];
       const draftConfig: MappingConfig = { ...config, rules: effectiveRules, config: configOptions };
       const stored: StoredDraft = {
         config: draftConfig,
@@ -694,7 +805,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude config from dep list; trigger on rule/option changes
-  }, [rules, draftRules, configOptions, hasUnsavedChanges, loadState, currentRevision, draftKey]);
+  }, [rules, draftRules, configOptions, hasUnsavedChanges, loadState, currentRevision, draftKey, targetTypeByPath]);
 
   // ---------------------------------------------------------------------------
   // Save status derivation
@@ -750,7 +861,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
 
     // Merge draftRules into the current rules array before saving
     const mergedRules = draftRules.size > 0
-      ? mergeDraftsIntoRules(rules, draftRules)
+      ? mergeDraftsIntoRules(rules, draftRules, targetTypeByPath)
       : [...rules];
 
     const updatedConfig: MappingConfig = {
@@ -825,7 +936,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, currentRevision, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId, draftKey]);
+  }, [config, version, currentRevision, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId, draftKey, targetTypeByPath]);
 
   // Keep ref up to date for keyboard handler
   useEffect(() => {
@@ -927,6 +1038,33 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     },
     [],
   );
+
+  const updateRuleByTarget = useCallback((targetPath: string, patch: Partial<MappingRule>) => {
+    setRules((prev) => {
+      const existingIndex = prev.findIndex((rule) => rule.target === targetPath);
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        const current = next[existingIndex]!;
+        next[existingIndex] = {
+          ...current,
+          ...patch,
+          target: targetPath,
+        };
+        return next;
+      }
+
+      const appended: MappingRule = {
+        target: targetPath,
+        type: patch.type ?? 'string',
+        expression: patch.expression ?? '',
+        description: patch.description,
+        ...(patch.valueTableRef ? { valueTableRef: patch.valueTableRef } : {}),
+        ...(patch.noMatchBehavior ? { noMatchBehavior: patch.noMatchBehavior } : {}),
+      };
+      return [...prev, appended];
+    });
+    setSaveState('idle');
+  }, []);
 
   const deleteRule = useCallback((index: number) => {
     setRules((prev) => prev.filter((_, i) => i !== index));
@@ -1185,6 +1323,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     () => ({
       addRule,
       updateRule,
+      updateRuleByTarget,
       deleteRule,
       deleteRuleByTarget,
       reorderRules,
@@ -1211,7 +1350,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       resetAiValidation,
     }),
     [
-      addRule, updateRule, deleteRule, deleteRuleByTarget, reorderRules,
+      addRule, updateRule, updateRuleByTarget, deleteRule, deleteRuleByTarget, reorderRules,
       bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore,
       updateDraft, commitDraft, revertDraft, revertAllDrafts, getDraftExpression,
       getUnsavedChangeSummary, applyRule, save, createVersion, acceptDraftRestore,

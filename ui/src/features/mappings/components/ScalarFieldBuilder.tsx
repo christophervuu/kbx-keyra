@@ -34,6 +34,7 @@ import { LogicStepList } from './LogicStepList';
 import { RawDslEditor } from './RawDslEditor';
 import type { RawDslEditorRef } from './RawDslEditor';
 import { SmartBuilderPanel } from './SmartBuilderPanel';
+import type { ValueMapProjectUiState } from './SmartBuilderPanel';
 import { SmartFixInline } from './SmartFixInline';
 import type { StagedInputField } from './SourceSchemaPanel';
 import { StaticValueInput } from './StaticValueInput';
@@ -73,7 +74,18 @@ import type {
 import type { SmartBuilderHydrationResult } from '../lib/smart-builder-state';
 import { decomposeToSourceCardState } from '../lib/source-card-decomposer';
 
-import type { Diagnostic, ParsedSchema, MappingRule, SchemaTreeNode, SmartFixInput } from '@/lib/types/domain';
+import type {
+  Diagnostic,
+  ParsedSchema,
+  MappingRule,
+  MappingRuleProjectValueTableRef,
+  SchemaTreeNode,
+  SmartFixInput,
+  ValueTableDirection,
+  ValueTableNoMatchMode,
+  ValueTablePrimitiveValue,
+  ValueTableScope,
+} from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,8 +179,25 @@ export interface ScalarFieldBuilderProps {
       editingStepScope?: 'input-transform' | 'output-step';
       calculationInputId?: string;
       setAsStartInputId?: string;
+      valueMapScope?: ValueTableScope;
+      valueMapProjectSelection?: {
+        readonly ref: MappingRuleProjectValueTableRef;
+      };
+      valueMapNoMatchMode?: ValueTableNoMatchMode;
+      valueMapFallbackValue?: ValueTablePrimitiveValue;
     },
   ) => void;
+  valueMapProjectState?: ValueMapProjectUiState;
+  onValueMapScopeChange?: (scope: ValueTableScope) => void;
+  onValueMapProjectTableSelect?: (tableId: string) => void;
+  onValueMapDirectionSelect?: (direction: ValueTableDirection) => void;
+  onValueMapNoMatchModeChange?: (mode: ValueTableNoMatchMode) => void;
+  onValueMapFallbackValueChange?: (value: string) => void;
+  onValueMapInlineMappingAdd?: () => void;
+  onValueMapInlineMappingUpdate?: (index: number, patch: { whenValue?: string; outputValue?: string }) => void;
+  onValueMapInlineMappingRemove?: (index: number) => void;
+  onValueMapConvertInlineToProject?: () => void;
+  onValueMapAdoptLatestRevision?: () => void;
   onSmartBeginActionParameterEdit?: (
     actionId: string,
     values?: Readonly<Record<string, SmartBuilderActionParameterValue>>,
@@ -572,6 +601,17 @@ export function ScalarFieldBuilder({
   smartActionAnnouncement = null,
   smartConcatSeparator = ' ',
   onSmartConcatSeparatorChange,
+  valueMapProjectState,
+  onValueMapScopeChange,
+  onValueMapProjectTableSelect,
+  onValueMapDirectionSelect,
+  onValueMapNoMatchModeChange,
+  onValueMapFallbackValueChange,
+  onValueMapInlineMappingAdd,
+  onValueMapInlineMappingUpdate,
+  onValueMapInlineMappingRemove,
+  onValueMapConvertInlineToProject,
+  onValueMapAdoptLatestRevision,
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
@@ -663,8 +703,12 @@ export function ScalarFieldBuilder({
     onExpressionChangeRef.current?.(next);
   }, [expression, selectedTargetPath]);
 
-  const hydrateFromExpression = useCallback((expr: string, options?: { warningOnFailure?: boolean }) => {
+  const hydrateFromExpression = useCallback((
+    expr: string,
+    options?: { warningOnFailure?: boolean; forceBuilderMode?: boolean },
+  ) => {
     const warningOnFailure = options?.warningOnFailure ?? false;
+    const forceBuilderMode = options?.forceBuilderMode ?? false;
     const trimmedExpr = expr.trim();
     hasHydratedTargetRef.current = false;
     skipNextBuilderEmissionRef.current = true;
@@ -740,7 +784,7 @@ export function ScalarFieldBuilder({
     if (result.success) {
       setDecompositionWarning(null);
       setChainState(createEmptyChainState());
-      setMode('editor');
+      setMode(forceBuilderMode ? 'builder' : 'editor');
       hasHydratedTargetRef.current = true;
       return;
     }
@@ -749,7 +793,7 @@ export function ScalarFieldBuilder({
     if (sourceCardResult !== null) {
       setDecompositionWarning(null);
       setChainState(createEmptyChainState());
-      setMode('editor');
+      setMode(forceBuilderMode ? 'builder' : 'editor');
       hasHydratedTargetRef.current = true;
       return;
     }
@@ -759,7 +803,7 @@ export function ScalarFieldBuilder({
     setDecompositionWarning(
       warningOnFailure ? (result.reason ?? 'Expression cannot be loaded into the guided builder.') : null,
     );
-    setMode('editor');
+    setMode(forceBuilderMode ? 'builder' : 'editor');
     hasHydratedTargetRef.current = true;
   }, []);
 
@@ -787,12 +831,32 @@ export function ScalarFieldBuilder({
   // Priority: draft expression → saved expression → empty state.
   useEffect(() => {
     const draftExpr = getDraftExpression(selectedTargetPath);
-    const expr = draftExpr ?? currentExpression ?? '';
+    const expr = preferSmartBuilder && smartHydrationOverride?.kind === 'guided'
+      ? (smartHydrationOverride.draft.expression ?? '')
+      : (draftExpr ?? currentExpression ?? '');
+    const shouldForceBuilderMode = preferSmartBuilder
+      ? (
+        smartHydrationOverride?.kind === 'guided'
+        || hydrateSmartBuilderFromExpression({
+          expression: expr,
+          targetPath: selectedTargetPath,
+          targetType: selectedTargetType,
+          isRequired: selectedTargetRequired,
+          sourceValueTypeByPath: Object.fromEntries(
+            (parsedSourceSchema?.nodes ?? []).map((node) => [node.path, toBuilderValueType(node.type)]),
+          ),
+        }).kind === 'guided'
+      )
+      : false;
+
     prevHydratedTargetRef.current = selectedTargetPath;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    hydrateFromExpression(expr, { warningOnFailure: true });
+    hydrateFromExpression(expr, {
+      warningOnFailure: true,
+      forceBuilderMode: shouldForceBuilderMode,
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTargetPath, currentExpression]);
+  }, [selectedTargetPath, currentExpression, preferSmartBuilder, smartHydrationOverride, parsedSourceSchema?.nodes, selectedTargetRequired, selectedTargetType]);
 
   const { errorDecorations, parseResult, isValid: isParseValid, diagnostics } = useDslValidation(expression);
 
@@ -1416,6 +1480,17 @@ export function ScalarFieldBuilder({
               actionAnnouncement={smartActionAnnouncement}
               concatSeparator={smartConcatSeparator}
               onConcatSeparatorChange={onSmartConcatSeparatorChange}
+              valueMapProjectState={valueMapProjectState}
+              onValueMapScopeChange={onValueMapScopeChange}
+              onValueMapProjectTableSelect={onValueMapProjectTableSelect}
+              onValueMapDirectionSelect={onValueMapDirectionSelect}
+              onValueMapNoMatchModeChange={onValueMapNoMatchModeChange}
+              onValueMapFallbackValueChange={onValueMapFallbackValueChange}
+              onValueMapInlineMappingAdd={onValueMapInlineMappingAdd}
+              onValueMapInlineMappingUpdate={onValueMapInlineMappingUpdate}
+              onValueMapInlineMappingRemove={onValueMapInlineMappingRemove}
+              onValueMapConvertInlineToProject={onValueMapConvertInlineToProject}
+              onValueMapAdoptLatestRevision={onValueMapAdoptLatestRevision}
             />
           </div>
         )}

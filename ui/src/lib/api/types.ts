@@ -26,8 +26,18 @@ import type {
   MappingVersion,
   MappingVersionEntry,
   MappingMetadata,
+  ProjectValueTable,
+  ProjectValueTableRevision,
   ProjectDetail,
   ProjectMetadata,
+  ValueTableDiffPage,
+  ValueTableListOptions,
+  ValueTableUsageEntry,
+  CreateProjectValueTableInput,
+  CreateProjectValueTableRevisionInput,
+  DuplicateProjectValueTableInput,
+  ResolveProjectValueTableReferenceInput,
+  ResolveProjectValueTableReferenceResult,
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
@@ -228,4 +238,33 @@ export interface ApiAdapter {
 
   // Preview
   previewOnServer(mappingId: string, input: ServerPreviewInput): Promise<ServerPreviewResult>;
+
+  // Project value tables
+  listProjectValueTables(projectId: string, options?: ValueTableListOptions): Promise<ProjectValueTable[]>;
+  getProjectValueTable(valueTableId: string): Promise<ProjectValueTable>;
+  getProjectValueTableRevision(valueTableId: string, revision: number): Promise<ProjectValueTableRevision>;
+  createProjectValueTable(input: CreateProjectValueTableInput): Promise<ProjectValueTable>;
+  createProjectValueTableRevision(
+    valueTableId: string,
+    input: CreateProjectValueTableRevisionInput,
+  ): Promise<ProjectValueTableRevision>;
+  duplicateProjectValueTable(input: DuplicateProjectValueTableInput): Promise<ProjectValueTable>;
+  archiveProjectValueTable(valueTableId: string): Promise<ProjectValueTable>;
+  deleteProjectValueTable(valueTableId: string): Promise<void>;
+  listProjectValueTableUsage(valueTableId: string): Promise<ValueTableUsageEntry[]>;
+  getProjectValueTableRevisionDiff(
+    valueTableId: string,
+    fromRevision: number,
+    toRevision: number,
+    options?: { cursor?: string; pageSize?: number },
+  ): Promise<ValueTableDiffPage>;
+  exportProjectValueTableCsv(valueTableId: string, revision?: number): Promise<string>;
+  importProjectValueTableCsv(
+    projectId: string,
+    csv: string,
+    options?: { name?: string; key?: string },
+  ): Promise<ProjectValueTableRevision>;
+  resolveProjectValueTableReference(
+    input: ResolveProjectValueTableReferenceInput,
+  ): Promise<ResolveProjectValueTableReferenceResult>;
 }

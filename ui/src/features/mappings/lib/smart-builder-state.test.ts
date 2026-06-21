@@ -125,6 +125,124 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toBe('get(external("carrier"), "rateCode")');
   });
 
+  it('hydrates project value-table valueMap expressions into guided draft when metadata exists', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      targetPath: 'target.status',
+      targetType: 'string',
+      isRequired: false,
+      ruleValueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        revision: 3,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [
+          { in: 'OPEN', out: 'Open', rowId: 'r1' },
+        ],
+      },
+      ruleNoMatchBehavior: { mode: 'fallback_value', fallbackValue: 'UNKNOWN' },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition?.kind).toBe('valueMap');
+    if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.scope).toBe('project');
+    expect(result.draft.composition.project?.ref.valueTableId).toBe('vt-1');
+    expect(result.draft.expression).toContain('valueTable("order-status", "oms", "cdm")');
+  });
+
+  it('hydrates exact inline value-map expression into guided draft', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'valueMap(source("channel"), {"web": "WEB_PORTAL", "mobile": "MOBILE_APP", "store": "RETAIL_STORE"}, "UNKNOWN")',
+      targetPath: 'target.channel',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition?.kind).toBe('valueMap');
+    if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.scope).toBe('inline');
+    expect(result.draft.composition.mappings).toHaveLength(3);
+    expect(result.draft.expression).toContain('valueMap(source("channel"), {');
+  });
+
+  it('hydrates exact project value-map expression with return-input fallback into guided draft', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), source("status"))',
+      targetPath: 'target.status',
+      targetType: 'string',
+      isRequired: false,
+      ruleValueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt-1',
+        tableKey: 'exercise-1-table',
+        revision: 3,
+        inputSideKey: 'side-a',
+        outputSideKey: 'side-b',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [
+          { in: 'open', out: 'OPEN', rowId: 'r1' },
+        ],
+      },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition?.kind).toBe('valueMap');
+    if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.scope).toBe('project');
+    expect(result.draft.composition.project?.ref.valueTableId).toBe('vt-1');
+    expect(result.draft.composition.noMatchBehavior?.mode).toBe('return_input');
+    expect(result.draft.expression).toBe('valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), source("status"))');
+  });
+
+  it('hydrates project value-table valueMap expressions with multiline formatting into guided draft', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: `valueMap(
+        source("status"),
+        valueTable(
+          "order-status",
+          "oms",
+          "cdm"
+        ),
+        "UNKNOWN"
+      )`,
+      targetPath: 'target.status',
+      targetType: 'string',
+      isRequired: false,
+      ruleValueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        revision: 3,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [
+          { in: 'OPEN', out: 'Open', rowId: 'r1' },
+        ],
+      },
+      ruleNoMatchBehavior: { mode: 'fallback_value', fallbackValue: 'UNKNOWN' },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition?.kind).toBe('valueMap');
+    if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.scope).toBe('project');
+    expect(result.draft.composition.project?.ref.valueTableId).toBe('vt-1');
+    expect(result.draft.expression).toContain('valueTable("order-status", "oms", "cdm")');
+  });
+
   it('returns advanced-mode result for non-decomposable expression', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'if(eq(lower(source("emailA")), lower(source("emailB"))), static("MATCH"), static("NO_MATCH"))',

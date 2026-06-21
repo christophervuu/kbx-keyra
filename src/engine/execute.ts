@@ -66,6 +66,7 @@ export function execute(
     externalSources: evaluationOptions.externalSources ?? {},
     registry: defaultRegistry,
     options: evaluationOptions,
+    currentRule: undefined,
     currentItem: undefined,
     parentItem: undefined,
     evaluate,
@@ -106,6 +107,8 @@ export function execute(
       }
     }
 
+    context.currentRule = rule;
+
     if (ast === null) {
       setAtPath(output, rule.target, null);
       rulesFailed += 1;
@@ -123,6 +126,7 @@ export function execute(
         });
       }
 
+      context.currentRule = undefined;
       continue;
     }
 
@@ -165,6 +169,8 @@ export function execute(
         durationMs: Date.now() - ruleStartedAt,
       });
     }
+
+    context.currentRule = undefined;
   }
 
   applyUnmappedTargets(config, output, targetSchema, diagnostics);

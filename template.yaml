@@ -119,6 +119,8 @@ Globals:
         SCHEMA_NODES_TABLE: !Ref SchemaNodesTable
         MAPPING_REVISIONS_TABLE: !Ref MappingRevisionsTable
         MAPPING_VERSIONS_TABLE: !Ref MappingVersionsTable
+        VALUE_TABLES_TABLE: !Ref ValueTablesTable
+        VALUE_TABLE_REVISIONS_TABLE: !Ref ValueTableRevisionsTable
         DEPLOYMENTS_TABLE: !Ref DeploymentsTable
         DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
         DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
@@ -253,6 +255,47 @@ Resources:
           AttributeType: N
       KeySchema:
         - AttributeName: mappingId
+          KeyType: HASH
+        - AttributeName: revision
+          KeyType: RANGE
+
+  ValueTablesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: integrations-keyra-value-tables
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: valueTableId
+          AttributeType: S
+        - AttributeName: projectId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: valueTableId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: projectId-index
+          KeySchema:
+            - AttributeName: projectId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ValueTableRevisionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: integrations-keyra-value-table-revisions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: valueTableId
+          AttributeType: S
+        - AttributeName: revision
+          AttributeType: N
+      KeySchema:
+        - AttributeName: valueTableId
           KeyType: HASH
         - AttributeName: revision
           KeyType: RANGE
@@ -653,6 +696,379 @@ Resources:
             RestApiId: !Ref KeyraApi
             Path: /projects/{id}/mappings
             Method: get
+
+  ListProjectValueTablesFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listprojectvaluetables
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.listProjectValueTablesHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}/value-tables
+            Method: get
+
+  CreateProjectValueTableFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-createprojectvaluetable
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.createProjectValueTableHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}/value-tables
+            Method: post
+
+  GetProjectValueTableFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getprojectvaluetable
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.getProjectValueTableHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}
+            Method: get
+
+  DeleteProjectValueTableFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-deleteprojectvaluetable
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.deleteProjectValueTableHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}
+            Method: delete
+
+  GetProjectValueTableRevisionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getprojectvaluetablerevision
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.getProjectValueTableRevisionHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/revisions/{revision}
+            Method: get
+
+  CreateProjectValueTableRevisionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-createprojectvaluetablerevision
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.createProjectValueTableRevisionHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/revisions
+            Method: post
+
+  DuplicateProjectValueTableFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-duplicateprojectvaluetable
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.duplicateProjectValueTableHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/duplicate
+            Method: post
+
+  ArchiveProjectValueTableFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-archiveprojectvaluetable
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.archiveProjectValueTableHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/archive
+            Method: post
+
+  ListProjectValueTableUsageFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listprojectvaluetableusage
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.listProjectValueTableUsageHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/usage
+            Method: get
+
+  GetProjectValueTableDiffFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getprojectvaluetablediff
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.getProjectValueTableRevisionDiffHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/diff
+            Method: get
+
+  ExportProjectValueTableCsvFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-exportprojectvaluetablecsv
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.exportProjectValueTableCsvHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/export.csv
+            Method: get
+
+  ImportProjectValueTableCsvFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-importprojectvaluetablecsv
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.importProjectValueTableCsvHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}/value-tables/import-csv
+            Method: post
+
+  ResolveProjectValueTableReferenceFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-resolveprojectvaluetableref
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.resolveProjectValueTableReferenceHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{id}/value-tables/resolve
+            Method: post
 
   ListVersionsFunction:
     Type: AWS::Serverless::Function

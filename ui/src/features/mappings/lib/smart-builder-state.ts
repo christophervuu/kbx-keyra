@@ -7,7 +7,16 @@ import {
 import { generateSmartBuilderExpression } from './smart-builder-expression-generator';
 
 import { parse } from '@/lib/engine';
-import type { MappingRule } from '@/lib/types/domain';
+import type {
+  MappingRule,
+  MappingRuleNoMatchBehavior,
+  MappingRuleProjectValueTableRef,
+  MappingRuleValueTableRef,
+  ValueTableDirectionSupport,
+  ValueTableScope,
+  ValueTableSideDefinition,
+  ValueTableStatus,
+} from '@/lib/types/domain';
 
 export type BuilderValueType = MappingRule['type'] | 'unknown';
 
@@ -72,6 +81,17 @@ export interface BuilderValueMapEntry {
   readonly output: BuilderArgumentValue;
 }
 
+export interface BuilderProjectValueMapSelection {
+  readonly ref: MappingRuleProjectValueTableRef;
+  readonly tableName?: string;
+  readonly tableStatus?: ValueTableStatus;
+  readonly currentRevision?: number;
+  readonly sideA?: ValueTableSideDefinition;
+  readonly sideB?: ValueTableSideDefinition;
+  readonly directionSupport?: ValueTableDirectionSupport;
+  readonly usageCount?: number;
+}
+
 export type BuilderComposition =
   | { readonly kind: 'direct'; readonly inputId: string }
   | {
@@ -99,8 +119,11 @@ export type BuilderComposition =
   | {
       readonly kind: 'valueMap';
       readonly inputId: string;
+      readonly scope?: ValueTableScope;
+      readonly project?: BuilderProjectValueMapSelection | null;
       readonly mappings: readonly BuilderValueMapEntry[];
       readonly fallback: BuilderArgumentValue;
+      readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
     }
   | { readonly kind: 'arrayBuild'; readonly inputIds?: readonly string[] }
   | { readonly kind: 'arrayMerge'; readonly inputIds?: readonly string[] }
@@ -632,6 +655,8 @@ export function hydrateSmartBuilderFromExpression(input: {
   targetType: BuilderValueType;
   isRequired: boolean;
   sourceValueTypeByPath?: Readonly<Record<string, BuilderValueType>>;
+  ruleValueTableRef?: MappingRuleValueTableRef;
+  ruleNoMatchBehavior?: MappingRuleNoMatchBehavior;
 }): SmartBuilderHydrationResult {
   const expression = input.expression.trim();
   if (!expression) {
@@ -644,6 +669,37 @@ export function hydrateSmartBuilderFromExpression(input: {
   }
 
   const resolveSourceValueType = (path: string): BuilderValueType => input.sourceValueTypeByPath?.[path] ?? 'unknown';
+
+  const hydratedValueMap = hydrateValueMapCompositionFromExpression(expression, {
+    resolveSourceValueType,
+    ruleValueTableRef: input.ruleValueTableRef,
+    ruleNoMatchBehavior: input.ruleNoMatchBehavior,
+  });
+  if (hydratedValueMap) {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft(input),
+      inputs: [hydratedValueMap.primaryInput],
+      composition: {
+        kind: 'valueMap',
+        inputId: hydratedValueMap.primaryInput.id,
+        scope: hydratedValueMap.scope,
+        project: hydratedValueMap.project,
+        mappings: hydratedValueMap.mappings,
+        fallback: hydratedValueMap.fallback,
+        ...(hydratedValueMap.noMatchBehavior ? { noMatchBehavior: hydratedValueMap.noMatchBehavior } : {}),
+      },
+    };
+    const generated = generateSmartBuilderExpression(draft);
+
+    return {
+      kind: 'guided',
+      draft: {
+        ...draft,
+        expression: generated,
+        validation: generated ? { status: 'valid' } : { status: 'pending' },
+      },
+    };
+  }
 
   const hydratedDefault = hydrateDefaultCompositionFromExpression(expression, {
     resolveSourceValueType,
@@ -677,6 +733,319 @@ export function hydrateSmartBuilderFromExpression(input: {
       validation: generated ? { status: 'valid' } : { status: 'pending' },
     },
   };
+}
+
+function hydrateValueMapCompositionFromExpression(
+  expression: string,
+  options?: {
+    resolveSourceValueType?: (path: string) => BuilderValueType;
+    ruleValueTableRef?: MappingRuleValueTableRef;
+    ruleNoMatchBehavior?: MappingRuleNoMatchBehavior;
+  },
+): {
+  readonly primaryInput: BuilderInput;
+  readonly scope: ValueTableScope;
+  readonly project: BuilderProjectValueMapSelection | null;
+  readonly mappings: readonly BuilderValueMapEntry[];
+  readonly fallback: BuilderArgumentValue;
+  readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
+} | null {
+  const parsed = parseValueMapExpression(expression);
+  if (!parsed) return null;
+
+  const sourceExpression = parsed.sourceExpression;
+  const fallbackExpression = parsed.fallbackExpression;
+  if (!sourceExpression || !fallbackExpression) return null;
+
+  const hydratedPrimaryInput = hydrateFromSupportedExpression(sourceExpression, {
+    resolveSourceValueType: options?.resolveSourceValueType,
+  });
+  const primaryInput: BuilderInput = hydratedPrimaryInput ?? {
+    id: 'input-1',
+    sourceKind: 'expression',
+    label: 'Expression input',
+    rawExpression: sourceExpression,
+    valueType: 'unknown',
+    transforms: [],
+  };
+
+  const fallback = toArgumentValueFromHydratedExpression(fallbackExpression);
+  const derivedNoMatchBehavior = deriveNoMatchBehaviorFromFallback({
+    sourceExpression,
+    fallbackExpression,
+  });
+  const noMatchBehavior = options?.ruleNoMatchBehavior ?? derivedNoMatchBehavior;
+
+  if (parsed.mapping.kind === 'inline') {
+    return {
+      primaryInput,
+      scope: 'inline',
+      project: null,
+      mappings: parsed.mapping.entries,
+      fallback,
+      noMatchBehavior,
+    };
+  }
+
+  const tableKey = parsed.mapping.tableKey;
+  const inputSideKey = parsed.mapping.inputSideKey;
+  const outputSideKey = parsed.mapping.outputSideKey;
+  if (!tableKey || !inputSideKey || !outputSideKey) return null;
+
+  const ruleRef = options?.ruleValueTableRef?.scope === 'project'
+    ? options.ruleValueTableRef
+    : null;
+  const projectRef: MappingRuleProjectValueTableRef =
+    ruleRef
+    && ruleRef.tableKey === tableKey
+    && ruleRef.inputSideKey === inputSideKey
+    && ruleRef.outputSideKey === outputSideKey
+      ? ruleRef
+      : {
+        scope: 'project',
+        valueTableId: `unknown:${tableKey}`,
+        tableKey,
+        revision: 0,
+        inputSideKey,
+        outputSideKey,
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [],
+      };
+
+  return {
+    primaryInput,
+    scope: 'project',
+    project: {
+      ref: projectRef,
+      ...(projectRef.valueTableId.startsWith('unknown:') ? { tableName: tableKey } : {}),
+    },
+    mappings: projectRef.resolvedEntries.map((entry) => ({
+      whenValue: String(entry.in),
+      output: { kind: 'static', value: entry.out },
+    })),
+    fallback,
+    noMatchBehavior,
+  };
+}
+
+function parseValueMapExpression(expression: string): {
+  readonly sourceExpression: string;
+  readonly mapping:
+    | {
+        readonly kind: 'project';
+        readonly tableKey: string;
+        readonly inputSideKey: string;
+        readonly outputSideKey: string;
+      }
+    | {
+        readonly kind: 'inline';
+        readonly entries: readonly BuilderValueMapEntry[];
+      };
+  readonly fallbackExpression: string;
+} | null {
+  const trimmed = expression.trim();
+  const valueMapMatch = trimmed.match(/^valueMap\((?<args>[\s\S]*)\)$/);
+  if (!valueMapMatch?.groups?.args) return null;
+
+  const topLevelArgs = splitTopLevelDslArgs(valueMapMatch.groups.args);
+  if (topLevelArgs.length !== 3) return null;
+
+  const sourceExpression = topLevelArgs[0]?.trim() ?? '';
+  const mappingExpression = topLevelArgs[1]?.trim() ?? '';
+  const fallbackExpression = topLevelArgs[2]?.trim() ?? '';
+  if (!sourceExpression || !mappingExpression || !fallbackExpression) return null;
+
+  const projectMapping = parseProjectValueTableReference(mappingExpression);
+  const inlineMapping = projectMapping ? null : parseInlineValueMapEntries(mappingExpression);
+  if (!projectMapping && !inlineMapping) return null;
+
+  return {
+    sourceExpression,
+    mapping: projectMapping ?? { kind: 'inline', entries: inlineMapping ?? [] },
+    fallbackExpression,
+  };
+}
+
+function parseProjectValueTableReference(mappingExpression: string): {
+  readonly kind: 'project';
+  readonly tableKey: string;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+} | null {
+  const valueTableMatch = mappingExpression.match(/^valueTable\((?<args>[\s\S]*)\)$/);
+  if (!valueTableMatch?.groups?.args) return null;
+
+  const valueTableArgs = splitTopLevelDslArgs(valueTableMatch.groups.args);
+  if (valueTableArgs.length !== 3) return null;
+
+  const tableKey = readQuotedDslString(valueTableArgs[0] ?? '');
+  const inputSideKey = readQuotedDslString(valueTableArgs[1] ?? '');
+  const outputSideKey = readQuotedDslString(valueTableArgs[2] ?? '');
+  if (!tableKey || !inputSideKey || !outputSideKey) return null;
+
+  return {
+    kind: 'project',
+    tableKey,
+    inputSideKey,
+    outputSideKey,
+  };
+}
+
+function parseInlineValueMapEntries(mappingExpression: string): readonly BuilderValueMapEntry[] | null {
+  const trimmed = mappingExpression.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
+
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+
+  const rawEntries = splitTopLevelDslArgs(inner);
+  const entries: BuilderValueMapEntry[] = [];
+
+  for (const rawEntry of rawEntries) {
+    const separatorIndex = findTopLevelDslDelimiter(rawEntry, ':');
+    if (separatorIndex === -1) return null;
+
+    const rawKey = rawEntry.slice(0, separatorIndex).trim();
+    const rawValue = rawEntry.slice(separatorIndex + 1).trim();
+    const key = readQuotedDslString(rawKey);
+    if (!key || !rawValue) return null;
+
+    entries.push({
+      whenValue: key,
+      output: toArgumentValueFromHydratedExpression(rawValue),
+    });
+  }
+
+  return entries;
+}
+
+function deriveNoMatchBehaviorFromFallback(input: {
+  sourceExpression: string;
+  fallbackExpression: string;
+}): MappingRuleNoMatchBehavior | undefined {
+  const fallback = input.fallbackExpression.trim();
+  if (!fallback) return undefined;
+  if (fallback === input.sourceExpression.trim()) {
+    return { mode: 'return_input' };
+  }
+  if (fallback === 'null') {
+    return { mode: 'return_null' };
+  }
+
+  const argument = toArgumentValueFromHydratedExpression(fallback);
+  if (argument.kind === 'static' && (
+    typeof argument.value === 'string'
+    || typeof argument.value === 'number'
+    || typeof argument.value === 'boolean'
+  )) {
+    return { mode: 'fallback_value', fallbackValue: argument.value };
+  }
+
+  return undefined;
+}
+
+function splitTopLevelDslArgs(argsText: string): readonly string[] {
+  const args: string[] = [];
+  let current = '';
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let i = 0; i < argsText.length; i += 1) {
+    const ch = argsText[i] ?? '';
+
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+
+    if (ch === '\\') {
+      current += ch;
+      if (inString) escaping = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      current += ch;
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth += 1;
+        current += ch;
+        continue;
+      }
+
+      if (ch === ')' || ch === ']' || ch === '}') {
+        depth -= 1;
+        current += ch;
+        continue;
+      }
+
+      if (ch === ',' && depth === 0) {
+        args.push(current.trim());
+        current = '';
+        continue;
+      }
+    }
+
+    current += ch;
+  }
+
+  if (current.trim().length > 0) {
+    args.push(current.trim());
+  }
+
+  return args;
+}
+
+function findTopLevelDslDelimiter(text: string, delimiter: ':' | ','): number {
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] ?? '';
+
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+    if (ch === '\\') {
+      if (inString) escaping = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth += 1;
+        continue;
+      }
+      if (ch === ')' || ch === ']' || ch === '}') {
+        depth -= 1;
+        continue;
+      }
+      if (ch === delimiter && depth === 0) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function readQuotedDslString(input: string): string | null {
+  const match = input.trim().match(/^"([\s\S]*)"$/);
+  if (!match) return null;
+  return match[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\') ?? null;
 }
 
 function hydrateDefaultCompositionFromExpression(

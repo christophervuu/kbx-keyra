@@ -24,6 +24,7 @@ import {
   VersionHistoryDrawer,
   WorkspaceToolbar,
   WorkspaceNoSourceDataCallout,
+  type ValueMapProjectUiState,
   type ChildFieldInfo,
   type ExpressionBuilderPanelRef,
   type StagedInputField,
@@ -50,7 +51,20 @@ import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-disp
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
 import { executeMapping } from '@/lib/engine';
-import type { SchemaSamplePayloadMetadata, SchemaTreeNode } from '@/lib/types/domain';
+import type {
+  MappingRuleProjectValueTableRef,
+  MappingRuleValueTableRef,
+  ProjectValueTable,
+  ProjectValueTableRevision,
+  SchemaSamplePayloadMetadata,
+  SchemaTreeNode,
+  ValueTableDirection,
+  ValueTableDirectionSupport,
+  ValueTableNoMatchMode,
+  ValueTablePrimitiveValue,
+  ValueTableScope,
+  ValueTableStatus,
+} from '@/lib/types/domain';
 import { PATHS } from '@/routes/paths';
 
 const LAST_SELECTED_SAMPLE_STORAGE_PREFIX = 'keyra:mappings:last-selected-sample';
@@ -290,6 +304,150 @@ interface SmartActionMeta {
   readonly announcement: string | null;
 }
 
+interface ProjectValueMapCatalogEntry {
+  readonly table: ProjectValueTable;
+  readonly revision: ProjectValueTableRevision;
+  readonly usageCount: number;
+}
+
+interface ValueTableDirectionOption {
+  readonly direction: ValueTableDirection;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly label: string;
+  readonly enabled: boolean;
+  readonly reason?: string;
+}
+
+type ValueMapProjectSelectionState = ValueMapProjectUiState;
+
+interface ValueMapConversionPromptState {
+  readonly targetPath: string;
+  readonly selectedTableId: string;
+  readonly selectedDirection: ValueTableDirection;
+}
+
+interface ValueMapAdoptionPromptState {
+  readonly targetPath: string;
+  readonly tableId: string;
+  readonly fromRevision: number;
+  readonly toRevision: number;
+}
+
+function inferDirectionSupportFromRevision(revision: ProjectValueTableRevision): ValueTableDirectionSupport {
+  if (revision.directionSupport) return revision.directionSupport;
+
+  const seenA = new Set<string>();
+  const seenB = new Set<string>();
+  let aToB = true;
+  let bToA = true;
+
+  for (const row of revision.rows) {
+    const aKey = JSON.stringify(row.sideAValue);
+    const bKey = JSON.stringify(row.sideBValue);
+    if (seenA.has(aKey)) aToB = false;
+    if (seenB.has(bKey)) bToA = false;
+    seenA.add(aKey);
+    seenB.add(bKey);
+  }
+
+  return { aToB, bToA };
+}
+
+function normalizeValueMapFallback(mode: ValueTableNoMatchMode, fallback: ValueTablePrimitiveValue): {
+  readonly fallbackArgument: { kind: 'static'; value: ValueTablePrimitiveValue | null };
+  readonly noMatchBehavior: { mode: ValueTableNoMatchMode; fallbackValue?: ValueTablePrimitiveValue };
+} {
+  if (mode === 'return_null') {
+    return {
+      fallbackArgument: { kind: 'static', value: null },
+      noMatchBehavior: { mode: 'return_null' },
+    };
+  }
+  if (mode === 'return_input') {
+    return {
+      fallbackArgument: { kind: 'static', value: '' },
+      noMatchBehavior: { mode: 'return_input' },
+    };
+  }
+  return {
+    fallbackArgument: { kind: 'static', value: fallback },
+    noMatchBehavior: { mode: 'fallback_value', fallbackValue: fallback },
+  };
+}
+
+function deriveNoMatchModeFromDraft(draft: SmartBuilderDraft): ValueTableNoMatchMode {
+  const composition = draft.composition;
+  if (!composition || composition.kind !== 'valueMap') return 'fallback_value';
+  return composition.noMatchBehavior?.mode ?? 'fallback_value';
+}
+
+function deriveFallbackValueFromDraft(draft: SmartBuilderDraft): ValueTablePrimitiveValue {
+  const composition = draft.composition;
+  if (!composition || composition.kind !== 'valueMap') return '';
+  if (composition.noMatchBehavior?.mode === 'fallback_value' && composition.noMatchBehavior.fallbackValue !== undefined) {
+    return composition.noMatchBehavior.fallbackValue;
+  }
+  if (composition.fallback.kind === 'static' && (
+    typeof composition.fallback.value === 'string'
+    || typeof composition.fallback.value === 'number'
+    || typeof composition.fallback.value === 'boolean'
+  )) {
+    return composition.fallback.value;
+  }
+  return '';
+}
+
+function toDirectionLabel(direction: ValueTableDirection, revision: ProjectValueTableRevision): string {
+  if (direction === 'a_to_b') {
+    return `${revision.sideA.label} → ${revision.sideB.label}`;
+  }
+  return `${revision.sideB.label} → ${revision.sideA.label}`;
+}
+
+function toDirectionReason(direction: ValueTableDirection, support: ValueTableDirectionSupport): string | undefined {
+  const enabled = direction === 'a_to_b' ? support.aToB : support.bToA;
+  if (enabled) return undefined;
+  return direction === 'a_to_b'
+    ? 'Unavailable: duplicate input keys on Side A.'
+    : 'Unavailable: duplicate input keys on Side B.';
+}
+
+function buildDirectionOptions(revision: ProjectValueTableRevision): readonly ValueTableDirectionOption[] {
+  const support = inferDirectionSupportFromRevision(revision);
+  return [
+    {
+      direction: 'a_to_b',
+      inputSideKey: revision.sideA.key,
+      outputSideKey: revision.sideB.key,
+      label: toDirectionLabel('a_to_b', revision),
+      enabled: support.aToB,
+      reason: toDirectionReason('a_to_b', support),
+    },
+    {
+      direction: 'b_to_a',
+      inputSideKey: revision.sideB.key,
+      outputSideKey: revision.sideA.key,
+      label: toDirectionLabel('b_to_a', revision),
+      enabled: support.bToA,
+      reason: toDirectionReason('b_to_a', support),
+    },
+  ];
+}
+
+function inferDirectionFromRevisionAndRef(
+  revision: ProjectValueTableRevision,
+  ref: MappingRuleProjectValueTableRef,
+): ValueTableDirection | null {
+  if (ref.inputSideKey === revision.sideA.key && ref.outputSideKey === revision.sideB.key) {
+    return 'a_to_b';
+  }
+  if (ref.inputSideKey === revision.sideB.key && ref.outputSideKey === revision.sideA.key) {
+    return 'b_to_a';
+  }
+  return null;
+}
+
 function deriveSmartActionMetaFromDraft(draft: SmartBuilderDraft): SmartActionMeta {
   const composition = draft.composition;
   if (!composition) {
@@ -344,6 +502,19 @@ export function applySmartActionToDraft(
     readonly setAsStartInputId?: string;
     readonly editingStepIndex?: number;
     readonly editingStepScope?: 'input-transform' | 'output-step';
+    readonly valueMapScope?: ValueTableScope;
+    readonly valueMapProjectSelection?: {
+      readonly ref: MappingRuleProjectValueTableRef;
+      readonly tableName?: string;
+      readonly tableStatus?: ValueTableStatus;
+      readonly currentRevision?: number;
+      readonly sideA?: ProjectValueTableRevision['sideA'];
+      readonly sideB?: ProjectValueTableRevision['sideB'];
+      readonly directionSupport?: ValueTableDirectionSupport;
+      readonly usageCount?: number;
+    };
+    readonly valueMapNoMatchMode?: ValueTableNoMatchMode;
+    readonly valueMapFallbackValue?: ValueTablePrimitiveValue;
   },
 ): SmartBuilderDraft {
   const parameterResolution = getValidatedActionParameters({ draft, actionId });
@@ -353,6 +524,12 @@ export function applySmartActionToDraft(
 
   const actionParameters = parameterResolution.values;
   let nextDraft: SmartBuilderDraft = draft;
+
+  const resolveValueMapFallback = () => {
+    const fallbackMode = options?.valueMapNoMatchMode ?? deriveNoMatchModeFromDraft(draft);
+    const fallbackValue = options?.valueMapFallbackValue ?? deriveFallbackValueFromDraft(draft);
+    return normalizeValueMapFallback(fallbackMode, fallbackValue);
+  };
 
   const toMathOperator = (id: string): 'add' | 'subtract' | 'multiply' | 'divide' =>
     id === 'number.add'
@@ -626,13 +803,19 @@ export function applySmartActionToDraft(
     case 'lookup.valueMap': {
       const first = draft.inputs[0];
       if (!first) return draft;
+      const fallback = resolveValueMapFallback();
+      const scope = options?.valueMapScope
+        ?? (draft.composition?.kind === 'valueMap' ? (draft.composition.scope ?? 'inline') : 'inline');
       nextDraft = {
         ...draft,
         composition: {
           kind: 'valueMap',
           inputId: first.id,
-          mappings: [],
-          fallback: { kind: 'static', value: '' },
+          scope,
+          project: scope === 'project' ? (options?.valueMapProjectSelection ?? (draft.composition?.kind === 'valueMap' ? (draft.composition.project ?? null) : null)) : null,
+          mappings: draft.composition?.kind === 'valueMap' ? draft.composition.mappings : [],
+          fallback: fallback.fallbackArgument,
+          noMatchBehavior: fallback.noMatchBehavior,
         },
       };
       break;
@@ -1062,7 +1245,14 @@ export default function MappingEditor() {
   const [samplePayloadCache, setSamplePayloadCache] = useState<Record<string, { raw: string; parsed: unknown | null }>>({});
   const [localSamplePayloadsBySchema, setLocalSamplePayloadsBySchema] = useState<Record<string, readonly SchemaSamplePayloadMetadata[]>>({});
   const [projectName, setProjectName] = useState<string>('Project');
-  const [routeEnrichmentSourceData, setRouteEnrichmentSourceData] = useState<Record<string, unknown>>({});
+  const routeEnrichmentSourceData = useMemo<Record<string, unknown>>(() => {
+    const navState = location.state as Record<string, unknown> | null;
+    const incomingExternalSourcesRaw = navState?.externalSourcesRaw;
+    if (typeof incomingExternalSourcesRaw !== 'string') {
+      return {};
+    }
+    return tryParseEnrichmentSourceData(incomingExternalSourcesRaw) ?? {};
+  }, [location.state]);
 
   const sourceSchemaMetadata = editor.sourceSchemaDetail?.metadata ?? null;
   const sourceSchemaId = sourceSchemaMetadata?.schemaId ?? null;
@@ -1673,12 +1863,6 @@ export default function MappingEditor() {
   useEffect(() => {
     const navState = location.state as Record<string, unknown> | null;
     const incomingPath = navState?.selectedTargetPath;
-    const incomingExternalSourcesRaw = navState?.externalSourcesRaw;
-
-    if (typeof incomingExternalSourcesRaw === 'string') {
-      const parsed = tryParseEnrichmentSourceData(incomingExternalSourcesRaw);
-      setRouteEnrichmentSourceData(parsed ?? {});
-    }
 
     if (incomingPath && typeof incomingPath === 'string') {
       setSelectedTargetPath(resolveSelectedTargetPath(incomingPath));
@@ -1695,6 +1879,10 @@ export default function MappingEditor() {
   const smartDraftByTargetRef = useRef(new Map<string, ReturnType<typeof createEmptySmartBuilderDraft>>());
   const [smartDraftByTargetState, setSmartDraftByTargetState] = useState<Record<string, SmartBuilderDraft>>({});
   const [smartActionMetaByTarget, setSmartActionMetaByTarget] = useState<Record<string, SmartActionMeta>>({});
+  const [projectValueTableCatalog, setProjectValueTableCatalog] = useState<readonly ProjectValueMapCatalogEntry[]>([]);
+  const [valueMapProjectSelectionByTarget, setValueMapProjectSelectionByTarget] = useState<Record<string, ValueMapProjectSelectionState>>({});
+  const [valueMapConversionPrompt, setValueMapConversionPrompt] = useState<ValueMapConversionPromptState | null>(null);
+  const [valueMapAdoptionPrompt, setValueMapAdoptionPrompt] = useState<ValueMapAdoptionPromptState | null>(null);
 
   const setSmartDraftForTarget = useCallback((targetPath: string, draft: SmartBuilderDraft) => {
     smartDraftByTargetRef.current.set(targetPath, draft);
@@ -1711,6 +1899,43 @@ export default function MappingEditor() {
       };
     });
   }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const tables = await adapter.listProjectValueTables(projectId, {
+          status: 'active',
+          sortBy: 'updatedAt',
+          sortDirection: 'desc',
+        });
+
+        const details = await Promise.all(
+          tables.map(async (table) => {
+            const [revision, usage] = await Promise.all([
+              adapter.getProjectValueTableRevision(table.id, table.currentRevision),
+              adapter.listProjectValueTableUsage(table.id),
+            ]);
+            return { table, revision, usageCount: usage.length } as ProjectValueMapCatalogEntry;
+          }),
+        );
+
+        if (cancelled) return;
+        setProjectValueTableCatalog(details);
+      } catch (error) {
+        if (cancelled) return;
+        void error;
+        setProjectValueTableCatalog([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, projectId]);
 
   const handleSmartFocusedSlotChange = useCallback((targetPath: string, slotId: string | null) => {
     const existing = smartDraftByTargetRef.current.get(targetPath);
@@ -1895,10 +2120,7 @@ export default function MappingEditor() {
     return editor.validation.diagnosticsForRule(selectedRuleIndexForSmartFix);
   }, [editor.validation, selectedRuleIndexForSmartFix]);
 
-  const resolveSmartDraftForTarget = useCallback((targetPath: string) => {
-    const existing = smartDraftByTargetRef.current.get(targetPath);
-    if (existing) return { draft: existing, guided: true as const };
-
+  const hydrateSmartDraftForTarget = useCallback((targetPath: string) => {
     const node = editor.parsedTargetSchema
       ? findNodeByPath(editor.parsedTargetSchema.nodes, targetPath)
       : undefined;
@@ -1908,8 +2130,9 @@ export default function MappingEditor() {
     const effectiveExpression = editor.actions.getDraftExpression(targetPath)
       ?? editor.rules.find((rule) => rule.target === targetPath)?.expression
       ?? '';
+    const existingRule = editor.rules.find((rule) => rule.target === targetPath);
 
-    const hydrated = hydrateSmartBuilderFromExpression({
+    return hydrateSmartBuilderFromExpression({
       expression: effectiveExpression,
       targetPath,
       targetType,
@@ -1920,7 +2143,16 @@ export default function MappingEditor() {
           toTargetFieldType(sourceNode.type),
         ]),
       ),
+      ruleValueTableRef: existingRule?.valueTableRef,
+      ruleNoMatchBehavior: existingRule?.noMatchBehavior,
     });
+  }, [editor.actions, editor.parsedSourceSchema?.nodes, editor.parsedTargetSchema, editor.rules]);
+
+  const resolveSmartDraftForTarget = useCallback((targetPath: string) => {
+    const existing = smartDraftByTargetRef.current.get(targetPath);
+    if (existing) return { draft: existing, guided: true as const };
+
+    const hydrated = hydrateSmartDraftForTarget(targetPath);
 
     if (hydrated.kind === 'advanced') {
       return { draft: null, guided: false as const };
@@ -1928,7 +2160,7 @@ export default function MappingEditor() {
 
     setSmartDraftForTarget(targetPath, hydrated.draft);
     return { draft: hydrated.draft, guided: true as const };
-  }, [editor.actions, editor.parsedSourceSchema?.nodes, editor.parsedTargetSchema, editor.rules, setSmartDraftForTarget]);
+  }, [hydrateSmartDraftForTarget, setSmartDraftForTarget]);
 
   const selectedNodeSmartHydration = useMemo(() => {
     if (!selectedNode) return null;
@@ -1936,6 +2168,280 @@ export default function MappingEditor() {
     if (!existing) return null;
     return { kind: 'guided' as const, draft: existing };
   }, [selectedNode, smartDraftByTargetState]);
+
+  const syncRuleValueMapMetadataForTarget = useCallback((targetPath: string, draft: SmartBuilderDraft) => {
+    const composition = draft.composition;
+    if (!composition || composition.kind !== 'valueMap') {
+      editor.actions.updateRuleByTarget(targetPath, {
+        expression: draft.expression,
+        valueTableRef: undefined,
+        noMatchBehavior: undefined,
+      });
+      return;
+    }
+
+    const noMatchBehavior = composition.noMatchBehavior ?? {
+      mode: 'fallback_value' as const,
+      ...(composition.fallback.kind === 'static' && (
+        typeof composition.fallback.value === 'string'
+        || typeof composition.fallback.value === 'number'
+        || typeof composition.fallback.value === 'boolean'
+      )
+        ? { fallbackValue: composition.fallback.value }
+        : {}),
+    };
+
+    const scope = composition.scope ?? 'inline';
+    const valueTableRef: MappingRuleValueTableRef = scope === 'project' && composition.project
+      ? composition.project.ref
+      : { scope: 'inline' };
+
+    editor.actions.updateRuleByTarget(targetPath, {
+      expression: draft.expression,
+      valueTableRef,
+      noMatchBehavior,
+    });
+  }, [editor.actions]);
+
+  const deriveValueMapProjectSelectionState = useCallback((targetPath: string, draft: SmartBuilderDraft): ValueMapProjectSelectionState | null => {
+    const composition = draft.composition;
+    if (!composition || composition.kind !== 'valueMap') return null;
+
+    const scope = composition.scope ?? 'inline';
+    const availableTables = projectValueTableCatalog.map((entry) => ({
+      tableId: entry.table.id,
+      label: entry.table.name,
+      revision: entry.table.currentRevision,
+      status: entry.table.status,
+      usageCount: entry.usageCount,
+      rowCount: entry.revision.rowCount,
+    }));
+
+    const selectedTableId = scope === 'project' ? (composition.project?.ref.valueTableId ?? null) : null;
+    const selectedEntry = selectedTableId
+      ? projectValueTableCatalog.find((entry) => entry.table.id === selectedTableId) ?? null
+      : null;
+
+    const directionOptions = selectedEntry ? buildDirectionOptions(selectedEntry.revision) : [];
+    const direction = selectedEntry && composition.project
+      ? inferDirectionFromRevisionAndRef(selectedEntry.revision, composition.project.ref)
+      : null;
+    const selectedDirectionOption = direction
+      ? directionOptions.find((option) => option.direction === direction)
+      : undefined;
+
+    const noMatchMode = composition.noMatchBehavior?.mode ?? 'fallback_value';
+    const fallbackValue = composition.noMatchBehavior?.fallbackValue
+      ?? (composition.fallback.kind === 'static' && (
+        typeof composition.fallback.value === 'string'
+        || typeof composition.fallback.value === 'number'
+        || typeof composition.fallback.value === 'boolean'
+      )
+        ? composition.fallback.value
+        : '');
+
+    return {
+      scope,
+      tableId: selectedTableId,
+      direction,
+      pinnedRevision: composition.project?.ref.revision ?? null,
+      currentRevision: selectedEntry?.table.currentRevision ?? null,
+      tableStatus: selectedEntry?.table.status ?? composition.project?.tableStatus ?? null,
+      directionOptions,
+      availableTables,
+      selectedTableName: selectedEntry?.table.name ?? composition.project?.tableName,
+      usageCount: selectedEntry?.usageCount ?? composition.project?.usageCount,
+      newerRevisionAvailable:
+        (composition.project?.ref.revision ?? 0) > 0
+        && (selectedEntry?.table.currentRevision ?? 0) > (composition.project?.ref.revision ?? 0),
+      selectedDirectionInvalidReason:
+        selectedDirectionOption && !selectedDirectionOption.enabled
+          ? selectedDirectionOption.reason
+          : undefined,
+      noMatchMode,
+      fallbackValue,
+      projectSelection: composition.project ?? null,
+    };
+  }, [projectValueTableCatalog]);
+
+  const upsertValueMapSelectionStateForTarget = useCallback((targetPath: string, state: ValueMapProjectSelectionState | null) => {
+    setValueMapProjectSelectionByTarget((prev) => {
+      if (state === null) {
+        if (!(targetPath in prev)) return prev;
+        const next = { ...prev };
+        delete next[targetPath];
+        return next;
+      }
+      return {
+        ...prev,
+        [targetPath]: state,
+      };
+    });
+  }, []);
+
+  const applyValueMapSelectionToDraft = useCallback(async (input: {
+    targetPath: string;
+    tableId: string;
+    direction: ValueTableDirection;
+    noMatchMode?: ValueTableNoMatchMode;
+    fallbackValue?: ValueTablePrimitiveValue;
+    preserveInlineMappings?: boolean;
+  }) => {
+    const resolved = resolveSmartDraftForTarget(input.targetPath);
+    if (!resolved.guided || resolved.draft === null) return;
+
+    const selected = projectValueTableCatalog.find((entry) => entry.table.id === input.tableId);
+    if (!selected) return;
+
+    const directionOptions = buildDirectionOptions(selected.revision);
+    const directionOption = directionOptions.find((option) => option.direction === input.direction);
+    if (!directionOption || !directionOption.enabled) return;
+
+    const resolvedRef = await adapter.resolveProjectValueTableReference({
+      projectId,
+      valueTableId: selected.table.id,
+      tableKey: selected.table.key,
+      revision: selected.revision.revision,
+      inputSideKey: directionOption.inputSideKey,
+      outputSideKey: directionOption.outputSideKey,
+    });
+
+    const fallback = normalizeValueMapFallback(
+      input.noMatchMode ?? deriveNoMatchModeFromDraft(resolved.draft),
+      input.fallbackValue ?? deriveFallbackValueFromDraft(resolved.draft),
+    );
+
+    const projectSelection = {
+      ref: resolvedRef.ref,
+      tableName: selected.table.name,
+      tableStatus: selected.table.status,
+      currentRevision: selected.table.currentRevision,
+      sideA: selected.revision.sideA,
+      sideB: selected.revision.sideB,
+      directionSupport: inferDirectionSupportFromRevision(selected.revision),
+      usageCount: selected.usageCount,
+    };
+
+    const nextDraft = applySmartActionToDraft(resolved.draft, 'lookup.valueMap', {
+      valueMapScope: 'project',
+      valueMapProjectSelection: projectSelection,
+      valueMapNoMatchMode: fallback.noMatchBehavior.mode,
+      valueMapFallbackValue:
+        fallback.noMatchBehavior.mode === 'fallback_value'
+          ? (fallback.noMatchBehavior.fallbackValue ?? '')
+          : '',
+    });
+
+    const composed = nextDraft.composition;
+    const finalDraft = composed && composed.kind === 'valueMap'
+      ? updateSmartBuilderExpression({
+        ...nextDraft,
+        composition: {
+          ...composed,
+          scope: 'project',
+          project: projectSelection,
+          mappings: input.preserveInlineMappings ? composed.mappings : [],
+          fallback: fallback.fallbackArgument,
+          noMatchBehavior: fallback.noMatchBehavior,
+        },
+      }, generateSmartBuilderExpression({
+        ...nextDraft,
+        composition: {
+          ...composed,
+          scope: 'project',
+          project: projectSelection,
+          mappings: input.preserveInlineMappings ? composed.mappings : [],
+          fallback: fallback.fallbackArgument,
+          noMatchBehavior: fallback.noMatchBehavior,
+        },
+      }))
+      : nextDraft;
+
+    setSmartDraftForTarget(input.targetPath, finalDraft);
+    upsertValueMapSelectionStateForTarget(input.targetPath, deriveValueMapProjectSelectionState(input.targetPath, finalDraft));
+    editor.actions.updateDraft(input.targetPath, finalDraft.expression);
+    syncRuleValueMapMetadataForTarget(input.targetPath, finalDraft);
+  }, [
+    adapter,
+    deriveValueMapProjectSelectionState,
+    editor.actions,
+    projectId,
+    projectValueTableCatalog,
+    resolveSmartDraftForTarget,
+    setSmartDraftForTarget,
+    syncRuleValueMapMetadataForTarget,
+    upsertValueMapSelectionStateForTarget,
+  ]);
+
+  const updateValueMapCompositionForTarget = useCallback((input: {
+    targetPath: string;
+    patch: (composition: NonNullable<SmartBuilderDraft['composition']> & { kind: 'valueMap' }) => NonNullable<SmartBuilderDraft['composition']> & { kind: 'valueMap' };
+  }) => {
+    const resolved = resolveSmartDraftForTarget(input.targetPath);
+    if (!resolved.guided || resolved.draft === null) return;
+    const composition = resolved.draft.composition;
+    if (!composition || composition.kind !== 'valueMap') return;
+
+    const nextComposition = input.patch(composition);
+    const nextDraft = updateSmartBuilderExpression(
+      {
+        ...resolved.draft,
+        composition: nextComposition,
+      },
+      generateSmartBuilderExpression({
+        ...resolved.draft,
+        composition: nextComposition,
+      }),
+    );
+
+    setSmartDraftForTarget(input.targetPath, nextDraft);
+    upsertValueMapSelectionStateForTarget(input.targetPath, deriveValueMapProjectSelectionState(input.targetPath, nextDraft));
+    editor.actions.updateDraft(input.targetPath, nextDraft.expression);
+    syncRuleValueMapMetadataForTarget(input.targetPath, nextDraft);
+  }, [
+    deriveValueMapProjectSelectionState,
+    editor.actions,
+    resolveSmartDraftForTarget,
+    setSmartDraftForTarget,
+    syncRuleValueMapMetadataForTarget,
+    upsertValueMapSelectionStateForTarget,
+  ]);
+
+  const handleConfirmValueMapConversion = useCallback(() => {
+    const prompt = valueMapConversionPrompt;
+    if (!prompt) return;
+
+    setValueMapConversionPrompt(null);
+    void applyValueMapSelectionToDraft({
+      targetPath: prompt.targetPath,
+      tableId: prompt.selectedTableId,
+      direction: prompt.selectedDirection,
+      preserveInlineMappings: true,
+    });
+  }, [applyValueMapSelectionToDraft, valueMapConversionPrompt]);
+
+  const handleConfirmValueMapAdoption = useCallback(() => {
+    const prompt = valueMapAdoptionPrompt;
+    if (!prompt) return;
+
+    const selectionState = valueMapProjectSelectionByTarget[prompt.targetPath];
+    if (!selectionState?.tableId || !selectionState.direction) {
+      setValueMapAdoptionPrompt(null);
+      return;
+    }
+
+    setValueMapAdoptionPrompt(null);
+    void applyValueMapSelectionToDraft({
+      targetPath: prompt.targetPath,
+      tableId: selectionState.tableId,
+      direction: selectionState.direction,
+      preserveInlineMappings: true,
+    });
+  }, [
+    applyValueMapSelectionToDraft,
+    valueMapAdoptionPrompt,
+    valueMapProjectSelectionByTarget,
+  ]);
 
   const clearSmartParameterDraftForTarget = useCallback((targetPath: string) => {
     const existing = smartDraftByTargetRef.current.get(targetPath);
@@ -2434,22 +2940,29 @@ export default function MappingEditor() {
             pendingActionDraft: null,
           };
           setSmartDraftForTarget(selectedTargetPath, nextDraftCleared);
+          upsertValueMapSelectionStateForTarget(
+            selectedTargetPath,
+            deriveValueMapProjectSelectionState(selectedTargetPath, nextDraftCleared),
+          );
           editor.actions.updateDraft(selectedTargetPath, nextDraftCleared.expression);
+          syncRuleValueMapMetadataForTarget(selectedTargetPath, nextDraftCleared);
 
           const actionLabel =
             actionId === 'text.concat'
               ? 'Combine text'
               : actionId === 'base.calculation'
                 ? 'Calculation'
-                : actionId === 'text.upper'
-                  ? 'Uppercase'
-                  : actionId === 'text.lower'
-                    ? 'Lowercase'
-                    : actionId === 'text.trim'
-                      ? 'Trim spaces'
-                      : actionId === 'text.phoneDigits'
-                        ? 'Normalize phone digits'
-                        : actionId;
+                : actionId === 'lookup.valueMap'
+                  ? 'Value Mapping'
+                  : actionId === 'text.upper'
+                    ? 'Uppercase'
+                    : actionId === 'text.lower'
+                      ? 'Lowercase'
+                      : actionId === 'text.trim'
+                        ? 'Trim spaces'
+                        : actionId === 'text.phoneDigits'
+                          ? 'Normalize phone digits'
+                          : actionId;
 
           setSmartActionMetaByTarget((prev) => ({
             ...prev,
@@ -2459,6 +2972,187 @@ export default function MappingEditor() {
               announcement: `Applied ${actionLabel}. Draft saved.`,
             },
           }));
+        }}
+        valueMapProjectState={(() => {
+          const cached = valueMapProjectSelectionByTarget[selectedNode.path];
+          if (cached) return cached as ValueMapProjectUiState;
+          const existingDraft = smartDraftByTargetState[selectedNode.path];
+          if (existingDraft) {
+            return deriveValueMapProjectSelectionState(selectedNode.path, existingDraft) as ValueMapProjectUiState | null | undefined;
+          }
+          const hydrated = hydrateSmartDraftForTarget(selectedNode.path);
+          if (hydrated.kind === 'advanced') return undefined;
+          return deriveValueMapProjectSelectionState(selectedNode.path, hydrated.draft) as ValueMapProjectUiState | null | undefined;
+        })() ?? undefined}
+        onValueMapScopeChange={(scope) => {
+          if (!selectedTargetPath) return;
+          if (scope === 'inline') {
+            updateValueMapCompositionForTarget({
+              targetPath: selectedTargetPath,
+              patch: (composition) => ({
+                ...composition,
+                scope: 'inline',
+                project: null,
+              }),
+            });
+            return;
+          }
+
+          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          const candidateTableId = state?.tableId ?? projectValueTableCatalog[0]?.table.id;
+          if (!candidateTableId) return;
+          const candidateEntry = projectValueTableCatalog.find((entry) => entry.table.id === candidateTableId);
+          if (!candidateEntry) return;
+          const firstEnabledDirection = buildDirectionOptions(candidateEntry.revision).find((option) => option.enabled);
+          if (!firstEnabledDirection) return;
+
+          void applyValueMapSelectionToDraft({
+            targetPath: selectedTargetPath,
+            tableId: candidateTableId,
+            direction: firstEnabledDirection.direction,
+            preserveInlineMappings: true,
+          });
+        }}
+        onValueMapProjectTableSelect={(tableId) => {
+          if (!selectedTargetPath) return;
+          const selectedEntry = projectValueTableCatalog.find((entry) => entry.table.id === tableId);
+          if (!selectedEntry) return;
+          const enabledDirection = buildDirectionOptions(selectedEntry.revision).find((option) => option.enabled);
+          if (!enabledDirection) return;
+
+          void applyValueMapSelectionToDraft({
+            targetPath: selectedTargetPath,
+            tableId,
+            direction: enabledDirection.direction,
+            preserveInlineMappings: false,
+          });
+        }}
+        onValueMapDirectionSelect={(direction) => {
+          if (!selectedTargetPath) return;
+          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          if (!state?.tableId) return;
+          void applyValueMapSelectionToDraft({
+            targetPath: selectedTargetPath,
+            tableId: state.tableId,
+            direction,
+            preserveInlineMappings: true,
+          });
+        }}
+        onValueMapNoMatchModeChange={(mode) => {
+          if (!selectedTargetPath) return;
+          updateValueMapCompositionForTarget({
+            targetPath: selectedTargetPath,
+            patch: (composition) => {
+              const currentFallback = composition.noMatchBehavior?.fallbackValue
+                ?? (composition.fallback.kind === 'static' && (
+                  typeof composition.fallback.value === 'string'
+                  || typeof composition.fallback.value === 'number'
+                  || typeof composition.fallback.value === 'boolean'
+                )
+                  ? composition.fallback.value
+                  : '');
+              const normalized = normalizeValueMapFallback(
+                mode,
+                currentFallback,
+              );
+              return {
+                ...composition,
+                fallback: normalized.fallbackArgument,
+                noMatchBehavior: normalized.noMatchBehavior,
+              };
+            },
+          });
+        }}
+        onValueMapInlineMappingAdd={() => {
+          if (!selectedTargetPath) return;
+          updateValueMapCompositionForTarget({
+            targetPath: selectedTargetPath,
+            patch: (composition) => ({
+              ...composition,
+              scope: 'inline',
+              project: null,
+              mappings: [
+                ...composition.mappings,
+                {
+                  whenValue: '',
+                  output: { kind: 'static', value: '' },
+                },
+              ],
+            }),
+          });
+        }}
+        onValueMapInlineMappingUpdate={(index, patch) => {
+          if (!selectedTargetPath) return;
+          updateValueMapCompositionForTarget({
+            targetPath: selectedTargetPath,
+            patch: (composition) => ({
+              ...composition,
+              scope: 'inline',
+              project: null,
+              mappings: composition.mappings.map((entry, rowIndex) => {
+                if (rowIndex !== index) return entry;
+                return {
+                  ...entry,
+                  ...(patch.whenValue !== undefined ? { whenValue: patch.whenValue } : {}),
+                  ...(patch.outputValue !== undefined
+                    ? { output: { kind: 'static' as const, value: patch.outputValue } }
+                    : {}),
+                };
+              }),
+            }),
+          });
+        }}
+        onValueMapInlineMappingRemove={(index) => {
+          if (!selectedTargetPath) return;
+          updateValueMapCompositionForTarget({
+            targetPath: selectedTargetPath,
+            patch: (composition) => ({
+              ...composition,
+              scope: 'inline',
+              project: null,
+              mappings: composition.mappings.filter((_, rowIndex) => rowIndex !== index),
+            }),
+          });
+        }}
+        onValueMapFallbackValueChange={(fallbackText) => {
+          if (!selectedTargetPath) return;
+          updateValueMapCompositionForTarget({
+            targetPath: selectedTargetPath,
+            patch: (composition) => {
+              const normalized = normalizeValueMapFallback('fallback_value', fallbackText);
+              return {
+                ...composition,
+                fallback: normalized.fallbackArgument,
+                noMatchBehavior: normalized.noMatchBehavior,
+              };
+            },
+          });
+        }}
+        onValueMapConvertInlineToProject={() => {
+          if (!selectedTargetPath) return;
+          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          const fallbackTableId = projectValueTableCatalog[0]?.table.id;
+          const fallbackDirection = projectValueTableCatalog[0]
+            ? (buildDirectionOptions(projectValueTableCatalog[0].revision).find((option) => option.enabled)?.direction ?? null)
+            : null;
+          if (!state?.tableId && (!fallbackTableId || !fallbackDirection)) return;
+          setValueMapConversionPrompt({
+            targetPath: selectedTargetPath,
+            selectedTableId: state?.tableId ?? fallbackTableId!,
+            selectedDirection: state?.direction ?? fallbackDirection!,
+          });
+        }}
+        onValueMapAdoptLatestRevision={() => {
+          if (!selectedTargetPath) return;
+          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          if (!state?.tableId || !state.pinnedRevision || !state.currentRevision) return;
+          if (state.currentRevision <= state.pinnedRevision) return;
+          setValueMapAdoptionPrompt({
+            targetPath: selectedTargetPath,
+            tableId: state.tableId,
+            fromRevision: state.pinnedRevision,
+            toRevision: state.currentRevision,
+          });
         }}
         onSmartBeginActionParameterEdit={(actionId, values) => {
           if (!selectedTargetPath) return;
@@ -2716,6 +3410,28 @@ export default function MappingEditor() {
         cancelLabel="Cancel"
         onConfirm={handleBlockerDiscard}
         onCancel={handleBlockerCancel}
+      />
+
+      <ConfirmDialog
+        open={valueMapConversionPrompt !== null}
+        title="Convert inline map to project table"
+        message="Use the selected project value table and direction for this field? Existing inline entries will be replaced by project-table lookup behavior and this mapping will be marked unsaved."
+        confirmLabel="Convert"
+        cancelLabel="Cancel"
+        onConfirm={handleConfirmValueMapConversion}
+        onCancel={() => setValueMapConversionPrompt(null)}
+      />
+
+      <ConfirmDialog
+        open={valueMapAdoptionPrompt !== null}
+        title="Adopt newer table revision"
+        message={valueMapAdoptionPrompt
+          ? `Adopt ${valueMapAdoptionPrompt.tableId} revision r${valueMapAdoptionPrompt.toRevision} (currently pinned to r${valueMapAdoptionPrompt.fromRevision})? This will update the pinned revision and mark the mapping unsaved.`
+          : ''}
+        confirmLabel="Adopt revision"
+        cancelLabel="Keep current"
+        onConfirm={handleConfirmValueMapAdoption}
+        onCancel={() => setValueMapAdoptionPrompt(null)}
       />
     </>
   );

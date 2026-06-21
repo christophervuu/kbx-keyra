@@ -71,6 +71,7 @@ src/
       list-projects.ts  GET /projects handler (includes mapping/schema counts)
       update-project.ts PUT /projects/:id handler
       delete-project.ts DELETE /projects/:id handler (conflict when mappings exist)
+      value-tables.ts   Project value-table route handlers (`/projects/:id/value-tables*`, `/value-tables/*`) including list/get/create/revision/duplicate/archive/delete-guard/usage/diff/export/import/resolve flows (FS-096 T-03)
       index.ts          Project lambda barrel exports
     mapping/          Mapping CRUD lambdas (FS-057 T-03)
       create-mapping.ts POST /mappings handler
@@ -140,12 +141,14 @@ src/
       sync-activity.ts  CDM re-sync activity logger — writes outcome to SyncActivity DynamoDB table (FS-077 T-05)
       mapping-revisions.ts MappingRevisions save/list/get/getConfig with no-op hash detection and selective prune (retain 50 unversioned; preserve version-referenced)
       mapping-versions.ts MappingVersions milestone create/list/get (+ compatibility save/getConfig shims)
+      value-tables.ts    Project value-table persistence operations (metadata/revisions/usage/resolve helpers) (FS-096 T-04)
       deployments.ts    Deployments + DeploymentCurrent persistence operations (create/getCurrent/getCurrentAll/listHistory) with immutable snapshot writes (FS-064 T-01)
       deployment-orchestrations.ts Control-plane orchestration persistence operations (create/get/updateStatus) for deploy/promote lifecycle transitions (FS-083 T-03)
       s3/               Shared S3 content helpers for schemas and mappings
         index.ts          S3 helper barrel exports
         schema-content.ts Schema original/processed content put/get/delete helpers
         mapping-config.ts Mapping config put/get/delete helpers
+        value-table-revisions.ts Value-table revision row payload helpers (put/get/delete immutable S3 JSON) (FS-096 T-04)
         deployment-snapshot.ts Immutable deployment snapshot S3 helper (put)
     deployment/       Shared deployment utility logic (FS-064 T-03)
       index.ts          Deployment utility barrel exports
@@ -199,13 +202,14 @@ ui/
     App.tsx               Root component and router setup
     routes/               Route path constants and placeholder pages
       index.ts            Barrel export for route constants
-      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test-lab' (FS-021 T-05, FS-032 T-01)
+      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test-lab' (FS-021 T-05, FS-032 T-01) and PROJECT_VALUE_MAPPINGS = '/projects/:projectId/value-mappings' (FS-096 T-06)
       pages/              Placeholder page components (one per route)
         HomeDashboard.tsx   Renders HomeDashboardPage from features/home (FS-014 T-11)
         CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
         ProjectOverview.tsx       Renders ProjectOverviewPage from features/projects (FS-013 T-08)
         ProjectSettings.tsx
         ProjectDeployments.tsx
+        ProjectValueMappings.tsx   Renders ProjectValueMappingsPage from features/projects (FS-096 T-06)
         CreateMapping.tsx          Renders CreateMappingPage from features/projects (FS-013 T-10)
         MappingEditor.tsx
         MappingDeployment.tsx       Thin wrapper: extracts projectId/mappingId from route params, renders DeploymentPage (FS-064 T-05)
@@ -367,7 +371,9 @@ ui/
           ProjectHeader.tsx         Consolidated project header: inline-editable h1 (InlineEditableText), metadata row (description/dates/tags), clickable summary-linked schema count trigger, "Create Mapping" + "Add Schema" primary action buttons, OverflowMenu (Open Deployments / Project Settings / Duplicate / Export / Delete) (FS-050 T-02, FS-086 T-02)
           LinkedSchemasDialog.tsx   Lightweight linked-schemas modal/dialog opened from ProjectHeader summary trigger; compact schema rows (name/origin/format/field count/usage), Add Schema CTA, focus trap + Escape close + backdrop dismiss + focus return (FS-086 T-02)
           ProjectSummaryRow.tsx     Compact horizontal metrics row: mapping count, schema count, error count (red when >0), scaffold deployment placeholders with muted styling + aria-label, "View Deployments" link (FS-050 T-03)
-          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states; default section order: Header → Mappings; linked schemas available via LinkedSchemasDialog trigger in header summary (FS-050 T-02, FS-086 T-01/T-02)
+          ProjectOverviewPage.tsx   Full page assembly: reads projectId from route params, calls useProjectOverview, renders loading/error/not-found/loaded states; default section order: Header → Value Mappings summary → Mappings; linked schemas available via LinkedSchemasDialog trigger in header summary (FS-050 T-02, FS-086 T-01/T-02, FS-096 T-06)
+          ValueMappingsSummaryCard.tsx  Project Overview summary card for project value tables (active count, mappings-using count, manage action, empty/error states) with navigation into dedicated management route (FS-096 T-06)
+          ProjectValueMappingsPage.tsx  Project-level value-table management page (`/projects/:projectId/value-mappings`): list/search/sort/select, details/usage, direction diagnostics, and editor modal for create/revision flows including CSV import/export and clipboard paste actions (FS-096 T-06)
           CreateProjectPage.tsx     Create Project form: name/description/tags fields, slug derivation, createProject() call, navigate to new project on success (FS-013 T-09)
           CreateMappingPage.tsx     Create Mapping single-page setup workspace: Mapping Details (required name + optional business context), Source/Target schema cards with in-page add-schema actions, simple Schema Summary, Start From (blank/auto-map), validation-gated create, create-time auto-map orchestration with non-blocking failure notice and editor handoff (FS-088 T-01..T-07)
           SchemaUploadDialog.tsx    Modal dialog: file picker (.json/.xsd/.xml), format detection, field count, inferred warning, scope selection, createSchema() + addSchemaRef() on confirm; handles 202 ingesting response with polling UI (FS-013 T-11, FS-059 T-07)
@@ -384,7 +390,9 @@ ui/
             MappingRow.test.tsx                 Component tests (23 tests: AE-07 condensed badge, AE-08 filled badge colors, AE-14 deploy nav, AE-17 Test Lab link)
             MappingListSection.test.tsx         Component tests (21 tests: AE-09/AE-10 recently-edited card, AE-11 empty state, heading, sort, CRUD callbacks)
             ProjectActionsSection.test.tsx      Component tests (16 tests: button variants, disabled states, delete confirm counts, plural/singular, confirm/cancel callbacks, settings link route)
-            ProjectOverviewPage.test.tsx        Component tests (30+ tests: AE-01–AE-06, AE-15, AE-16 layout checks, breadcrumb integration, overflow menu, section order)
+            ProjectOverviewPage.test.tsx        Component tests (30+ tests: AE-01–AE-06, AE-15, AE-16 layout checks, breadcrumb integration, overflow menu, section order) + Value Mappings summary integration assertions (FS-096 T-06)
+            ValueMappingsSummaryCard.test.tsx   Component tests for Project Overview value-table summary card counts, empty/error states, and manage-route navigation (FS-096 T-06)
+            ProjectValueMappingsPage.test.tsx   Component tests for project value-table management route/list/detail/editor flows, action controls, delete guard, and back navigation (FS-096 T-06)
             CreateProjectPage.test.tsx          Component tests (10 tests: fields, required indicator, validation, createProject call, navigation, cancel, submit error, tag parsing)
             CreateMappingPage.test.tsx          Component tests for FS-088 single-page behavior: section order/layout, required-field validation, schema card/summary rendering, in-page add-schema auto-select flows, Start From/CTA branching, blank/create-to-editor flow, auto-map create trigger path, and unsupported auto-map notice handling (FS-088 T-08)
             SchemaUploadDialog.test.tsx         Component tests (11 tests + 6 polling tests: open/closed, file input extensions, upload disabled before file, format badge, inferred warning, empty file error, FileReader error, createSchema+addSchemaRef, cancel, scope radios; 202 processing indicator, ready/error/timeout polling states) (FS-013 T-11, FS-059 T-07)

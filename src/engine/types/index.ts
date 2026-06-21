@@ -2,9 +2,16 @@ export type {
   MappingConfig,
   MappingConfigBlock,
   MappingRule,
+  MappingRuleNoMatchBehavior,
+  MappingRuleProjectValueTableRef,
+  MappingRuleValueTableRef,
   RuleType,
   SchemaRef,
   SchemaRefType,
+  ValueTableNoMatchMode,
+  ValueTablePrimitiveValue,
+  ValueTableResolvedEntry,
+  ValueTableValueType,
 } from './config.js';
 
 export type {

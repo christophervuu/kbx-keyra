@@ -33,6 +33,7 @@ export interface ProjectHeaderProps {
   project: ProjectDetail;
   mappingCount: number;
   schemaCount: number;
+  activeValueTableCount?: number | null;
   errorCount: number;
   onUpdateName: (name: string) => Promise<void>;
   onUpdateDescription: (description: string) => Promise<void>;
@@ -115,6 +116,7 @@ function OverflowMenu({
   }
 
   const deleteMessage = `This will delete ${mappingCount} mapping${mappingCount !== 1 ? 's' : ''} and unlink ${schemaCount} schema${schemaCount !== 1 ? 's' : ''}. This action cannot be undone.`;
+  const valueTablesPath = PATHS.PROJECT_VALUE_MAPPINGS.replace(':projectId', projectId);
 
   return (
     <div ref={menuRef} className="relative">
@@ -148,6 +150,18 @@ function OverflowMenu({
             }}
           >
             Open Deployments
+          </button>
+
+          {/* Manage value tables */}
+          <button
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 focus-visible:bg-slate-800 focus-visible:outline-none"
+            onClick={() => {
+              setOpen(false);
+              navigate(valueTablesPath);
+            }}
+          >
+            Manage value tables
           </button>
 
           {/* Project Settings */}
@@ -235,6 +249,7 @@ export function ProjectHeader({
   project,
   mappingCount,
   schemaCount,
+  activeValueTableCount,
   errorCount,
   onUpdateName,
   onUpdateDescription,
@@ -245,6 +260,10 @@ export function ProjectHeader({
   onDuplicateProject,
   onDeleteProject,
 }: ProjectHeaderProps) {
+  const navigate = useNavigate();
+  const showValueTableMetric =
+    typeof activeValueTableCount === 'number' && activeValueTableCount > 0;
+
   return (
     <header className="space-y-3 border-b border-slate-800 pb-4">
       {/* Title row */}
@@ -325,7 +344,24 @@ export function ProjectHeader({
             </button>
           ) : (
             <>{schemaCount} schema{schemaCount === 1 ? '' : 's'}</>
-          )}{' '}
+          )}
+          {showValueTableMetric ? (
+            <>
+              {' '}
+              ·{' '}
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(PATHS.PROJECT_VALUE_MAPPINGS.replace(':projectId', project.projectId))
+                }
+                className="rounded text-blue-400 underline decoration-blue-500/60 underline-offset-2 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                data-testid="value-tables-summary-link"
+                aria-label="Manage value tables"
+              >
+                {activeValueTableCount} value table{activeValueTableCount === 1 ? '' : 's'}
+              </button>
+            </>
+          ) : null}{' '}
           · {errorCount} error{errorCount === 1 ? '' : 's'}
         </p>
       </div>

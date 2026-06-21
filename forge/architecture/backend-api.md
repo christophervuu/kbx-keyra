@@ -32,7 +32,7 @@ Deployment/preview architecture contracts are covered via addenda in this docume
 
 ## 2) Route Table (Phase 1)
 
-Phase 1 exposes 26 routes in this architecture slice (including FS-076 CDM read-only integration and FS-090 inferred-review/sample contracts). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
+Phase 1 exposes 40 routes in this architecture slice (including FS-076 CDM read-only integration, FS-090 inferred-review/sample contracts, and FS-096 project value-table routes). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
 
 | Method | Path | Handler File | Lambda Name (logical) | Description |
 |---|---|---|---|---|
@@ -63,6 +63,19 @@ Phase 1 exposes 26 routes in this architecture slice (including FS-076 CDM read-
 | POST | `/schemas/:id/query` | `src/lambda/schema/query-schema-nodes.ts` | `QuerySchemaNodesFunction` | Query schema nodes (DynamoDB lexical retrieval + optional bounded rerank/context expansion; max 50) |
 | POST | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Explicit manual CDM re-sync (updates content/metadata only when upstream changed) |
 | GET | `/schemas/:id/sync-cdm` | `src/lambda/schema/sync-cdm-schema.ts` | `SyncCdmSchemaFunction` | Lightweight CDM status-refresh read (`update-available` without content mutation) |
+| GET | `/projects/:id/value-tables` | `src/lambda/project/value-tables.ts` | `ListProjectValueTablesFunction` | List project value tables (search/filter/sort ready) |
+| POST | `/projects/:id/value-tables` | `src/lambda/project/value-tables.ts` | `CreateProjectValueTableFunction` | Create project value table (initial immutable revision `1`) |
+| GET | `/value-tables/:valueTableId` | `src/lambda/project/value-tables.ts` | `GetProjectValueTableFunction` | Get project value table metadata |
+| DELETE | `/value-tables/:valueTableId` | `src/lambda/project/value-tables.ts` | `DeleteProjectValueTableFunction` | Delete table when not referenced; conflict with usage details when referenced |
+| GET | `/value-tables/:valueTableId/revisions/:revision` | `src/lambda/project/value-tables.ts` | `GetProjectValueTableRevisionFunction` | Get immutable table revision with rows |
+| POST | `/value-tables/:valueTableId/revisions` | `src/lambda/project/value-tables.ts` | `CreateProjectValueTableRevisionFunction` | Create immutable next table revision (append-only) |
+| POST | `/value-tables/:valueTableId/duplicate` | `src/lambda/project/value-tables.ts` | `DuplicateProjectValueTableFunction` | Duplicate table into same project with new id/key/name |
+| POST | `/value-tables/:valueTableId/archive` | `src/lambda/project/value-tables.ts` | `ArchiveProjectValueTableFunction` | Archive table (disallow new selection/resolution, preserve pinned execution) |
+| GET | `/value-tables/:valueTableId/usage` | `src/lambda/project/value-tables.ts` | `ListProjectValueTableUsageFunction` | List mapping usage with pinned/latest revision metadata |
+| GET | `/value-tables/:valueTableId/diff` | `src/lambda/project/value-tables.ts` | `GetProjectValueTableDiffFunction` | Revision diff (full summary + paginated changes) |
+| GET | `/value-tables/:valueTableId/export.csv` | `src/lambda/project/value-tables.ts` | `ExportProjectValueTableCsvFunction` | Export selected/current revision rows as CSV |
+| POST | `/projects/:id/value-tables/import-csv` | `src/lambda/project/value-tables.ts` | `ImportProjectValueTableCsvFunction` | Import CSV as new table + revision `1` |
+| POST | `/projects/:id/value-tables/resolve` | `src/lambda/project/value-tables.ts` | `ResolveProjectValueTableReferenceFunction` | Resolve pinned table/direction to embedded `valueTableRef.resolvedEntries` payload |
 
 ---
 
@@ -240,6 +253,15 @@ This contract is the canonical resilience behavior for Phase 1 CRUD surfaces.
 #### `MAPPING_VERSIONS_TABLE`
 - PK: `mappingId` (String), SK: `version` (Number)
 - Main fields: `revisionNumber`, `createdAt`, `createdBy`
+
+#### `VALUE_TABLES_TABLE`
+- PK: `valueTableId` (String)
+- GSI: `projectId-index` (PK=`projectId`)
+- Main fields: `projectId`, `key`, `name`, `status`, side metadata (`sideA`, `sideB`), `currentRevision`, timestamps
+
+#### `VALUE_TABLE_REVISIONS_TABLE`
+- PK: `valueTableId` (String), SK: `revision` (Number)
+- Main fields: side metadata (`sideA`, `sideB`), `directionSupport`, `rowCount`, `rowsS3Key`, `contentHash`, timestamps
 
 ### FS-087 schema-access and compatibility addendum
 
@@ -472,6 +494,44 @@ Preview/test input-set contract at API boundary:
   - optional `expectedOutput`
 - Legacy single-source samples normalize to input sets with `externalSources: {}`.
 
+### FS-096 project value-table contract addendum
+
+FS-096 adds project-level reusable value-table APIs with immutable revisions and explicit mapping pin/resolve behavior.
+
+Canonical backend contracts:
+
+- Project value tables are project-scoped entities with immutable revision history.
+- Mapping rules pin a specific table revision and direction through resolved metadata embedded in mapping config (`valueTableRef`).
+- Save/deploy separation remains unchanged; FS-096 does not introduce deploy-side mutation in save/edit flows.
+
+Resolve contract (`POST /projects/:id/value-tables/resolve`):
+
+- Input includes table identity + pinned revision + explicit direction (`inputSideKey`, `outputSideKey`).
+- Response returns canonical project `valueTableRef` including typed `resolvedEntries` for deterministic engine/runtime execution.
+- Validation failures include unknown side, same-side direction, or unsupported direction.
+
+Revision and archive semantics:
+
+- Revision creation is append-only and optimistic (`expectedCurrentRevision` behavior on write paths).
+- Archived tables cannot be newly selected/resolved for new pinning.
+- Existing mappings pinned to prior revisions remain valid and executable.
+
+Usage/delete-guard semantics:
+
+- Usage endpoint enumerates mapping references with pinned revision, direction, and newer-revision indicators.
+- Delete is conflict-blocked when referenced; conflict payload includes usage details.
+
+Diff/export/import semantics:
+
+- Diff endpoint returns full summary + deterministic cursor pagination for `changes` rows.
+- CSV export/import are deterministic transforms over revision rows and typed side metadata.
+
+Runtime and execution invariants:
+
+- Runtime execute path remains no-I/O relative to project value-table storage.
+- Execution uses mapping/snapshot-embedded `resolvedEntries`; no runtime table fetch fallback is permitted.
+- Snapshot integrity failures for unresolved project table references surface deterministic integrity errors.
+
 | Handler | DynamoDB patterns |
 |---|---|
 | `project/create-project` | put project item |
@@ -501,6 +561,7 @@ Preview/test input-set contract at API boundary:
 | `schema/delete-schema` | get schema + guard references across canonical `linkedSchemaIds` + compatibility refs + mapping references + delete schema + delete schema nodes |
 | `schema/query-schema-nodes` | get schema + DynamoDB retriever query via `searchSchemaNodes` (lexical candidate generation, optional bounded rerank, optional context expansion) |
 | `schema/sync-cdm-schema` | read linked source metadata, perform GitHub read-only compare/fetch, persist sync status and optional content/commitSha updates |
+| `project/value-tables` handlers | query/update value-table metadata + revision metadata; revision rows are loaded/stored via S3 helper using `rowsS3Key` |
 
 ---
 
@@ -537,6 +598,8 @@ Notes:
 | `SCHEMA_NODES_TABLE` | Schema nodes table name |
 | `MAPPING_REVISIONS_TABLE` | Mapping revisions table name |
 | `MAPPING_VERSIONS_TABLE` | Mapping versions table name |
+| `VALUE_TABLES_TABLE` | Project value tables metadata table name |
+| `VALUE_TABLE_REVISIONS_TABLE` | Project value table revisions metadata table name |
 | `CONTENT_BUCKET` | S3 bucket for mapping/schema content |
 
 ### Runtime/environment defaults

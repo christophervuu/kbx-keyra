@@ -18,8 +18,11 @@ const ORIGINAL_ENV = {
   SCHEMA_NODES_TABLE: getEnvStore().SCHEMA_NODES_TABLE,
   MAPPING_REVISIONS_TABLE: getEnvStore().MAPPING_REVISIONS_TABLE,
   MAPPING_VERSIONS_TABLE: getEnvStore().MAPPING_VERSIONS_TABLE,
+  VALUE_TABLES_TABLE: getEnvStore().VALUE_TABLES_TABLE,
+  VALUE_TABLE_REVISIONS_TABLE: getEnvStore().VALUE_TABLE_REVISIONS_TABLE,
   DEPLOYMENTS_TABLE: getEnvStore().DEPLOYMENTS_TABLE,
   DEPLOYMENT_CURRENT_TABLE: getEnvStore().DEPLOYMENT_CURRENT_TABLE,
+  DEPLOYMENT_ORCHESTRATIONS_TABLE: getEnvStore().DEPLOYMENT_ORCHESTRATIONS_TABLE,
   ACTIVE_SNAPSHOTS_TABLE: getEnvStore().ACTIVE_SNAPSHOTS_TABLE,
   DEPLOYMENT_HISTORY_TABLE: getEnvStore().DEPLOYMENT_HISTORY_TABLE,
   STORAGE_BUCKET: getEnvStore().STORAGE_BUCKET,
@@ -55,8 +58,11 @@ describe('persistence config', () => {
     setEnvValue('SCHEMA_NODES_TABLE', ORIGINAL_ENV.SCHEMA_NODES_TABLE);
     setEnvValue('MAPPING_REVISIONS_TABLE', ORIGINAL_ENV.MAPPING_REVISIONS_TABLE);
     setEnvValue('MAPPING_VERSIONS_TABLE', ORIGINAL_ENV.MAPPING_VERSIONS_TABLE);
+    setEnvValue('VALUE_TABLES_TABLE', ORIGINAL_ENV.VALUE_TABLES_TABLE);
+    setEnvValue('VALUE_TABLE_REVISIONS_TABLE', ORIGINAL_ENV.VALUE_TABLE_REVISIONS_TABLE);
     setEnvValue('DEPLOYMENTS_TABLE', ORIGINAL_ENV.DEPLOYMENTS_TABLE);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', ORIGINAL_ENV.DEPLOYMENT_CURRENT_TABLE);
+    setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', ORIGINAL_ENV.DEPLOYMENT_ORCHESTRATIONS_TABLE);
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', ORIGINAL_ENV.ACTIVE_SNAPSHOTS_TABLE);
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', ORIGINAL_ENV.DEPLOYMENT_HISTORY_TABLE);
     setEnvValue('STORAGE_BUCKET', ORIGINAL_ENV.STORAGE_BUCKET);
@@ -73,6 +79,7 @@ describe('persistence config', () => {
     expect(config.mappingConfigKey('mapping-1')).toBe('mappings/mapping-1/config.json');
     expect(config.mappingVersionKey('mapping-1', 12)).toBe('mappings/mapping-1/versions/v12.json');
     expect(config.mappingRevisionKey('mapping-1', 12)).toBe('mappings/mapping-1/revisions/r12.json');
+    expect(config.valueTableRevisionRowsKey('vt-1', 3)).toBe('value-tables/vt-1/revisions/r3.json');
     expect(config.deploymentSnapshotKey('mapping-1', 'DEV', '2026-06-01T00:00:00.000Z')).toBe(
       'deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json',
     );
@@ -91,8 +98,11 @@ describe('persistence config', () => {
     setEnvValue('SCHEMA_NODES_TABLE', undefined);
     setEnvValue('MAPPING_REVISIONS_TABLE', undefined);
     setEnvValue('MAPPING_VERSIONS_TABLE', undefined);
+    setEnvValue('VALUE_TABLES_TABLE', undefined);
+    setEnvValue('VALUE_TABLE_REVISIONS_TABLE', undefined);
     setEnvValue('DEPLOYMENTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', undefined);
+    setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', undefined);
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', undefined);
     setEnvValue('STORAGE_BUCKET', undefined);
@@ -110,8 +120,11 @@ describe('persistence config', () => {
       schemaNodes: 'keyra-schema-nodes',
       mappingRevisions: 'keyra-mapping-revisions',
       mappingVersions: 'keyra-mapping-versions',
+      valueTables: 'keyra-value-tables',
+      valueTableRevisions: 'keyra-value-table-revisions',
       deployments: 'keyra-deployments',
       deploymentCurrent: 'keyra-deployment-current',
+      deploymentOrchestrations: 'keyra-deployment-orchestrations',
     });
     expect(config.RUNTIME_TABLE_NAMES).toEqual({
       activeSnapshots: 'keyra-active-snapshots',
@@ -130,8 +143,11 @@ describe('persistence config', () => {
     setEnvValue('SCHEMA_NODES_TABLE', 'schema-nodes-dev');
     setEnvValue('MAPPING_REVISIONS_TABLE', 'mapping-revisions-dev');
     setEnvValue('MAPPING_VERSIONS_TABLE', 'mapping-versions-dev');
+    setEnvValue('VALUE_TABLES_TABLE', 'value-tables-dev');
+    setEnvValue('VALUE_TABLE_REVISIONS_TABLE', 'value-table-revisions-dev');
     setEnvValue('DEPLOYMENTS_TABLE', 'deployments-dev');
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', 'deployment-current-dev');
+    setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'deployment-orchestrations-dev');
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', 'active-snapshots-dev');
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', 'deployment-history-dev');
     setEnvValue('STORAGE_BUCKET', 'storage-dev');
@@ -149,8 +165,11 @@ describe('persistence config', () => {
       schemaNodes: 'schema-nodes-dev',
       mappingRevisions: 'mapping-revisions-dev',
       mappingVersions: 'mapping-versions-dev',
+      valueTables: 'value-tables-dev',
+      valueTableRevisions: 'value-table-revisions-dev',
       deployments: 'deployments-dev',
       deploymentCurrent: 'deployment-current-dev',
+      deploymentOrchestrations: 'deployment-orchestrations-dev',
     });
     expect(config.RUNTIME_TABLE_NAMES).toEqual({
       activeSnapshots: 'active-snapshots-dev',

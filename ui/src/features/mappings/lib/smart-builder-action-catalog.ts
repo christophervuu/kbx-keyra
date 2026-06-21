@@ -302,7 +302,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
   { id: 'null.isNull', label: 'Is missing', category: 'null', appliesTo: 'input', role: 'conditionPredicate', dslFunctions: ['isNull'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // lookup
-  { id: 'lookup.valueMap', label: 'Map values', category: 'lookup', appliesTo: 'input', role: 'mappingMethod', dslFunctions: ['valueMap'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'lookup.valueMap', label: 'Value Mapping', category: 'lookup', appliesTo: 'input', role: 'mappingMethod', dslFunctions: ['valueMap'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // array
   { id: 'array.map', label: 'Map array', category: 'array', appliesTo: 'array-scope', role: 'arrayAction', dslFunctions: ['map'], constraints: { minInputs: 1, requiresArrayContext: true } },

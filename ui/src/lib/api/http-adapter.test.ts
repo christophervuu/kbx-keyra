@@ -401,6 +401,295 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('listProjectValueTables maps to GET /projects/:id/value-tables with query options', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listProjectValueTables('p-1', {
+      query: 'status',
+      status: 'active',
+      sortBy: 'updatedAt',
+      sortDirection: 'desc',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-tables?query=status&status=active&sortBy=updatedAt&sortDirection=desc',
+      method: 'GET',
+    });
+  });
+
+  it('getProjectValueTable maps to GET /value-tables/:id', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vt-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.getProjectValueTable('vt-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1',
+      method: 'GET',
+    });
+  });
+
+  it('getProjectValueTableRevision maps to GET /value-tables/:id/revisions/:revision', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ valueTableId: 'vt-1', revision: 2 });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.getProjectValueTableRevision('vt-1', 2);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/revisions/2',
+      method: 'GET',
+    });
+  });
+
+  it('createProjectValueTable maps to POST /projects/:id/value-tables', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vt-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      projectId: 'p-1',
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' as const },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' as const },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    };
+
+    await adapter.createProjectValueTable(input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-tables',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('createProjectValueTableRevision maps to POST /value-tables/:id/revisions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ valueTableId: 'vt-1', revision: 2 });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      valueTableId: 'vt-1',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' as const },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' as const },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'COMPLETED' }],
+    };
+
+    await adapter.createProjectValueTableRevision('vt-1', input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/revisions',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('duplicateProjectValueTable maps to POST /value-tables/:id/duplicate', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vt-2' });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      projectId: 'p-1',
+      valueTableId: 'vt-1',
+      name: 'Order Status Codes Copy',
+      key: 'order-status-copy',
+    };
+
+    await adapter.duplicateProjectValueTable(input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/duplicate',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('archiveProjectValueTable maps to POST /value-tables/:id/archive', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vt-1', status: 'archived' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.archiveProjectValueTable('vt-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/archive',
+      method: 'POST',
+      body: {},
+    });
+  });
+
+  it('deleteProjectValueTable maps to DELETE /value-tables/:id', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce(undefined);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.deleteProjectValueTable('vt-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1',
+      method: 'DELETE',
+    });
+  });
+
+  it('listProjectValueTableUsage maps to GET /value-tables/:id/usage', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listProjectValueTableUsage('vt-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/usage',
+      method: 'GET',
+    });
+  });
+
+  it('exportProjectValueTableCsv maps to GET /value-tables/:id/export.csv with revision query', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce('csv-content');
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.exportProjectValueTableCsv('vt-1', 2);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/export.csv?revision=2',
+      method: 'GET',
+    });
+  });
+
+  it('importProjectValueTableCsv maps to POST /projects/:id/value-tables/import-csv', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ valueTableId: 'vt-1', revision: 1 });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.importProjectValueTableCsv('p-1', '"A","B"\n"x","y"', {
+      name: 'Imported table',
+      key: 'imported-table',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-tables/import-csv',
+      method: 'POST',
+      body: {
+        csv: '"A","B"\n"x","y"',
+        name: 'Imported table',
+        key: 'imported-table',
+      },
+    });
+  });
+
+  it('resolveProjectValueTableReference maps to POST /projects/:id/value-tables/resolve', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      ref: {
+        scope: 'project',
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        revision: 2,
+        inputSideKey: 'oms-status',
+        outputSideKey: 'cdm-status',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'row-1' }],
+      },
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.resolveProjectValueTableReference({
+      projectId: 'p-1',
+      valueTableId: 'vt-1',
+      tableKey: 'order-status',
+      revision: 2,
+      inputSideKey: 'oms-status',
+      outputSideKey: 'cdm-status',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-tables/resolve',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        revision: 2,
+        inputSideKey: 'oms-status',
+        outputSideKey: 'cdm-status',
+      },
+    });
+  });
+
+  it('resolveProjectValueTableReference omits optional valueTableId when not provided', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      ref: {
+        scope: 'project',
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        revision: 2,
+        inputSideKey: 'oms-status',
+        outputSideKey: 'cdm-status',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'row-1' }],
+      },
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.resolveProjectValueTableReference({
+      projectId: 'p-1',
+      tableKey: 'order-status',
+      revision: 2,
+      inputSideKey: 'oms-status',
+      outputSideKey: 'cdm-status',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-tables/resolve',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        tableKey: 'order-status',
+        revision: 2,
+        inputSideKey: 'oms-status',
+        outputSideKey: 'cdm-status',
+      },
+    });
+  });
+
+  it('getProjectValueTableRevisionDiff maps to GET /value-tables/:id/diff with pagination', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      summary: {
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        fromRevision: 1,
+        toRevision: 2,
+        counts: { added: 1, removed: 0, changed: 2, unchanged: 10 },
+        directionImpact: {
+          previous: { aToB: true, bToA: true },
+          next: { aToB: true, bToA: false },
+        },
+      },
+      changes: [],
+      pageSize: 100,
+      nextCursor: '100',
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.getProjectValueTableRevisionDiff('vt-1', 1, 2, { cursor: '0', pageSize: 100 });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/diff?fromRevision=1&toRevision=2&cursor=0&pageSize=100',
+      method: 'GET',
+    });
+  });
+
   it('deployMapping maps to POST /mappings/:id/deploy', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce({
       mappingId: 'm-1',

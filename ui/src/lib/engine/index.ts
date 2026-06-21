@@ -20,7 +20,6 @@
  * - The FS-009 ParsedSchema is for UI tree display only; it is NOT passed to the engine
  */
 
-import { validate, execute, parse, defaultRegistry, evaluate, resolvePath } from '@keyra/engine';
 import type {
   ValidationResult,
   Diagnostic,
@@ -51,6 +50,7 @@ import type {
   EvaluationResult,
   ValueType,
 } from '@keyra/engine';
+import { validate, execute, parse, defaultRegistry, evaluate, resolvePath } from '@keyra/engine';
 import { FunctionRegistry } from '@keyra/engine';
 
 import type { MappingConfig, MappingRule } from '@/lib/types/domain';
@@ -77,6 +77,8 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
     type: normalizeRuleType(rule.type),
     expression: rule.expression,
     ...(rule.description !== undefined && { description: rule.description }),
+    ...(rule.valueTableRef !== undefined && { valueTableRef: rule.valueTableRef }),
+    ...(rule.noMatchBehavior !== undefined && { noMatchBehavior: rule.noMatchBehavior }),
   }));
 
   const engineConfigBlock: MappingConfigBlock = {

@@ -4,6 +4,41 @@ import { describe, expect, it, vi } from 'vitest';
 import { SmartBuilderPanel } from './SmartBuilderPanel';
 import { createEmptySmartBuilderDraft } from '../lib/smart-builder-state';
 
+const valueMapProjectUiStateFixture = {
+  scope: 'project' as const,
+  tableId: 'vt-1',
+  direction: 'a_to_b' as const,
+  pinnedRevision: 2,
+  currentRevision: 3,
+  newerRevisionAvailable: true,
+  selectedTableName: 'Status Codes',
+  noMatchMode: 'fallback_value' as const,
+  fallbackValue: 'UNKNOWN',
+  availableTables: [
+    {
+      tableId: 'vt-1',
+      label: 'Status Codes',
+      revision: 3,
+      status: 'active' as const,
+      usageCount: 4,
+      rowCount: 12,
+    },
+  ],
+  directionOptions: [
+    {
+      direction: 'a_to_b' as const,
+      label: 'A → B',
+      enabled: true,
+    },
+    {
+      direction: 'b_to_a' as const,
+      label: 'B → A',
+      enabled: false,
+      reason: 'Unavailable: duplicate input keys on Side B.',
+    },
+  ],
+};
+
 describe('SmartBuilderPanel', () => {
   it('renders target-focused empty state and other-ways copy', () => {
     const draft = createEmptySmartBuilderDraft({
@@ -254,7 +289,7 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Direct mapping');
+    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Direct Mapping');
     expect(screen.queryByTestId('smart-recipe-base-preview')).not.toBeInTheDocument();
   });
 
@@ -298,6 +333,283 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Combine text');
     expect(screen.getByTestId('smart-recipe-base-preview')).toHaveTextContent('firstName + [space] + lastName');
     expect(screen.getByTestId('smart-concat-separator-controls')).toBeInTheDocument();
+  });
+
+  it('renders value-map scope controls, inline editor, and project selection callbacks', () => {
+    const onValueMapProjectTableSelect = vi.fn();
+    const onValueMapDirectionSelect = vi.fn();
+    const onValueMapNoMatchModeChange = vi.fn();
+    const onValueMapFallbackValueChange = vi.fn();
+    const onValueMapAdoptLatestRevision = vi.fn();
+
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'statusCode',
+          path: 'statusCode',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'input-1',
+        scope: 'project' as const,
+        project: null,
+        mappings: [{ whenValue: 'A', output: { kind: 'static' as const, value: 'Alpha' } }],
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        valueMapProjectState={valueMapProjectUiStateFixture}
+        onValueMapProjectTableSelect={onValueMapProjectTableSelect}
+        onValueMapDirectionSelect={onValueMapDirectionSelect}
+        onValueMapNoMatchModeChange={onValueMapNoMatchModeChange}
+        onValueMapFallbackValueChange={onValueMapFallbackValueChange}
+        onValueMapAdoptLatestRevision={onValueMapAdoptLatestRevision}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-value-map-config')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-value-map-scope-inline')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-value-map-scope-project')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('smart-value-map-table-select'), { target: { value: 'vt-1' } });
+    expect(onValueMapProjectTableSelect).toHaveBeenCalledWith('vt-1');
+
+    fireEvent.click(screen.getByTestId('smart-value-map-direction-a_to_b'));
+    expect(onValueMapDirectionSelect).toHaveBeenCalledWith('a_to_b');
+
+    expect(screen.getByTestId('smart-value-map-direction-b_to_a')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('smart-value-map-no-match-mode'), { target: { value: 'return_null' } });
+    expect(onValueMapNoMatchModeChange).toHaveBeenCalledWith('return_null');
+
+    fireEvent.change(screen.getByTestId('smart-value-map-fallback-input'), { target: { value: 'N/A' } });
+    expect(onValueMapFallbackValueChange).toHaveBeenCalledWith('N/A');
+
+    fireEvent.click(screen.getByTestId('smart-value-map-adopt-latest'));
+    expect(onValueMapAdoptLatestRevision).toHaveBeenCalled();
+
+    expect(screen.queryByTestId('smart-value-map-metadata')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-input-transforms')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-value-map-scope-inline'));
+  });
+
+  it('supports inline row editing without conversion CTA', () => {
+    const onValueMapInlineMappingAdd = vi.fn();
+    const onValueMapInlineMappingUpdate = vi.fn();
+    const onValueMapInlineMappingRemove = vi.fn();
+
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'statusCode',
+          path: 'statusCode',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'input-1',
+        scope: 'inline' as const,
+        project: null,
+        mappings: [{ whenValue: 'A', output: { kind: 'static' as const, value: 'Alpha' } }],
+        fallback: { kind: 'static' as const, value: '' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: '' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        valueMapProjectState={{
+          ...valueMapProjectUiStateFixture,
+          scope: 'inline',
+          tableId: null,
+          direction: null,
+          newerRevisionAvailable: false,
+        }}
+        onValueMapInlineMappingAdd={onValueMapInlineMappingAdd}
+        onValueMapInlineMappingUpdate={onValueMapInlineMappingUpdate}
+        onValueMapInlineMappingRemove={onValueMapInlineMappingRemove}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-value-map-inline-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-value-map-convert-to-project')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-value-map-inline-add'));
+    expect(onValueMapInlineMappingAdd).toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId('smart-value-map-inline-when-0'), { target: { value: 'B' } });
+    expect(onValueMapInlineMappingUpdate).toHaveBeenCalledWith(0, { whenValue: 'B' });
+
+    fireEvent.change(screen.getByTestId('smart-value-map-inline-output-0'), { target: { value: 'Beta' } });
+    expect(onValueMapInlineMappingUpdate).toHaveBeenCalledWith(0, { outputValue: 'Beta' });
+
+    fireEvent.click(screen.getByTestId('smart-value-map-inline-remove-0'));
+    expect(onValueMapInlineMappingRemove).toHaveBeenCalledWith(0);
+
+  });
+
+  it('re-shows transforms and output steps immediately when switching off value map method', () => {
+    const baseDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'statusCode',
+          path: 'statusCode',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+    };
+
+    const valueMapDraft = {
+      ...baseDraft,
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'input-1',
+        scope: 'project' as const,
+        project: null,
+        mappings: [{ whenValue: 'A', output: { kind: 'static' as const, value: 'Alpha' } }],
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    const directDraft = {
+      ...baseDraft,
+      composition: { kind: 'direct' as const, inputId: 'input-1' },
+    };
+
+    const { rerender } = render(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: valueMapDraft }}
+        valueMapProjectState={valueMapProjectUiStateFixture}
+      />,
+    );
+
+    expect(screen.queryByTestId('smart-recipe-input-transforms')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+
+    rerender(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: directDraft }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-recipe-input-transforms')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-recipe-steps')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-action-live-region')).toBeInTheDocument();
+  });
+
+  it('keeps inline when-value input focused while typing', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'statusCode',
+          path: 'statusCode',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'input-1',
+        scope: 'inline' as const,
+        project: null,
+        mappings: [{ whenValue: 'A', output: { kind: 'static' as const, value: 'Alpha' } }],
+        fallback: { kind: 'static' as const, value: '' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: '' },
+      },
+    };
+
+    const { rerender } = render(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        valueMapProjectState={{
+          ...valueMapProjectUiStateFixture,
+          scope: 'inline',
+          tableId: null,
+          direction: null,
+          newerRevisionAvailable: false,
+        }}
+      />,
+    );
+
+    const whenInput = screen.getByTestId('smart-value-map-inline-when-0') as HTMLInputElement;
+    whenInput.focus();
+    expect(document.activeElement).toBe(whenInput);
+
+    const nextDraft = {
+      ...draft,
+      composition: {
+        ...draft.composition,
+        mappings: [{ whenValue: 'AB', output: { kind: 'static' as const, value: 'Alpha' } }],
+      },
+    };
+
+    rerender(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: nextDraft }}
+        valueMapProjectState={{
+          ...valueMapProjectUiStateFixture,
+          scope: 'inline',
+          tableId: null,
+          direction: null,
+          newerRevisionAvailable: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-value-map-inline-when-0')).toHaveFocus();
   });
 
   it('shows mapping method section once at least one input exists', () => {
@@ -1152,7 +1464,7 @@ describe('SmartBuilderPanel', () => {
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'default' } });
     expect(screen.queryByTestId('smart-picker-action-null.default')).not.toBeInTheDocument();
   });
-  it('shows calculation and binary math methods in method picker', () => {
+  it('shows only Direct Mapping, Value Mapping, and Conditional in method picker without search', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.total',
@@ -1189,9 +1501,17 @@ describe('SmartBuilderPanel', () => {
     );
 
     fireEvent.click(screen.getByTestId('smart-recipe-change-base'));
-    expect(screen.getByTestId('smart-picker-action-base.calculation')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-picker-action-number.add')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-picker-action-number.subtract')).toBeInTheDocument();
+
+    expect(screen.getByTestId('smart-picker-action-base.direct')).toHaveTextContent('Direct Mapping');
+    expect(screen.getByTestId('smart-picker-action-lookup.valueMap')).toHaveTextContent('Value Mapping');
+    expect(screen.getByTestId('smart-picker-action-condition.compare')).toHaveTextContent('Conditional');
+    expect(screen.getByTestId('smart-picker-action-base.direct')).toBeDisabled();
+
+    expect(screen.queryByTestId('smart-picker-search')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-base.calculation')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-number.add')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-number.subtract')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-advanced.expression')).not.toBeInTheDocument();
   });
 
   it('shows divide-by-zero warning for literal zero denominator in calculation rows', () => {

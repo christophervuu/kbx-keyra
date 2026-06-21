@@ -4,6 +4,7 @@ export const PATHS = {
   PROJECT_OVERVIEW: '/projects/:projectId',
   PROJECT_SETTINGS: '/projects/:projectId/settings',
   PROJECT_DEPLOYMENTS: '/projects/:projectId/deployments',
+  PROJECT_VALUE_MAPPINGS: '/projects/:projectId/value-mappings',
   CREATE_MAPPING: '/projects/:projectId/mappings/new',
   MAPPING_EDITOR: '/projects/:projectId/mappings/:mappingId',
   MAPPING_DEPLOYMENT: '/projects/:projectId/mappings/:mappingId/deploy',

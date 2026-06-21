@@ -476,3 +476,24 @@ Contract intent:
 
 - This metadata is additive and forward-compatible.
 - Deployment page UX redesign is out of scope for FS-093; artifact metadata completeness prevents future blocker for enrichment-aware deployment inspection.
+
+## 20) FS-096 project value-table snapshot compatibility addendum
+
+FS-096 requires deployment/runtime compatibility for project value-table pinned references without changing deploy/promote/rollback workflow shape.
+
+Snapshot/artifact compatibility requirements:
+
+- Deployment artifacts include mapping config with embedded project value-table refs (`valueTableRef`) and pinned `resolvedEntries` per rule.
+- Artifact identity/hash is computed over deterministic mapping payload (no non-deterministic timestamp fields in artifact body).
+
+Immutability + promotion + rollback invariants:
+
+- Deploy snapshot immutability: post-deploy table edits/revisions must not alter existing deployed snapshots.
+- Promote reuses identical artifact identity/data (no repack/re-resolve of table rows during promote).
+- Rollback restores the exact previously embedded table data via prior snapshot pointer.
+
+Runtime execute invariant:
+
+- Runtime execute continues resolving active local snapshot only.
+- Runtime execute must not fetch project value-table storage (DynamoDB/S3/project APIs).
+- Missing project `resolvedEntries` in snapshot payload is treated as deterministic snapshot integrity failure.

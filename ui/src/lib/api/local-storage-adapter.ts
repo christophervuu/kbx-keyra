@@ -45,6 +45,9 @@ import type {
   MappingVersion,
   MappingVersionEntry,
   MappingMetadata,
+  ProjectValueTable,
+  ProjectValueTableRevision,
+  ProjectValueTableRevisionRow,
   Project,
   ProjectDetail,
   ProjectMetadata,
@@ -62,6 +65,17 @@ import type {
   SuggestExpressionResult,
   TemplateDetail,
   TemplateMetadata,
+  ValueTableDiffChange,
+  ValueTableDiffPage,
+  ValueTableDirectionSupport,
+  ValueTableListOptions,
+  ValueTableUsageEntry,
+  ValueTableValueType,
+  CreateProjectValueTableInput,
+  CreateProjectValueTableRevisionInput,
+  DuplicateProjectValueTableInput,
+  ResolveProjectValueTableReferenceInput,
+  ResolveProjectValueTableReferenceResult,
   UpdateSchemaInput,
   UpdateProjectInput,
   ValidateMappingsInput,
@@ -75,6 +89,8 @@ const STORAGE_KEYS = {
   templates: 'keyra:templates',
   deployments: 'keyra:deployments',
   activity: 'keyra:activity',
+  valueTables: 'keyra:value-tables',
+  valueTableUsage: 'keyra:value-table-usage',
 } as const;
 
 const MAX_MAPPING_VERSIONS = 50;
@@ -267,6 +283,55 @@ interface StoredVersionEntry {
   readonly createdBy: string;
 }
 
+interface StoredValueTable {
+  readonly table: ProjectValueTable;
+  readonly revisions: readonly ProjectValueTableRevision[];
+}
+
+function normalizeValueTableRows(rows: readonly ProjectValueTableRevisionRow[]): readonly ProjectValueTableRevisionRow[] {
+  return rows.map((row) => ({
+    ...row,
+    id: row.id || crypto.randomUUID(),
+  }));
+}
+
+function isValidLookupInput(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+
+  return typeof value === 'number' || typeof value === 'boolean';
+}
+
+function computeDirectionSupport(rows: readonly ProjectValueTableRevisionRow[]): ValueTableDirectionSupport {
+  const aToBSeen = new Set<string>();
+  const bToASeen = new Set<string>();
+  let aToB = true;
+  let bToA = true;
+
+  for (const row of rows) {
+    const aKey = JSON.stringify(row.sideAValue);
+    const bKey = JSON.stringify(row.sideBValue);
+
+    if (!isValidLookupInput(row.sideAValue) || aToBSeen.has(aKey)) {
+      aToB = false;
+    }
+
+    if (!isValidLookupInput(row.sideBValue) || bToASeen.has(bKey)) {
+      bToA = false;
+    }
+
+    aToBSeen.add(aKey);
+    bToASeen.add(bKey);
+  }
+
+  return { aToB, bToA };
+}
+
 interface CurrentDeploymentsInput {
   readonly DEV?: CurrentDeployment | null;
   readonly PREPROD?: CurrentDeployment | null;
@@ -434,6 +499,31 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   private writeDeployments(mappingId: string, deployments: DeploymentRecord[]): void {
     this.writeArray(this.deploymentKey(mappingId), deployments);
+  }
+
+  private readValueTables(): StoredValueTable[] {
+    return this.readArray<StoredValueTable>(STORAGE_KEYS.valueTables);
+  }
+
+  private writeValueTables(value: StoredValueTable[]): void {
+    this.writeArray(STORAGE_KEYS.valueTables, value);
+  }
+
+  private getValueTableUsageCount(valueTableId: string): number {
+    const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
+    let count = 0;
+
+    for (const mapping of mappings) {
+      const hasUsage = mapping.config.rules.some(
+        (rule) => rule.valueTableRef?.scope === 'project' && rule.valueTableRef.valueTableId === valueTableId,
+      );
+
+      if (hasUsage) {
+        count += 1;
+      }
+    }
+
+    return count;
   }
 
   private toCurrentDeployment(item: DeploymentRecord): CurrentDeployment {
@@ -1771,5 +1861,560 @@ export class LocalStorageAdapter implements ApiAdapter {
     void mappingId;
     void input;
     throw this.offlineModeError();
+  }
+
+  async listProjectValueTables(
+    projectId: string,
+    options?: ValueTableListOptions,
+  ): Promise<ProjectValueTable[]> {
+    const valueTablesStore = this.readValueTables();
+
+    let tables = this.readValueTables()
+      .map((entry) => entry.table)
+      .filter((table) => table.projectId === projectId);
+
+    if (options?.query) {
+      const query = options.query.toLowerCase();
+      tables = tables.filter((table) =>
+        table.name.toLowerCase().includes(query)
+        || table.key.toLowerCase().includes(query)
+        || table.sideA.label.toLowerCase().includes(query)
+        || table.sideB.label.toLowerCase().includes(query),
+      );
+    }
+
+    if (options?.status) {
+      tables = tables.filter((table) => table.status === options.status);
+    }
+
+    const sortBy = options?.sortBy ?? 'updatedAt';
+    const sortDirection = options?.sortDirection ?? 'desc';
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    const usageCountByTableId = sortBy === 'usedBy'
+      ? (() => {
+          const map = new Map<string, number>();
+          for (const table of tables) {
+            map.set(table.id, this.getValueTableUsageCount(table.id));
+          }
+          return map;
+        })()
+      : new Map<string, number>();
+
+    tables = [...tables].sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name) * direction;
+      if (sortBy === 'updatedAt') return a.updatedAt.localeCompare(b.updatedAt) * direction;
+
+      if (sortBy === 'rowCount') {
+        const aRows = valueTablesStore.find((entry) => entry.table.id === a.id)?.revisions.at(-1)?.rowCount ?? 0;
+        const bRows = valueTablesStore.find((entry) => entry.table.id === b.id)?.revisions.at(-1)?.rowCount ?? 0;
+        return (aRows - bRows) * direction;
+      }
+
+      if (sortBy === 'usedBy') {
+        const aUsage = usageCountByTableId.get(a.id) ?? 0;
+        const bUsage = usageCountByTableId.get(b.id) ?? 0;
+        return (aUsage - bUsage) * direction;
+      }
+
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+
+    return tables;
+  }
+
+  async getProjectValueTable(valueTableId: string): Promise<ProjectValueTable> {
+    const found = this.readValueTables().find((entry) => entry.table.id === valueTableId);
+    if (!found) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    return found.table;
+  }
+
+  async getProjectValueTableRevision(
+    valueTableId: string,
+    revision: number,
+  ): Promise<ProjectValueTableRevision> {
+    const found = this.readValueTables().find((entry) => entry.table.id === valueTableId);
+    if (!found) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    const revisionEntry = found.revisions.find((entry) => entry.revision === revision);
+    if (!revisionEntry) {
+      throw this.notFound('ProjectValueTableRevision', `${valueTableId}@${revision}`);
+    }
+
+    return revisionEntry;
+  }
+
+  async createProjectValueTable(input: CreateProjectValueTableInput): Promise<ProjectValueTable> {
+    const existingByProjectAndKey = this.readValueTables().find(
+      (entry) => entry.table.projectId === input.projectId && entry.table.key === input.key,
+    );
+
+    if (existingByProjectAndKey) {
+      throw {
+        message: `Value table key already exists in project: ${input.key}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const timestamp = this.nowIso();
+    const valueTableId = crypto.randomUUID();
+    const normalizedRows = normalizeValueTableRows(input.rows);
+    const directionSupport = computeDirectionSupport(normalizedRows);
+
+    const table: ProjectValueTable = {
+      id: valueTableId,
+      projectId: input.projectId,
+      key: input.key,
+      name: input.name,
+      ...(input.description ? { description: input.description } : {}),
+      sideA: input.sideA,
+      sideB: input.sideB,
+      currentRevision: 1,
+      status: 'active',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      createdBy: 'local-user',
+      updatedBy: 'local-user',
+    };
+
+    const revision: ProjectValueTableRevision = {
+      valueTableId,
+      revision: 1,
+      sideA: input.sideA,
+      sideB: input.sideB,
+      rows: normalizedRows,
+      rowCount: normalizedRows.length,
+      directionSupport,
+      rowsS3Key: `local://value-tables/${valueTableId}/revisions/1.json`,
+      contentHash: await this.computeConfigHash({
+        name: input.name,
+        version: 1,
+        engineVersion: '2.0.0',
+        config: {},
+        rules: [],
+      }),
+      createdAt: timestamp,
+      createdBy: 'local-user',
+    };
+
+    const all = this.readValueTables();
+    all.push({ table, revisions: [revision] });
+    this.writeValueTables(all);
+
+    return table;
+  }
+
+  async createProjectValueTableRevision(
+    valueTableId: string,
+    input: CreateProjectValueTableRevisionInput,
+  ): Promise<ProjectValueTableRevision> {
+    const all = this.readValueTables();
+    const index = all.findIndex((entry) => entry.table.id === valueTableId);
+    if (index < 0) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    const current = all[index];
+    if (current.table.status === 'archived') {
+      throw {
+        message: `Cannot create revision for archived value table: ${valueTableId}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const nextRevision = (current.revisions.at(-1)?.revision ?? 0) + 1;
+    const timestamp = this.nowIso();
+    const normalizedRows = normalizeValueTableRows(input.rows);
+
+    const revision: ProjectValueTableRevision = {
+      valueTableId,
+      revision: nextRevision,
+      sideA: input.sideA,
+      sideB: input.sideB,
+      rows: normalizedRows,
+      rowCount: normalizedRows.length,
+      directionSupport: computeDirectionSupport(normalizedRows),
+      rowsS3Key: `local://value-tables/${valueTableId}/revisions/${nextRevision}.json`,
+      contentHash: await this.computeConfigHash({
+        name: current.table.name,
+        version: nextRevision,
+        engineVersion: '2.0.0',
+        config: {},
+        rules: [],
+      }),
+      createdAt: timestamp,
+      createdBy: 'local-user',
+    };
+
+    const nextTable: ProjectValueTable = {
+      ...current.table,
+      sideA: input.sideA,
+      sideB: input.sideB,
+      currentRevision: nextRevision,
+      updatedAt: timestamp,
+      updatedBy: 'local-user',
+    };
+
+    all[index] = {
+      table: nextTable,
+      revisions: [...current.revisions, revision],
+    };
+    this.writeValueTables(all);
+
+    return revision;
+  }
+
+  async duplicateProjectValueTable(input: DuplicateProjectValueTableInput): Promise<ProjectValueTable> {
+    const original = this.readValueTables().find((entry) => entry.table.id === input.valueTableId);
+    if (!original) {
+      throw this.notFound('ProjectValueTable', input.valueTableId);
+    }
+
+    const latestRevision = original.revisions.find((entry) => entry.revision === original.table.currentRevision)
+      ?? original.revisions.at(-1);
+    if (!latestRevision) {
+      throw this.notFound('ProjectValueTableRevision', input.valueTableId);
+    }
+
+    return this.createProjectValueTable({
+      projectId: input.projectId,
+      key: input.key ?? `${original.table.key}-copy`,
+      name: input.name,
+      description: original.table.description,
+      sideA: latestRevision.sideA,
+      sideB: latestRevision.sideB,
+      rows: latestRevision.rows,
+    });
+  }
+
+  async archiveProjectValueTable(valueTableId: string): Promise<ProjectValueTable> {
+    const all = this.readValueTables();
+    const index = all.findIndex((entry) => entry.table.id === valueTableId);
+    if (index < 0) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    const next: ProjectValueTable = {
+      ...all[index].table,
+      status: 'archived',
+      updatedAt: this.nowIso(),
+      updatedBy: 'local-user',
+    };
+    all[index] = { ...all[index], table: next };
+    this.writeValueTables(all);
+    return next;
+  }
+
+  async deleteProjectValueTable(valueTableId: string): Promise<void> {
+    const usage = await this.listProjectValueTableUsage(valueTableId);
+    if (usage.length > 0) {
+      throw {
+        message: `ProjectValueTable is still referenced: ${valueTableId}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    this.writeValueTables(this.readValueTables().filter((entry) => entry.table.id !== valueTableId));
+  }
+
+  async listProjectValueTableUsage(valueTableId: string): Promise<ValueTableUsageEntry[]> {
+    const table = this.readValueTables().find((entry) => entry.table.id === valueTableId);
+    if (!table) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
+    const usage: ValueTableUsageEntry[] = [];
+
+    for (const mapping of mappings) {
+      for (const rule of mapping.config.rules) {
+        if (rule.valueTableRef?.scope !== 'project') {
+          continue;
+        }
+
+        if (rule.valueTableRef.valueTableId !== valueTableId) {
+          continue;
+        }
+
+        const latestRevision = table.table.currentRevision;
+        const direction = rule.valueTableRef.inputSideKey === table.table.sideA.key
+          && rule.valueTableRef.outputSideKey === table.table.sideB.key
+          ? 'a_to_b'
+          : 'b_to_a';
+
+        const latestRevisionEntry = table.revisions.find((entry) => entry.revision === latestRevision);
+        const latestDirectionSupported = direction === 'a_to_b'
+          ? latestRevisionEntry?.directionSupport.aToB
+          : latestRevisionEntry?.directionSupport.bToA;
+
+        usage.push({
+          valueTableId,
+          tableKey: table.table.key,
+          mappingId: mapping.metadata.mappingId,
+          mappingName: mapping.metadata.name,
+          mappingVersion: mapping.metadata.version,
+          pinnedRevision: rule.valueTableRef.revision,
+          direction,
+          inputSideKey: rule.valueTableRef.inputSideKey,
+          outputSideKey: rule.valueTableRef.outputSideKey,
+          newerRevisionAvailable: rule.valueTableRef.revision < latestRevision,
+          latestRevision,
+          latestDirectionSupported,
+          updatedAt: mapping.metadata.updatedAt,
+        });
+      }
+    }
+
+    return usage;
+  }
+
+  async getProjectValueTableRevisionDiff(
+    valueTableId: string,
+    fromRevision: number,
+    toRevision: number,
+    options?: { cursor?: string; pageSize?: number },
+  ): Promise<ValueTableDiffPage> {
+    const table = this.readValueTables().find((entry) => entry.table.id === valueTableId);
+    if (!table) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    const from = table.revisions.find((entry) => entry.revision === fromRevision);
+    const to = table.revisions.find((entry) => entry.revision === toRevision);
+    if (!from || !to) {
+      throw this.notFound('ProjectValueTableRevision', `${valueTableId}:${fromRevision}->${toRevision}`);
+    }
+
+    const fromMap = new Map(from.rows.map((row) => [row.id, row]));
+    const toMap = new Map(to.rows.map((row) => [row.id, row]));
+    const ids = Array.from(new Set([...fromMap.keys(), ...toMap.keys()])).sort((a, b) => a.localeCompare(b));
+
+    const allChanges: ValueTableDiffChange[] = ids.map((id) => {
+      const before = fromMap.get(id);
+      const after = toMap.get(id);
+      if (!before && after) {
+        return { changeType: 'added', rowId: id, after };
+      }
+
+      if (before && !after) {
+        return { changeType: 'removed', rowId: id, before };
+      }
+
+      if (before && after) {
+        const changed = JSON.stringify(before) !== JSON.stringify(after);
+        return {
+          changeType: changed ? 'changed' : 'unchanged',
+          rowId: id,
+          before,
+          after,
+        };
+      }
+
+      return { changeType: 'unchanged', rowId: id };
+    });
+
+    const counts = allChanges.reduce(
+      (acc, change) => {
+        if (change.changeType === 'added') acc.added += 1;
+        if (change.changeType === 'removed') acc.removed += 1;
+        if (change.changeType === 'changed') acc.changed += 1;
+        if (change.changeType === 'unchanged') acc.unchanged += 1;
+        return acc;
+      },
+      { added: 0, removed: 0, changed: 0, unchanged: 0 },
+    );
+
+    const pageSize = Math.min(500, Math.max(1, options?.pageSize ?? 100));
+    const start = options?.cursor ? Number(options.cursor) : 0;
+    const offset = Number.isFinite(start) && start >= 0 ? start : 0;
+    const changes = allChanges.slice(offset, offset + pageSize);
+    const nextCursor = offset + pageSize < allChanges.length ? String(offset + pageSize) : undefined;
+
+    return {
+      summary: {
+        valueTableId,
+        tableKey: table.table.key,
+        fromRevision,
+        toRevision,
+        counts,
+        directionImpact: {
+          previous: from.directionSupport,
+          next: to.directionSupport,
+        },
+      },
+      changes,
+      pageSize,
+      ...(nextCursor ? { nextCursor } : {}),
+    };
+  }
+
+  async exportProjectValueTableCsv(valueTableId: string, revision?: number): Promise<string> {
+    const table = this.readValueTables().find((entry) => entry.table.id === valueTableId);
+    if (!table) {
+      throw this.notFound('ProjectValueTable', valueTableId);
+    }
+
+    const resolvedRevision = revision ?? table.table.currentRevision;
+    const revisionEntry = table.revisions.find((entry) => entry.revision === resolvedRevision);
+    if (!revisionEntry) {
+      throw this.notFound('ProjectValueTableRevision', `${valueTableId}@${resolvedRevision}`);
+    }
+
+    const header = [revisionEntry.sideA.label, revisionEntry.sideB.label, 'Description'];
+    const rows = revisionEntry.rows.map((row) => [
+      String(row.sideAValue),
+      String(row.sideBValue),
+      row.description ?? '',
+    ]);
+
+    return [header, ...rows]
+      .map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(','))
+      .join('\n');
+  }
+
+  async importProjectValueTableCsv(
+    projectId: string,
+    csv: string,
+    options?: { name?: string; key?: string },
+  ): Promise<ProjectValueTableRevision> {
+    const lines = csv.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      throw {
+        message: 'CSV must include header and at least one data row',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    const parseCsvLine = (line: string): string[] => line
+      .split(',')
+      .map((token) => token.trim().replace(/^"|"$/g, '').replaceAll('""', '"'));
+
+    const [headerA = 'Side A', headerB = 'Side B'] = parseCsvLine(lines[0]);
+    const rows: ProjectValueTableRevisionRow[] = lines.slice(1).map((line) => {
+      const [sideAValue = '', sideBValue = '', description = ''] = parseCsvLine(line);
+      return {
+        id: crypto.randomUUID(),
+        sideAValue,
+        sideBValue,
+        ...(description ? { description } : {}),
+      };
+    });
+
+    const keyBase = options?.key
+      ?? headerA.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+      ?? `value-table-${crypto.randomUUID()}`;
+
+    const table = await this.createProjectValueTable({
+      projectId,
+      key: keyBase,
+      name: options?.name ?? `${headerA} / ${headerB}`,
+      sideA: { key: `${keyBase}-a`, label: headerA, type: 'string' as ValueTableValueType },
+      sideB: { key: `${keyBase}-b`, label: headerB, type: 'string' as ValueTableValueType },
+      rows,
+    });
+
+    return this.getProjectValueTableRevision(table.id, 1);
+  }
+
+  async resolveProjectValueTableReference(
+    input: ResolveProjectValueTableReferenceInput,
+  ): Promise<ResolveProjectValueTableReferenceResult> {
+    const candidates = this.readValueTables().filter((entry) => entry.table.projectId === input.projectId);
+    const table = input.valueTableId
+      ? candidates.find((entry) => entry.table.id === input.valueTableId)
+      : candidates.find((entry) => entry.table.key === input.tableKey);
+
+    if (!table) {
+      throw this.notFound('ProjectValueTable', input.valueTableId ?? input.tableKey);
+    }
+
+    if (table.table.status === 'archived') {
+      throw {
+        message: `Archived value table cannot be newly selected: ${table.table.id}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const revision = table.revisions.find((entry) => entry.revision === input.revision);
+    if (!revision) {
+      throw this.notFound('ProjectValueTableRevision', `${table.table.id}@${input.revision}`);
+    }
+
+    const inputSide = input.inputSideKey === revision.sideA.key
+      ? revision.sideA
+      : input.inputSideKey === revision.sideB.key
+        ? revision.sideB
+        : null;
+    const outputSide = input.outputSideKey === revision.sideA.key
+      ? revision.sideA
+      : input.outputSideKey === revision.sideB.key
+        ? revision.sideB
+        : null;
+
+    if (!inputSide || !outputSide) {
+      throw {
+        message: 'Unknown value-table side key',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    if (inputSide.key === outputSide.key) {
+      throw {
+        message: 'Input and output sides must differ',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    const direction = inputSide.key === revision.sideA.key ? 'aToB' : 'bToA';
+    if (!revision.directionSupport[direction]) {
+      throw {
+        message: 'Selected value-table direction is not supported',
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        retryable: false,
+      };
+    }
+
+    const resolvedEntries = revision.rows.map((row) => ({
+      in: inputSide.key === revision.sideA.key ? row.sideAValue : row.sideBValue,
+      out: outputSide.key === revision.sideA.key ? row.sideAValue : row.sideBValue,
+      rowId: row.id,
+    }));
+
+    return {
+      ref: {
+        scope: 'project',
+        valueTableId: table.table.id,
+        tableKey: table.table.key,
+        revision: revision.revision,
+        inputSideKey: inputSide.key,
+        outputSideKey: outputSide.key,
+        inputType: inputSide.type,
+        outputType: outputSide.type,
+        resolvedEntries,
+        sourceMeta: {
+          tableName: table.table.name,
+          revisionCreatedAt: revision.createdAt,
+        },
+      },
+    };
   }
 }

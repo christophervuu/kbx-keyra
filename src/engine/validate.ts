@@ -10,6 +10,7 @@ import {
   validateSourcePaths,
   validateTargetPaths,
   validateTypeCompatibility,
+  validateValueTables,
 } from './validate/index.js';
 import type { Diagnostic, EngineOptions, MappingConfig, ValidationResult } from './types/index.js';
 
@@ -75,6 +76,7 @@ export function validate(
     }
 
     diagnostics.push(...validateConstantsAndExternals(validAsts, config.config));
+    diagnostics.push(...validateValueTables(validAsts));
 
     const coverage = targetTree ? computeCoverage(config.rules, targetTree) : undefined;
     const valid = !diagnostics.some((diagnostic) => diagnostic.severity === 'error');

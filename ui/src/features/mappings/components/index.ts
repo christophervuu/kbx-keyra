@@ -119,6 +119,7 @@ export type { SourceSchemaPanelProps, StagedInputField } from './SourceSchemaPan
 export { BuilderEmptyState } from './BuilderEmptyState';
 export type { BuilderEmptyStateProps } from './BuilderEmptyState';
 export { SmartBuilderPanel } from './SmartBuilderPanel';
+export type { ValueMapProjectUiState } from './SmartBuilderPanel';
 export { InputTray } from './InputTray';
 export { BuilderActionList } from './BuilderActionList';
 export { BreadcrumbNav } from './BreadcrumbNav';

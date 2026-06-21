@@ -91,6 +91,19 @@ const mockAdapter: ApiAdapter = {
   querySchemaNodes: vi.fn(),
   listActivity: vi.fn(),
   previewOnServer: vi.fn(),
+  listProjectValueTables: vi.fn(),
+  getProjectValueTable: vi.fn(),
+  getProjectValueTableRevision: vi.fn(),
+  createProjectValueTable: vi.fn(),
+  createProjectValueTableRevision: vi.fn(),
+  duplicateProjectValueTable: vi.fn(),
+  archiveProjectValueTable: vi.fn(),
+  deleteProjectValueTable: vi.fn(),
+  listProjectValueTableUsage: vi.fn(),
+  getProjectValueTableRevisionDiff: vi.fn(),
+  exportProjectValueTableCsv: vi.fn(),
+  importProjectValueTableCsv: vi.fn(),
+  resolveProjectValueTableReference: vi.fn(),
 } as unknown as ApiAdapter;
 
 // ---------------------------------------------------------------------------

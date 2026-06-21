@@ -126,6 +126,34 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     publishSchemaToGitHub: vi.fn(),
     linkPublishedSchema: vi.fn(),
     autoMap: vi.fn(),
+    listProjectValueTables: vi.fn().mockResolvedValue([
+      {
+        id: 'vt-1',
+        projectId: PROJECT_DETAIL.projectId,
+        key: 'order-status',
+        name: 'Order Status',
+        sideA: { key: 'a', label: 'A', type: 'string' },
+        sideB: { key: 'b', label: 'B', type: 'string' },
+        currentRevision: 1,
+        status: 'active',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ]),
+    listProjectValueTableUsage: vi.fn().mockResolvedValue([
+      {
+        valueTableId: 'vt-1',
+        tableKey: 'order-status',
+        mappingId: MAPPING_META.mappingId,
+        mappingName: MAPPING_META.name,
+        pinnedRevision: 1,
+        direction: 'a_to_b',
+        inputSideKey: 'a',
+        outputSideKey: 'b',
+        newerRevisionAvailable: false,
+        latestRevision: 1,
+      },
+    ]),
     suggestExpression: vi.fn(),
     smartFix: vi.fn(),
     previewMapping: vi.fn(),
@@ -155,6 +183,7 @@ function renderPage(
             <Route path="/projects/:projectId/deployments" element={<div data-testid="project-deployments-page" />} />
             <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page" />} />
             <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div data-testid="mapping-deployment-page" />} />
+            <Route path="/projects/:projectId/value-mappings" element={<div data-testid="project-value-mappings-page" />} />
           </Routes>
         </BreadcrumbProvider>
       </MemoryRouter>
@@ -196,7 +225,8 @@ describe('ProjectOverviewPage', () => {
     expect(screen.getByRole('button', { name: 'Project name' })).toBeInTheDocument();
 
     // Section — mappings (heading)
-    expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Mappings' })).toBeInTheDocument();
+    expect(screen.queryByTestId('project-value-mappings-summary')).not.toBeInTheDocument();
 
     // No right rail / deployment activity / schema management section in FS-086 T-01
     expect(screen.queryByTestId('project-overview-right-rail')).not.toBeInTheDocument();
@@ -283,6 +313,7 @@ describe('ProjectOverviewPage', () => {
     });
 
     expect(screen.getByTestId('project-overview-main-column')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-value-mappings-summary')).not.toBeInTheDocument();
     expect(screen.queryByTestId('project-overview-right-rail')).not.toBeInTheDocument();
     expect(screen.queryByTestId('deployment-activity-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('schemas-right-rail-card')).not.toBeInTheDocument();
@@ -404,7 +435,7 @@ describe('ProjectOverviewPage', () => {
     renderPage(statusAdapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Mappings' })).toBeInTheDocument();
     });
 
     // Ready: row is open target + Deploy icon visible
@@ -459,7 +490,80 @@ describe('ProjectOverviewPage', () => {
     expect(within(details).getByText('accountSettings')).toBeInTheDocument();
     expect(within(details).getByText('Schema Two')).toBeInTheDocument();
 
-    expect(screen.getByTestId('project-header-summary-line')).toHaveTextContent('1 mapping · 2 linked schemas · 0 errors');
+    expect(screen.getByTestId('project-header-summary-line')).toHaveTextContent(
+      '1 mapping · 2 linked schemas · 1 value table · 0 errors',
+    );
+  });
+
+  it('omits value-table summary metric when there are zero active tables', async () => {
+    const zeroTablesAdapter = createMockAdapter({
+      listProjectValueTables: vi.fn().mockResolvedValue([]),
+    });
+
+    renderPage(zeroTablesAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-header-summary-line')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('value-tables-summary-link')).not.toBeInTheDocument();
+    expect(screen.getByTestId('project-header-summary-line')).not.toHaveTextContent('0 value tables');
+  });
+
+  it('omits value-table summary metric when value-table summary fetch fails', async () => {
+    const failingTablesAdapter = createMockAdapter({
+      listProjectValueTables: vi.fn().mockRejectedValue(new Error('value table API unavailable')),
+    });
+
+    renderPage(failingTablesAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-header-summary-line')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('value-tables-summary-link')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('project-value-mappings-summary-error')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Mappings' })).toBeInTheDocument();
+  });
+
+  it('shows value-table summary metric with pluralized count and navigates on click', async () => {
+    const user = userEvent.setup();
+    const multiTablesAdapter = createMockAdapter({
+      listProjectValueTables: vi.fn().mockResolvedValue([
+        {
+          id: 'vt-1',
+          projectId: PROJECT_DETAIL.projectId,
+          key: 'order-status',
+          name: 'Order Status',
+          sideA: { key: 'a', label: 'A', type: 'string' },
+          sideB: { key: 'b', label: 'B', type: 'string' },
+          currentRevision: 1,
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'vt-2',
+          projectId: PROJECT_DETAIL.projectId,
+          key: 'payment-status',
+          name: 'Payment Status',
+          sideA: { key: 'a', label: 'A', type: 'string' },
+          sideB: { key: 'b', label: 'B', type: 'string' },
+          currentRevision: 1,
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ]),
+    });
+
+    renderPage(multiTablesAdapter);
+
+    const metric = await screen.findByTestId('value-tables-summary-link');
+    expect(metric).toHaveTextContent('2 value tables');
+
+    await user.click(metric);
+    expect(screen.getByTestId('project-value-mappings-page')).toBeInTheDocument();
   });
 });
 
@@ -522,7 +626,9 @@ describe('ProjectOverviewPage — layout checks', () => {
       expect(screen.getByTestId('project-header-summary-line')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('project-header-summary-line')).toHaveTextContent('1 mapping · 1 linked schema · 0 errors');
+    expect(screen.getByTestId('project-header-summary-line')).toHaveTextContent(
+      '1 mapping · 1 linked schema · 1 value table · 0 errors',
+    );
     expect(screen.queryByText('Add tag…')).not.toBeInTheDocument();
   });
 
@@ -560,10 +666,25 @@ describe('ProjectOverviewPage — layout checks', () => {
     const menu = screen.getByTestId('project-overflow-menu');
     expect(menu).toBeInTheDocument();
     expect(within(menu).getByText('Open Deployments')).toBeInTheDocument();
+    expect(within(menu).getByText('Manage value tables')).toBeInTheDocument();
     expect(within(menu).getByText('Project Settings')).toBeInTheDocument();
     expect(within(menu).getByText('Duplicate Project')).toBeInTheDocument();
     expect(within(menu).getByText('Export Project')).toBeInTheDocument();
     expect(within(menu).getByText('Delete Project')).toBeInTheDocument();
+  });
+
+  it('overflow menu Manage value tables action navigates to value-mappings route', async () => {
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overflow-menu-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('project-overflow-menu-trigger'));
+    await user.click(screen.getByRole('menuitem', { name: 'Manage value tables' }));
+
+    expect(screen.getByTestId('project-value-mappings-page')).toBeInTheDocument();
   });
 
   it('AE-16: overflow menu closes on outside click', async () => {
@@ -586,7 +707,7 @@ describe('ProjectOverviewPage — layout checks', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /mappings/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Mappings' })).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId('project-schema-management-section')).not.toBeInTheDocument();

@@ -9,4 +9,5 @@ export { inferType } from './type-inference.js';
 export { validateTypeCompatibility } from './type-compatibility.js';
 export { validateArrayContext } from './array-context.js';
 export { validateConstantsAndExternals } from './constants-externals.js';
+export { validateValueTables } from './value-tables.js';
 export { computeCoverage } from './coverage.js';

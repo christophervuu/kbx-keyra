@@ -11,6 +11,7 @@ import { useProjectOverview } from '../hooks/use-project-overview';
 
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
+import { useAdapter } from '@/lib/api';
 import { PATHS } from '@/routes/paths';
 
 // ---------------------------------------------------------------------------
@@ -18,8 +19,16 @@ import { PATHS } from '@/routes/paths';
 // ---------------------------------------------------------------------------
 
 function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
+  const adapter = useAdapter();
   const navigate = useNavigate();
   const [showLinkedSchemasDialog, setShowLinkedSchemasDialog] = useState(false);
+  const [valueTableSummary, setValueTableSummary] = useState<{
+    projectId: string;
+    activeCount: number | null;
+  }>({
+    projectId: '',
+    activeCount: null,
+  });
   const { recordActivity } = useRecentActivity();
 
   const {
@@ -53,6 +62,37 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once on successful load
   }, [loadState]);
+
+  useEffect(() => {
+    if (loadState !== 'loaded') {
+      return;
+    }
+
+    let cancelled = false;
+
+    void adapter
+      .listProjectValueTables(projectId, {
+        status: 'active',
+        sortBy: 'updatedAt',
+        sortDirection: 'desc',
+      })
+      .then((tables) => {
+        if (cancelled) return;
+        setValueTableSummary({ projectId, activeCount: tables.length });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Non-blocking summary metric: omit when fetch fails.
+        setValueTableSummary({ projectId, activeCount: null });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, projectId, loadState]);
+
+  const activeValueTableCount =
+    valueTableSummary.projectId === projectId ? valueTableSummary.activeCount : null;
 
   // -------------------------------------------------------------------------
   // Loading
@@ -131,6 +171,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           project={project}
           mappingCount={mappings.length}
           schemaCount={schemas.length}
+          activeValueTableCount={activeValueTableCount}
           errorCount={mappings.filter((m) => m.status === 'has-errors').length}
           onUpdateName={updateName}
           onUpdateDescription={updateDescription}
@@ -143,7 +184,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
         />
 
         {/* Section 2 — full-width mappings content */}
-        <div className="min-w-0" data-testid="project-overview-main-column">
+        <div className="min-w-0 space-y-4" data-testid="project-overview-main-column">
           <MappingListSection
             mappings={mappings}
             projectId={projectId}

@@ -33,6 +33,8 @@ export type { ProjectActionsSectionProps } from './ProjectActionsSection';
 
 export { ProjectOverviewPage } from './ProjectOverviewPage';
 
+export { ProjectValueMappingsPage } from './ProjectValueMappingsPage';
+
 export { CreateProjectPage } from './CreateProjectPage';
 
 export { CreateMappingPage } from './CreateMappingPage';
@@ -44,3 +46,5 @@ export { ProjectOverviewSkeleton } from './ProjectOverviewSkeleton';
 export { ProjectErrorState } from './ProjectErrorState';
 export type { ProjectErrorStateProps } from './ProjectErrorState';
 export { ProjectNotFoundState } from './ProjectNotFoundState';
+
+export { ValueMappingsSummaryCard } from './ValueMappingsSummaryCard';

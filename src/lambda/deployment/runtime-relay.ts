@@ -19,7 +19,6 @@ export interface RuntimeDeployArtifact {
   readonly sourceConfigHash: string;
   readonly engineVersion: string;
   readonly mappingConfig: MappingConfig;
-  readonly createdAt: string;
 }
 
 export interface RuntimeRelayResult {
@@ -55,8 +54,30 @@ export interface RuntimeRelayClient {
 
 const MAX_ARTIFACT_PAYLOAD_BYTES_DEFAULT = 5 * 1024 * 1024; // 5MB (FS-083 Rev 2)
 
-function nowIso(): string {
-  return new Date().toISOString();
+function normalizeMappingConfigForArtifact(config: MappingConfig): MappingConfig {
+  const sanitizedRules = Array.isArray(config.rules)
+    ? config.rules.map((rule) => {
+      const noMatch = rule.noMatchBehavior;
+      const normalizedNoMatch = noMatch
+        ? {
+            mode: noMatch.mode,
+            ...(noMatch.mode === 'fallback_value' && noMatch.fallbackValue !== undefined
+              ? { fallbackValue: noMatch.fallbackValue }
+              : {}),
+          }
+        : undefined;
+
+      return {
+        ...rule,
+        ...(normalizedNoMatch ? { noMatchBehavior: normalizedNoMatch } : {}),
+      };
+    })
+    : [];
+
+  return {
+    ...config,
+    rules: sanitizedRules,
+  };
 }
 
 function parseMaxPayloadBytes(value: string | undefined): number {
@@ -91,7 +112,8 @@ export async function buildRuntimeDeployArtifact(input: {
   sourceNumber: number;
   config: MappingConfig;
 }): Promise<RuntimeDeployArtifact> {
-  const artifactHash = await computeConfigHash(input.config);
+  const normalizedConfig = normalizeMappingConfigForArtifact(input.config);
+  const artifactHash = await computeConfigHash(normalizedConfig);
   const artifactId = buildArtifactId(input.mappingId, input.sourceType, input.sourceNumber);
 
   return {
@@ -102,9 +124,8 @@ export async function buildRuntimeDeployArtifact(input: {
     sourceType: input.sourceType,
     sourceNumber: input.sourceNumber,
     sourceConfigHash: artifactHash,
-    engineVersion: input.config.engineVersion,
-    mappingConfig: input.config,
-    createdAt: nowIso(),
+    engineVersion: normalizedConfig.engineVersion,
+    mappingConfig: normalizedConfig,
   };
 }
 

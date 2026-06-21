@@ -17,8 +17,8 @@ Purpose:
 - Define the `src/lib/persistence/` module architecture
 
 Scope:
-- Projects, Mappings, SchemaMetadata, SchemaNodes, MappingRevisions, MappingVersions tables
-- S3 key patterns for schema content and mapping configs
+- Projects, Mappings, SchemaMetadata, SchemaNodes, MappingRevisions, MappingVersions, ValueTables, ValueTableRevisions tables
+- S3 key patterns for schema content, mapping configs, and value-table revision row payloads
 - Shared data-access module structure
 
 Out of scope:
@@ -174,6 +174,44 @@ FS-091 retrieval control decisions:
 
 ---
 
+### ValueTables
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `valueTableId` | PK | String (UUID) | Unique value-table identifier |
+| `projectId` | GSI PK (`projectId-index`) | String (UUID) | Parent project |
+| `key` | — | String | Stable project-unique table key |
+| `name` | — | String | Display name |
+| `description` | — | String | Optional description |
+| `sideA` | — | Map | Side A metadata (`key`, `label`, `type`) |
+| `sideB` | — | Map | Side B metadata (`key`, `label`, `type`) |
+| `currentRevision` | — | Number | Latest immutable revision pointer |
+| `currentRowCount` | — | Number | Row count of current revision |
+| `status` | — | String | `active` / `archived` |
+| `createdAt` | — | String | ISO 8601 |
+| `createdBy` | — | String | Optional author identifier |
+| `updatedAt` | — | String | ISO 8601 |
+| `updatedBy` | — | String | Optional updater identifier |
+
+---
+
+### ValueTableRevisions
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `valueTableId` | PK | String (UUID) | Parent value table |
+| `revision` | SK | Number | Immutable revision number |
+| `sideA` | — | Map | Side A metadata at this revision |
+| `sideB` | — | Map | Side B metadata at this revision |
+| `rowCount` | — | Number | Row count for this revision |
+| `directionSupport` | — | Map | `{ aToB, bToA }` computed direction validity |
+| `rowsS3Key` | — | String | S3 key of immutable row payload JSON |
+| `contentHash` | — | String | Deterministic hash of revision payload |
+| `createdAt` | — | String | ISO 8601 |
+| `createdBy` | — | String | Optional author identifier |
+
+---
+
 ## 3) S3 Object Layout
 
 Bucket: configured via `STORAGE_BUCKET` environment variable.
@@ -187,6 +225,7 @@ Bucket: configured via `STORAGE_BUCKET` environment variable.
 | `schemas/{schemaId}/samples/{sampleId}/payload.xml` | Persisted XML sample payload blob | `application/xml` |
 | `mappings/{mappingId}/config.json` | Current mapping config | `application/json` |
 | `mappings/{mappingId}/revisions/r{N}.json` | Revision N config snapshot | `application/json` |
+| `value-tables/{valueTableId}/revisions/r{N}.json` | Value-table revision row payload | `application/json` |
 
 Rules:
 - Schema content is always stored in S3 (may exceed DynamoDB's 400KB limit).
@@ -396,6 +435,49 @@ Revision/version snapshot compatibility:
 - Mapping revisions/versions continue to snapshot full config in S3; FS-093 enrichment fields are additive and included in those snapshots.
 - No PK/SK table-key migration is required for FS-093; change is payload-shape evolution within existing records.
 
+## FS-096 project value-table persistence addendum
+
+FS-096 introduces project-scoped reusable value tables with immutable revision storage and mapping usage/resolve support.
+
+Canonical table model additions:
+
+- `ValueTables` (metadata/current pointer):
+  - PK: `valueTableId`
+  - attributes include `projectId`, `key`, side metadata (`sideA`, `sideB`), `currentRevision`, `status`, timestamps
+  - project listing path uses `projectId-index`
+- `ValueTableRevisions` (immutable revision metadata):
+  - PK: `valueTableId`, SK: `revision`
+  - attributes include side metadata, `directionSupport`, `rowCount`, `rowsS3Key`, `contentHash`, timestamps
+
+Row payload storage decision (resolved in FS-096 Rev 2):
+
+- Every revision row payload is stored as immutable S3 JSON under:
+  - `value-tables/{valueTableId}/revisions/r{revision}.json`
+- DynamoDB stores metadata/index fields only; S3 is canonical for row payload retrieval.
+- No threshold split path is used in this phase.
+
+Mapping pin/resolve persistence contract:
+
+- Mapping rule config stores embedded project `valueTableRef` with:
+  - pinned `valueTableId`, `tableKey`, `revision`
+  - explicit direction keys (`inputSideKey`, `outputSideKey`)
+  - typed `resolvedEntries[]` for deterministic execution
+  - optional source metadata (`tableName`, `revisionCreatedAt`)
+- Optional per-rule `noMatchBehavior` is persisted alongside `valueTableRef`.
+
+Usage index contract:
+
+- Usage responses are derived from mapping configs for value-table references and include:
+  - pinned revision/direction
+  - latest revision metadata
+  - `newerRevisionAvailable` and latest-direction support indicators
+- Delete guardrails depend on this usage derivation and block referenced-table deletion.
+
+Determinism and snapshot compatibility:
+
+- Mapping revisions/versions continue to snapshot full config in S3; embedded project `valueTableRef.resolvedEntries` are part of those immutable snapshots.
+- This preserves offline/browser determinism and downstream deployment/runtime no-table-fetch behavior.
+
 ## 6) Draft / Revision / Version Model
 
 ### Three-tier semantics
@@ -442,10 +524,12 @@ src/lib/persistence/
   schema-nodes.ts       SchemaNodes batch/query operations
   mapping-revisions.ts  MappingRevisions operations (save/list/get/getConfig + selective prune)
   mapping-versions.ts   MappingVersions operations (create/list/get + compatibility shims)
+  value-tables.ts       Project value-table operations (metadata/revision/usage/resolve)
   s3/
     index.ts            S3 helper barrel
     schema-content.ts   Schema original + processed content helpers
     mapping-config.ts   Mapping config put/get/delete helpers
+    value-table-revisions.ts  Value-table revision rows put/get helpers (immutable S3 JSON)
 ```
 
 Rules:
@@ -472,6 +556,8 @@ Rules:
 | `SCHEMA_NODES_TABLE` | SchemaNodes table name | `keyra-schema-nodes` |
 | `MAPPING_REVISIONS_TABLE` | MappingRevisions table name | `keyra-mapping-revisions` |
 | `MAPPING_VERSIONS_TABLE` | MappingVersions table name | `keyra-mapping-versions` |
+| `VALUE_TABLES_TABLE` | ValueTables table name | `keyra-value-tables` |
+| `VALUE_TABLE_REVISIONS_TABLE` | ValueTableRevisions table name | `keyra-value-table-revisions` |
 | `STORAGE_BUCKET` | S3 bucket name | `keyra-storage` |
 
 For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_ENDPOINT=http://localhost:4566`.

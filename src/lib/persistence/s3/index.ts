@@ -1,4 +1,10 @@
 export { delete as deleteMappingConfig, get as getMappingConfig, mappingConfig, put as putMappingConfig } from './mapping-config.js';
+export {
+  delete as deleteValueTableRevisionRows,
+  get as getValueTableRevisionRows,
+  put as putValueTableRevisionRows,
+  valueTableRevisionsContent,
+} from './value-table-revisions.js';
 export { deploymentSnapshot, put as putDeploymentSnapshot } from './deployment-snapshot.js';
 export {
   delete as deleteSchemaContent,

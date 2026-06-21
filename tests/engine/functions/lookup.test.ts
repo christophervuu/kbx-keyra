@@ -5,7 +5,7 @@ import type { AstNode, EvaluationContext } from '../../../src/engine/dsl/types.j
 import { registerLookupFunctions } from '../../../src/engine/functions/lookup.js';
 import { createRegistry } from '../../../src/engine/registry/function-registry.js';
 
-function createContext(): EvaluationContext {
+function createContext(currentRule?: EvaluationContext['currentRule']): EvaluationContext {
   const registry = createRegistry();
   registerLookupFunctions(registry);
 
@@ -16,6 +16,7 @@ function createContext(): EvaluationContext {
     externalSources: {},
     registry,
     options: {},
+    currentRule,
     evaluate,
     addDiagnostic: () => {
       // Overridden by evaluator root context.
@@ -218,6 +219,219 @@ describe('valueMap()', () => {
     expect(booleanLookup.value).toBe('yes');
     expect(numericLookup.diagnostics).toEqual([]);
     expect(booleanLookup.diagnostics).toEqual([]);
+  });
+
+  it('supports valueTable(...) accessor against current rule resolved entries', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [
+          { in: 'confirmed', out: 'OPEN', rowId: 'r1' },
+          { in: 'shipped', out: 'COMPLETED', rowId: 'r2' },
+        ],
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'confirmed', start: 0, end: 0 },
+        {
+          type: 'FunctionCall',
+          name: 'valueTable',
+          arguments: [
+            { type: 'StringLiteral', value: 'order-status', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'oms', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'cdm', start: 0, end: 0 },
+          ],
+          start: 0,
+          end: 0,
+        },
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('OPEN');
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('respects noMatchBehavior return_input for project value table refs', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }],
+      },
+      noMatchBehavior: {
+        mode: 'return_input',
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        {
+          type: 'FunctionCall',
+          name: 'valueTable',
+          arguments: [
+            { type: 'StringLiteral', value: 'order-status', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'oms', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'cdm', start: 0, end: 0 },
+          ],
+          start: 0,
+          end: 0,
+        },
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('missing');
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-W003')).toBe(true);
+  });
+
+  it('respects noMatchBehavior return_null for project value table refs and keeps diagnostic context', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }],
+      },
+      noMatchBehavior: {
+        mode: 'return_null',
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        {
+          type: 'FunctionCall',
+          name: 'valueTable',
+          arguments: [
+            { type: 'StringLiteral', value: 'order-status', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'oms', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'cdm', start: 0, end: 0 },
+          ],
+          start: 0,
+          end: 0,
+        },
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBeNull();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'KEYRA-W003',
+        location: expect.objectContaining({ function: 'valueMap', argumentIndex: 0 }),
+      }),
+    );
+  });
+
+  it('respects noMatchBehavior fallback_value for project value table refs', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }],
+      },
+      noMatchBehavior: {
+        mode: 'fallback_value',
+        fallbackValue: 'NOT_MAPPED',
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        {
+          type: 'FunctionCall',
+          name: 'valueTable',
+          arguments: [
+            { type: 'StringLiteral', value: 'order-status', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'oms', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'cdm', start: 0, end: 0 },
+          ],
+          start: 0,
+          end: 0,
+        },
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('NOT_MAPPED');
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-W003')).toBe(true);
+  });
+
+  it('keeps inline object-literal valueMap behavior even when rule has project value-table metadata', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression: 'valueMap(source("status"), {"A":"ACTIVE"}, "UNKNOWN")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }],
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'A', start: 0, end: 0 },
+        objectNode([{ key: 'A', value: { type: 'StringLiteral', value: 'ACTIVE', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('ACTIVE');
+    expect(result.diagnostics).toEqual([]);
   });
 
   it('empty mappings object returns null and emits W003', () => {

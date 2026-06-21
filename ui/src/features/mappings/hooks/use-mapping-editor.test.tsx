@@ -1552,6 +1552,7 @@ describe('useMappingEditor', () => {
       expect(result.current.draftRules.size).toBe(0);
       // The new rule should be in saved rules
       expect(result.current.rules.find((r) => r.target === 'A.D')?.expression).toBe('static("new")');
+      expect(result.current.rules.find((r) => r.target === 'A.D')?.type).toBe('string');
       // adapter should have been called with the merged rules
       expect(adapter.saveMapping).toHaveBeenCalledWith(
         'mapping-1',
@@ -1561,6 +1562,103 @@ describe('useMappingEditor', () => {
           ]),
         }),
       );
+    });
+
+    it('uses parsed target schema type when adding draft-only rules on save', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') {
+            return Promise.resolve({
+              ...MOCK_TARGET_SCHEMA,
+              content: {
+                type: 'object',
+                properties: {
+                  A: {
+                    type: 'object',
+                    properties: {
+                      B: { type: 'string' },
+                      C: { type: 'number' },
+                      D: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            } satisfies SchemaDetail);
+          }
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      act(() => {
+        result.current.actions.updateDraft('A.D', 'cast(source("y"), "number")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(result.current.rules.find((r) => r.target === 'A.D')?.type).toBe('number');
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          rules: expect.arrayContaining([
+            expect.objectContaining({ target: 'A.D', type: 'number' }),
+          ]),
+        }),
+      );
+    });
+
+    it('normalizes stale loaded rule types against target schema before editing', async () => {
+      const staleConfig: MappingConfig = {
+        ...MOCK_CONFIG,
+        rules: [
+          ...MOCK_CONFIG.rules,
+          {
+            target: 'A.D',
+            type: 'string',
+            expression: 'cast(source("y"), "number")',
+          },
+        ],
+      };
+      const adapter = createMockAdapter({
+        getMapping: vi.fn().mockResolvedValue(staleConfig),
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') {
+            return Promise.resolve({
+              ...MOCK_TARGET_SCHEMA,
+              content: {
+                type: 'object',
+                properties: {
+                  A: {
+                    type: 'object',
+                    properties: {
+                      B: { type: 'string' },
+                      C: { type: 'number' },
+                      D: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            } satisfies SchemaDetail);
+          }
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.rules.find((r) => r.target === 'A.D')?.type).toBe('number');
     });
 
     it('merges draft updates into saved rules on save', async () => {

@@ -17,11 +17,48 @@ export interface MappingConfigBlock {
   readonly externalSources: readonly string[];
 }
 
+export type ValueTableValueType = 'string' | 'number' | 'boolean';
+
+export type ValueTablePrimitiveValue = string | number | boolean;
+
+export interface ValueTableResolvedEntry {
+  readonly in: ValueTablePrimitiveValue;
+  readonly out: ValueTablePrimitiveValue;
+  readonly rowId: string;
+}
+
+export interface MappingRuleProjectValueTableRef {
+  readonly scope: 'project';
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly inputType: ValueTableValueType;
+  readonly outputType: ValueTableValueType;
+  readonly resolvedEntries: readonly ValueTableResolvedEntry[];
+}
+
+export interface MappingRuleInlineValueTableRef {
+  readonly scope: 'inline';
+}
+
+export type MappingRuleValueTableRef = MappingRuleProjectValueTableRef | MappingRuleInlineValueTableRef;
+
+export type ValueTableNoMatchMode = 'return_null' | 'return_input' | 'fallback_value';
+
+export interface MappingRuleNoMatchBehavior {
+  readonly mode: ValueTableNoMatchMode;
+  readonly fallbackValue?: ValueTablePrimitiveValue;
+}
+
 export interface MappingRule {
   readonly target: string;
   readonly type: RuleType;
   readonly expression: string;
   readonly description?: string;
+  readonly valueTableRef?: MappingRuleValueTableRef;
+  readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
 }
 
 export interface MappingConfig {

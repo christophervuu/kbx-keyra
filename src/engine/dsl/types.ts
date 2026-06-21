@@ -1,4 +1,5 @@
 import type { FunctionRegistry } from '../registry/function-registry.js';
+import type { MappingRule } from '../types/config.js';
 import type { EngineOptions } from '../types/options.js';
 import type { Diagnostic } from '../types/results.js';
 
@@ -113,6 +114,7 @@ export interface EvaluationContext {
   readonly externalSources: Readonly<Record<string, unknown>>;
   readonly registry: FunctionRegistry;
   readonly options: EngineOptions;
+  currentRule?: MappingRule;
   readonly currentItem?: unknown;
   readonly parentItem?: unknown;
   readonly evaluate: (node: AstNode, context: EvaluationContext) => EvaluationResult;

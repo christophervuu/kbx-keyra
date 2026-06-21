@@ -97,6 +97,196 @@ export type DeploymentRecordStatus = 'active' | 'superseded' | 'rolled-back';
 
 export type SchemaRefType = 'github' | 'local' | 'published';
 
+export type ValueTableValueType = 'string' | 'number' | 'boolean';
+
+export type ValueTablePrimitiveValue = string | number | boolean;
+
+export type ValueTableStatus = 'active' | 'archived';
+
+export type ValueTableScope = 'project' | 'inline';
+
+export type ValueTableDirection = 'a_to_b' | 'b_to_a';
+
+export interface ValueTableSideDefinition {
+  readonly key: string;
+  readonly label: string;
+  readonly type: ValueTableValueType;
+}
+
+export interface ProjectValueTable {
+  readonly id: string;
+  readonly projectId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly currentRevision: number;
+  readonly status: ValueTableStatus;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+  readonly updatedAt: ISODateString;
+  readonly updatedBy?: string;
+}
+
+export interface ProjectValueTableRevisionRow {
+  readonly id: string;
+  readonly sideAValue: ValueTablePrimitiveValue;
+  readonly sideBValue: ValueTablePrimitiveValue;
+  readonly description?: string;
+}
+
+export interface ValueTableDirectionSupport {
+  readonly aToB: boolean;
+  readonly bToA: boolean;
+}
+
+export interface ProjectValueTableRevision {
+  readonly valueTableId: string;
+  readonly revision: number;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+  readonly rowCount: number;
+  readonly directionSupport: ValueTableDirectionSupport;
+  readonly contentHash?: string;
+  readonly rowsS3Key?: string;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+}
+
+export interface ValueTableResolvedEntry {
+  readonly in: ValueTablePrimitiveValue;
+  readonly out: ValueTablePrimitiveValue;
+  readonly rowId: string;
+}
+
+export interface ValueTableRefSourceMeta {
+  readonly tableName?: string;
+  readonly revisionCreatedAt?: ISODateString;
+}
+
+export interface MappingRuleProjectValueTableRef {
+  readonly scope: 'project';
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly inputType: ValueTableValueType;
+  readonly outputType: ValueTableValueType;
+  readonly resolvedEntries: readonly ValueTableResolvedEntry[];
+  readonly sourceMeta?: ValueTableRefSourceMeta;
+}
+
+export interface MappingRuleInlineValueTableRef {
+  readonly scope: 'inline';
+}
+
+export type MappingRuleValueTableRef = MappingRuleProjectValueTableRef | MappingRuleInlineValueTableRef;
+
+export type ValueTableNoMatchMode = 'return_null' | 'return_input' | 'fallback_value';
+
+export interface MappingRuleNoMatchBehavior {
+  readonly mode: ValueTableNoMatchMode;
+  readonly fallbackValue?: ValueTablePrimitiveValue;
+}
+
+export interface ValueTableUsageEntry {
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly mappingId: string;
+  readonly mappingName?: string;
+  readonly mappingVersion?: number;
+  readonly pinnedRevision: number;
+  readonly direction: ValueTableDirection;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly newerRevisionAvailable: boolean;
+  readonly latestRevision: number;
+  readonly latestDirectionSupported?: boolean;
+  readonly updatedAt?: ISODateString;
+}
+
+export type ValueTableDiffChangeType = 'added' | 'removed' | 'changed' | 'unchanged';
+
+export interface ValueTableDiffDirectionImpact {
+  readonly previous: ValueTableDirectionSupport;
+  readonly next: ValueTableDirectionSupport;
+}
+
+export interface ValueTableDiffSummary {
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly fromRevision: number;
+  readonly toRevision: number;
+  readonly counts: {
+    readonly added: number;
+    readonly removed: number;
+    readonly changed: number;
+    readonly unchanged: number;
+  };
+  readonly directionImpact: ValueTableDiffDirectionImpact;
+}
+
+export interface ValueTableDiffChange {
+  readonly changeType: ValueTableDiffChangeType;
+  readonly rowId?: string;
+  readonly before?: ProjectValueTableRevisionRow;
+  readonly after?: ProjectValueTableRevisionRow;
+}
+
+export interface ValueTableDiffPage {
+  readonly summary: ValueTableDiffSummary;
+  readonly changes: readonly ValueTableDiffChange[];
+  readonly pageSize: number;
+  readonly nextCursor?: string;
+}
+
+export interface ValueTableListOptions {
+  readonly query?: string;
+  readonly status?: ValueTableStatus;
+  readonly sortBy?: 'name' | 'updatedAt' | 'usedBy' | 'rowCount';
+  readonly sortDirection?: 'asc' | 'desc';
+}
+
+export interface CreateProjectValueTableInput {
+  readonly projectId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+}
+
+export interface CreateProjectValueTableRevisionInput {
+  readonly valueTableId: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+}
+
+export interface DuplicateProjectValueTableInput {
+  readonly projectId: string;
+  readonly valueTableId: string;
+  readonly name: string;
+  readonly key?: string;
+}
+
+export interface ResolveProjectValueTableReferenceInput {
+  readonly projectId: string;
+  readonly valueTableId?: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+}
+
+export interface ResolveProjectValueTableReferenceResult {
+  readonly ref: MappingRuleProjectValueTableRef;
+}
+
 export interface SchemaRef {
   readonly schemaId: string;
   readonly type: SchemaRefType;
@@ -108,6 +298,8 @@ export interface MappingRule {
   readonly type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | 'any';
   readonly expression: string;
   readonly description?: string;
+  readonly valueTableRef?: MappingRuleValueTableRef;
+  readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
 }
 
 export interface MappingEditorPreferences {

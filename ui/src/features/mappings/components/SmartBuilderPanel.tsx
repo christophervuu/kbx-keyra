@@ -11,9 +11,49 @@ import { resolveSmartBuilderActionsFromDraft } from '../lib/smart-builder-action
 import type {
   BuilderInput,
   BuilderInputTransform,
+  BuilderProjectValueMapSelection,
   SmartBuilderActionParameterValue,
   SmartBuilderHydrationResult,
 } from '../lib/smart-builder-state';
+
+import type {
+  ValueTableDirection,
+  ValueTableNoMatchMode,
+  ValueTablePrimitiveValue,
+  ValueTableScope,
+} from '@/lib/types/domain';
+
+interface ValueMapProjectTableOption {
+  readonly tableId: string;
+  readonly label: string;
+  readonly revision: number;
+  readonly status: 'active' | 'archived';
+  readonly usageCount: number;
+  readonly rowCount: number;
+}
+
+interface ValueMapDirectionOption {
+  readonly direction: ValueTableDirection;
+  readonly label: string;
+  readonly enabled: boolean;
+  readonly reason?: string;
+}
+
+export interface ValueMapProjectUiState {
+  readonly scope: ValueTableScope;
+  readonly tableId: string | null;
+  readonly direction: ValueTableDirection | null;
+  readonly pinnedRevision: number | null;
+  readonly currentRevision: number | null;
+  readonly newerRevisionAvailable: boolean;
+  readonly selectedDirectionInvalidReason?: string;
+  readonly selectedTableName?: string;
+  readonly noMatchMode: ValueTableNoMatchMode;
+  readonly fallbackValue?: ValueTablePrimitiveValue;
+  readonly projectSelection?: BuilderProjectValueMapSelection | null;
+  readonly availableTables: readonly ValueMapProjectTableOption[];
+  readonly directionOptions: readonly ValueMapDirectionOption[];
+}
 
 interface SmartBuilderPanelProps {
   readonly targetPath: string;
@@ -50,6 +90,17 @@ interface SmartBuilderPanelProps {
   readonly actionAnnouncement?: string | null;
   readonly concatSeparator?: string;
   readonly onConcatSeparatorChange?: (separator: string) => void;
+  readonly valueMapProjectState?: ValueMapProjectUiState;
+  readonly onValueMapScopeChange?: (scope: ValueTableScope) => void;
+  readonly onValueMapProjectTableSelect?: (tableId: string) => void;
+  readonly onValueMapDirectionSelect?: (direction: ValueTableDirection) => void;
+  readonly onValueMapNoMatchModeChange?: (mode: ValueTableNoMatchMode) => void;
+  readonly onValueMapFallbackValueChange?: (value: string) => void;
+  readonly onValueMapInlineMappingAdd?: () => void;
+  readonly onValueMapInlineMappingUpdate?: (index: number, patch: { whenValue?: string; outputValue?: string }) => void;
+  readonly onValueMapInlineMappingRemove?: (index: number) => void;
+  readonly onValueMapConvertInlineToProject?: () => void;
+  readonly onValueMapAdoptLatestRevision?: () => void;
 }
 
 export function SmartBuilderPanel({
@@ -72,6 +123,17 @@ export function SmartBuilderPanel({
   actionAnnouncement = null,
   concatSeparator = ' ',
   onConcatSeparatorChange,
+  valueMapProjectState,
+  onValueMapScopeChange,
+  onValueMapProjectTableSelect,
+  onValueMapDirectionSelect,
+  onValueMapNoMatchModeChange,
+  onValueMapFallbackValueChange,
+  onValueMapInlineMappingAdd,
+  onValueMapInlineMappingUpdate,
+  onValueMapInlineMappingRemove,
+  onValueMapConvertInlineToProject,
+  onValueMapAdoptLatestRevision,
 }: SmartBuilderPanelProps) {
   const [showAddInput, setShowAddInput] = useState(false);
   const [showConditionEditor, setShowConditionEditor] = useState(false);
@@ -165,16 +227,15 @@ export function SmartBuilderPanel({
     }
     return 'base.none';
   })();
-
   const mappingMethodLabel =
     mappingMethodId === 'text.concat'
       ? 'Combine text'
       : mappingMethodId === 'null.coalesce'
         ? 'Use first available'
         : mappingMethodId === 'condition.compare'
-          ? 'Compare inputs'
+          ? 'Conditional'
           : mappingMethodId === 'lookup.valueMap'
-            ? 'Map values'
+            ? 'Value Mapping'
             : mappingMethodId === 'advanced.expression'
               ? 'Edit expression'
               : mappingMethodId === 'base.calculation'
@@ -189,7 +250,7 @@ export function SmartBuilderPanel({
                         ? 'Divide numbers'
                         : mappingMethodId === 'base.none'
                           ? 'Needs action'
-                        : 'Direct mapping';
+                        : 'Direct Mapping';
   const isMethodNeedsAction = mappingMethodId === 'base.none';
 
   const defaultFallback = hydration.draft.composition?.kind === 'default'
@@ -355,27 +416,23 @@ export function SmartBuilderPanel({
   })();
 
   const shouldRenderMethodPreview = mappingMethodId !== 'base.direct';
+  const valueMapComposition = hydration.draft.composition?.kind === 'valueMap'
+    ? hydration.draft.composition
+    : null;
+  void onValueMapConvertInlineToProject;
 
   const basePickerActions = (() => {
     const options = [
       {
         id: 'base.direct',
-        label: 'Direct mapping',
+        label: 'Direct Mapping',
         enabled: hydration.draft.inputs.length === 1,
         reason: hydration.draft.inputs.length === 0
           ? 'Select at least one input first.'
-          : 'Direct mapping is only valid with exactly one input.',
+          : 'Direct Mapping is only valid with exactly one input.',
       },
-      { id: 'base.calculation', label: 'Calculation' },
-      { id: 'number.add', label: 'Add numbers' },
-      { id: 'number.subtract', label: 'Subtract numbers' },
-      { id: 'number.multiply', label: 'Multiply numbers' },
-      { id: 'number.divide', label: 'Divide numbers' },
-      { id: 'text.concat', label: 'Combine text' },
-      { id: 'null.coalesce', label: 'Use first available' },
-      { id: 'condition.compare', label: 'Compare inputs' },
-      { id: 'lookup.valueMap', label: 'Map values' },
-      { id: 'advanced.expression', label: 'Edit expression' },
+      { id: 'condition.compare', label: 'Conditional' },
+      { id: 'lookup.valueMap', label: 'Value Mapping' },
     ];
     const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
     return options.map((option) => {
@@ -383,15 +440,6 @@ export function SmartBuilderPanel({
         return { id: option.id, label: option.label, enabled: option.enabled, reason: option.reason };
       }
       const resolved = resolvedById.get(option.id);
-      if (option.id === 'base.calculation') {
-        const numericCount = hydration.draft.inputs.filter((input) => input.valueType === 'number').length;
-        return {
-          id: option.id,
-          label: option.label,
-          enabled: numericCount >= 2,
-          reason: numericCount >= 2 ? undefined : 'Requires at least two numeric inputs.',
-        };
-      }
       return {
         id: option.id,
         label: option.label,
@@ -453,7 +501,8 @@ export function SmartBuilderPanel({
         : effectivePickerMode === 'step'
           ? stepPickerActions
           : [];
-  const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
+  const supportsPickerSearch = effectivePickerMode !== 'base';
+  const normalizedPickerQuery = supportsPickerSearch ? pickerQuery.trim().toLowerCase() : '';
   const visibleEnabledPickerActions = activePickerActions.filter((action) => {
     if (!action.enabled) return false;
     if (!normalizedPickerQuery) return true;
@@ -968,6 +1017,67 @@ export function SmartBuilderPanel({
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-preview">{composePreview}</p>
             )}
 
+            {effectivePickerMode === 'base' && (
+              <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-base-picker">
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Choose mapping method
+                  </p>
+                  {!isMethodNeedsAction && (
+                    <button
+                      type="button"
+                      className="text-[11px] text-slate-500 hover:text-slate-300"
+                      data-testid="smart-picker-close"
+                      onClick={() => setPickerMode(null)}
+                    >
+                      Close
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
+                  {basePickerActions.map((action) => (
+                    <div key={action.id}>
+                      <button
+                        type="button"
+                        data-testid={`smart-picker-action-${action.id}`}
+                        disabled={!action.enabled}
+                        className={`w-full rounded border px-2 py-1.5 text-left text-xs ${action.enabled ? 'border-slate-700 bg-slate-900/70 text-slate-100 hover:border-slate-500' : 'cursor-not-allowed border-slate-800 bg-slate-950/70 text-slate-500'}`}
+                        onClick={() => {
+                          if (!action.enabled) return;
+
+                          const parameterDefinitions = getSmartBuilderActionParameters(action.id);
+                          if (parameterDefinitions.length > 0) {
+                            onBeginActionParameterEdit?.(action.id);
+                            setParameterEditorStepIndex(null);
+                            setParameterEditorStepScope(null);
+                            setPickerMode(null);
+                            return;
+                          }
+
+                          if (action.id === 'condition.if' || action.id === 'condition.compare' || action.id === 'condition.truthy') {
+                            setShowConditionEditor(true);
+                            onConditionFocusedSlotChange?.('condition:left');
+                          }
+                          onApplyAction?.(action.id);
+                          setParameterEditorStepIndex(null);
+                          setParameterEditorStepScope(null);
+                          setPickerMode(null);
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                      {!action.enabled && action.reason && (
+                        <p className="mt-1 text-[11px] text-slate-500" data-testid={`smart-picker-disabled-reason-${action.id}`}>
+                          {action.reason}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {mappingMethodId === 'base.direct' && (
               <div className="mt-3" data-testid="smart-missing-value-section">
                 <div className="flex items-center justify-between">
@@ -1039,7 +1149,169 @@ export function SmartBuilderPanel({
             </div>
           )}
 
-          {!isMethodNeedsAction && (
+          {mappingMethodId === 'lookup.valueMap' && valueMapProjectState && valueMapComposition && (
+            <div className="mt-3 rounded border border-slate-800 bg-slate-950/30 px-2.5 py-2" data-testid="smart-value-map-config">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Value table scope</p>
+              <div className="mt-1 flex gap-1.5" role="group" aria-label="Value map scope">
+                <button
+                  type="button"
+                  data-testid="smart-value-map-scope-inline"
+                  className={`rounded border px-2 py-1 text-[11px] ${valueMapProjectState.scope === 'inline' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                  onClick={() => onValueMapScopeChange?.('inline')}
+                >
+                  Inline value map
+                </button>
+                <button
+                  type="button"
+                  data-testid="smart-value-map-scope-project"
+                  className={`rounded border px-2 py-1 text-[11px] ${valueMapProjectState.scope === 'project' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                  onClick={() => onValueMapScopeChange?.('project')}
+                >
+                  Project value table
+                </button>
+              </div>
+
+              {valueMapProjectState.scope === 'project' ? (
+                <>
+                  <label className="mt-2 block text-[11px] text-slate-400" htmlFor="smart-value-map-table-select">Project table</label>
+                  <select
+                    id="smart-value-map-table-select"
+                    data-testid="smart-value-map-table-select"
+                    className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    value={valueMapProjectState.tableId ?? ''}
+                    onChange={(event) => {
+                      if (event.target.value) onValueMapProjectTableSelect?.(event.target.value);
+                    }}
+                  >
+                    <option value="">Select project table…</option>
+                    {valueMapProjectState.availableTables.map((table) => (
+                      <option key={table.tableId} value={table.tableId}>
+                        {table.label} · r{table.revision} · {table.rowCount} rows
+                      </option>
+                    ))}
+                  </select>
+
+                  {valueMapProjectState.directionOptions.length > 0 && (
+                    <div className="mt-2" data-testid="smart-value-map-direction-group">
+                      <p className="text-[11px] text-slate-400">Lookup direction</p>
+                      <div className="mt-1 space-y-1">
+                        {valueMapProjectState.directionOptions.map((option) => (
+                          <button
+                            key={option.direction}
+                            type="button"
+                            data-testid={`smart-value-map-direction-${option.direction}`}
+                            disabled={!option.enabled}
+                            className={`w-full rounded border px-2 py-1 text-left text-[11px] ${valueMapProjectState.direction === option.direction ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-200'} disabled:cursor-not-allowed disabled:opacity-50`}
+                            onClick={() => onValueMapDirectionSelect?.(option.direction)}
+                          >
+                            <span>{option.label}</span>
+                            {!option.enabled && option.reason && (
+                              <span className="ml-2 text-slate-400">{option.reason}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {valueMapProjectState.newerRevisionAvailable && (
+                    <div className="mt-2 rounded border border-amber-700/60 bg-amber-900/20 px-2 py-1.5" data-testid="smart-value-map-newer-revision">
+                      <p className="text-[11px] text-amber-200">A newer table revision is available.</p>
+                      <button
+                        type="button"
+                        data-testid="smart-value-map-adopt-latest"
+                        className="mt-1 rounded border border-amber-700 px-2 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/30"
+                        onClick={() => onValueMapAdoptLatestRevision?.()}
+                      >
+                        Review newer revision
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="mt-2" data-testid="smart-value-map-inline-editor">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] text-slate-400">Inline mappings</p>
+                    <button
+                      type="button"
+                      data-testid="smart-value-map-inline-add"
+                      className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                      onClick={() => onValueMapInlineMappingAdd?.()}
+                    >
+                      + Add row
+                    </button>
+                  </div>
+
+                  {valueMapComposition.mappings.length === 0 ? (
+                    <p className="mt-1 text-xs text-slate-400" data-testid="smart-value-map-inline-empty">No inline mappings yet.</p>
+                  ) : (
+                    <div className="mt-2 space-y-1.5" data-testid="smart-value-map-inline-rows">
+                      {valueMapComposition.mappings.map((entry, index) => (
+                        <div key={`inline-value-map-row-${index}`} className="rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5" data-testid={`smart-value-map-inline-row-${index}`}>
+                          <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-1.5">
+                            <input
+                              type="text"
+                              data-testid={`smart-value-map-inline-when-${index}`}
+                              value={entry.whenValue}
+                              onChange={(event) => onValueMapInlineMappingUpdate?.(index, { whenValue: event.target.value })}
+                              className="h-8 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                              placeholder="Input value"
+                            />
+                            <span className="text-[11px] text-slate-500">→</span>
+                            <input
+                              type="text"
+                              data-testid={`smart-value-map-inline-output-${index}`}
+                              value={entry.output.kind === 'static' ? String(entry.output.value ?? '') : ''}
+                              onChange={(event) => onValueMapInlineMappingUpdate?.(index, { outputValue: event.target.value })}
+                              className="h-8 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                              placeholder="Output value"
+                            />
+                            <button
+                              type="button"
+                              data-testid={`smart-value-map-inline-remove-${index}`}
+                              className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                              onClick={() => onValueMapInlineMappingRemove?.(index)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
+              )}
+
+              <div className="mt-2" data-testid="smart-value-map-no-match">
+                <label className="text-[11px] text-slate-400" htmlFor="smart-value-map-no-match-mode">No match behavior</label>
+                <select
+                  id="smart-value-map-no-match-mode"
+                  data-testid="smart-value-map-no-match-mode"
+                  className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                  value={valueMapProjectState.noMatchMode}
+                  onChange={(event) => onValueMapNoMatchModeChange?.(event.target.value as ValueTableNoMatchMode)}
+                >
+                  <option value="fallback_value">Use fallback value</option>
+                  <option value="return_input">Return input value</option>
+                  <option value="return_null">Return null</option>
+                </select>
+                {valueMapProjectState.noMatchMode === 'fallback_value' && (
+                  <input
+                    type="text"
+                    data-testid="smart-value-map-fallback-input"
+                    value={String(valueMapProjectState.fallbackValue ?? '')}
+                    onChange={(event) => onValueMapFallbackValueChange?.(event.target.value)}
+                    className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    placeholder="Fallback value"
+                  />
+                )}
+              </div>
+
+            </div>
+          )}
+
+          {!isMethodNeedsAction && mappingMethodId !== 'lookup.valueMap' && (
             <>
               <div className="mt-3" data-testid="smart-recipe-input-transforms">
                 <div className="flex items-center justify-between">
@@ -1304,7 +1576,7 @@ export function SmartBuilderPanel({
 
           {!isDefaultFallbackParameterEditor && parameterEditorBlock}
 
-            {effectivePickerMode !== null && (
+            {mappingMethodId !== 'lookup.valueMap' && (effectivePickerMode === 'transform' || effectivePickerMode === 'step') && (
               <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid={`smart-${effectivePickerMode}-picker`}>
                 <div className="mb-1 flex items-center justify-between">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -1326,17 +1598,19 @@ export function SmartBuilderPanel({
                 )}
               </div>
 
-              <input
-                type="search"
-                value={pickerQuery}
-                onChange={(event) => {
-                  setPickerQuery(event.target.value);
-                  setExpandedDisabledId(null);
-                }}
-                placeholder="Search actions..."
-                data-testid="smart-picker-search"
-                className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
-              />
+              {supportsPickerSearch && (
+                <input
+                  type="search"
+                  value={pickerQuery}
+                  onChange={(event) => {
+                    setPickerQuery(event.target.value);
+                    setExpandedDisabledId(null);
+                  }}
+                  placeholder="Search actions..."
+                  data-testid="smart-picker-search"
+                  className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+                />
+              )}
 
               <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
                 {visibleEnabledPickerActions.map((action) => (
@@ -1370,7 +1644,7 @@ export function SmartBuilderPanel({
                 ))}
               </div>
 
-                {(normalizedPickerQuery.length > 0 && visibleDisabledPickerActions.length > 0) && (
+                {(supportsPickerSearch && normalizedPickerQuery.length > 0 && visibleDisabledPickerActions.length > 0) && (
                   <ul className="mt-2 space-y-1.5" data-testid="smart-picker-disabled-actions">
                   {visibleDisabledPickerActions.map((action) => {
                     const expanded = expandedDisabledId === action.id;

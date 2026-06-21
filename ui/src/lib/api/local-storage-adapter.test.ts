@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalStorageAdapter } from '@/lib/api';
+import { executeMapping } from '@/lib/engine';
 import type { CreateProjectInput, MappingConfig, MappingVersionEntry, SchemaRef } from '@/lib/types';
 
 const SOURCE_SCHEMA_REF: SchemaRef = {
@@ -332,6 +333,348 @@ describe('LocalStorageAdapter', () => {
     expect(config.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
     expect(config.config.externalSources).toEqual(['legacyAlias']);
     expect(created.enrichmentSources).toEqual([{ alias: 'legacyAlias', required: false }]);
+  });
+
+  it('creates project value table and resolves pinned reference entries', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const table = await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [
+        { id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+        { id: 'r2', sideAValue: 'shipped', sideBValue: 'COMPLETED' },
+      ],
+    });
+
+    const listed = await adapter.listProjectValueTables(project.projectId);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe(table.id);
+
+    const resolved = await adapter.resolveProjectValueTableReference({
+      projectId: project.projectId,
+      valueTableId: table.id,
+      tableKey: 'order-status',
+      revision: 1,
+      inputSideKey: 'oms-status',
+      outputSideKey: 'cdm-status',
+    });
+
+    expect(resolved.ref.valueTableId).toBe(table.id);
+    expect(resolved.ref.revision).toBe(1);
+    expect(resolved.ref.resolvedEntries).toEqual([
+      { in: 'confirmed', out: 'OPEN', rowId: 'r1' },
+      { in: 'shipped', out: 'COMPLETED', rowId: 'r2' },
+    ]);
+  });
+
+  it('returns paginated value-table revision diff with full summary', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const table = await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [
+        { id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+        { id: 'r2', sideAValue: 'shipped', sideBValue: 'COMPLETED' },
+      ],
+    });
+
+    await adapter.createProjectValueTableRevision(table.id, {
+      valueTableId: table.id,
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [
+        { id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+        { id: 'r2', sideAValue: 'shipped', sideBValue: 'DONE' },
+        { id: 'r3', sideAValue: 'cancelled', sideBValue: 'CANCELLED' },
+      ],
+    });
+
+    const page1 = await adapter.getProjectValueTableRevisionDiff(table.id, 1, 2, { pageSize: 1 });
+    expect(page1.summary.counts).toEqual({ added: 1, removed: 0, changed: 1, unchanged: 1 });
+    expect(page1.changes).toHaveLength(1);
+    expect(page1.nextCursor).toBe('1');
+
+    const page2 = await adapter.getProjectValueTableRevisionDiff(table.id, 1, 2, {
+      pageSize: 1,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.summary.counts).toEqual({ added: 1, removed: 0, changed: 1, unchanged: 1 });
+    expect(page2.changes).toHaveLength(1);
+  });
+
+  it('enforces value-table key uniqueness within a project', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    await expect(
+      adapter.createProjectValueTable({
+        projectId: project.projectId,
+        key: 'order-status',
+        name: 'Duplicate Key Table',
+        sideA: { key: 'a', label: 'A', type: 'string' },
+        sideB: { key: 'b', label: 'B', type: 'string' },
+        rows: [{ id: 'r2', sideAValue: 'x', sideBValue: 'y' }],
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
+
+  it('requires explicit adoption and does not silently repin pinned revisions', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const table = await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    const resolvedRevision1 = await adapter.resolveProjectValueTableReference({
+      projectId: project.projectId,
+      valueTableId: table.id,
+      tableKey: table.key,
+      revision: 1,
+      inputSideKey: 'oms-status',
+      outputSideKey: 'cdm-status',
+    });
+
+    const mapping = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [
+        {
+          target: 'Order.status',
+          type: 'string',
+          expression: 'valueMap(source("status"), valueTable("order-status", "oms-status", "cdm-status"), "UNKNOWN")',
+          valueTableRef: resolvedRevision1.ref,
+          noMatchBehavior: {
+            mode: 'fallback_value',
+            fallbackValue: 'UNKNOWN',
+          },
+        },
+      ],
+    });
+
+    await adapter.createProjectValueTableRevision(table.id, {
+      valueTableId: table.id,
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'COMPLETED' }],
+    });
+
+    const usage = await adapter.listProjectValueTableUsage(table.id);
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({
+      mappingId: mapping.mappingId,
+      pinnedRevision: 1,
+      latestRevision: 2,
+      newerRevisionAvailable: true,
+    });
+
+    const loaded = await adapter.getMapping(mapping.mappingId);
+    const ref = loaded.rules[0]?.valueTableRef;
+    expect(ref?.scope).toBe('project');
+    if (ref?.scope === 'project') {
+      expect(ref.revision).toBe(1);
+      expect(ref.resolvedEntries).toEqual([{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }]);
+    }
+
+    const execution = executeMapping(
+      loaded,
+      { status: 'confirmed' },
+      { type: 'object' },
+      { type: 'object' },
+    );
+    expect(execution.output).toEqual({ Order: { status: 'OPEN' } });
+  });
+
+  it('blocks creating revisions and resolving references for archived tables', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const table = await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    await adapter.archiveProjectValueTable(table.id);
+
+    await expect(
+      adapter.createProjectValueTableRevision(table.id, {
+        valueTableId: table.id,
+        sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+        sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+        rows: [{ id: 'r2', sideAValue: 'shipped', sideBValue: 'COMPLETED' }],
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+
+    await expect(
+      adapter.resolveProjectValueTableReference({
+        projectId: project.projectId,
+        valueTableId: table.id,
+        tableKey: table.key,
+        revision: 1,
+        inputSideKey: 'oms-status',
+        outputSideKey: 'cdm-status',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
+
+  it('adopting newer revision updates execution behavior after explicit repin', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Project',
+      description: 'desc',
+      slug: 'project',
+    });
+
+    const table = await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'order-status',
+      name: 'Order Status Codes',
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    const refRevision1 = await adapter.resolveProjectValueTableReference({
+      projectId: project.projectId,
+      valueTableId: table.id,
+      tableKey: table.key,
+      revision: 1,
+      inputSideKey: 'oms-status',
+      outputSideKey: 'cdm-status',
+    });
+
+    const mapping = await adapter.createMapping({
+      projectId: project.projectId,
+      name: 'Mapping A',
+      sourceSchemaRef: SOURCE_SCHEMA_REF,
+      targetSchemaRef: TARGET_SCHEMA_REF,
+      rules: [
+        {
+          target: 'Order.status',
+          type: 'string',
+          expression: 'valueMap(source("status"), valueTable("order-status", "oms-status", "cdm-status"), "UNKNOWN")',
+          valueTableRef: refRevision1.ref,
+          noMatchBehavior: {
+            mode: 'fallback_value',
+            fallbackValue: 'UNKNOWN',
+          },
+        },
+      ],
+    });
+
+    await adapter.createProjectValueTableRevision(table.id, {
+      valueTableId: table.id,
+      sideA: { key: 'oms-status', label: 'OMS Status', type: 'string' },
+      sideB: { key: 'cdm-status', label: 'CDM Status', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'COMPLETED' }],
+    });
+
+    const pinnedBeforeAdoption = await adapter.getMapping(mapping.mappingId);
+    const executionBefore = executeMapping(
+      pinnedBeforeAdoption,
+      { status: 'confirmed' },
+      { type: 'object' },
+      { type: 'object' },
+    );
+    expect(executionBefore.output).toEqual({ Order: { status: 'OPEN' } });
+
+    const refRevision2 = await adapter.resolveProjectValueTableReference({
+      projectId: project.projectId,
+      valueTableId: table.id,
+      tableKey: table.key,
+      revision: 2,
+      inputSideKey: 'oms-status',
+      outputSideKey: 'cdm-status',
+    });
+
+    const loaded = await adapter.getMapping(mapping.mappingId);
+    const [firstRule] = loaded.rules;
+    if (!firstRule) {
+      throw new Error('Expected mapping rule for adoption test.');
+    }
+
+    const saveResult = await adapter.saveMapping(mapping.mappingId, {
+      ...loaded,
+      rules: [
+        {
+          ...firstRule,
+          valueTableRef: refRevision2.ref,
+        },
+      ],
+    });
+
+    expect(saveResult.noChange).toBe(false);
+
+    const pinnedAfterAdoption = await adapter.getMapping(mapping.mappingId);
+    const adoptedRef = pinnedAfterAdoption.rules[0]?.valueTableRef;
+    expect(adoptedRef?.scope).toBe('project');
+    if (adoptedRef?.scope === 'project') {
+      expect(adoptedRef.revision).toBe(2);
+    }
+
+    const executionAfter = executeMapping(
+      pinnedAfterAdoption,
+      { status: 'confirmed' },
+      { type: 'object' },
+      { type: 'object' },
+    );
+    expect(executionAfter.output).toEqual({ Order: { status: 'COMPLETED' } });
   });
 
   it.each([

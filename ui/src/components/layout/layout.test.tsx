@@ -72,6 +72,7 @@ function renderBreadcrumbs(path: string) {
             <Route path="/projects/:projectId/mappings/:mappingId" element={<div />} />
             <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div />} />
             <Route path="/projects/:projectId/deployments" element={<div />} />
+            <Route path="/projects/:projectId/value-mappings" element={<div />} />
             <Route path="/schemas" element={<div />} />
             <Route path="/schemas/:schemaId" element={<div />} />
             <Route path="*" element={<div />} />
@@ -136,6 +137,10 @@ function renderBreadcrumbsWithLabel(
             />
             <Route
               path="/projects/:projectId/mappings/new"
+              element={<PageWithLabel segmentValue={segmentValue} label={label} />}
+            />
+            <Route
+              path="/projects/:projectId/value-mappings"
               element={<PageWithLabel segmentValue={segmentValue} label={label} />}
             />
             <Route path="*" element={<div />} />
@@ -264,6 +269,17 @@ describe('Breadcrumbs', () => {
     expect(screen.queryByRole('link', { name: 'Mappings' })).not.toBeInTheDocument();
     expect(screen.getByText('New')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'New' })).not.toBeInTheDocument();
+  });
+
+  it('renders value-mappings breadcrumbs as Home / Projects / {project-name} / Value Mappings', () => {
+    renderBreadcrumbsWithLabel('/projects/abc-123/value-mappings', 'abc-123', 'My Project');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'My Project' })).toHaveAttribute('href', '/projects/abc-123');
+    expect(screen.getByText('Value Mappings')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Value Mappings' })).not.toBeInTheDocument();
   });
 
   it('renders breadcrumbs for mapping deployment hierarchy', () => {

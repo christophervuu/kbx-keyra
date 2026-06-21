@@ -36,9 +36,13 @@ import type {
   MappingSaveResult,
   MappingVersion,
   MappingVersionEntry,
+  ProjectValueTable,
+  ProjectValueTableRevision,
   PublishSchemaInput,
   ProjectDetail,
   ProjectMetadata,
+  ResolveProjectValueTableReferenceInput,
+  ResolveProjectValueTableReferenceResult,
   SchemaDetail,
   SchemaMetadata,
   SchemaSamplePayloadContent,
@@ -54,6 +58,12 @@ import type {
   TemplateMetadata,
   UpdateProjectInput,
   UpdateSchemaInput,
+  ValueTableDiffPage,
+  ValueTableListOptions,
+  ValueTableUsageEntry,
+  CreateProjectValueTableInput,
+  CreateProjectValueTableRevisionInput,
+  DuplicateProjectValueTableInput,
   ValidateMappingsInput,
   ValidationReport,
 } from '@/lib/types';
@@ -669,6 +679,155 @@ export class HttpAdapter extends LocalStorageAdapter {
     return httpRequest<ServerPreviewResult>({
       baseUrl: this.apiUrl,
       path: `/mappings/${encodeURIComponent(mappingId)}/preview`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async listProjectValueTables(
+    projectId: string,
+    options?: ValueTableListOptions,
+  ): Promise<ProjectValueTable[]> {
+    const searchParams = new URLSearchParams();
+    if (options?.query) searchParams.set('query', options.query);
+    if (options?.status) searchParams.set('status', options.status);
+    if (options?.sortBy) searchParams.set('sortBy', options.sortBy);
+    if (options?.sortDirection) searchParams.set('sortDirection', options.sortDirection);
+    const query = searchParams.toString();
+
+    return httpRequest<ProjectValueTable[]>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-tables${query ? `?${query}` : ''}`,
+      method: 'GET',
+    });
+  }
+
+  override async getProjectValueTable(valueTableId: string): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}`,
+      method: 'GET',
+    });
+  }
+
+  override async getProjectValueTableRevision(
+    valueTableId: string,
+    revision: number,
+  ): Promise<ProjectValueTableRevision> {
+    return httpRequest<ProjectValueTableRevision>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/revisions/${encodeURIComponent(String(revision))}`,
+      method: 'GET',
+    });
+  }
+
+  override async createProjectValueTable(input: CreateProjectValueTableInput): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(input.projectId)}/value-tables`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async createProjectValueTableRevision(
+    valueTableId: string,
+    input: CreateProjectValueTableRevisionInput,
+  ): Promise<ProjectValueTableRevision> {
+    return httpRequest<ProjectValueTableRevision>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/revisions`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async duplicateProjectValueTable(input: DuplicateProjectValueTableInput): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(input.valueTableId)}/duplicate`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async archiveProjectValueTable(valueTableId: string): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/archive`,
+      method: 'POST',
+      body: {},
+    });
+  }
+
+  override async deleteProjectValueTable(valueTableId: string): Promise<void> {
+    await httpRequest<void>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}`,
+      method: 'DELETE',
+    });
+  }
+
+  override async listProjectValueTableUsage(valueTableId: string): Promise<ValueTableUsageEntry[]> {
+    return httpRequest<ValueTableUsageEntry[]>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/usage`,
+      method: 'GET',
+    });
+  }
+
+  override async getProjectValueTableRevisionDiff(
+    valueTableId: string,
+    fromRevision: number,
+    toRevision: number,
+    options?: { cursor?: string; pageSize?: number },
+  ): Promise<ValueTableDiffPage> {
+    const searchParams = new URLSearchParams({
+      fromRevision: String(fromRevision),
+      toRevision: String(toRevision),
+    });
+    if (options?.cursor) searchParams.set('cursor', options.cursor);
+    if (typeof options?.pageSize === 'number') searchParams.set('pageSize', String(options.pageSize));
+
+    return httpRequest<ValueTableDiffPage>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/diff?${searchParams.toString()}`,
+      method: 'GET',
+    });
+  }
+
+  override async exportProjectValueTableCsv(valueTableId: string, revision?: number): Promise<string> {
+    const query = typeof revision === 'number' ? `?revision=${encodeURIComponent(String(revision))}` : '';
+    return httpRequest<string>({
+      baseUrl: this.apiUrl,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/export.csv${query}`,
+      method: 'GET',
+    });
+  }
+
+  override async importProjectValueTableCsv(
+    projectId: string,
+    csv: string,
+    options?: { name?: string; key?: string },
+  ): Promise<ProjectValueTableRevision> {
+    return httpRequest<ProjectValueTableRevision>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-tables/import-csv`,
+      method: 'POST',
+      body: {
+        csv,
+        ...(options?.name ? { name: options.name } : {}),
+        ...(options?.key ? { key: options.key } : {}),
+      },
+    });
+  }
+
+  override async resolveProjectValueTableReference(
+    input: ResolveProjectValueTableReferenceInput,
+  ): Promise<ResolveProjectValueTableReferenceResult> {
+    return httpRequest<ResolveProjectValueTableReferenceResult>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(input.projectId)}/value-tables/resolve`,
       method: 'POST',
       body: input,
     });

@@ -17,6 +17,8 @@ export const TABLE_NAMES = {
   schemaNodes: getEnvValueOrDefault('SCHEMA_NODES_TABLE', 'keyra-schema-nodes'),
   mappingRevisions: getEnvValueOrDefault('MAPPING_REVISIONS_TABLE', 'keyra-mapping-revisions'),
   mappingVersions: getEnvValueOrDefault('MAPPING_VERSIONS_TABLE', 'keyra-mapping-versions'),
+  valueTables: getEnvValueOrDefault('VALUE_TABLES_TABLE', 'keyra-value-tables'),
+  valueTableRevisions: getEnvValueOrDefault('VALUE_TABLE_REVISIONS_TABLE', 'keyra-value-table-revisions'),
   deployments: getEnvValueOrDefault('DEPLOYMENTS_TABLE', 'keyra-deployments'),
   deploymentCurrent: getEnvValueOrDefault('DEPLOYMENT_CURRENT_TABLE', 'keyra-deployment-current'),
   deploymentOrchestrations: getEnvValueOrDefault('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'keyra-deployment-orchestrations'),
@@ -53,6 +55,10 @@ export function mappingVersionKey(mappingId: string, version: number): string {
 
 export function mappingRevisionKey(mappingId: string, revision: number): string {
   return `mappings/${mappingId}/revisions/r${revision}.json`;
+}
+
+export function valueTableRevisionRowsKey(valueTableId: string, revision: number): string {
+  return `value-tables/${valueTableId}/revisions/r${revision}.json`;
 }
 
 export function deploymentSnapshotKey(mappingId: string, environment: string, deployedAt: string): string {

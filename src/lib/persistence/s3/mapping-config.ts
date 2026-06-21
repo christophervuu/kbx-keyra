@@ -72,6 +72,11 @@ export async function remove(mappingId: string): Promise<void> {
 
 export { remove as delete };
 
+// Named aliases for call sites that use explicit operation naming.
+export const putMappingConfig = put;
+export const getMappingConfig = get;
+export const deleteMappingConfig = remove;
+
 export const mappingConfig = {
   put,
   get,

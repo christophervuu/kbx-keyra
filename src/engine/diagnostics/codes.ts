@@ -114,7 +114,42 @@ export const DIAGNOSTIC_CODES = {
   'KEYRA-E060': {
     code: 'KEYRA-E060',
     severity: 'error',
-    messageTemplate: '`valueMap` mappings argument must be an object literal',
+    messageTemplate: '`valueMap` mappings argument must be an object literal or valueTable(...)',
+  },
+  'KEYRA-E061': {
+    code: 'KEYRA-E061',
+    severity: 'error',
+    messageTemplate: 'Unknown or invalid value table key: `{tableKey}`',
+  },
+  'KEYRA-E062': {
+    code: 'KEYRA-E062',
+    severity: 'error',
+    messageTemplate: 'Missing pinned value table revision or resolved entries for `{tableKey}`',
+  },
+  'KEYRA-E063': {
+    code: 'KEYRA-E063',
+    severity: 'error',
+    messageTemplate: 'Value table input and output sides must differ (`{sideKey}` provided for both)',
+  },
+  'KEYRA-E064': {
+    code: 'KEYRA-E064',
+    severity: 'error',
+    messageTemplate: 'Value table side/type mismatch for `{sideKey}`',
+  },
+  'KEYRA-E065': {
+    code: 'KEYRA-E065',
+    severity: 'error',
+    messageTemplate: 'Invalid value table direction: duplicate input value `"{value}"` on side `{sideKey}`',
+  },
+  'KEYRA-E066': {
+    code: 'KEYRA-E066',
+    severity: 'error',
+    messageTemplate: 'No-match fallback mode requires `fallbackValue`',
+  },
+  'KEYRA-E067': {
+    code: 'KEYRA-E067',
+    severity: 'error',
+    messageTemplate: 'No-match fallback type mismatch: expected `{expected}`, got `{actual}`',
   },
   'KEYRA-W001': {
     code: 'KEYRA-W001',

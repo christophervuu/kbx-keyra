@@ -9,7 +9,14 @@ import type { SmartBuilderDraft } from '../lib/smart-builder-state';
 
 import { AdapterProvider } from '@/lib/api/adapter-provider';
 import type { ApiAdapter } from '@/lib/api/types';
-import type { ExplainRuleResult, ParsedSchema, SchemaTreeNode, SmartFixResult, SuggestExpressionResult } from '@/lib/types/domain';
+import type {
+  ExplainRuleResult,
+  MappingRuleProjectValueTableRef,
+  ParsedSchema,
+  SchemaTreeNode,
+  SmartFixResult,
+  SuggestExpressionResult,
+} from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1268,6 +1275,330 @@ describe('ScalarFieldBuilder', () => {
     });
   });
 
+  it('forwards value mapping controls from smart builder panel', () => {
+    const onSmartApplyAction = vi.fn();
+    const onValueMapScopeChange = vi.fn();
+    const onValueMapProjectTableSelect = vi.fn();
+    const onValueMapDirectionSelect = vi.fn();
+    const onValueMapNoMatchModeChange = vi.fn();
+    const onValueMapFallbackValueChange = vi.fn();
+    const onValueMapAdoptLatestRevision = vi.fn();
+
+    const valueTableRef = {
+      scope: 'project',
+      valueTableId: 'vt-1',
+      tableKey: 'order-status',
+      revision: 2,
+      inputSideKey: 'oms',
+      outputSideKey: 'cdm',
+      inputType: 'string',
+      outputType: 'string',
+      resolvedEntries: [],
+    } satisfies MappingRuleProjectValueTableRef;
+
+    const draft: SmartBuilderDraft = {
+      targetPath: 'patient.status',
+      targetType: 'string',
+      isRequired: false,
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary',
+          label: 'status',
+          path: 'status',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      focusedSlotId: null,
+      slotScopedInputs: {},
+      composition: {
+        kind: 'valueMap',
+        inputId: 'status',
+        scope: 'project',
+        project: { ref: valueTableRef },
+        mappings: [{ whenValue: 'A', output: { kind: 'static', value: 'Alpha' } }],
+        fallback: { kind: 'static', value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value', fallbackValue: 'UNKNOWN' },
+      },
+      postSteps: [],
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      previousExpressions: [],
+      validation: { status: 'valid' },
+      pendingActionDraft: null,
+    };
+
+    const { rerender } = renderBuilder({
+      preferSmartBuilder: true,
+      smartHydrationOverride: { kind: 'guided', draft },
+      onSmartApplyAction,
+      valueMapProjectState: {
+        scope: 'project',
+        tableId: 'vt-1',
+        direction: 'a_to_b',
+        pinnedRevision: 2,
+        currentRevision: 3,
+        newerRevisionAvailable: true,
+        selectedTableName: 'Order Status',
+        noMatchMode: 'fallback_value',
+        fallbackValue: 'UNKNOWN',
+        projectSelection: { ref: valueTableRef },
+        availableTables: [
+          {
+            tableId: 'vt-1',
+            label: 'Order Status',
+            revision: 2,
+            status: 'active',
+            usageCount: 1,
+            rowCount: 4,
+          },
+        ],
+        directionOptions: [
+          { direction: 'a_to_b', label: 'OMS → CDM', enabled: true },
+          { direction: 'b_to_a', label: 'CDM → OMS', enabled: false, reason: 'duplicate output keys' },
+        ],
+      },
+      onValueMapScopeChange,
+      onValueMapProjectTableSelect,
+      onValueMapDirectionSelect,
+      onValueMapNoMatchModeChange,
+      onValueMapFallbackValueChange,
+      onValueMapAdoptLatestRevision,
+    });
+
+    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Value Mapping');
+    expect(screen.getByTestId('smart-value-map-config')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-recipe-change-base'));
+    fireEvent.click(screen.getByTestId('smart-picker-action-lookup.valueMap'));
+    expect(onSmartApplyAction).toHaveBeenCalledWith('lookup.valueMap');
+
+    expect(screen.getByTestId('smart-value-map-scope-inline')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-value-map-scope-project')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-value-map-scope-inline'));
+    expect(onValueMapScopeChange).toHaveBeenCalledWith('inline');
+
+    fireEvent.change(screen.getByTestId('smart-value-map-table-select'), { target: { value: 'vt-1' } });
+    expect(onValueMapProjectTableSelect).toHaveBeenCalledWith('vt-1');
+
+    fireEvent.click(screen.getByTestId('smart-value-map-direction-a_to_b'));
+    expect(onValueMapDirectionSelect).toHaveBeenCalledWith('a_to_b');
+
+    expect(screen.getByTestId('smart-value-map-direction-b_to_a')).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('smart-value-map-no-match-mode'), { target: { value: 'return_null' } });
+    expect(onValueMapNoMatchModeChange).toHaveBeenCalledWith('return_null');
+
+    fireEvent.change(screen.getByTestId('smart-value-map-fallback-input'), { target: { value: 'N/A' } });
+    expect(onValueMapFallbackValueChange).toHaveBeenCalledWith('N/A');
+
+    fireEvent.click(screen.getByTestId('smart-value-map-adopt-latest'));
+    expect(onValueMapAdoptLatestRevision).toHaveBeenCalled();
+
+    rerender(
+      <AdapterProvider adapter={makeDefaultAdapter() as ApiAdapter}>
+        <ScalarFieldBuilder
+          {...DEFAULT_PROPS}
+          {...makeDraftApi()}
+          preferSmartBuilder
+          smartHydrationOverride={{ kind: 'guided', draft: { ...draft, composition: { ...draft.composition, scope: 'inline', project: null } } }}
+          valueMapProjectState={{
+            scope: 'inline',
+            tableId: null,
+            direction: null,
+            pinnedRevision: null,
+            currentRevision: null,
+            newerRevisionAvailable: false,
+            selectedTableName: undefined,
+            noMatchMode: 'fallback_value',
+            fallbackValue: '',
+            projectSelection: null,
+            availableTables: [
+              {
+                tableId: 'vt-1',
+                label: 'Order Status',
+                revision: 2,
+                status: 'active',
+                usageCount: 1,
+                rowCount: 4,
+              },
+            ],
+            directionOptions: [],
+          }}
+        />
+      </AdapterProvider>,
+    );
+
+    expect(screen.queryByTestId('smart-value-map-convert-to-project')).not.toBeInTheDocument();
+  });
+
+  it('keeps Builder mode when guided smart hydration updates for project value table selection', () => {
+    const onValueMapProjectTableSelect = vi.fn();
+
+    const baseRef = {
+      scope: 'project',
+      valueTableId: 'vt-1',
+      tableKey: 'order-status',
+      revision: 2,
+      inputSideKey: 'oms',
+      outputSideKey: 'cdm',
+      inputType: 'string',
+      outputType: 'string',
+      resolvedEntries: [],
+    } satisfies MappingRuleProjectValueTableRef;
+
+    const makeDraft = (ref: MappingRuleProjectValueTableRef): SmartBuilderDraft => ({
+      targetPath: 'patient.status',
+      targetType: 'string',
+      isRequired: false,
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary',
+          label: 'status',
+          path: 'status',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      focusedSlotId: null,
+      slotScopedInputs: {},
+      composition: {
+        kind: 'valueMap',
+        inputId: 'status',
+        scope: 'project',
+        project: { ref },
+        mappings: [],
+        fallback: { kind: 'static', value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value', fallbackValue: 'UNKNOWN' },
+      },
+      postSteps: [],
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      previousExpressions: [],
+      validation: { status: 'valid' },
+      pendingActionDraft: null,
+    });
+
+    const { rerender } = renderBuilder({
+      preferSmartBuilder: true,
+      smartHydrationOverride: { kind: 'guided', draft: makeDraft(baseRef) },
+      onValueMapProjectTableSelect,
+      valueMapProjectState: {
+        scope: 'project',
+        tableId: 'vt-1',
+        direction: 'a_to_b',
+        pinnedRevision: 2,
+        currentRevision: 3,
+        newerRevisionAvailable: true,
+        selectedTableName: 'Order Status',
+        noMatchMode: 'fallback_value',
+        fallbackValue: 'UNKNOWN',
+        projectSelection: { ref: baseRef },
+        availableTables: [
+          {
+            tableId: 'vt-1',
+            label: 'Order Status',
+            revision: 2,
+            status: 'active',
+            usageCount: 1,
+            rowCount: 4,
+          },
+          {
+            tableId: 'vt-2',
+            label: 'Order Status v2',
+            revision: 3,
+            status: 'active',
+            usageCount: 0,
+            rowCount: 5,
+          },
+        ],
+        directionOptions: [
+          { direction: 'a_to_b', label: 'OMS → CDM', enabled: true },
+          { direction: 'b_to_a', label: 'CDM → OMS', enabled: true },
+        ],
+      },
+    });
+
+    expect(screen.getByTestId('mode-toggle-builder')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('raw-dsl-editor')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('smart-value-map-table-select'), { target: { value: 'vt-2' } });
+    expect(onValueMapProjectTableSelect).toHaveBeenCalledWith('vt-2');
+
+    const nextRef = {
+      ...baseRef,
+      valueTableId: 'vt-2',
+      revision: 3,
+    } satisfies MappingRuleProjectValueTableRef;
+
+    rerender(
+      <ScalarFieldBuilder
+        {...DEFAULT_PROPS}
+        {...makeDraftApi()}
+        preferSmartBuilder
+        smartHydrationOverride={{ kind: 'guided', draft: makeDraft(nextRef) }}
+        onValueMapProjectTableSelect={onValueMapProjectTableSelect}
+        valueMapProjectState={{
+          scope: 'project',
+          tableId: 'vt-2',
+          direction: 'a_to_b',
+          pinnedRevision: 3,
+          currentRevision: 3,
+          newerRevisionAvailable: false,
+          selectedTableName: 'Order Status v2',
+          noMatchMode: 'fallback_value',
+          fallbackValue: 'UNKNOWN',
+          projectSelection: { ref: nextRef },
+          availableTables: [
+            {
+              tableId: 'vt-1',
+              label: 'Order Status',
+              revision: 2,
+              status: 'active',
+              usageCount: 1,
+              rowCount: 4,
+            },
+            {
+              tableId: 'vt-2',
+              label: 'Order Status v2',
+              revision: 3,
+              status: 'active',
+              usageCount: 0,
+              rowCount: 5,
+            },
+          ],
+          directionOptions: [
+            { direction: 'a_to_b', label: 'OMS → CDM', enabled: true },
+            { direction: 'b_to_a', label: 'CDM → OMS', enabled: true },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('mode-toggle-builder')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('smart-value-map-config')).toBeInTheDocument();
+    expect(screen.queryByTestId('raw-dsl-editor')).not.toBeInTheDocument();
+  });
+
+  it('defaults to Builder mode for project value-map expression without explicit hydration override', () => {
+    const { getDraftExpression, updateDraft, revertDraft } = makeDraftApi();
+
+    renderBuilder({
+      preferSmartBuilder: true,
+      selectedTargetPath: 'transaction.status',
+      selectedTargetType: 'string',
+      currentStatus: 'mapped',
+      currentExpression: 'valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), source("status"))',
+      getDraftExpression,
+      updateDraft,
+      revertDraft,
+    });
+
+    expect(screen.getByTestId('mode-toggle-builder')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('smart-builder-complex-banner')).not.toBeInTheDocument();
+  });
+
   it('forwards parameter editor lifecycle callbacks from smart builder panel', () => {
     const onSmartBeginActionParameterEdit = vi.fn();
     const onSmartUpdateActionParameterDraft = vi.fn();
@@ -1311,7 +1642,7 @@ describe('ScalarFieldBuilder', () => {
       onSmartCancelActionParameterDraft,
     });
 
-    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
+    fireEvent.click(screen.getByTestId('smart-recipe-add-transform'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
     fireEvent.click(screen.getByTestId('smart-picker-action-text.substring'));
     expect(onSmartBeginActionParameterEdit).toHaveBeenCalledWith('text.substring');

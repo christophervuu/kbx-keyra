@@ -110,6 +110,30 @@ function resolveInputExpressions(
     .filter(Boolean);
 }
 
+function noMatchFallbackExpression(
+  draft: SmartBuilderDraft,
+  sourceExpression: string,
+  fallback: BuilderArgumentValue,
+): string {
+  const valueMapComposition = draft.composition;
+  if (!valueMapComposition || valueMapComposition.kind !== 'valueMap') {
+    return argumentValueToExpression(draft, fallback);
+  }
+
+  const mode = valueMapComposition.noMatchBehavior?.mode;
+  if (mode === 'return_null') return 'null';
+  if (mode === 'return_input') return sourceExpression;
+
+  if (mode === 'fallback_value') {
+    if (valueMapComposition.noMatchBehavior?.fallbackValue !== undefined) {
+      return literalToDsl(valueMapComposition.noMatchBehavior.fallbackValue);
+    }
+    return argumentValueToExpression(draft, fallback);
+  }
+
+  return argumentValueToExpression(draft, fallback);
+}
+
 function predicateExpression(
   draft: SmartBuilderDraft,
   predicate: {
@@ -265,13 +289,13 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         break;
       }
       const sourceExpr = inputExpression(source);
-      const mappings = composition.mappings
-        .filter((entry) => entry.whenValue.trim().length > 0)
-        .map(
-          (entry) => `${quote(entry.whenValue)}: ${argumentValueToExpression(draft, entry.output)}`,
-        );
-      const mappingExpr = `{${mappings.join(', ')}}`;
-      const fallbackExpr = argumentValueToExpression(draft, composition.fallback);
+      const mappingExpr = composition.scope === 'project' && composition.project
+        ? `valueTable(${quote(composition.project.ref.tableKey)}, ${quote(composition.project.ref.inputSideKey)}, ${quote(composition.project.ref.outputSideKey)})`
+        : `{${composition.mappings
+          .filter((entry) => entry.whenValue.trim().length > 0)
+          .map((entry) => `${quote(entry.whenValue)}: ${argumentValueToExpression(draft, entry.output)}`)
+          .join(', ')}}`;
+      const fallbackExpr = noMatchFallbackExpression(draft, sourceExpr, composition.fallback);
       baseExpression = `valueMap(${sourceExpr}, ${mappingExpr}, ${fallbackExpr})`;
       break;
     }

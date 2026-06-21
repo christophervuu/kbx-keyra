@@ -176,6 +176,64 @@ describe('persistence deployments', () => {
     expect(dynamoSendMock).not.toHaveBeenCalled();
   });
 
+  it('create persists value-table resolved entries exactly in deployment snapshot payload', async () => {
+    putSnapshotMock.mockResolvedValue('deployments/mapping-1/DEV/2026-06-01T00:00:00.000Z.json');
+    dynamoSendMock.mockResolvedValue({});
+
+    const mod = await importModule();
+    const configWithProjectValueTable = makeConfig({
+      rules: [
+        {
+          target: 'statusLabel',
+          type: 'string',
+          expression: 'valueMap(source("status"), valueTable("order-status", "code", "label"), "UNKNOWN")',
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'vt-1',
+            tableKey: 'order-status',
+            revision: 3,
+            inputSideKey: 'code',
+            outputSideKey: 'label',
+            inputType: 'string',
+            outputType: 'string',
+            resolvedEntries: [
+              { in: 'A', out: 'OPEN', rowId: 'r1' },
+              { in: 'B', out: 'CLOSED', rowId: 'r2' },
+            ],
+          },
+          noMatchBehavior: {
+            mode: 'fallback_value',
+            fallbackValue: 'UNKNOWN',
+          },
+        },
+      ],
+    });
+
+    await mod.create(makeCreateInput({ config: configWithProjectValueTable }));
+
+    expect(putSnapshotMock).toHaveBeenCalledWith(
+      'mapping-1',
+      'DEV',
+      expect.any(String),
+      expect.objectContaining({
+        rules: [
+          expect.objectContaining({
+            valueTableRef: expect.objectContaining({
+              scope: 'project',
+              valueTableId: 'vt-1',
+              revision: 3,
+              resolvedEntries: [
+                { in: 'A', out: 'OPEN', rowId: 'r1' },
+                { in: 'B', out: 'CLOSED', rowId: 'r2' },
+              ],
+            }),
+          }),
+        ],
+      }),
+      {},
+    );
+  });
+
   it('createRollback appends rollback event and repoints current without writing snapshot', async () => {
     dynamoSendMock.mockResolvedValue({});
 
