@@ -360,6 +360,54 @@ describe('generateSmartBuilderExpression', () => {
     );
   });
 
+  it('uses OR composition for condition predicates when matchMode is any', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary',
+          label: 'emailA',
+          path: 'emailA',
+          valueType: 'string',
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary',
+          label: 'emailB',
+          path: 'emailB',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition',
+        matchMode: 'any',
+        clauses: [{
+          predicates: [
+            {
+              left: { kind: 'input', inputId: 'a' },
+              operator: 'eq',
+              right: { kind: 'static', value: 'X' },
+            },
+            {
+              left: { kind: 'input', inputId: 'b' },
+              operator: 'eq',
+              right: { kind: 'static', value: 'Y' },
+            },
+          ],
+          thenOutput: { kind: 'static', value: 'MATCH' },
+        }],
+        elseOutput: { kind: 'static', value: 'MISS' },
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'if(or(eq(source("emailA"), "X"), eq(source("emailB"), "Y")), "MATCH", "MISS")',
+    );
+  });
+
   it('generates static input as static(...) in direct composition', () => {
     const draft: SmartBuilderDraft = {
       ...makeBaseDraft(),
@@ -467,6 +515,54 @@ describe('generateSmartBuilderExpression', () => {
 
     expect(generateSmartBuilderExpression(draft)).toBe(
       'if(not(isNull(source("left"))), constant("MATCH_FLAG"), static("NO_MATCH"))',
+    );
+  });
+
+  it('keeps per-usage transforms independent for reused inputs in IF/THEN/OTHERWISE', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'priority',
+          sourceKind: 'primary',
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition',
+        clauses: [{
+          predicates: [{
+            left: {
+              kind: 'input',
+              inputId: 'priority',
+              transforms: [{ functionName: 'trim' }],
+            },
+            operator: 'eq',
+            right: {
+              kind: 'static',
+              value: 'HIGH',
+              transforms: [{ functionName: 'upper' }],
+            },
+          }],
+          thenOutput: {
+            kind: 'input',
+            inputId: 'priority',
+            transforms: [{ functionName: 'lower' }],
+          },
+        }],
+        elseOutput: {
+          kind: 'input',
+          inputId: 'priority',
+          transforms: [{ functionName: 'length' }],
+        },
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'if(eq(trim(source("priority")), upper("HIGH")), lower(source("priority")), length(source("priority")))',
     );
   });
 });

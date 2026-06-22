@@ -58,11 +58,56 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-builder-panel')).toBeInTheDocument();
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('Other ways to fill this field');
     expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
-    expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-mapping-recipe')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Direct Mapping');
+    expect(screen.getByTestId('smart-recipe-base-empty-direct')).toHaveTextContent('Select an input to continue.');
     expect(screen.getByTestId('smart-add-input-toggle')).toBeInTheDocument();
     expect(screen.queryByText('Smart Builder')).not.toBeInTheDocument();
-    expect(screen.queryByText('Mapping method')).not.toBeInTheDocument();
     expect(screen.queryByText(/^Base$/)).not.toBeInTheDocument();
+  });
+
+  it('passes computed input usage metadata to tray rows for conditional drafts', () => {
+    const base = createEmptySmartBuilderDraft({
+      targetPath: 'customer.priorityLabel',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    const draft = {
+      ...base,
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'input-1' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: 'HIGH' },
+          }],
+          thenOutput: { kind: 'input' as const, inputId: 'input-1' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'normal' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.priorityLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-input-tray-usage-input-1')).toHaveTextContent('Used 2×');
   });
 
   it('renders complex-expression banner for non-decomposable hydration and allows advanced entry', () => {
@@ -1700,6 +1745,442 @@ describe('SmartBuilderPanel', () => {
 
     expect(screen.getByTestId('smart-parameter-field-decimals')).toBeInTheDocument();
     expect(screen.getByTestId('smart-parameter-input-decimals')).toHaveValue(2);
+  });
+
+  it('renders direct IF/THEN/OTHERWISE conditional editor and removes slot-fill controls', () => {
+    const onConditionFocusedSlotChange = vi.fn();
+    const onUpdateConditionComposition = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'input-1' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: 'HIGH' },
+          }, {
+            left: { kind: 'input' as const, inputId: 'input-1' },
+            operator: 'neq' as const,
+            right: { kind: 'static' as const, value: 'LOW' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'MATCH' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'OTHERWISE' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.priorityLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onConditionFocusedSlotChange={onConditionFocusedSlotChange}
+        onUpdateConditionComposition={onUpdateConditionComposition}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-condition-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-condition-match-mode-select')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-condition-then')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-condition-otherwise')).toBeInTheDocument();
+    expect(screen.queryByTestId('condition-slot-left')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('condition-slot-right')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('condition-slot-then')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('condition-slot-else')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('condition-focus-clear')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-condition-left-0'));
+    fireEvent.click(screen.getByTestId('smart-condition-right-0'));
+    fireEvent.click(screen.getByTestId('smart-condition-then'));
+    fireEvent.click(screen.getByTestId('smart-condition-otherwise'));
+
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith('condition:left');
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith('condition:right');
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith('condition:then');
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith('condition:else');
+
+    fireEvent.change(screen.getByTestId('smart-condition-match-mode-select'), { target: { value: 'any' } });
+    expect(onUpdateConditionComposition).toHaveBeenCalledWith(expect.objectContaining({ matchMode: 'any' }));
+
+    fireEvent.change(screen.getByTestId('smart-condition-operator-0'), { target: { value: 'isNull' } });
+    expect(onUpdateConditionComposition).toHaveBeenCalledWith(expect.objectContaining({
+      clauses: [expect.objectContaining({ predicates: expect.arrayContaining([expect.objectContaining({ operator: 'isNull' })]) })],
+    }));
+
+    expect(onUpdateConditionComposition).toHaveBeenCalledWith(expect.objectContaining({
+      clauses: [expect.objectContaining({ predicates: expect.arrayContaining([expect.objectContaining({ operator: 'eq' })]) })],
+    }));
+  });
+
+  it('filters condition operators by left type and shows compatibility diagnostics for invalid comparisons', () => {
+    const onConditionFocusedSlotChange = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'left-number',
+          sourceKind: 'primary' as const,
+          label: 'requestedQuantity',
+          path: 'requestedQuantity',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'right-string',
+          sourceKind: 'enrichment' as const,
+          label: 'availableQuantityText',
+          path: 'availableQuantityText',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'left-number' },
+            operator: 'gt' as const,
+            right: { kind: 'input' as const, inputId: 'right-string' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'MATCH' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'OTHERWISE' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.priorityLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onConditionFocusedSlotChange={onConditionFocusedSlotChange}
+      />,
+    );
+
+    const operator = screen.getByTestId('smart-condition-operator-0') as HTMLSelectElement;
+    const optionValues = Array.from(operator.options).map((option) => option.value);
+
+    expect(optionValues).toContain('gt');
+    expect(optionValues).toContain('lte');
+    expect(optionValues).not.toContain('contains');
+    expect(screen.getByTestId('smart-condition-compatibility-errors')).toHaveTextContent('requires numeric left and comparison values');
+
+    fireEvent.click(screen.getByTestId('smart-condition-transform-affordance'));
+    expect(onConditionFocusedSlotChange).toHaveBeenCalledWith('condition:left');
+  });
+
+  it('shows type-aware fixed right-side editors for number, boolean, and string predicates', () => {
+    const makeDraft = (leftType: 'number' | 'boolean' | 'string') => ({
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.value',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'left',
+          sourceKind: 'primary' as const,
+          label: 'leftField',
+          path: 'leftField',
+          valueType: leftType,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'left' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: '' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'Y' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'N' },
+      },
+    });
+
+    const { rerender } = render(
+      <SmartBuilderPanel
+        targetPath="target.value"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: makeDraft('number') }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('smart-condition-right-0'));
+    expect(screen.getByTestId('smart-condition-picker-fixed-number-right-0')).toBeInTheDocument();
+
+    rerender(
+      <SmartBuilderPanel
+        targetPath="target.value"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: makeDraft('boolean') }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('smart-condition-right-0'));
+    expect(screen.getByTestId('smart-condition-picker-fixed-boolean-right-0')).toBeInTheDocument();
+
+    rerender(
+      <SmartBuilderPanel
+        targetPath="target.value"
+        targetType="string"
+        hydration={{ kind: 'guided', draft: makeDraft('string') }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('smart-condition-right-0'));
+    expect(screen.getByTestId('smart-condition-picker-fixed-string-right-0')).toBeInTheDocument();
+  });
+
+  it('uses shared inline picker for THEN and OTHERWISE and collapses on done', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'input-1' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: 'HIGH' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'MATCH' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'OTHERWISE' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.priorityLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-condition-then'));
+    expect(screen.getByTestId('smart-condition-picker-then')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-condition-picker-mode-fixed-then')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-condition-picker-mode-input-then')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-picker-mode-value-map-then')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-condition-picker-done-then'));
+    expect(screen.queryByTestId('smart-condition-picker-then')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-condition-otherwise'));
+    expect(screen.getByTestId('smart-condition-picker-otherwise')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('smart-condition-picker-mode-input-otherwise'));
+    expect(screen.getByTestId('smart-condition-picker-input-browse-otherwise')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('smart-condition-picker-done-otherwise'));
+    expect(screen.queryByTestId('smart-condition-picker-otherwise')).not.toBeInTheDocument();
+  });
+
+  it('renders conditional value selectors without duplicate usage-transform controls', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.value',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'left',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'left' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: 'HIGH' },
+          }],
+          thenOutput: { kind: 'input' as const, inputId: 'left' },
+        }],
+        elseOutput: { kind: 'input' as const, inputId: 'left' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="target.value"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.queryByTestId('smart-condition-left-transform-summary-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-right-transform-summary-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-then-transform-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-otherwise-transform-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-left-transform-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-right-transform-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-then-transform')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-condition-otherwise-transform')).not.toBeInTheDocument();
+
+    expect(screen.getByTestId('smart-condition-then')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-condition-otherwise')).toBeInTheDocument();
+  });
+
+  it('renders compact conditional ready status text', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.availabilityLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'requested',
+          sourceKind: 'primary' as const,
+          label: 'requestedQuantity',
+          path: 'requestedQuantity',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'available',
+          sourceKind: 'enrichment' as const,
+          label: 'inventory.availableQuantity',
+          externalName: 'inventory',
+          path: 'availableQuantity',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'status',
+          sourceKind: 'enrichment' as const,
+          label: 'inventory.availabilityStatus',
+          externalName: 'inventory',
+          path: 'availabilityStatus',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'requested' },
+            operator: 'lte' as const,
+            right: { kind: 'input' as const, inputId: 'available' },
+          }],
+          thenOutput: { kind: 'input' as const, inputId: 'status' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'UNAVAILABLE' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.availabilityLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        sourceSampleData={{ requestedQuantity: 3 }}
+        enrichmentSampleData={{ inventory: { availableQuantity: 5, availabilityStatus: 'IN_STOCK' } }}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-condition-status-ready')).toHaveTextContent('Ready. THEN branch will return IN_STOCK.');
+    expect(screen.queryByTestId('smart-condition-sample-diagnostics')).not.toBeInTheDocument();
+  });
+
+  it('shows compact blocked conditional status text', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.availabilityLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'requested',
+          sourceKind: 'primary' as const,
+          label: 'requestedQuantity',
+          path: 'requestedQuantity',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'available',
+          sourceKind: 'enrichment' as const,
+          label: 'inventory.availableQuantity',
+          externalName: 'inventory',
+          path: 'availableQuantity',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'requested' },
+            operator: 'lte' as const,
+            right: { kind: 'input' as const, inputId: 'available' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'AVAILABLE' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'UNAVAILABLE' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.availabilityLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        sourceSampleData={{ requestedQuantity: null }}
+        enrichmentSampleData={{}}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-condition-status-blocked')).toHaveTextContent(
+      'Complete condition values before previewing output.',
+    );
   });
 
   it('lets users change operator for an existing formula term explicitly', () => {

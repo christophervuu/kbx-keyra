@@ -74,6 +74,12 @@ export interface SourceSchemaPanelProps {
   }[];
   /** Optional className for the outer container. */
   className?: string;
+  /** Current source selection mode for browse interactions. */
+  selectionMode?: 'add-to-tray' | 'fill-current-value';
+  /** Enables Fill Current Value mode when a builder value slot is active. */
+  canFillCurrentValue?: boolean;
+  /** Called when the source selection mode changes. */
+  onSelectionModeChange?: (mode: 'add-to-tray' | 'fill-current-value') => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +520,9 @@ export function SourceSchemaPanel({
   onStageField,
   selectedInputs = [],
   className = '',
+  selectionMode = 'add-to-tray',
+  canFillCurrentValue = false,
+  onSelectionModeChange,
 }: SourceSchemaPanelProps) {
   void sourceSchemaName;
   const previewCtx = useContext(PreviewContext);
@@ -675,6 +684,46 @@ export function SourceSchemaPanel({
               : `${totalMatchCount} result${totalMatchCount === 1 ? '' : 's'}`}
           </p>
         )}
+
+        <div className="mt-2" data-testid="source-selection-mode">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Selection mode</p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="source-mode-add-to-tray"
+              aria-pressed={selectionMode === 'add-to-tray'}
+              onClick={() => onSelectionModeChange?.('add-to-tray')}
+              className={[
+                'rounded border px-2 py-1 text-[11px] transition-colors',
+                selectionMode === 'add-to-tray'
+                  ? 'border-blue-500/60 bg-blue-900/40 text-blue-200'
+                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700',
+              ].join(' ')}
+            >
+              Add to tray
+            </button>
+            <button
+              type="button"
+              data-testid="source-mode-fill-current"
+              aria-pressed={selectionMode === 'fill-current-value'}
+              disabled={!canFillCurrentValue}
+              onClick={() => onSelectionModeChange?.('fill-current-value')}
+              className={[
+                'rounded border px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+                selectionMode === 'fill-current-value'
+                  ? 'border-blue-500/60 bg-blue-900/40 text-blue-200'
+                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700',
+              ].join(' ')}
+            >
+              Fill current value
+            </button>
+          </div>
+          <p className="mt-1 text-[10px] text-slate-500" data-testid="source-selection-mode-hint">
+            {selectionMode === 'fill-current-value'
+              ? 'Single-select a field to fill the active builder value.'
+              : 'Select fields to stage in Inputs without replacing active values.'}
+          </p>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

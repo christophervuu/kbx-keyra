@@ -46,16 +46,22 @@ function argumentValueToExpression(
   draft: SmartBuilderDraft,
   value: BuilderArgumentValue,
 ): string {
-  switch (value.kind) {
-    case 'static':
-      return literalToDsl(value.value);
-    case 'expression':
-      return value.expression;
-    case 'input': {
-      const input = findInput(draft, value.inputId);
-      return input ? inputExpression(input) : '';
+  const baseExpression = (() => {
+    switch (value.kind) {
+      case 'static':
+        return literalToDsl(value.value);
+      case 'expression':
+        return value.expression;
+      case 'input': {
+        const input = findInput(draft, value.inputId);
+        return input ? inputExpression(input) : '';
+      }
     }
-  }
+  })();
+
+  if (!baseExpression) return baseExpression;
+  if (!value.transforms || value.transforms.length === 0) return baseExpression;
+  return applyTransformStepsToExpression(baseExpression, value.transforms, draft);
 }
 
 function inputExpression(input: BuilderInput): string {
@@ -271,10 +277,12 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         break;
       }
 
+      const joiner = composition.matchMode === 'any' ? 'or' : 'and';
+
       const elseExpression = argumentValueToExpression(draft, composition.elseOutput);
       const folded = [...composition.clauses].reverse().reduce((elseExpr, clause) => {
         const predicates = clause.predicates.map((predicate) => predicateExpression(draft, predicate));
-        const predicateExpr = predicates.length === 1 ? predicates[0] : `and(${predicates.join(', ')})`;
+        const predicateExpr = predicates.length === 1 ? predicates[0] : `${joiner}(${predicates.join(', ')})`;
         const thenExpr = argumentValueToExpression(draft, clause.thenOutput);
         return `if(${predicateExpr}, ${thenExpr}, ${elseExpr})`;
       }, elseExpression);

@@ -510,7 +510,7 @@ ui/
           AiSuggestionReviewPrimitives.tsx FS-074 shared AI suggestion review primitives: generated-state label copy and reusable current-vs-generated comparison block used across Suggest/SmartFix/Workspace cards
           SuggestExpressionInline.tsx FS-042 inline NL→Rule panel: instruction input (`inputting`/`loading`) + suggestion result (`success`) + error state (`error`), Accept/Dismiss actions, Ctrl+Enter submit, Escape dismiss
           SuggestExpressionInline.test.tsx FS-042 component tests (state rendering, keyboard shortcuts, generate/accept/dismiss flows, error state)
-          SmartBuilderPanel.tsx      Smart Builder shell: target-focused header, input tray + action list composition, and complex-expression Advanced fallback banner (FS-094 T-04)
+          SmartBuilderPanel.tsx      Smart Builder shell: target-focused header, input tray + action list composition, direct IF/THEN/OTHERWISE condition editing with type-aware operators/right-value editors/per-usage transform controls and compatibility diagnostics + transform affordance, and complex-expression Advanced fallback banner (FS-094 T-04, FS-097 T-05/T-06)
           SmartBuilderPanel.test.tsx Component tests for empty tray state and non-decomposable expression fallback banner (FS-094 T-04)
           InputTray.tsx              Smart Builder tray surface with source-kind badges and empty/populated states (FS-094 T-04)
           InputTray.test.tsx         Component tests for tray empty guidance and source-kind badge rendering (FS-094 T-04)

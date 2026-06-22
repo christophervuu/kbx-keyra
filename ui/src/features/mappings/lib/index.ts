@@ -236,6 +236,7 @@ export {
   toSmartBuilderTransformArgsFromParameters,
   toSmartBuilderCompositionPatchFromParameters,
   hydrateSmartBuilderFromExpression,
+  getBuilderInputUsages,
 } from './smart-builder-state';
 export type {
   BuilderValueType,
@@ -245,6 +246,9 @@ export type {
   BuilderInput,
   BuilderPredicate,
   BuilderConditionClause,
+  BuilderConditionMatchMode,
+  BuilderInputUsage,
+  BuilderInputUsageLocation,
   BuilderValueMapEntry,
   BuilderComposition,
   DraftValidationState as SmartDraftValidationState,

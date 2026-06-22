@@ -36,10 +36,13 @@ import { RuleList } from '@/features/mappings/components';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
 import { useAutoMapWorkspace, useExpressionBuilder, useMappingEditor, useTargetStatus, useVersionHistory } from '@/features/mappings/hooks';
 import {
+  type BuilderArgumentValue,
+  type BuilderInput,
   type SmartBuilderDraft,
   createActionParameterDraft,
   createEmptySmartBuilderDraft,
   generateSmartBuilderExpression,
+  getBuilderInputUsages,
   getValidatedActionParameters,
   getPendingAutoMapSession,
   hydrateSmartBuilderFromExpression,
@@ -245,6 +248,43 @@ interface SmartSelectionResult {
   readonly expression: string;
 }
 
+export function buildSmartTargetSessionKey(mappingId: string, targetPath: string): string {
+  return `${mappingId}::${targetPath}`;
+}
+
+export function normalizeLegacySmartSlotId(slotId: string | null | undefined): string | null {
+  if (!slotId) return null;
+  switch (slotId) {
+    case 'condition-left':
+      return 'condition:left';
+    case 'condition-right':
+      return 'condition:right';
+    case 'condition-then':
+      return 'condition:then';
+    case 'condition-else':
+      return 'condition:else';
+    case 'fallback-default':
+      return 'fallback:default';
+    default:
+      return slotId;
+  }
+}
+
+function normalizeLegacySlotScopedInputs(
+  slotScopedInputs: SmartBuilderDraft['slotScopedInputs'],
+): SmartBuilderDraft['slotScopedInputs'] {
+  if (!slotScopedInputs) return slotScopedInputs;
+  const entries = Object.entries(slotScopedInputs);
+  if (entries.length === 0) return slotScopedInputs;
+
+  const normalized: Record<string, BuilderInput> = {};
+  for (const [key, value] of entries) {
+    const normalizedKey = normalizeLegacySmartSlotId(key) ?? key;
+    normalized[normalizedKey] = value;
+  }
+  return normalized;
+}
+
 function isSameStagedAsInput(
   input: SmartBuilderDraft['inputs'][number],
   staged: StagedInputField,
@@ -273,6 +313,12 @@ function removeInputFromSmartDraft(
 ): SmartBuilderDraft {
   const remainingInputs = draft.inputs.filter((input) => input.id !== inputId);
 
+  const sanitizeArgument = (value: BuilderArgumentValue) => {
+    if (value.kind !== 'input') return value;
+    if (value.inputId !== inputId) return value;
+    return { kind: 'static', value: '' } as const;
+  };
+
   let composition = draft.composition;
   if (remainingInputs.length === 0) {
     composition = null;
@@ -287,6 +333,44 @@ function removeInputFromSmartDraft(
     composition = remainingInputs.length > 0
       ? { kind: 'direct', inputId: remainingInputs[0]!.id }
       : null;
+  } else if (composition?.kind === 'coalesce') {
+    const nextIds = (composition.inputIds ?? draft.inputs.map((input) => input.id)).filter((id) => id !== inputId);
+    composition = nextIds.length <= 1
+      ? { kind: 'direct', inputId: nextIds[0] ?? remainingInputs[0]!.id }
+      : {
+          ...composition,
+          inputIds: nextIds,
+          ...(composition.fallback ? { fallback: sanitizeArgument(composition.fallback) } : {}),
+        };
+  } else if (composition?.kind === 'math') {
+    const nextOperations = (composition.operations ?? []).filter((operation) => operation.inputId !== inputId);
+    const nextStartInputId = composition.startInputId === inputId
+      ? (nextOperations[0]?.inputId ?? remainingInputs[0]!.id)
+      : composition.startInputId;
+
+    if (nextOperations.length === 0) {
+      composition = {
+        kind: 'direct',
+        inputId: nextStartInputId ?? remainingInputs[0]!.id,
+      };
+    } else {
+      composition = {
+        ...composition,
+        startInputId: nextStartInputId,
+        operations: nextOperations,
+      };
+    }
+  } else if (composition?.kind === 'valueMap' && composition.inputId === inputId) {
+    composition = {
+      kind: 'direct',
+      inputId: remainingInputs[0]!.id,
+    };
+  } else if (composition?.kind === 'arrayBuild' || composition?.kind === 'arrayMerge') {
+    const nextIds = (composition.inputIds ?? draft.inputs.map((input) => input.id)).filter((id) => id !== inputId);
+    composition = {
+      ...composition,
+      inputIds: nextIds,
+    };
   }
 
   const nextDraft = {
@@ -296,6 +380,47 @@ function removeInputFromSmartDraft(
   };
 
   return updateSmartBuilderExpression(nextDraft, generateSmartBuilderExpression(nextDraft));
+}
+
+export function removeInputFromSmartDraftWithUsageCleanup(
+  draft: SmartBuilderDraft,
+  inputId: string,
+): SmartBuilderDraft {
+  const usages = getBuilderInputUsages(draft).filter((usage) => usage.inputId === inputId);
+  if (usages.length === 0) {
+    return removeInputFromSmartDraft(draft, inputId);
+  }
+
+  const sanitizeArgument = (value: { readonly kind: 'static'; readonly value: unknown } | { readonly kind: 'expression'; readonly expression: string } | { readonly kind: 'input'; readonly inputId: string }) => {
+    if (value.kind !== 'input') return value;
+    if (value.inputId !== inputId) return value;
+    return { kind: 'static', value: '' } as const;
+  };
+
+  const rewriteCondition = (condition: Extract<NonNullable<SmartBuilderDraft['composition']>, { kind: 'condition' }>): SmartBuilderDraft['composition'] => ({
+    ...condition,
+    clauses: condition.clauses.map((clause) => ({
+      ...clause,
+      predicates: clause.predicates.map((predicate) => ({
+        ...predicate,
+        left: sanitizeArgument(predicate.left),
+        ...(predicate.right ? { right: sanitizeArgument(predicate.right) } : {}),
+      })),
+      thenOutput: sanitizeArgument(clause.thenOutput),
+    })),
+    elseOutput: sanitizeArgument(condition.elseOutput),
+  });
+
+  let nextDraft = draft;
+  if (nextDraft.composition?.kind === 'condition') {
+    nextDraft = {
+      ...nextDraft,
+      composition: rewriteCondition(nextDraft.composition),
+    };
+    nextDraft = updateSmartBuilderExpression(nextDraft, generateSmartBuilderExpression(nextDraft));
+  }
+
+  return removeInputFromSmartDraft(nextDraft, inputId);
 }
 
 interface SmartActionMeta {
@@ -332,6 +457,12 @@ interface ValueMapAdoptionPromptState {
   readonly tableId: string;
   readonly fromRevision: number;
   readonly toRevision: number;
+}
+
+interface SmartMethodSwitchPromptState {
+  readonly targetPath: string;
+  readonly actionId: string;
+  readonly options?: Parameters<typeof applySmartActionToDraft>[2];
 }
 
 function inferDirectionSupportFromRevision(revision: ProjectValueTableRevision): ValueTableDirectionSupport {
@@ -822,18 +953,29 @@ export function applySmartActionToDraft(
     }
     case 'condition.compare':
     case 'condition.if': {
-      const left = draft.inputs[0];
-      const right = draft.inputs[1];
-      if (!left) return draft;
+      if (draft.composition?.kind === 'condition') {
+        return draft;
+      }
+
+      const directSeedInputId =
+        draft.composition?.kind === 'direct'
+          ? draft.composition.inputId
+          : draft.composition?.kind === 'default'
+            ? draft.composition.inputId
+            : undefined;
+      const left = directSeedInputId
+        ? draft.inputs.find((input) => input.id === directSeedInputId) ?? draft.inputs[0]
+        : draft.inputs[0];
       nextDraft = {
         ...draft,
         composition: {
           kind: 'condition',
+          matchMode: 'all',
           clauses: [{
             predicates: [{
-              left: { kind: 'input', inputId: left.id },
+              left: left ? { kind: 'input', inputId: left.id } : { kind: 'static', value: '' },
               operator: 'eq',
-              right: right ? { kind: 'input', inputId: right.id } : { kind: 'static', value: '' },
+              right: { kind: 'static', value: '' },
             }],
             thenOutput: { kind: 'static', value: '' },
           }],
@@ -843,12 +985,17 @@ export function applySmartActionToDraft(
       break;
     }
     case 'condition.truthy': {
+      if (draft.composition?.kind === 'condition') {
+        return draft;
+      }
+
       const first = draft.inputs[0];
       if (!first) return draft;
       nextDraft = {
         ...draft,
         composition: {
           kind: 'condition',
+          matchMode: 'all',
           clauses: [{
             predicates: [{
               left: { kind: 'input', inputId: first.id },
@@ -950,6 +1097,27 @@ export function applySmartActionToDraft(
   return updateSmartBuilderExpression(nextDraft, generateSmartBuilderExpression(nextDraft));
 }
 
+export function shouldConfirmConditionalMethodSwitch(
+  draft: SmartBuilderDraft,
+  actionId: string,
+  options?: Parameters<typeof applySmartActionToDraft>[2],
+): boolean {
+  if (draft.composition?.kind !== 'condition') {
+    return false;
+  }
+
+  if (actionId === 'condition.compare' || actionId === 'condition.if' || actionId === 'condition.truthy') {
+    return false;
+  }
+
+  const nextDraft = applySmartActionToDraft(draft, actionId, options);
+  if (nextDraft === draft) {
+    return false;
+  }
+
+  return nextDraft.composition?.kind !== 'condition';
+}
+
 function createBuilderInputId(existingIds: readonly string[]): string {
   let next = existingIds.length + 1;
   let candidate = `input-${next}`;
@@ -1040,11 +1208,20 @@ function mapStagedToBuilderInput(
 export function applyStagedInputToSmartDraft(params: {
   readonly draft: SmartBuilderDraft;
   readonly staged: StagedInputField;
+  readonly selectionBehavior?: 'toggle-on-existing' | 'ignore-existing';
 }): SmartSelectionResult {
-  const { draft, staged } = params;
+  const { draft, staged, selectionBehavior = 'toggle-on-existing' } = params;
 
   const existingMatch = draft.inputs.find((input) => isSameStagedAsInput(input, staged));
   if (existingMatch && !draft.focusedSlotId) {
+    if (selectionBehavior === 'ignore-existing') {
+      return {
+        outcome: 'appended-to-tray',
+        draft,
+        expression: draft.expression,
+      };
+    }
+
     const toggled = removeInputFromSmartDraft(draft, existingMatch.id);
     return {
       outcome: 'appended-to-tray',
@@ -1053,14 +1230,21 @@ export function applyStagedInputToSmartDraft(params: {
     };
   }
 
-  const nextInput = mapStagedToBuilderInput(
-    staged,
-    createBuilderInputId(draft.inputs.map((input) => input.id)),
-  );
+  const nextInput = existingMatch
+    ?? mapStagedToBuilderInput(
+      staged,
+      createBuilderInputId(draft.inputs.map((input) => input.id)),
+    );
 
-  if (draft.focusedSlotId && draft.focusedSlotId.trim().length > 0) {
-    const focusedSlotId = draft.focusedSlotId;
-    let nextDraft: SmartBuilderDraft = setSlotScopedInput(draft, focusedSlotId, nextInput);
+  const focusedSlotId = normalizeLegacySmartSlotId(draft.focusedSlotId);
+  if (focusedSlotId && focusedSlotId.trim().length > 0) {
+    const draftWithFilledInput = existingMatch
+      ? draft
+      : {
+          ...draft,
+          inputs: [...draft.inputs, nextInput],
+        };
+    let nextDraft: SmartBuilderDraft = setSlotScopedInput(draftWithFilledInput, focusedSlotId, nextInput);
 
     const argumentFromFocusedInput = {
       kind: 'expression' as const,
@@ -1088,16 +1272,31 @@ export function applyStagedInputToSmartDraft(params: {
 
       const updatedPredicate =
         focusedSlotId === 'condition:left'
-          ? { ...firstPredicate, left: argumentFromFocusedInput }
+          ? {
+            ...firstPredicate,
+            left: {
+              ...argumentFromFocusedInput,
+              transforms: firstPredicate.left.transforms,
+            },
+          }
           : focusedSlotId === 'condition:right'
-            ? { ...firstPredicate, right: argumentFromFocusedInput }
+            ? {
+              ...firstPredicate,
+              right: {
+                ...argumentFromFocusedInput,
+                transforms: firstPredicate.right?.transforms,
+              },
+            }
             : firstPredicate;
 
       const updatedClause = {
         ...firstClause,
         predicates: [updatedPredicate, ...remainingPredicates],
         thenOutput: focusedSlotId === 'condition:then'
-          ? argumentFromFocusedInput
+          ? {
+            ...argumentFromFocusedInput,
+            transforms: firstClause.thenOutput.transforms,
+          }
           : firstClause.thenOutput,
       };
 
@@ -1107,7 +1306,10 @@ export function applyStagedInputToSmartDraft(params: {
           ...composition,
           clauses: [updatedClause, ...remainingClauses],
           elseOutput: focusedSlotId === 'condition:else'
-            ? argumentFromFocusedInput
+            ? {
+              ...argumentFromFocusedInput,
+              transforms: composition.elseOutput.transforms,
+            }
             : composition.elseOutput,
         },
       };
@@ -1154,7 +1356,7 @@ export function applyStagedInputToSmartDraft(params: {
   const appended = {
     ...draft,
     inputs: [...draft.inputs, nextInput],
-    composition: draft.composition?.kind === 'direct' ? null : draft.composition,
+    composition: draft.composition,
   };
   const expression = generateSmartBuilderExpression(appended);
   const withExpression = updateSmartBuilderExpression(appended, expression);
@@ -1883,22 +2085,30 @@ export default function MappingEditor() {
   const [valueMapProjectSelectionByTarget, setValueMapProjectSelectionByTarget] = useState<Record<string, ValueMapProjectSelectionState>>({});
   const [valueMapConversionPrompt, setValueMapConversionPrompt] = useState<ValueMapConversionPromptState | null>(null);
   const [valueMapAdoptionPrompt, setValueMapAdoptionPrompt] = useState<ValueMapAdoptionPromptState | null>(null);
+  const [smartMethodSwitchPrompt, setSmartMethodSwitchPrompt] = useState<SmartMethodSwitchPromptState | null>(null);
 
   const setSmartDraftForTarget = useCallback((targetPath: string, draft: SmartBuilderDraft) => {
-    smartDraftByTargetRef.current.set(targetPath, draft);
-    setSmartDraftByTargetState((prev) => ({ ...prev, [targetPath]: draft }));
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
+    const normalizedDraft: SmartBuilderDraft = {
+      ...draft,
+      focusedSlotId: normalizeLegacySmartSlotId(draft.focusedSlotId),
+      slotScopedInputs: normalizeLegacySlotScopedInputs(draft.slotScopedInputs),
+    };
+
+    smartDraftByTargetRef.current.set(targetSessionKey, normalizedDraft);
+    setSmartDraftByTargetState((prev) => ({ ...prev, [targetSessionKey]: normalizedDraft }));
     setSmartActionMetaByTarget((prev) => {
-      const derived = deriveSmartActionMetaFromDraft(draft);
+      const derived = deriveSmartActionMetaFromDraft(normalizedDraft);
       return {
         ...prev,
-        [targetPath]: {
-          ...(prev[targetPath] ?? { activeActionId: null, concatSeparator: ' ', announcement: null }),
+        [targetSessionKey]: {
+          ...(prev[targetSessionKey] ?? { activeActionId: null, concatSeparator: ' ', announcement: null }),
           activeActionId: derived.activeActionId,
           concatSeparator: derived.concatSeparator,
         },
       };
     });
-  }, []);
+  }, [mappingId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1938,12 +2148,14 @@ export default function MappingEditor() {
   }, [adapter, projectId]);
 
   const handleSmartFocusedSlotChange = useCallback((targetPath: string, slotId: string | null) => {
-    const existing = smartDraftByTargetRef.current.get(targetPath);
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
+    const existing = smartDraftByTargetRef.current.get(targetSessionKey);
     if (!existing) return;
     const nextDraft = { ...existing, focusedSlotId: slotId };
     setSmartDraftForTarget(targetPath, nextDraft);
-  }, [setSmartDraftForTarget]);
+  }, [mappingId, setSmartDraftForTarget]);
   const [isSourceBrowseOpen, setIsSourceBrowseOpen] = useState(false);
+  const [sourceSelectionModeOverride, setSourceSelectionModeOverride] = useState<'add-to-tray' | 'fill-current-value' | null>(null);
   const [isSourcePanelHidden, setIsSourcePanelHidden] = useState(false);
   const [isBuilderPanelHidden, setIsBuilderPanelHidden] = useState(false);
 
@@ -2001,6 +2213,7 @@ export default function MappingEditor() {
         }
       }
       setStagedInputField(null);
+      setSourceSelectionModeOverride(null);
       setIsBuilderPanelHidden(false);
       setIsSourcePanelHidden(false);
       setSelectedTargetPath(resolveSelectedTargetPath(path));
@@ -2149,7 +2362,8 @@ export default function MappingEditor() {
   }, [editor.actions, editor.parsedSourceSchema?.nodes, editor.parsedTargetSchema, editor.rules]);
 
   const resolveSmartDraftForTarget = useCallback((targetPath: string) => {
-    const existing = smartDraftByTargetRef.current.get(targetPath);
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
+    const existing = smartDraftByTargetRef.current.get(targetSessionKey);
     if (existing) return { draft: existing, guided: true as const };
 
     const hydrated = hydrateSmartDraftForTarget(targetPath);
@@ -2160,14 +2374,15 @@ export default function MappingEditor() {
 
     setSmartDraftForTarget(targetPath, hydrated.draft);
     return { draft: hydrated.draft, guided: true as const };
-  }, [hydrateSmartDraftForTarget, setSmartDraftForTarget]);
+  }, [hydrateSmartDraftForTarget, mappingId, setSmartDraftForTarget]);
 
   const selectedNodeSmartHydration = useMemo(() => {
     if (!selectedNode) return null;
-    const existing = smartDraftByTargetState[selectedNode.path];
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedNode.path);
+    const existing = smartDraftByTargetState[targetSessionKey];
     if (!existing) return null;
     return { kind: 'guided' as const, draft: existing };
-  }, [selectedNode, smartDraftByTargetState]);
+  }, [mappingId, selectedNode, smartDraftByTargetState]);
 
   const syncRuleValueMapMetadataForTarget = useCallback((targetPath: string, draft: SmartBuilderDraft) => {
     const composition = draft.composition;
@@ -2265,19 +2480,20 @@ export default function MappingEditor() {
   }, [projectValueTableCatalog]);
 
   const upsertValueMapSelectionStateForTarget = useCallback((targetPath: string, state: ValueMapProjectSelectionState | null) => {
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
     setValueMapProjectSelectionByTarget((prev) => {
       if (state === null) {
-        if (!(targetPath in prev)) return prev;
+        if (!(targetSessionKey in prev)) return prev;
         const next = { ...prev };
-        delete next[targetPath];
+        delete next[targetSessionKey];
         return next;
       }
       return {
         ...prev,
-        [targetPath]: state,
+        [targetSessionKey]: state,
       };
     });
-  }, []);
+  }, [mappingId]);
 
   const applyValueMapSelectionToDraft = useCallback(async (input: {
     targetPath: string;
@@ -2424,7 +2640,8 @@ export default function MappingEditor() {
     const prompt = valueMapAdoptionPrompt;
     if (!prompt) return;
 
-    const selectionState = valueMapProjectSelectionByTarget[prompt.targetPath];
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, prompt.targetPath);
+    const selectionState = valueMapProjectSelectionByTarget[targetSessionKey];
     if (!selectionState?.tableId || !selectionState.direction) {
       setValueMapAdoptionPrompt(null);
       return;
@@ -2439,19 +2656,91 @@ export default function MappingEditor() {
     });
   }, [
     applyValueMapSelectionToDraft,
+    mappingId,
     valueMapAdoptionPrompt,
     valueMapProjectSelectionByTarget,
   ]);
 
+  const applySmartActionForTarget = useCallback((input: {
+    targetPath: string;
+    actionId: string;
+    options?: Parameters<typeof applySmartActionToDraft>[2];
+  }) => {
+    const resolved = resolveSmartDraftForTarget(input.targetPath);
+    if (!resolved.guided || resolved.draft === null) return;
+
+    const nextDraft = applySmartActionToDraft(resolved.draft, input.actionId, input.options);
+    if (nextDraft === resolved.draft) return;
+
+    const nextDraftCleared = {
+      ...nextDraft,
+      pendingActionDraft: null,
+    };
+    setSmartDraftForTarget(input.targetPath, nextDraftCleared);
+    upsertValueMapSelectionStateForTarget(
+      input.targetPath,
+      deriveValueMapProjectSelectionState(input.targetPath, nextDraftCleared),
+    );
+    editor.actions.updateDraft(input.targetPath, nextDraftCleared.expression);
+    syncRuleValueMapMetadataForTarget(input.targetPath, nextDraftCleared);
+
+    const actionLabel =
+      input.actionId === 'text.concat'
+        ? 'Combine text'
+        : input.actionId === 'base.calculation'
+          ? 'Calculation'
+          : input.actionId === 'lookup.valueMap'
+            ? 'Value Mapping'
+            : input.actionId === 'text.upper'
+              ? 'Uppercase'
+              : input.actionId === 'text.lower'
+                ? 'Lowercase'
+                : input.actionId === 'text.trim'
+                  ? 'Trim spaces'
+                  : input.actionId === 'text.phoneDigits'
+                    ? 'Normalize phone digits'
+                    : input.actionId;
+
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, input.targetPath);
+    setSmartActionMetaByTarget((prev) => ({
+      ...prev,
+      [targetSessionKey]: {
+        ...(prev[targetSessionKey] ?? { activeActionId: null, concatSeparator: ' ' }),
+        activeActionId: input.actionId,
+        announcement: `Applied ${actionLabel}. Draft saved.`,
+      },
+    }));
+  }, [
+    deriveValueMapProjectSelectionState,
+    editor.actions,
+    mappingId,
+    resolveSmartDraftForTarget,
+    setSmartDraftForTarget,
+    syncRuleValueMapMetadataForTarget,
+    upsertValueMapSelectionStateForTarget,
+  ]);
+
+  const handleConfirmSmartMethodSwitch = useCallback(() => {
+    const prompt = smartMethodSwitchPrompt;
+    if (!prompt) return;
+    setSmartMethodSwitchPrompt(null);
+    applySmartActionForTarget({
+      targetPath: prompt.targetPath,
+      actionId: prompt.actionId,
+      options: prompt.options,
+    });
+  }, [applySmartActionForTarget, smartMethodSwitchPrompt]);
+
   const clearSmartParameterDraftForTarget = useCallback((targetPath: string) => {
-    const existing = smartDraftByTargetRef.current.get(targetPath);
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
+    const existing = smartDraftByTargetRef.current.get(targetSessionKey);
     if (!existing || existing.pendingActionDraft === null) return;
     const nextDraft = {
       ...existing,
       pendingActionDraft: null,
     };
     setSmartDraftForTarget(targetPath, nextDraft);
-  }, [setSmartDraftForTarget]);
+  }, [mappingId, setSmartDraftForTarget]);
 
   const beginSmartParameterEditForTarget = useCallback((input: {
     targetPath: string;
@@ -2516,7 +2805,8 @@ export default function MappingEditor() {
 
   const selectedInputsForSourcePanel = useMemo(() => {
     if (!selectedTargetPath) return [] as { kind: 'primary' | 'enrichment' | 'constant' | 'static' | 'item' | 'parent' | 'expression'; path: string; alias?: string }[];
-    const draft = smartDraftByTargetState[selectedTargetPath];
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+    const draft = smartDraftByTargetState[targetSessionKey];
     if (!draft) return [] as { kind: 'primary' | 'enrichment' | 'constant' | 'static' | 'item' | 'parent' | 'expression'; path: string; alias?: string }[];
 
     return draft.inputs
@@ -2526,7 +2816,27 @@ export default function MappingEditor() {
         path: input.path ?? '',
         alias: input.externalName,
       }));
-  }, [selectedTargetPath, smartDraftByTargetState]);
+  }, [mappingId, selectedTargetPath, smartDraftByTargetState]);
+
+  const focusedSlotIdForSelectedTarget = useMemo(() => {
+    if (!selectedTargetPath) return null;
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+    return smartDraftByTargetState[targetSessionKey]?.focusedSlotId ?? null;
+  }, [mappingId, selectedTargetPath, smartDraftByTargetState]);
+
+  const canFillCurrentValue = Boolean(
+    selectedTargetPath
+    && focusedSlotIdForSelectedTarget
+    && focusedSlotIdForSelectedTarget.trim().length > 0,
+  );
+
+  const normalizedSourceSelectionModeOverride =
+    sourceSelectionModeOverride === 'fill-current-value' && !canFillCurrentValue
+      ? null
+      : sourceSelectionModeOverride;
+
+  const sourceSelectionMode = normalizedSourceSelectionModeOverride
+    ?? (canFillCurrentValue ? 'fill-current-value' : 'add-to-tray');
 
   const autoMapSuggestionStatusByPath = useMemo(() => {
     const statusMap: Record<string, 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale'> = {};
@@ -2632,6 +2942,12 @@ export default function MappingEditor() {
       enrichmentSourceData={routeEnrichmentSourceData}
       sourceSchemaName={editor.sourceSchemaName}
       selectedInputs={selectedInputsForSourcePanel}
+      selectionMode={sourceSelectionMode}
+      canFillCurrentValue={canFillCurrentValue}
+      onSelectionModeChange={(mode) => {
+        if (mode === 'fill-current-value' && !canFillCurrentValue) return;
+        setSourceSelectionModeOverride(mode);
+      }}
       onStageField={(field) => {
         if (view === 'rules') {
           expressionBuilderRef.current?.insertSourceField(field);
@@ -2649,10 +2965,21 @@ export default function MappingEditor() {
           return;
         }
 
-        const nextSelection = applyStagedInputToSmartDraft({ draft: resolved.draft, staged: field });
+        const shouldFillCurrentValue = sourceSelectionMode === 'fill-current-value' && canFillCurrentValue;
+        const nextSelection = applyStagedInputToSmartDraft({
+          draft: resolved.draft,
+          staged: field,
+          selectionBehavior: 'ignore-existing',
+        });
         setSmartDraftForTarget(selectedTargetPath, nextSelection.draft);
         editor.actions.updateDraft(selectedTargetPath, nextSelection.expression);
         setStagedInputField(null);
+
+        if (shouldFillCurrentValue && nextSelection.outcome === 'filled-focused-slot') {
+          setIsSourcePanelHidden(true);
+          setIsSourceBrowseOpen(false);
+          setSourceSelectionModeOverride(null);
+        }
       }}
       className="h-full"
     />
@@ -2856,6 +3183,8 @@ export default function MappingEditor() {
         currentExpression={selectedNodeExpression}
         parsedSourceSchema={editor.parsedSourceSchema}
         stagedSourcePath={stagedInputField?.expression ?? null}
+        sourceSampleData={selectedSampleParsed}
+        enrichmentSampleData={routeEnrichmentSourceData}
         updateDraft={editor.actions.updateDraft}
         revertDraft={editor.actions.revertDraft}
         getDraftExpression={editor.actions.getDraftExpression}
@@ -2888,7 +3217,7 @@ export default function MappingEditor() {
           const resolved = resolveSmartDraftForTarget(selectedTargetPath);
           if (!resolved.guided || resolved.draft === null) return;
 
-          const nextDraft = removeInputFromSmartDraft(resolved.draft, input.id);
+          const nextDraft = removeInputFromSmartDraftWithUsageCleanup(resolved.draft, input.id);
           setSmartDraftForTarget(selectedTargetPath, nextDraft);
           editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
         }}
@@ -2897,7 +3226,27 @@ export default function MappingEditor() {
           const resolved = resolveSmartDraftForTarget(selectedTargetPath);
           if (!resolved.guided || resolved.draft === null) return;
 
-          const nextDraft = removeInputFromSmartDraft(resolved.draft, inputId);
+          const nextDraft = removeInputFromSmartDraftWithUsageCleanup(resolved.draft, inputId);
+          setSmartDraftForTarget(selectedTargetPath, nextDraft);
+          editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
+        }}
+        onSmartUpdateConditionComposition={(composition) => {
+          if (!selectedTargetPath) return;
+          const resolved = resolveSmartDraftForTarget(selectedTargetPath);
+          if (!resolved.guided || resolved.draft === null) return;
+          if (resolved.draft.composition?.kind !== 'condition') return;
+
+          const nextDraft = updateSmartBuilderExpression(
+            {
+              ...resolved.draft,
+              composition,
+            },
+            generateSmartBuilderExpression({
+              ...resolved.draft,
+              composition,
+            }),
+          );
+
           setSmartDraftForTarget(selectedTargetPath, nextDraft);
           editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
         }}
@@ -2906,9 +3255,19 @@ export default function MappingEditor() {
           const resolved = resolveSmartDraftForTarget(selectedTargetPath);
           if (!resolved.guided || resolved.draft === null) return;
 
-          const nextDraftApplied = applySmartActionToDraft(resolved.draft, actionId, options);
           const editingStepIndex = options?.editingStepIndex ?? null;
           const editingStepScope = options?.editingStepScope ?? null;
+
+          if (shouldConfirmConditionalMethodSwitch(resolved.draft, actionId, options)) {
+            setSmartMethodSwitchPrompt({
+              targetPath: selectedTargetPath,
+              actionId,
+              options,
+            });
+            return;
+          }
+
+          const nextDraftApplied = applySmartActionToDraft(resolved.draft, actionId, options);
 
           let nextDraft = nextDraftApplied;
           if (editingStepScope !== 'output-step' && editingStepIndex !== null && editingStepIndex >= 0) {
@@ -2964,19 +3323,21 @@ export default function MappingEditor() {
                           ? 'Normalize phone digits'
                           : actionId;
 
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
           setSmartActionMetaByTarget((prev) => ({
             ...prev,
-            [selectedTargetPath]: {
-              ...(prev[selectedTargetPath] ?? { activeActionId: null, concatSeparator: ' ' }),
+            [targetSessionKey]: {
+              ...(prev[targetSessionKey] ?? { activeActionId: null, concatSeparator: ' ' }),
               activeActionId: actionId,
               announcement: `Applied ${actionLabel}. Draft saved.`,
             },
           }));
         }}
         valueMapProjectState={(() => {
-          const cached = valueMapProjectSelectionByTarget[selectedNode.path];
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedNode.path);
+          const cached = valueMapProjectSelectionByTarget[targetSessionKey];
           if (cached) return cached as ValueMapProjectUiState;
-          const existingDraft = smartDraftByTargetState[selectedNode.path];
+          const existingDraft = smartDraftByTargetState[targetSessionKey];
           if (existingDraft) {
             return deriveValueMapProjectSelectionState(selectedNode.path, existingDraft) as ValueMapProjectUiState | null | undefined;
           }
@@ -2998,7 +3359,8 @@ export default function MappingEditor() {
             return;
           }
 
-          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+          const state = valueMapProjectSelectionByTarget[targetSessionKey];
           const candidateTableId = state?.tableId ?? projectValueTableCatalog[0]?.table.id;
           if (!candidateTableId) return;
           const candidateEntry = projectValueTableCatalog.find((entry) => entry.table.id === candidateTableId);
@@ -3029,7 +3391,8 @@ export default function MappingEditor() {
         }}
         onValueMapDirectionSelect={(direction) => {
           if (!selectedTargetPath) return;
-          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+          const state = valueMapProjectSelectionByTarget[targetSessionKey];
           if (!state?.tableId) return;
           void applyValueMapSelectionToDraft({
             targetPath: selectedTargetPath,
@@ -3130,7 +3493,8 @@ export default function MappingEditor() {
         }}
         onValueMapConvertInlineToProject={() => {
           if (!selectedTargetPath) return;
-          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+          const state = valueMapProjectSelectionByTarget[targetSessionKey];
           const fallbackTableId = projectValueTableCatalog[0]?.table.id;
           const fallbackDirection = projectValueTableCatalog[0]
             ? (buildDirectionOptions(projectValueTableCatalog[0].revision).find((option) => option.enabled)?.direction ?? null)
@@ -3144,7 +3508,8 @@ export default function MappingEditor() {
         }}
         onValueMapAdoptLatestRevision={() => {
           if (!selectedTargetPath) return;
-          const state = valueMapProjectSelectionByTarget[selectedTargetPath];
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+          const state = valueMapProjectSelectionByTarget[targetSessionKey];
           if (!state?.tableId || !state.pinnedRevision || !state.currentRevision) return;
           if (state.currentRevision <= state.pinnedRevision) return;
           setValueMapAdoptionPrompt({
@@ -3179,9 +3544,9 @@ export default function MappingEditor() {
           if (!selectedTargetPath) return;
           clearSmartParameterDraftForTarget(selectedTargetPath);
         }}
-        smartActiveActionId={smartActionMetaByTarget[selectedNode.path]?.activeActionId ?? null}
-        smartActionAnnouncement={smartActionMetaByTarget[selectedNode.path]?.announcement ?? null}
-        smartConcatSeparator={smartActionMetaByTarget[selectedNode.path]?.concatSeparator ?? ' '}
+        smartActiveActionId={smartActionMetaByTarget[buildSmartTargetSessionKey(mappingId, selectedNode.path)]?.activeActionId ?? null}
+        smartActionAnnouncement={smartActionMetaByTarget[buildSmartTargetSessionKey(mappingId, selectedNode.path)]?.announcement ?? null}
+        smartConcatSeparator={smartActionMetaByTarget[buildSmartTargetSessionKey(mappingId, selectedNode.path)]?.concatSeparator ?? ' '}
         onSmartConcatSeparatorChange={(separator) => {
           if (!selectedTargetPath) return;
           const resolved = resolveSmartDraftForTarget(selectedTargetPath);
@@ -3207,10 +3572,11 @@ export default function MappingEditor() {
           );
           setSmartDraftForTarget(selectedTargetPath, nextDraft);
           editor.actions.updateDraft(selectedTargetPath, nextDraft.expression);
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
           setSmartActionMetaByTarget((prev) => ({
             ...prev,
-            [selectedTargetPath]: {
-              ...(prev[selectedTargetPath] ?? { activeActionId: 'text.concat', concatSeparator: ' ' }),
+            [targetSessionKey]: {
+              ...(prev[targetSessionKey] ?? { activeActionId: 'text.concat', concatSeparator: ' ' }),
               activeActionId: 'text.concat',
               concatSeparator: separator,
               announcement: 'Updated separator. Draft saved.',
@@ -3245,14 +3611,19 @@ export default function MappingEditor() {
     if (selectedNode !== null) {
       setIsSourceBrowseOpen(true);
       setIsSourcePanelHidden(false);
+      if (canFillCurrentValue) {
+        setSourceSelectionModeOverride('fill-current-value');
+      }
       return;
     }
     setIsSourcePanelHidden(false);
+    setSourceSelectionModeOverride(null);
     setIsSourceBrowseOpen((prev) => !prev);
   };
 
   const handleHideSourcePanel = () => {
     setIsSourcePanelHidden(true);
+    setSourceSelectionModeOverride(null);
     if (selectedNode === null) {
       setIsSourceBrowseOpen(false);
     }
@@ -3410,6 +3781,42 @@ export default function MappingEditor() {
         cancelLabel="Cancel"
         onConfirm={handleBlockerDiscard}
         onCancel={handleBlockerCancel}
+      />
+
+      <ConfirmDialog
+        open={smartMethodSwitchPrompt !== null}
+        title="Change mapping method?"
+        message={(() => {
+          if (!smartMethodSwitchPrompt) return '';
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, smartMethodSwitchPrompt.targetPath);
+          const promptDraft = smartDraftByTargetState[targetSessionKey] ?? null;
+          const clauseCount = promptDraft?.composition?.kind === 'condition'
+            ? promptDraft.composition.clauses.length
+            : 0;
+          const predicateCount = promptDraft?.composition?.kind === 'condition'
+            ? promptDraft.composition.clauses.reduce((total, clause) => total + clause.predicates.length, 0)
+            : 0;
+
+          return (
+            <div className="space-y-2" data-testid="smart-method-switch-confirm-message">
+              <p>
+                Switching away from <strong>Conditional</strong> will discard conditional-specific configuration for this field.
+              </p>
+              <ul className="list-disc space-y-1 pl-5" data-testid="smart-method-switch-discard-list">
+                <li>IF predicates ({predicateCount})</li>
+                <li>Condition clauses ({clauseCount})</li>
+                <li>THEN / OTHERWISE branch values</li>
+              </ul>
+              <p data-testid="smart-method-switch-preserve-tray">
+                Input Tray rows are preserved on both cancel and confirm.
+              </p>
+            </div>
+          );
+        })()}
+        confirmLabel="Discard conditional settings"
+        cancelLabel="Keep conditional"
+        onConfirm={handleConfirmSmartMethodSwitch}
+        onCancel={() => setSmartMethodSwitchPrompt(null)}
       />
 
       <ConfirmDialog

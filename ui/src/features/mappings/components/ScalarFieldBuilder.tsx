@@ -67,6 +67,7 @@ import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { hydrateSmartBuilderFromExpression } from '../lib/smart-builder-state';
 import type {
+  BuilderComposition,
   BuilderInput,
   BuilderValueType,
   SmartBuilderActionParameterValue,
@@ -114,6 +115,10 @@ export interface ScalarFieldBuilderProps {
    * When provided, the builder inserts/selects this source path.
    */
   stagedSourcePath?: string | null;
+  /** Optional selected sample data used by Smart Builder conditional diagnostics. */
+  sourceSampleData?: unknown;
+  /** Optional enrichment sample map keyed by enrichment alias for conditional diagnostics. */
+  enrichmentSampleData?: Readonly<Record<string, unknown>>;
   /**
    * Called on every expression change to persist an in-memory draft.
    * Replaces the old onApply model — no explicit Apply needed.
@@ -171,6 +176,8 @@ export interface ScalarFieldBuilderProps {
   onSmartInputToggle?: (input: BuilderInput) => void;
   /** Explicit remove behavior from tray cards. */
   onSmartInputRemove?: (inputId: string) => void;
+  /** Update guided condition composition from direct IF/THEN/OTHERWISE controls. */
+  onSmartUpdateConditionComposition?: (composition: Extract<BuilderComposition, { kind: 'condition' }>) => void;
   /** Apply smart-builder action from action list. */
   onSmartApplyAction?: (
     actionId: string,
@@ -592,6 +599,7 @@ export function ScalarFieldBuilder({
   smartHydrationOverride = null,
   onSmartInputToggle,
   onSmartInputRemove,
+  onSmartUpdateConditionComposition,
   onSmartApplyAction,
   onSmartBeginActionParameterEdit,
   onSmartUpdateActionParameterDraft,
@@ -612,6 +620,8 @@ export function ScalarFieldBuilder({
   onValueMapInlineMappingRemove,
   onValueMapConvertInlineToProject,
   onValueMapAdoptLatestRevision,
+  sourceSampleData,
+  enrichmentSampleData = {},
   className = '',
 }: ScalarFieldBuilderProps) {
   const [expression, setExpression] = useState(currentExpression);
@@ -867,6 +877,7 @@ export function ScalarFieldBuilder({
   // Read sourceData from PreviewContext for live result display
   const previewCtx = useContext(PreviewContext);
   const sourceData = previewCtx?.sourceData ?? null;
+  const effectiveSourceSampleData = sourceSampleData ?? sourceData;
   const targetOutputPreview = useExpressionPreview({ expression, sourceData });
 
   // FS-040 T-02: Two-level validation state
@@ -1471,6 +1482,7 @@ export function ScalarFieldBuilder({
               onRequestArrayBuilderHandoff={onRequestArrayBuilderHandoff}
               onInputToggle={onSmartInputToggle}
               onInputRemove={onSmartInputRemove}
+              onUpdateConditionComposition={onSmartUpdateConditionComposition}
               onApplyAction={onSmartApplyAction}
               onBeginActionParameterEdit={onSmartBeginActionParameterEdit}
               onUpdateActionParameterDraft={onSmartUpdateActionParameterDraft}
@@ -1491,6 +1503,8 @@ export function ScalarFieldBuilder({
               onValueMapInlineMappingRemove={onValueMapInlineMappingRemove}
               onValueMapConvertInlineToProject={onValueMapConvertInlineToProject}
               onValueMapAdoptLatestRevision={onValueMapAdoptLatestRevision}
+              sourceSampleData={effectiveSourceSampleData}
+              enrichmentSampleData={enrichmentSampleData}
             />
           </div>
         )}

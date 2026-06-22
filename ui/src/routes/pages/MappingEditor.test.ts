@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildSmartTargetSessionKey,
   buildSampleOutputByTargetPath,
   applySmartActionToDraft,
   applyStagedInputToSmartDraft,
+  normalizeLegacySmartSlotId,
+  removeInputFromSmartDraftWithUsageCleanup,
   resolveBuilderTargetPath,
   resolveInitialSelectedSampleId,
+  shouldConfirmConditionalMethodSwitch,
   shouldUseArrayBuilderForSmartDraft,
 } from './MappingEditor';
 
@@ -41,6 +45,13 @@ const TARGET_NODES: SchemaTreeNode[] = (() => {
 
   return [order, orderItems, orderItemSku, orderItemQty, orderId, customer, customerName];
 })();
+
+describe('buildSmartTargetSessionKey', () => {
+  it('builds deterministic mapping-scoped target keys', () => {
+    expect(buildSmartTargetSessionKey('mapping-a', 'customer.name')).toBe('mapping-a::customer.name');
+    expect(buildSmartTargetSessionKey('mapping-b', 'customer.name')).not.toBe(buildSmartTargetSessionKey('mapping-a', 'customer.name'));
+  });
+});
 
 describe('resolveBuilderTargetPath', () => {
   it('returns the same path for a directly selected array node', () => {
@@ -161,6 +172,99 @@ describe('resolveInitialSelectedSampleId', () => {
 });
 
 describe('applyStagedInputToSmartDraft', () => {
+  it('discovery: legacy slot-based focusedSlotId aliases map to deterministic conditional slot writes', () => {
+    const legacySlotAliases: readonly { readonly slot: string; readonly expectedExpressionFragment: string }[] = [
+      { slot: 'condition:left', expectedExpressionFragment: 'eq(source("candidate"), "")' },
+      { slot: 'condition:right', expectedExpressionFragment: 'eq("", source("candidate"))' },
+      { slot: 'condition:then', expectedExpressionFragment: ', source("candidate"), "NO_MATCH")' },
+      { slot: 'condition:else', expectedExpressionFragment: ', "MATCH", source("candidate"))' },
+    ];
+
+    for (const entry of legacySlotAliases) {
+      const draft = {
+        ...createEmptySmartBuilderDraft({
+          targetPath: 'order.reviewFlag',
+          targetType: 'boolean',
+          isRequired: false,
+        }),
+        focusedSlotId: entry.slot,
+        composition: {
+          kind: 'condition' as const,
+          clauses: [{
+            predicates: [{
+              left: { kind: 'static' as const, value: '' },
+              operator: 'eq' as const,
+              right: { kind: 'static' as const, value: '' },
+            }],
+            thenOutput: { kind: 'static' as const, value: 'MATCH' },
+          }],
+          elseOutput: { kind: 'static' as const, value: 'NO_MATCH' },
+        },
+      };
+
+      const result = applyStagedInputToSmartDraft({
+        draft,
+        staged: {
+          path: 'candidate',
+          kind: 'primary',
+          valueType: 'string',
+          expression: 'source("candidate")',
+        },
+      });
+
+      expect(result.outcome).toBe('filled-focused-slot');
+      expect(result.draft.slotScopedInputs?.[entry.slot]?.path).toBe('candidate');
+      expect(result.expression).toContain(entry.expectedExpressionFragment);
+    }
+  });
+
+  it('migrates legacy condition-left slot id to canonical left-slot behavior', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.reviewFlag',
+        targetType: 'boolean',
+        isRequired: false,
+      }),
+      focusedSlotId: 'condition-left',
+      composition: {
+        kind: 'condition' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'static' as const, value: '' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: '' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'MATCH' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'NO_MATCH' },
+      },
+    };
+
+    const result = applyStagedInputToSmartDraft({
+      draft,
+      staged: {
+        path: 'candidate',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("candidate")',
+      },
+    });
+
+    expect(result.outcome).toBe('filled-focused-slot');
+    expect(result.draft.slotScopedInputs?.['condition:left']?.path).toBe('candidate');
+    expect(result.expression).toContain('eq(source("candidate"), "")');
+  });
+
+  it('normalizes known legacy focused-slot aliases to canonical slot ids', () => {
+    expect(normalizeLegacySmartSlotId('condition-left')).toBe('condition:left');
+    expect(normalizeLegacySmartSlotId('condition-right')).toBe('condition:right');
+    expect(normalizeLegacySmartSlotId('condition-then')).toBe('condition:then');
+    expect(normalizeLegacySmartSlotId('condition-else')).toBe('condition:else');
+    expect(normalizeLegacySmartSlotId('fallback-default')).toBe('fallback:default');
+    expect(normalizeLegacySmartSlotId('condition:left')).toBe('condition:left');
+    expect(normalizeLegacySmartSlotId(null)).toBeNull();
+  });
+
   it('creates direct draft on first staged input', () => {
     const draft = createEmptySmartBuilderDraft({
       targetPath: 'order.id',
@@ -216,8 +320,11 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(second.outcome).toBe('appended-to-tray');
     expect(second.draft.inputs).toHaveLength(2);
     expect(second.draft.inputs.map((input) => input.path)).toEqual(['firstName', 'lastName']);
-    expect(second.draft.composition).toBeNull();
-    expect(second.expression).toBe('');
+    expect(second.draft.composition).toEqual({
+      kind: 'direct',
+      inputId: first.draft.inputs[0]?.id,
+    });
+    expect(second.expression).toBe('source("firstName")');
   });
 
   it('does not implicitly concat when two numeric inputs are staged', () => {
@@ -249,11 +356,14 @@ describe('applyStagedInputToSmartDraft', () => {
 
     expect(second.outcome).toBe('appended-to-tray');
     expect(second.draft.inputs).toHaveLength(2);
-    expect(second.draft.composition).toBeNull();
-    expect(second.expression).toBe('');
+    expect(second.draft.composition).toEqual({
+      kind: 'direct',
+      inputId: first.draft.inputs[0]?.id,
+    });
+    expect(second.expression).toBe('source("subtotal")');
   });
 
-  it('fills focused slot without appending top-level tray input', () => {
+  it('fills focused slot and auto-adds selected field to tray when missing', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.reviewFlag',
@@ -284,8 +394,9 @@ describe('applyStagedInputToSmartDraft', () => {
     });
 
     expect(result.outcome).toBe('filled-focused-slot');
-    expect(result.draft.inputs).toHaveLength(1);
-    expect(result.draft.slotScopedInputs?.['condition-left']?.path).toBe('candidate');
+    expect(result.draft.inputs).toHaveLength(2);
+    expect(result.draft.inputs.some((input) => input.path === 'candidate')).toBe(true);
+    expect(result.draft.slotScopedInputs?.['condition:left']?.path).toBe('candidate');
   });
 
   it('fills focused condition right slot and generates deterministic condition expression', () => {
@@ -326,6 +437,100 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(result.expression).toContain('"NO_MATCH"');
   });
 
+  it('preserves existing per-usage transforms when replacing focused conditional slots', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.reviewFlag',
+        targetType: 'boolean',
+        isRequired: false,
+      }),
+      focusedSlotId: 'condition:right',
+      composition: {
+        kind: 'condition' as const,
+        clauses: [{
+          predicates: [{
+            left: {
+              kind: 'input' as const,
+              inputId: 'input-left',
+              transforms: [{ functionName: 'trim' as const }],
+            },
+            operator: 'eq' as const,
+            right: {
+              kind: 'expression' as const,
+              expression: 'source("before")',
+              transforms: [{ functionName: 'upper' as const }],
+            },
+          }],
+          thenOutput: {
+            kind: 'expression' as const,
+            expression: 'source("thenBefore")',
+            transforms: [{ functionName: 'lower' as const }],
+          },
+        }],
+        elseOutput: {
+          kind: 'expression' as const,
+          expression: 'source("elseBefore")',
+          transforms: [{ functionName: 'length' as const }],
+        },
+      },
+      inputs: [
+        {
+          id: 'input-left',
+          sourceKind: 'primary' as const,
+          label: 'left',
+          path: 'left',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+    };
+
+    const rightResult = applyStagedInputToSmartDraft({
+      draft,
+      staged: {
+        path: 'afterRight',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("afterRight")',
+      },
+    });
+
+    const rightTransforms = ((rightResult.draft.composition?.kind === 'condition'
+      ? rightResult.draft.composition.clauses[0]?.predicates[0]?.right
+      : null) as { readonly transforms?: readonly { readonly functionName: string }[] } | null)?.transforms ?? [];
+    expect(rightTransforms).toEqual([{ functionName: 'upper' }]);
+
+    const thenResult = applyStagedInputToSmartDraft({
+      draft: { ...rightResult.draft, focusedSlotId: 'condition:then' },
+      staged: {
+        path: 'afterThen',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("afterThen")',
+      },
+    });
+
+    const thenTransforms = ((thenResult.draft.composition?.kind === 'condition'
+      ? thenResult.draft.composition.clauses[0]?.thenOutput
+      : null) as { readonly transforms?: readonly { readonly functionName: string }[] } | null)?.transforms ?? [];
+    expect(thenTransforms).toEqual([{ functionName: 'lower' }]);
+
+    const elseResult = applyStagedInputToSmartDraft({
+      draft: { ...thenResult.draft, focusedSlotId: 'condition:else' },
+      staged: {
+        path: 'afterElse',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("afterElse")',
+      },
+    });
+
+    const elseTransforms = ((elseResult.draft.composition?.kind === 'condition'
+      ? elseResult.draft.composition.elseOutput
+      : null) as { readonly transforms?: readonly { readonly functionName: string }[] } | null)?.transforms ?? [];
+    expect(elseTransforms).toEqual([{ functionName: 'length' }]);
+  });
+
   it('routes focused fallback:default staged input into default fallback slot', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -362,7 +567,8 @@ describe('applyStagedInputToSmartDraft', () => {
     });
 
     expect(result.outcome).toBe('filled-focused-slot');
-    expect(result.draft.inputs).toHaveLength(1);
+    expect(result.draft.inputs).toHaveLength(2);
+    expect(result.draft.inputs.some((input) => input.path === 'legalName')).toBe(true);
     expect(result.draft.slotScopedInputs?.['fallback:default']?.path).toBe('legalName');
     expect(result.draft.composition).toEqual({
       kind: 'default',
@@ -446,7 +652,7 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(parentResult.expression).toBe('parent("orderId")');
   });
 
-  it('AE-04: focused-slot routing does not append to top-level tray inputs', () => {
+  it('AE-04: focused-slot routing appends selected source to top-level tray inputs', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.reviewFlag',
@@ -475,7 +681,8 @@ describe('applyStagedInputToSmartDraft', () => {
     });
 
     expect(result.outcome).toBe('filled-focused-slot');
-    expect(result.draft.inputs).toHaveLength(1);
+    expect(result.draft.inputs).toHaveLength(2);
+    expect(result.draft.inputs.some((input) => input.path === 'candidate')).toBe(true);
     expect(result.draft.slotScopedInputs?.['condition:left']?.path).toBe('candidate');
   });
 
@@ -506,7 +713,7 @@ describe('applyStagedInputToSmartDraft', () => {
       },
     });
 
-    expect(second.expression).toBe('');
+    expect(second.expression).toBe('source("firstName")');
   });
 
   it('toggles off an already-added source field instead of duplicating it', () => {
@@ -538,6 +745,93 @@ describe('applyStagedInputToSmartDraft', () => {
 
     expect(second.draft.inputs).toHaveLength(0);
     expect(second.expression).toBe('');
+  });
+
+  it('supports explicit Add-to-Tray mode by ignoring duplicate clicks', () => {
+    const base = createEmptySmartBuilderDraft({
+      targetPath: 'order.fullName',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    const first = applyStagedInputToSmartDraft({
+      draft: base,
+      staged: {
+        path: 'firstName',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("firstName")',
+      },
+    });
+
+    const second = applyStagedInputToSmartDraft({
+      draft: first.draft,
+      staged: {
+        path: 'firstName',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("firstName")',
+      },
+      selectionBehavior: 'ignore-existing',
+    });
+
+    expect(second.draft.inputs).toHaveLength(1);
+    expect(second.expression).toBe('source("firstName")');
+  });
+});
+
+describe('removeInputFromSmartDraftWithUsageCleanup', () => {
+  it('clears referenced condition usages atomically when removing an input', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'input-2',
+          sourceKind: 'primary' as const,
+          label: 'channel',
+          path: 'channel',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'input-1' },
+            operator: 'eq' as const,
+            right: { kind: 'input' as const, inputId: 'input-2' },
+          }],
+          thenOutput: { kind: 'input' as const, inputId: 'input-1' },
+        }],
+        elseOutput: { kind: 'input' as const, inputId: 'input-1' },
+      },
+    };
+
+    const next = removeInputFromSmartDraftWithUsageCleanup(draft, 'input-1');
+    expect(next.inputs.map((input) => input.id)).toEqual(['input-2']);
+    expect(next.composition?.kind).toBe('condition');
+
+    if (next.composition?.kind !== 'condition') {
+      throw new Error('Expected condition composition after usage cleanup removal');
+    }
+
+    const predicate = next.composition.clauses[0]?.predicates[0];
+    expect(predicate?.left).toEqual({ kind: 'static', value: '' });
+    expect(next.composition.clauses[0]?.thenOutput).toEqual({ kind: 'static', value: '' });
+    expect(next.composition.elseOutput).toEqual({ kind: 'static', value: '' });
   });
 });
 
@@ -904,6 +1198,176 @@ describe('applySmartActionToDraft', () => {
     const next = applySmartActionToDraft(draft, 'base.direct');
     expect(next.composition).toEqual({ kind: 'direct', inputId: 'a' });
     expect(next.expression).toBe('source("firstName")');
+  });
+
+  it('keeps tray inputs when switching conditional to direct', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityFlag',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'channel',
+          path: 'channel',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'a' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: 'HIGH' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'yes' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'no' },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'base.direct');
+    expect(next.composition).toEqual({ kind: 'direct', inputId: 'a' });
+    expect(next.inputs.map((input) => input.id)).toEqual(['a', 'b']);
+  });
+
+  it('identifies conditional-to-non-conditional actions that require confirmation', () => {
+    const conditionDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityFlag',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [{
+        id: 'a',
+        sourceKind: 'primary' as const,
+        label: 'priority',
+        path: 'priority',
+        valueType: 'string' as const,
+        transforms: [],
+      }],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'all' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'a' },
+            operator: 'eq' as const,
+            right: { kind: 'static' as const, value: 'HIGH' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'yes' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'no' },
+      },
+    };
+
+    expect(shouldConfirmConditionalMethodSwitch(conditionDraft, 'base.direct')).toBe(true);
+    expect(shouldConfirmConditionalMethodSwitch(conditionDraft, 'condition.compare')).toBe(false);
+    expect(shouldConfirmConditionalMethodSwitch(conditionDraft, 'text.upper')).toBe(false);
+    expect(shouldConfirmConditionalMethodSwitch(conditionDraft, 'lookup.valueMap')).toBe(true);
+  });
+
+  it('seeds condition.compare from direct composition input and defaults matchMode to all', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityFlag',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'channel',
+          path: 'channel',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'b' },
+    };
+
+    const next = applySmartActionToDraft(draft, 'condition.compare');
+
+    expect(next.composition?.kind).toBe('condition');
+    if (next.composition?.kind !== 'condition') return;
+    expect(next.composition.matchMode).toBe('all');
+    expect(next.composition.clauses[0]?.predicates[0]?.left).toEqual({ kind: 'input', inputId: 'b' });
+    expect(next.composition.clauses[0]?.predicates[0]?.right).toEqual({ kind: 'static', value: '' });
+  });
+
+  it('allows condition.compare with empty tray and uses static placeholders', () => {
+    const draft = createEmptySmartBuilderDraft({
+      targetPath: 'customer.priorityFlag',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    const next = applySmartActionToDraft(draft, 'condition.compare');
+
+    expect(next.composition?.kind).toBe('condition');
+    if (next.composition?.kind !== 'condition') return;
+    expect(next.composition.matchMode).toBe('all');
+    expect(next.composition.clauses[0]?.predicates[0]?.left).toEqual({ kind: 'static', value: '' });
+    expect(next.composition.clauses[0]?.predicates[0]?.right).toEqual({ kind: 'static', value: '' });
+  });
+
+  it('does not reinitialize existing condition when condition.compare is re-applied', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.priorityFlag',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'priority',
+          path: 'priority',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        matchMode: 'any' as const,
+        clauses: [{
+          predicates: [{
+            left: { kind: 'input' as const, inputId: 'a' },
+            operator: 'contains' as const,
+            right: { kind: 'static' as const, value: 'VIP' },
+          }],
+          thenOutput: { kind: 'static' as const, value: 'yes' },
+        }],
+        elseOutput: { kind: 'static' as const, value: 'no' },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'condition.compare');
+    expect(next).toBe(draft);
   });
 
   it('adds subtract operand to existing calculation without replacing calculation base', () => {

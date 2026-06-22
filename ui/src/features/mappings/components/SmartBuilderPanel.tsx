@@ -2,26 +2,107 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
-import { ConditionBuilder } from './ConditionBuilder';
 import { InputTray } from './InputTray';
 import type { StagedInputField } from './SourceSchemaPanel';
-import type { BuilderState } from '../lib/expression-generator';
 import { findSmartBuilderActionById, getSmartBuilderActionParameters } from '../lib/smart-builder-action-catalog';
 import { resolveSmartBuilderActionsFromDraft } from '../lib/smart-builder-action-resolver';
+import {
+  getAllowedConditionOperatorsForLeftType,
+  getBuilderInputUsages,
+  getConditionCompatibilityIssues,
+  resolveBuilderArgumentValueType,
+} from '../lib/smart-builder-state';
 import type {
+  BuilderArgumentValue,
+  BuilderComposition,
   BuilderInput,
   BuilderInputTransform,
+  BuilderPredicate,
   BuilderProjectValueMapSelection,
   SmartBuilderActionParameterValue,
   SmartBuilderHydrationResult,
 } from '../lib/smart-builder-state';
 
+import { evaluateExpression } from '@/lib/engine';
 import type {
   ValueTableDirection,
   ValueTableNoMatchMode,
   ValueTablePrimitiveValue,
   ValueTableScope,
 } from '@/lib/types/domain';
+
+type ConditionSampleState = 'missing-input' | 'missing-field' | 'null' | 'value';
+
+interface ConditionSampleValueDetail {
+  readonly state: ConditionSampleState;
+  readonly display: string;
+}
+
+interface ConditionPredicateSampleDetail {
+  readonly clauseIndex: number;
+  readonly predicateIndex: number;
+  readonly expression: string;
+  readonly outcome: boolean | null;
+  readonly left: ConditionSampleValueDetail;
+  readonly right?: ConditionSampleValueDetail;
+}
+
+interface ConditionSampleDiagnostics {
+  readonly blocked: boolean;
+  readonly incompleteReasons: readonly string[];
+  readonly predicateDetails: readonly ConditionPredicateSampleDetail[];
+  readonly selectedBranch: string;
+  readonly selectedBranchResult: string;
+  readonly selectedBranchResultState: 'ok' | 'error' | 'pending';
+  readonly observedStates: readonly ConditionSampleState[];
+}
+
+type ConditionSlotKey = `left-${number}` | `right-${number}` | 'then' | 'otherwise';
+type ConditionPickerMode = 'fixed' | 'input';
+
+function quoteDslString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function literalToDsl(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return quoteDslString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return quoteDslString(JSON.stringify(value));
+}
+
+function formatSampleDisplay(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function resolvePathValue(document: unknown, fieldPath: string): { readonly found: boolean; readonly value: unknown } {
+  if (document === null || document === undefined) {
+    return { found: false, value: undefined };
+  }
+
+  const normalized = fieldPath.replace(/\[(\d+)\]/g, '.$1');
+  const segments = normalized.split('.').filter((segment) => segment.length > 0);
+  let current: unknown = document;
+
+  for (const segment of segments) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return { found: false, value: undefined };
+    }
+    if (!(segment in (current as Record<string, unknown>))) {
+      return { found: false, value: undefined };
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return { found: true, value: current };
+}
 
 interface ValueMapProjectTableOption {
   readonly tableId: string;
@@ -66,6 +147,7 @@ interface SmartBuilderPanelProps {
   readonly onRequestArrayBuilderHandoff?: () => void;
   readonly onInputToggle?: (input: BuilderInput) => void;
   readonly onInputRemove?: (inputId: string) => void;
+  readonly onUpdateConditionComposition?: (composition: Extract<BuilderComposition, { kind: 'condition' }>) => void;
   readonly onApplyAction?: (
     actionId: string,
     options?: {
@@ -101,6 +183,8 @@ interface SmartBuilderPanelProps {
   readonly onValueMapInlineMappingRemove?: (index: number) => void;
   readonly onValueMapConvertInlineToProject?: () => void;
   readonly onValueMapAdoptLatestRevision?: () => void;
+  readonly sourceSampleData?: unknown;
+  readonly enrichmentSampleData?: Readonly<Record<string, unknown>>;
 }
 
 export function SmartBuilderPanel({
@@ -114,6 +198,7 @@ export function SmartBuilderPanel({
   onRequestArrayBuilderHandoff,
   onInputToggle,
   onInputRemove,
+  onUpdateConditionComposition,
   onApplyAction,
   onBeginActionParameterEdit,
   onUpdateActionParameterDraft,
@@ -134,15 +219,18 @@ export function SmartBuilderPanel({
   onValueMapInlineMappingRemove,
   onValueMapConvertInlineToProject,
   onValueMapAdoptLatestRevision,
+  sourceSampleData = null,
+  enrichmentSampleData = {},
 }: SmartBuilderPanelProps) {
   const [showAddInput, setShowAddInput] = useState(false);
-  const [showConditionEditor, setShowConditionEditor] = useState(false);
   const [pickerMode, setPickerMode] = useState<'base' | 'transform' | 'step' | null>(null);
   const [pickerQuery, setPickerQuery] = useState('');
   const [expandedDisabledId, setExpandedDisabledId] = useState<string | null>(null);
   const [parameterEditorStepIndex, setParameterEditorStepIndex] = useState<number | null>(null);
   const [parameterEditorStepScope, setParameterEditorStepScope] = useState<'input-transform' | 'output-step' | null>(null);
   const [openParameterDropdownId, setOpenParameterDropdownId] = useState<string | null>(null);
+  const [activeConditionSlot, setActiveConditionSlot] = useState<ConditionSlotKey | null>(null);
+  const [conditionPickerModeBySlot, setConditionPickerModeBySlot] = useState<Partial<Record<ConditionSlotKey, ConditionPickerMode>>>({});
   const [parameterDropdownPosition, setParameterDropdownPosition] = useState<{
     readonly top: number;
     readonly left: number;
@@ -183,6 +271,7 @@ export function SmartBuilderPanel({
   }
 
   const actions = resolveSmartBuilderActionsFromDraft(hydration.draft);
+  const inputUsages = getBuilderInputUsages(hydration.draft);
   const pendingActionDraft = hydration.draft.pendingActionDraft ?? null;
   const hasArrayScope =
     hydration.draft.targetType === 'array'
@@ -193,20 +282,660 @@ export function SmartBuilderPanel({
   const hasEnabledArrayActions = actions.some(
     (entry) => entry.action.category === 'array' && entry.availability.enabled,
   );
+  const conditionCompatibilityIssues = conditionComposition
+    ? getConditionCompatibilityIssues(hydration.draft, conditionComposition)
+    : [];
 
-  const conditionState: BuilderState | null = {
-    functionName: conditionComposition?.clauses[0]?.predicates[0]?.operator ?? 'eq',
-    arguments: [
-      { kind: 'literal', value: 'left' },
-      { kind: 'literal', value: 'right' },
-    ],
+  const conditionSampleDiagnostics: ConditionSampleDiagnostics | null = conditionComposition
+    ? (() => {
+      const firstClause = conditionComposition.clauses[0];
+      if (!firstClause) {
+        return {
+          blocked: true,
+          incompleteReasons: ['Add at least one condition clause.'],
+          predicateDetails: [],
+          selectedBranch: 'Not selected',
+          selectedBranchResult: 'Condition is incomplete.',
+          selectedBranchResultState: 'pending' as const,
+          observedStates: [],
+        };
+      }
+
+      const observedStates = new Set<ConditionSampleState>();
+      const unresolvedInputLabels = new Set<string>();
+
+      const inspectArgument = (value: BuilderArgumentValue): ConditionSampleValueDetail => {
+        if (value.kind === 'static') {
+          if (value.value === null) {
+            observedStates.add('null');
+            return { state: 'null', display: 'null' };
+          }
+          observedStates.add('value');
+          return { state: 'value', display: formatSampleDisplay(value.value) };
+        }
+
+        if (value.kind === 'expression') {
+          if (!value.expression.trim()) {
+            observedStates.add('missing-field');
+            return { state: 'missing-field', display: 'Missing field (empty expression)' };
+          }
+          const { value: evaluated, error } = evaluateExpression(
+            value.expression,
+            sourceSampleData,
+            {},
+            enrichmentSampleData,
+          );
+          if (error) {
+            observedStates.add('missing-field');
+            return { state: 'missing-field', display: `Missing field (${error})` };
+          }
+          if (evaluated === null) {
+            observedStates.add('null');
+            return { state: 'null', display: 'null' };
+          }
+          observedStates.add('value');
+          return { state: 'value', display: formatSampleDisplay(evaluated) };
+        }
+
+        const input = hydration.draft.inputs.find((entry) => entry.id === value.inputId);
+        if (!input) {
+          observedStates.add('missing-input');
+          unresolvedInputLabels.add(value.inputId);
+          return { state: 'missing-input', display: `Missing input (${value.inputId})` };
+        }
+
+        if (input.sourceKind === 'enrichment') {
+          const alias = input.externalName ?? '';
+          const enrichmentDocument = alias ? enrichmentSampleData[alias] : undefined;
+          if (!alias || enrichmentDocument === undefined || enrichmentDocument === null) {
+            observedStates.add('missing-input');
+            unresolvedInputLabels.add(input.label);
+            return {
+              state: 'missing-input',
+              display: `Missing input sample (${alias || input.label})`,
+            };
+          }
+
+          if (input.path && input.path.trim().length > 0) {
+            const resolved = resolvePathValue(enrichmentDocument, input.path);
+            if (!resolved.found) {
+              observedStates.add('missing-field');
+              return {
+                state: 'missing-field',
+                display: `Missing field (${alias}.${input.path})`,
+              };
+            }
+            if (resolved.value === null) {
+              observedStates.add('null');
+              return { state: 'null', display: 'null' };
+            }
+            observedStates.add('value');
+            return { state: 'value', display: formatSampleDisplay(resolved.value) };
+          }
+
+          if (enrichmentDocument === null) {
+            observedStates.add('null');
+            return { state: 'null', display: 'null' };
+          }
+
+          observedStates.add('value');
+          return { state: 'value', display: formatSampleDisplay(enrichmentDocument) };
+        }
+
+        if (input.sourceKind === 'primary') {
+          if (sourceSampleData === null || sourceSampleData === undefined) {
+            observedStates.add('missing-input');
+            unresolvedInputLabels.add(input.label);
+            return { state: 'missing-input', display: 'Missing input sample (primary source)' };
+          }
+
+          if (input.path && input.path.trim().length > 0) {
+            const resolved = resolvePathValue(sourceSampleData, input.path);
+            if (!resolved.found) {
+              observedStates.add('missing-field');
+              return { state: 'missing-field', display: `Missing field (${input.path})` };
+            }
+            if (resolved.value === null) {
+              observedStates.add('null');
+              return { state: 'null', display: 'null' };
+            }
+            observedStates.add('value');
+            return { state: 'value', display: formatSampleDisplay(resolved.value) };
+          }
+
+          observedStates.add('value');
+          return { state: 'value', display: input.sampleValue !== undefined ? formatSampleDisplay(input.sampleValue) : input.label };
+        }
+
+        if (input.sampleValue === undefined) {
+          observedStates.add('missing-input');
+          unresolvedInputLabels.add(input.label);
+          return { state: 'missing-input', display: `Missing input sample (${input.label})` };
+        }
+
+        if (input.sampleValue === null) {
+          observedStates.add('null');
+          return { state: 'null', display: 'null' };
+        }
+
+        observedStates.add('value');
+        return { state: 'value', display: formatSampleDisplay(input.sampleValue) };
+      };
+
+      const toArgumentDslExpression = (value: BuilderArgumentValue): string => {
+        if (value.kind === 'static') return literalToDsl(value.value);
+        if (value.kind === 'expression') return value.expression;
+        const input = hydration.draft.inputs.find((entry) => entry.id === value.inputId);
+        if (!input) return 'null';
+        if (input.sourceKind === 'primary') {
+          return input.path ? `source(${quoteDslString(input.path)})` : 'source("")';
+        }
+        if (input.sourceKind === 'enrichment') {
+          if (input.externalName && input.path) {
+            return `get(external(${quoteDslString(input.externalName)}), ${quoteDslString(input.path)})`;
+          }
+          if (input.externalName) return `external(${quoteDslString(input.externalName)})`;
+        }
+        return 'null';
+      };
+
+      const evaluatePredicate = (predicate: BuilderPredicate): { readonly detail: ConditionPredicateSampleDetail; readonly complete: boolean } => {
+        const left = inspectArgument(predicate.left);
+        const leftDsl = toArgumentDslExpression(predicate.left);
+
+        if (predicate.operator === 'isNull' || predicate.operator === 'isNotNull' || predicate.operator === 'isTruthy' || predicate.operator === 'isFalsy') {
+          const expression =
+            predicate.operator === 'isNull'
+              ? `isNull(${leftDsl})`
+              : predicate.operator === 'isNotNull'
+                ? `not(isNull(${leftDsl}))`
+                : predicate.operator === 'isTruthy'
+                  ? `not(isNull(${leftDsl}))`
+                  : `isNull(${leftDsl})`;
+          if (left.state === 'missing-input' || left.state === 'missing-field') {
+            return {
+              detail: {
+                clauseIndex: 0,
+                predicateIndex: 0,
+                expression,
+                outcome: null,
+                left,
+              },
+              complete: false,
+            };
+          }
+
+          const result = evaluateExpression(expression, sourceSampleData, {}, enrichmentSampleData);
+          return {
+            detail: {
+              clauseIndex: 0,
+              predicateIndex: 0,
+              expression,
+              outcome: result.error ? null : Boolean(result.value),
+              left,
+            },
+            complete: !result.error,
+          };
+        }
+
+        if (!predicate.right) {
+          return {
+            detail: {
+              clauseIndex: 0,
+              predicateIndex: 0,
+              expression: `${predicate.operator}(${leftDsl}, <missing>)`,
+              outcome: null,
+              left,
+            },
+            complete: false,
+          };
+        }
+
+        const right = inspectArgument(predicate.right);
+        const rightDsl = toArgumentDslExpression(predicate.right);
+
+        const expression = `${predicate.operator}(${leftDsl}, ${rightDsl})`;
+        if (left.state === 'missing-input' || left.state === 'missing-field' || right.state === 'missing-input' || right.state === 'missing-field') {
+          return {
+            detail: {
+              clauseIndex: 0,
+              predicateIndex: 0,
+              expression,
+              outcome: null,
+              left,
+              right,
+            },
+            complete: false,
+          };
+        }
+
+        const result = evaluateExpression(expression, sourceSampleData, {}, enrichmentSampleData);
+        return {
+          detail: {
+            clauseIndex: 0,
+            predicateIndex: 0,
+            expression,
+            outcome: result.error ? null : Boolean(result.value),
+            left,
+            right,
+          },
+          complete: !result.error,
+        };
+      };
+
+      const predicateDetails: ConditionPredicateSampleDetail[] = [];
+      let conditionOutcome: boolean | null = null;
+      const incompleteReasons: string[] = [];
+
+      firstClause.predicates.forEach((predicate, predicateIndex) => {
+        const evaluated = evaluatePredicate(predicate);
+        predicateDetails.push({
+          ...evaluated.detail,
+          clauseIndex: 0,
+          predicateIndex,
+        });
+        if (!evaluated.complete) {
+          if (!incompleteReasons.includes('Condition is incomplete or has missing sample values.')) {
+            incompleteReasons.push('Condition is incomplete or has missing sample values.');
+          }
+          return;
+        }
+
+        if (evaluated.detail.outcome === null) {
+          if (!incompleteReasons.includes('Unable to evaluate one or more condition predicates.')) {
+            incompleteReasons.push('Unable to evaluate one or more condition predicates.');
+          }
+          return;
+        }
+
+        if (conditionOutcome === null) {
+          conditionOutcome = evaluated.detail.outcome;
+          return;
+        }
+        conditionOutcome = conditionComposition.matchMode === 'any'
+          ? conditionOutcome || evaluated.detail.outcome
+          : conditionOutcome && evaluated.detail.outcome;
+      });
+
+      if (firstClause.predicates.length === 0) {
+        incompleteReasons.push('Add at least one condition predicate.');
+      }
+
+      if (conditionCompatibilityIssues.length > 0) {
+        incompleteReasons.push('Resolve compatibility issues before running sample evaluation.');
+      }
+
+      const isConditionValueIncomplete = (value: BuilderArgumentValue): boolean => {
+        if (value.kind === 'static') return typeof value.value === 'string' ? value.value.trim().length === 0 : false;
+        if (value.kind === 'expression') return value.expression.trim().length === 0;
+        return value.inputId.trim().length === 0;
+      };
+      const thenIncomplete = isConditionValueIncomplete(firstClause.thenOutput);
+      const elseIncomplete = isConditionValueIncomplete(conditionComposition.elseOutput);
+      if (thenIncomplete || elseIncomplete) {
+        incompleteReasons.push('THEN and OTHERWISE values are required.');
+      }
+
+      if (unresolvedInputLabels.size > 0) {
+        incompleteReasons.push(`Missing sample input: ${Array.from(unresolvedInputLabels).join(', ')}`);
+      }
+
+      const blocked = incompleteReasons.length > 0 || conditionOutcome === null;
+      const selectedBranch = blocked
+        ? 'Not selected'
+        : conditionOutcome
+          ? 'THEN'
+          : 'OTHERWISE';
+      const selectedBranchValue = !blocked
+        ? (conditionOutcome ? firstClause.thenOutput : conditionComposition.elseOutput)
+        : null;
+
+      let selectedBranchResult = blocked
+        ? 'Condition is incomplete.'
+        : '';
+      let selectedBranchResultState: 'ok' | 'error' | 'pending' = blocked ? 'pending' : 'ok';
+
+      if (selectedBranchValue && !blocked) {
+        if (selectedBranchValue.kind === 'static') {
+          selectedBranchResult = formatSampleDisplay(selectedBranchValue.value);
+        } else {
+          const expression = selectedBranchValue.kind === 'expression'
+            ? selectedBranchValue.expression
+            : (() => {
+              const input = hydration.draft.inputs.find((entry) => entry.id === selectedBranchValue.inputId);
+              if (!input) return '';
+              if (input.sourceKind === 'primary') {
+                return input.path ? `source(${quoteDslString(input.path)})` : '';
+              }
+              if (input.sourceKind === 'enrichment') {
+                if (input.externalName && input.path) {
+                  return `get(external(${quoteDslString(input.externalName)}), ${quoteDslString(input.path)})`;
+                }
+                if (input.externalName) return `external(${quoteDslString(input.externalName)})`;
+              }
+              return '';
+            })();
+          if (!expression) {
+            selectedBranchResult = 'Missing input.';
+            selectedBranchResultState = 'pending';
+          } else {
+            const evaluated = evaluateExpression(expression, sourceSampleData, {}, enrichmentSampleData);
+            if (evaluated.error) {
+              selectedBranchResult = evaluated.error;
+              selectedBranchResultState = 'error';
+            } else {
+              selectedBranchResult = formatSampleDisplay(evaluated.value);
+              selectedBranchResultState = 'ok';
+            }
+          }
+        }
+      }
+
+      return {
+        blocked,
+        incompleteReasons,
+        predicateDetails,
+        selectedBranch,
+        selectedBranchResult,
+        selectedBranchResultState,
+        observedStates: Array.from(observedStates),
+      };
+    })()
+    : null;
+
+  const updateCondition = (next: Extract<BuilderComposition, { kind: 'condition' }>) => {
+    onUpdateConditionComposition?.(next);
   };
 
-  const shouldRenderConditionEditor = conditionComposition !== null || showConditionEditor;
+  const parseConditionSlotIndex = (slot: ConditionSlotKey): number | null => {
+    if (!slot.startsWith('left-') && !slot.startsWith('right-')) return null;
+    const [, rawIndex] = slot.split('-');
+    const index = Number(rawIndex);
+    return Number.isInteger(index) ? index : null;
+  };
+
+  const openConditionSlotPicker = (slot: ConditionSlotKey, defaultMode: ConditionPickerMode) => {
+    setActiveConditionSlot(slot);
+    setConditionPickerModeBySlot((current) => ({
+      ...current,
+      [slot]: current[slot] ?? defaultMode,
+    }));
+  };
+
+  const closeConditionSlotPicker = () => {
+    setActiveConditionSlot(null);
+  };
+
+  const updateConditionSlotMode = (slot: ConditionSlotKey, mode: ConditionPickerMode) => {
+    setConditionPickerModeBySlot((current) => ({ ...current, [slot]: mode }));
+  };
+
+  const toConditionFocusSlotId = (slot: ConditionSlotKey): string => {
+    if (slot === 'then') return 'condition:then';
+    if (slot === 'otherwise') return 'condition:else';
+    return slot.startsWith('left-') ? 'condition:left' : 'condition:right';
+  };
+
+  const describeConditionValue = (value: BuilderArgumentValue): string => {
+    return (() => {
+      if (value.kind === 'input') {
+        const input = hydration.draft.inputs.find((entry) => entry.id === value.inputId);
+        return input?.label ?? value.inputId;
+      }
+      if (value.kind === 'expression') return value.expression;
+      if (value.value === null) return 'null';
+      if (typeof value.value === 'string') return value.value;
+      return String(value.value);
+    })();
+  };
+
+  const toOperatorLabel = (operator: BuilderPredicate['operator']) => {
+    switch (operator) {
+      case 'eq': return 'Equals';
+      case 'neq': return 'Not equals';
+      case 'gt': return 'Greater than';
+      case 'gte': return 'Greater or equal';
+      case 'lt': return 'Less than';
+      case 'lte': return 'Less or equal';
+      case 'contains': return 'Contains';
+      case 'isNull': return 'Is missing';
+      case 'isNotNull': return 'Is not missing';
+      case 'isTruthy': return 'Has value';
+      case 'isFalsy': return 'Missing value';
+      default: return operator;
+    }
+  };
+
+  const renderConditionFixedValueEditor = (
+    slot: ConditionSlotKey,
+    valueType: BuilderInput['valueType'],
+    value: BuilderArgumentValue,
+    composition: Extract<BuilderComposition, { kind: 'condition' }>,
+  ) => {
+    const staticValue = value.kind === 'static' ? value.value : '';
+
+    if (valueType === 'number' || valueType === 'integer') {
+      return (
+        <input
+          type="number"
+          data-testid={`smart-condition-picker-fixed-number-${slot}`}
+          className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+          value={typeof staticValue === 'number' ? String(staticValue) : ''}
+          placeholder="Enter number"
+          onChange={(event) => {
+            const raw = event.target.value;
+            const nextValue = raw === '' ? '' : Number(raw);
+            updateConditionSlotArgument(composition, slot, {
+              kind: 'static',
+              value: nextValue,
+              transforms: value.transforms,
+            });
+          }}
+        />
+      );
+    }
+
+    if (valueType === 'boolean') {
+      const normalized = typeof staticValue === 'boolean'
+        ? (staticValue ? 'true' : 'false')
+        : '';
+      return (
+        <select
+          data-testid={`smart-condition-picker-fixed-boolean-${slot}`}
+          className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+          value={normalized}
+          onChange={(event) => {
+            const raw = event.target.value;
+            const nextValue = raw === 'true' ? true : raw === 'false' ? false : '';
+            updateConditionSlotArgument(composition, slot, {
+              kind: 'static',
+              value: nextValue,
+              transforms: value.transforms,
+            });
+          }}
+        >
+          <option value="">Select…</option>
+          <option value="true">True</option>
+          <option value="false">False</option>
+        </select>
+      );
+    }
+
+    return (
+      <input
+        type="text"
+        data-testid={`smart-condition-picker-fixed-string-${slot}`}
+        className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+        value={typeof staticValue === 'string' ? staticValue : ''}
+        placeholder="Enter text"
+        onChange={(event) => {
+          updateConditionSlotArgument(composition, slot, {
+            kind: 'static',
+            value: event.target.value,
+            transforms: value.transforms,
+          });
+        }}
+      />
+    );
+  };
+
+  const renderConditionValuePicker = (
+    slot: ConditionSlotKey,
+    composition: Extract<BuilderComposition, { kind: 'condition' }>,
+    valueType: BuilderInput['valueType'],
+  ) => {
+    const currentValue = getConditionSlotArgument(composition, slot)
+      ?? { kind: 'static' as const, value: '' };
+    const mode = conditionPickerModeBySlot[slot]
+      ?? ((currentValue.kind === 'input' || currentValue.kind === 'expression') ? 'input' : 'fixed');
+    const isInputSlot = mode === 'input';
+
+    return (
+      <div className="mt-1.5 rounded border border-slate-800 bg-slate-950/40 px-2 py-2" data-testid={`smart-condition-picker-${slot}`}>
+        <p className="text-[11px] font-semibold text-slate-300">Choose result value</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            data-testid={`smart-condition-picker-mode-fixed-${slot}`}
+            className={`rounded border px-2 py-0.5 text-[11px] ${mode === 'fixed' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+            onClick={() => {
+              updateConditionSlotMode(slot, 'fixed');
+              if (currentValue.kind !== 'static') {
+                updateConditionSlotArgument(composition, slot, {
+                  kind: 'static',
+                  value: '',
+                  transforms: currentValue.transforms,
+                });
+              }
+            }}
+          >
+            Fixed value
+          </button>
+          <button
+            type="button"
+            data-testid={`smart-condition-picker-mode-input-${slot}`}
+            className={`rounded border px-2 py-0.5 text-[11px] ${mode === 'input' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+            onClick={() => updateConditionSlotMode(slot, 'input')}
+          >
+            Input field
+          </button>
+        </div>
+
+        {mode === 'fixed' && (
+          <div className="mt-2" data-testid={`smart-condition-picker-fixed-editor-${slot}`}>
+            {renderConditionFixedValueEditor(slot, valueType, currentValue, composition)}
+          </div>
+        )}
+
+        {isInputSlot && (
+          <div className="mt-2 space-y-1.5" data-testid={`smart-condition-picker-input-editor-${slot}`}>
+            {(currentValue.kind === 'input' || currentValue.kind === 'expression') && (
+              <button
+                type="button"
+                data-testid={`smart-condition-picker-input-current-${slot}`}
+                className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
+                onClick={() => onConditionFocusedSlotChange?.(toConditionFocusSlotId(slot))}
+              >
+                {describeConditionValue(currentValue) || 'Select value'}
+              </button>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                data-testid={`smart-condition-picker-input-tray-${slot}`}
+                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                onClick={() => onConditionFocusedSlotChange?.(toConditionFocusSlotId(slot))}
+              >
+                Select from input tray
+              </button>
+              <button
+                type="button"
+                data-testid={`smart-condition-picker-input-browse-${slot}`}
+                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                onClick={() => onConditionFocusedSlotChange?.(toConditionFocusSlotId(slot))}
+              >
+                Browse source fields
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            data-testid={`smart-condition-picker-done-${slot}`}
+            className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+            onClick={() => closeConditionSlotPicker()}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const getConditionSlotArgument = (
+    composition: Extract<BuilderComposition, { kind: 'condition' }>,
+    slot: ConditionSlotKey,
+  ): BuilderArgumentValue | null => {
+    if (slot === 'then') return composition.clauses[0]?.thenOutput ?? null;
+    if (slot === 'otherwise') return composition.elseOutput;
+    const index = parseConditionSlotIndex(slot);
+    if (index === null) return null;
+    const predicate = composition.clauses[0]?.predicates[index];
+    if (!predicate) return null;
+    return slot.startsWith('left-') ? predicate.left : (predicate.right ?? null);
+  };
+
+  const updateConditionSlotArgument = (
+    composition: Extract<BuilderComposition, { kind: 'condition' }>,
+    slot: ConditionSlotKey,
+    nextValue: BuilderArgumentValue,
+  ) => {
+    if (slot === 'then') {
+      const firstClause = composition.clauses[0];
+      if (!firstClause) return;
+      updateCondition({
+        ...composition,
+        clauses: [
+          { ...firstClause, thenOutput: nextValue },
+          ...composition.clauses.slice(1),
+        ],
+      });
+      return;
+    }
+
+    if (slot === 'otherwise') {
+      updateCondition({ ...composition, elseOutput: nextValue });
+      return;
+    }
+
+    const index = parseConditionSlotIndex(slot);
+    if (index === null) return;
+    const predicates = (composition.clauses[0]?.predicates ?? []).map((entry, rowIndex) => {
+      if (rowIndex !== index) return entry;
+      if (slot.startsWith('left-')) {
+        return { ...entry, left: nextValue };
+      }
+      return { ...entry, right: nextValue };
+    });
+
+    updateCondition({
+      ...composition,
+      clauses: [
+        {
+          ...composition.clauses[0]!,
+          predicates,
+        },
+        ...composition.clauses.slice(1),
+      ],
+    });
+  };
+
 
   const mappingMethodId = (() => {
     const composition = hydration.draft.composition;
-    if (!composition) return 'base.none';
+    if (!composition) return hydration.draft.inputs.length === 0 ? 'base.direct' : 'base.none';
     if (composition.kind === 'direct' || composition.kind === 'default') return 'base.direct';
     if (composition.kind === 'concat') return 'text.concat';
     if (composition.kind === 'coalesce') return 'null.coalesce';
@@ -426,10 +1155,11 @@ export function SmartBuilderPanel({
       {
         id: 'base.direct',
         label: 'Direct Mapping',
-        enabled: hydration.draft.inputs.length === 1,
-        reason: hydration.draft.inputs.length === 0
-          ? 'Select at least one input first.'
-          : 'Direct Mapping is only valid with exactly one input.',
+        enabled: hydration.draft.inputs.length <= 1,
+        reason:
+          hydration.draft.inputs.length > 1
+            ? 'Direct Mapping is only valid with exactly one input.'
+            : undefined,
       },
       { id: 'condition.compare', label: 'Conditional' },
       { id: 'lookup.valueMap', label: 'Value Mapping' },
@@ -832,6 +1562,7 @@ export function SmartBuilderPanel({
         <div>
           <InputTray
             inputs={hydration.draft.inputs}
+            usages={inputUsages}
             onRemoveInput={onInputRemove}
             onToggleAddInput={() => setShowAddInput((prev) => !prev)}
           />
@@ -990,13 +1721,12 @@ export function SmartBuilderPanel({
           )}
         </div>
 
-        {hydration.draft.inputs.length > 0 && (
-          <div className="rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-mapping-recipe">
+        <div className="rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-mapping-recipe">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Mapping method</p>
 
             <div className="flex items-center justify-between" data-testid="smart-recipe-base-row">
               <p className="text-[11px] uppercase tracking-wide text-slate-500">Method</p>
-              {!isMethodNeedsAction && (
+              {!isMethodNeedsAction && hydration.draft.inputs.length > 0 && (
               <button
                 type="button"
                 data-testid="smart-recipe-change-base"
@@ -1013,6 +1743,9 @@ export function SmartBuilderPanel({
             </div>
 
             <p className="mt-1 text-xs text-slate-100" data-testid="smart-recipe-base-label">{mappingMethodLabel}</p>
+            {mappingMethodId === 'base.direct' && !defaultPrimaryInput && (
+              <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-empty-direct">Select an input to continue.</p>
+            )}
             {shouldRenderMethodPreview && (
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-preview">{composePreview}</p>
             )}
@@ -1055,10 +1788,6 @@ export function SmartBuilderPanel({
                             return;
                           }
 
-                          if (action.id === 'condition.if' || action.id === 'condition.compare' || action.id === 'condition.truthy') {
-                            setShowConditionEditor(true);
-                            onConditionFocusedSlotChange?.('condition:left');
-                          }
                           onApplyAction?.(action.id);
                           setParameterEditorStepIndex(null);
                           setParameterEditorStepScope(null);
@@ -1078,7 +1807,240 @@ export function SmartBuilderPanel({
               </div>
             )}
 
-            {mappingMethodId === 'base.direct' && (
+            {mappingMethodId === 'condition.compare' && conditionComposition && conditionComposition.clauses.length > 0 && (
+              <div className="mt-3 rounded border border-slate-800 bg-slate-950/30 px-2.5 py-2" data-testid="smart-condition-editor">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">IF</p>
+                  {(conditionComposition.clauses[0]?.predicates.length ?? 0) > 1 && (
+                    <label className="flex items-center gap-1.5 text-[11px] text-slate-300" htmlFor="smart-condition-match-mode-select">
+                      Match
+                      <select
+                        id="smart-condition-match-mode-select"
+                        data-testid="smart-condition-match-mode-select"
+                        className="h-7 rounded border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-100"
+                        value={conditionComposition.matchMode}
+                        onChange={(event) => {
+                          const nextMode = event.target.value === 'any' ? 'any' : 'all';
+                          updateCondition({ ...conditionComposition, matchMode: nextMode });
+                        }}
+                      >
+                        <option value="all">all</option>
+                        <option value="any">any</option>
+                      </select>
+                      condition
+                    </label>
+                  )}
+                </div>
+
+                <div className="mt-2 space-y-2" data-testid="smart-condition-rows">
+                  {(conditionComposition.clauses[0]?.predicates ?? []).map((predicate, index) => (
+                    <div key={`predicate-${index}`} className="rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5" data-testid={`smart-condition-row-${index}`}>
+                      {index > 0 && (
+                        <p className="mb-1 text-[11px] text-slate-400" data-testid={`smart-condition-row-joiner-${index}`}>
+                          {conditionComposition.matchMode === 'any' ? 'OR' : 'AND'}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-1.5">
+                        <div>
+                          <button
+                            type="button"
+                            data-testid={`smart-condition-left-${index}`}
+                            className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
+                            onClick={() => {
+                              openConditionSlotPicker(`left-${index}`, 'input');
+                              onConditionFocusedSlotChange?.('condition:left');
+                            }}
+                          >
+                            {describeConditionValue(predicate.left) || 'Select value'}
+                          </button>
+                          {activeConditionSlot === `left-${index}` && renderConditionValuePicker(
+                            `left-${index}`,
+                            conditionComposition,
+                            resolveBuilderArgumentValueType(hydration.draft, predicate.left),
+                          )}
+                        </div>
+                        <select
+                          data-testid={`smart-condition-operator-${index}`}
+                          className="h-8 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                          value={predicate.operator}
+                          onChange={(event) => {
+                            const operator = event.target.value as BuilderPredicate['operator'];
+                            const predicates = (conditionComposition.clauses[0]?.predicates ?? []).map((entry, rowIndex) =>
+                              rowIndex === index
+                                ? {
+                                  ...entry,
+                                  operator,
+                                  ...(operator === 'isNull' || operator === 'isNotNull' || operator === 'isTruthy' || operator === 'isFalsy'
+                                    ? { right: undefined }
+                                    : entry.right ? {} : { right: { kind: 'static' as const, value: '' } }),
+                                }
+                                : entry,
+                            );
+                            updateCondition({
+                              ...conditionComposition,
+                              clauses: [
+                                {
+                                  ...conditionComposition.clauses[0]!,
+                                  predicates,
+                                },
+                                ...conditionComposition.clauses.slice(1),
+                              ],
+                            });
+                          }}
+                        >
+                          {getAllowedConditionOperatorsForLeftType(
+                            resolveBuilderArgumentValueType(hydration.draft, predicate.left),
+                          ).map((operator) => (
+                            <option key={operator} value={operator}>{toOperatorLabel(operator)}</option>
+                          ))}
+                        </select>
+                        {(predicate.operator === 'isNull' || predicate.operator === 'isNotNull' || predicate.operator === 'isTruthy' || predicate.operator === 'isFalsy') ? (
+                          <span className="pt-2 text-[11px] text-slate-500">No comparison value</span>
+                        ) : (
+                          <div>
+                            <button
+                              type="button"
+                              data-testid={`smart-condition-right-${index}`}
+                              className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
+                              onClick={() => {
+                                openConditionSlotPicker(`right-${index}`, predicate.right?.kind === 'static' ? 'fixed' : 'input');
+                                onConditionFocusedSlotChange?.('condition:right');
+                              }}
+                            >
+                              {describeConditionValue(predicate.right ?? { kind: 'static', value: '' }) || 'Select value'}
+                            </button>
+                            {activeConditionSlot === `right-${index}` && renderConditionValuePicker(
+                              `right-${index}`,
+                              conditionComposition,
+                              resolveBuilderArgumentValueType(hydration.draft, predicate.left),
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  data-testid="smart-condition-add"
+                  aria-label="Add condition"
+                  className="mt-2 rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                  onClick={() => {
+                    const firstPredicate = conditionComposition.clauses[0]?.predicates[0];
+                    const nextPredicate: BuilderPredicate = {
+                      left: firstPredicate?.left ?? { kind: 'static', value: '' },
+                      operator: 'eq',
+                      right: { kind: 'static', value: '' },
+                    };
+                    updateCondition({
+                      ...conditionComposition,
+                      clauses: [
+                        {
+                          ...conditionComposition.clauses[0]!,
+                          predicates: [...(conditionComposition.clauses[0]?.predicates ?? []), nextPredicate],
+                        },
+                        ...conditionComposition.clauses.slice(1),
+                      ],
+                    });
+                  }}
+                >
+                  + Add condition
+                </button>
+
+                {conditionCompatibilityIssues.length > 0 && (
+                  <div
+                    className="mt-2 rounded border border-red-700/60 bg-red-950/20 px-2 py-1.5"
+                    data-testid="smart-condition-compatibility-errors"
+                  >
+                    <p className="text-[11px] text-red-300">Incompatible condition values detected:</p>
+                    <ul className="mt-1 list-disc pl-4 text-[11px] text-red-200">
+                      {conditionCompatibilityIssues.map((issue, issueIndex) => (
+                        <li key={`condition-issue-${issue.clauseIndex}-${issue.predicateIndex}-${issueIndex}`}>
+                          {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        data-testid="smart-condition-transform-affordance"
+                        className="rounded border border-red-600/60 px-2 py-0.5 text-[11px] text-red-200 hover:border-red-500"
+                        onClick={() => onConditionFocusedSlotChange?.('condition:left')}
+                      >
+                        Add transform to selected field
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">THEN</p>
+                    <button
+                      type="button"
+                      data-testid="smart-condition-then"
+                      aria-label="THEN value"
+                      className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
+                      onClick={() => {
+                        openConditionSlotPicker('then', conditionComposition.clauses[0]?.thenOutput.kind === 'static' ? 'fixed' : 'input');
+                        onConditionFocusedSlotChange?.('condition:then');
+                      }}
+                    >
+                      {describeConditionValue(conditionComposition.clauses[0]?.thenOutput ?? { kind: 'static', value: '' }) || 'Select value'}
+                    </button>
+                    {activeConditionSlot === 'then' && renderConditionValuePicker(
+                      'then',
+                      conditionComposition,
+                      hydration.draft.targetType,
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">OTHERWISE</p>
+                    <button
+                      type="button"
+                      data-testid="smart-condition-otherwise"
+                      aria-label="OTHERWISE value"
+                      className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
+                      onClick={() => {
+                        openConditionSlotPicker('otherwise', conditionComposition.elseOutput.kind === 'static' ? 'fixed' : 'input');
+                        onConditionFocusedSlotChange?.('condition:else');
+                      }}
+                    >
+                      {describeConditionValue(conditionComposition.elseOutput) || 'Select value'}
+                    </button>
+                    {activeConditionSlot === 'otherwise' && renderConditionValuePicker(
+                      'otherwise',
+                      conditionComposition,
+                      hydration.draft.targetType,
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`mt-3 rounded border px-2 py-1.5 ${conditionSampleDiagnostics?.blocked
+                    ? 'border-amber-700/60 bg-amber-950/20'
+                    : 'border-emerald-700/40 bg-emerald-950/20'}`}
+                  data-testid="smart-condition-status"
+                >
+                  {conditionSampleDiagnostics?.blocked ? (
+                    <p className="text-[11px] text-amber-200" data-testid="smart-condition-status-blocked">
+                      Complete condition values before previewing output.
+                      {conditionSampleDiagnostics?.incompleteReasons[0]
+                        ? ` ${conditionSampleDiagnostics.incompleteReasons[0]}`
+                        : ''}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-emerald-300" data-testid="smart-condition-status-ready">
+                      Ready. {conditionSampleDiagnostics?.selectedBranch ?? 'THEN'} branch will return {conditionSampleDiagnostics?.selectedBranchResult ?? '--'}.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {mappingMethodId === 'base.direct' && hydration.draft.inputs.length > 0 && (
               <div className="mt-3" data-testid="smart-missing-value-section">
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500">Fallback</p>
@@ -1311,7 +2273,10 @@ export function SmartBuilderPanel({
             </div>
           )}
 
-          {!isMethodNeedsAction && mappingMethodId !== 'lookup.valueMap' && (
+          {hydration.draft.inputs.length > 0
+            && !isMethodNeedsAction
+            && mappingMethodId !== 'lookup.valueMap'
+            && mappingMethodId !== 'condition.compare' && (
             <>
               <div className="mt-3" data-testid="smart-recipe-input-transforms">
                 <div className="flex items-center justify-between">
@@ -1629,10 +2594,6 @@ export function SmartBuilderPanel({
                         return;
                       }
 
-                      if (action.id === 'condition.if' || action.id === 'condition.compare' || action.id === 'condition.truthy') {
-                        setShowConditionEditor(true);
-                        onConditionFocusedSlotChange?.('condition:left');
-                      }
                       onApplyAction?.(action.id);
                       setParameterEditorStepIndex(null);
                       setParameterEditorStepScope(null);
@@ -1672,7 +2633,6 @@ export function SmartBuilderPanel({
               </div>
             )}
           </div>
-        )}
 
         {hasEnabledArrayActions && (
           <div
@@ -1733,75 +2693,6 @@ export function SmartBuilderPanel({
         document.body,
       )}
 
-      {shouldRenderConditionEditor && (
-        <div className="border-t border-slate-800 px-3 py-3" data-testid="smart-condition-editor">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Condition</p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                data-testid="condition-slot-left"
-                onClick={() => {
-                  onConditionFocusedSlotChange?.('condition:left');
-                }}
-              >
-                Fill left
-              </button>
-              <button
-                type="button"
-                className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                data-testid="condition-slot-right"
-                onClick={() => {
-                  onConditionFocusedSlotChange?.('condition:right');
-                }}
-              >
-                Fill right
-              </button>
-              <button
-                type="button"
-                className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                data-testid="condition-slot-then"
-                onClick={() => {
-                  onConditionFocusedSlotChange?.('condition:then');
-                }}
-              >
-                Fill THEN
-              </button>
-              <button
-                type="button"
-                className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                data-testid="condition-slot-else"
-                onClick={() => {
-                  onConditionFocusedSlotChange?.('condition:else');
-                }}
-              >
-                Fill ELSE
-              </button>
-            </div>
-          </div>
-          <ConditionBuilder
-            condition={conditionState}
-            onChange={() => {
-              onConditionFocusedSlotChange?.(null);
-            }}
-            parsedSourceSchema={null}
-            arrayItemSchema={null}
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-              data-testid="condition-focus-clear"
-              onClick={() => {
-                onConditionFocusedSlotChange?.(null);
-              }}
-            >
-              Done selecting slot
-            </button>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

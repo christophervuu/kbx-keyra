@@ -498,4 +498,44 @@ describe('SourceSchemaPanel', () => {
     expect(badges[0].className).toContain('min-w-[2rem]');
     expect(badges[1].className).toContain('min-w-[2rem]');
   });
+
+  it('renders distinct source selection modes and emits mode-change events', () => {
+    const onSelectionModeChange = vi.fn();
+    renderPanel({
+      parsedSourceSchema: FLAT_SCHEMA,
+      onStageField: vi.fn(),
+      selectionMode: 'add-to-tray',
+      canFillCurrentValue: true,
+      onSelectionModeChange,
+    });
+
+    expect(screen.getByTestId('source-mode-add-to-tray')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('source-mode-fill-current')).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByTestId('source-mode-fill-current'));
+    expect(onSelectionModeChange).toHaveBeenCalledWith('fill-current-value');
+  });
+
+  it('disables Fill current value mode when no active slot is available', () => {
+    renderPanel({
+      parsedSourceSchema: FLAT_SCHEMA,
+      onStageField: vi.fn(),
+      selectionMode: 'add-to-tray',
+      canFillCurrentValue: false,
+    });
+
+    expect(screen.getByTestId('source-mode-fill-current')).toBeDisabled();
+    expect(screen.getByTestId('source-selection-mode-hint')).toHaveTextContent('Select fields to stage in Inputs');
+  });
+
+  it('shows fill-mode hint when Fill current value mode is active', () => {
+    renderPanel({
+      parsedSourceSchema: FLAT_SCHEMA,
+      onStageField: vi.fn(),
+      selectionMode: 'fill-current-value',
+      canFillCurrentValue: true,
+    });
+
+    expect(screen.getByTestId('source-selection-mode-hint')).toHaveTextContent('Single-select a field to fill the active builder value.');
+  });
 });
