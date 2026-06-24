@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveSmartBuilderActions, resolveSmartBuilderActionsFromDraft } from './smart-builder-action-resolver';
+import {
+  resolveChangeLogicOptionsFromDraft,
+  resolveSmartBuilderActions,
+  resolveSmartBuilderActionsFromDraft,
+} from './smart-builder-action-resolver';
 import { createEmptySmartBuilderDraft } from './smart-builder-state';
 
 describe('smart-builder-action-resolver', () => {
@@ -277,5 +281,50 @@ describe('smart-builder-action-resolver', () => {
     expect(resolved.find((entry) => entry.action.id === 'text.concat')?.action.role).toBe('mappingMethod');
     expect(resolved.find((entry) => entry.action.id === 'number.add')?.action.role).toBe('methodParameterAction');
     expect(resolved.find((entry) => entry.action.id === 'number.round')?.action.role).toBe('outputStep');
+  });
+
+  it('resolves compatibility-first Change logic options with deterministic ordering', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    const options = resolveChangeLogicOptionsFromDraft(draft);
+    expect(options.map((option) => option.id)).toEqual([
+      'base.direct',
+      'base.fixed',
+      'base.constant',
+      'text.concat',
+      'null.coalesce',
+      'base.calculation',
+      'condition.compare',
+      'lookup.valueMap',
+    ]);
+
+    const unavailableCalculation = options.find((option) => option.id === 'base.calculation');
+    expect(unavailableCalculation?.enabled).toBe(false);
+    expect(unavailableCalculation?.reason).toContain('Convert to number first');
   });
 });

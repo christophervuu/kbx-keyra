@@ -100,7 +100,7 @@ ui/src/
         tree-to-json-schema.ts Tree reconstruction + field counting utilities
         parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
 
-    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023, FS-094, FS-097)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023, FS-094, FS-097, FS-098)
       index.ts                Feature barrel (components + hooks + utilities)
       types.ts                Feature-shared mappings types: TargetFilter/TargetSort/EditorView, linked debug selection, and comparison mode config (`COMPARISON_MODES`)
       components/
@@ -108,11 +108,11 @@ ui/src/
         SourceSchemaPanel.tsx Left column input browser: grouped Primary Source + Enrichment Input aliases, searchable schema tree, click-to-stage + drag-to-insert input selection; emits staged field metadata contract (`path`, `kind`, `alias?`, `valueType?`, `sampleValue?`, `expression`) for smart-slot routing
         TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
         BuilderEmptyState.tsx Center panel: no-selection guidance + CTAs
-        ScalarFieldBuilder.tsx Center panel scalar authoring shell. FS-094 replaces default scalar guided internals with `SmartBuilderPanel` while retaining RawDslEditor as Advanced fallback and preserving draft-only-until-save semantics (`updateDraft/revertDraft/getDraftExpression`). FS-097 further codifies method-independent tray behavior, conditional method-switch confirmation routing, and target-scoped session-state restoration keyed by mapping + target.
-        SmartBuilderPanel.tsx FS-094/FS-097 default scalar guided surface: target-focused shell + `InputTray` + `BuilderActionList`, direct IF/THEN/OTHERWISE conditional editor with type-aware operators/editors, per-usage transforms on conditional usages, compatibility diagnostics, quick-add input kinds (fixed value/constant/expression/item/parent), deterministic array handoff notice (`Open Array Builder`), and Advanced fallback banner for unsupported/non-lossless expressions.
-        InputTray.tsx        FS-094/FS-097 selected-input tray with source-kind badges (`SRC/ENR/CST/VAL/ITM/PAR/EXPR`), grouped provenance/usage metadata, and deterministic internal scroll-density behavior.
-        BuilderActionList.tsx FS-094 action list grouped by enabled-first ordering with deterministic disabled reasons
-        ConditionBuilder.tsx FS-094 condition mini-builder used by smart panel slot flow; guided operators map only to registered DSL output patterns (`isTruthy`/`isFalsy` compile to `not(isNull(...))` / `isNull(...)`)
+        ScalarFieldBuilder.tsx Center panel scalar authoring shell. FS-098 is the canonical Smart Builder contract for default scalar guided authoring: Inputs tray as availability palette, explicit Build Output recipe ownership, Refine Result post-steps, and Advanced DSL fallback for non-lossless decomposition while preserving draft-only-until-save semantics (`updateDraft/revertDraft/getDraftExpression`).
+        SmartBuilderPanel.tsx FS-098 canonical guided scalar surface: Target context → Inputs → Build Output → Refine Result → Details/Footer, explicit recipe/value usage model, IF/THEN/OTHERWISE conditional editor, slot-aware source routing, deterministic deep-array handoff to Array Builder actions, and Advanced DSL fallback banner for unsupported/non-lossless expressions.
+        InputTray.tsx        FS-098 method-independent availability tray with source-kind badges (`SRC/ENR/CST/VAL/ITM/PAR/EXPR`), grouped provenance/usage metadata, neutral available/unreferenced state semantics, accessible remove-confirmation flow, and deterministic internal scroll-density behavior.
+        BuilderActionList.tsx FS-098 action list grouped by enabled-first ordering with deterministic disabled reasons and explicit recipe-selection flow (no tray-count inference)
+        ConditionBuilder.tsx FS-098 condition mini-builder used by smart panel slot flow; guided operators map only to registered DSL output patterns (`isTruthy`/`isFalsy` compile to `not(isNull(...))` / `isNull(...)`)
         SuggestExpressionInline.tsx FS-042 inline NL→Rule interaction panel: instruction input, loading state, suggestion result, error display, Accept/Dismiss actions, keyboard shortcuts (Ctrl+Enter/Escape)
         AutoMapWorkspace.tsx        FS-048 center-panel Auto-Map review workspace shell: sticky header, toolbar slot, refresh confirmation slot, no-source-data slot, loading/error/empty/list states, completion banner
         WorkspaceHeader.tsx         FS-048 workspace header (section path, summary counts, last refreshed metadata, Back to Editor)
@@ -1971,7 +1971,7 @@ The expression builder is a dual-surface authoring system used in two contexts:
 - **Rules View:** `ExpressionBuilderPanel` (rule-selected panel)
 - **Target View / scalar fields:** `ScalarFieldBuilder` (target-selected panel)
 
-**FS-094 update:** Rules View continues to use chain-oriented builder/editor composition, while Target View scalar guided mode defaults to Smart Input Tray Builder (`SmartBuilderPanel`). `ChainBuilder`/`UnifiedExpressionBuilder` remain available as compatibility seams and legacy surfaces; they are not the authoritative default scalar guided architecture.
+**FS-098 canonical update:** Rules View continues to use chain-oriented builder/editor composition, while Target View scalar guided mode is governed by the FS-098 Smart Builder contract (`SmartBuilderPanel`). FS-098 supersedes conflicting FS-094/FS-097 behavior notes: tray membership is availability only, recipe explicitly owns operand usage/order/transforms, incomplete guided edits preserve last valid expression and block save, and unsupported/non-lossless expressions remain in Advanced DSL.
 
 #### Component hierarchy (Rules View) — FS-038
 
@@ -2005,53 +2005,37 @@ ScalarFieldBuilder
 
 Note: "Remove mapping" remains in the header overflow menu (⋮). AI buttons remain scalar-only and are intentionally omitted from ArrayBuilder until array-level AI features exist. FS-094 preserves this policy while replacing default scalar guided internals with SmartBuilderPanel.
 
-#### FS-094 Smart Input Tray Builder contracts (replacement architecture)
+#### FS-098 canonical Smart Builder contract (supersedes conflicting FS-094/FS-097 notes)
 
-FS-094 establishes Smart Builder as a **replacement architecture** for default scalar guided authoring. It is not an extension of `ChainBuilderState`.
+FS-098 defines the canonical scalar Smart Builder architecture. It preserves FS-094/FS-097-compatible seams where needed (`inputs`/`availableInputs`, `composition`/`recipe`, `resultSteps`/`postSteps`) but supersedes conflicting behavior.
 
-Canonical contracts:
+Canonical invariant (locked):
 
-- **State model:** `SmartBuilderDraft` (ordered `inputs`, optional focused slot id, optional slot-scoped inputs, `composition`, generated `expression`, history, validation state).
-- **Input kinds:** `primary | enrichment | constant | static | item | parent | expression`.
-- **Selection event contract:** Source panel stages metadata objects (not plain path strings). MappingEditor/SmartBuilder owns routing decision:
-  - no focused slot -> append to tray (or create direct mapping for first input)
-  - focused slot -> fill slot-scoped reference (no top-level append for that click)
-- **Action catalog/resolver boundary:** actions are catalog-driven with enabled-first ordering and deterministic disabled reasons. Guided actions must map only to registered DSL functions.
-- **Guided validity boundary:** guided generation emits registered/valid DSL only; raw editor can be temporarily invalid while editing.
-- **Save boundary:** smart builder updates drafts immediately; persistence still occurs only on global Save.
-- **Validation boundary:** engine validation remains canonical; Smart Builder does not maintain a parallel correctness engine.
-- **Hydration boundary:** decomposable saved expressions hydrate to guided draft; non-decomposable expressions open Advanced mode with complex-expression banner.
+- **The Input Tray contains values available to the rule. The active output recipe explicitly determines which values are used, their order, their per-use transformations, and how they produce the target. Tray membership never determines mapping behavior by itself.**
 
-Determinism and Rev 1 decisions captured in architecture:
+Canonical hierarchy and terminology:
 
-- Input insertion order is canonical when composition-specific operand ordering is absent.
-- Tray reorder UI is deferred in Rev 1.
-- Existing `ArrayBuilder` remains the detailed deep-array editor.
-
-Enrichment + array integration contracts:
-
-- Guided label is **Enrichment input**; generated DSL uses strict enrichment forms:
-  - alias root -> `external("alias")`
-  - nested field -> `get(external("alias"), "path")`
-- Array-capable actions are represented in the action catalog; deep array authoring uses deterministic handoff to `ArrayBuilder` (`Open Array Builder`) to preserve `item()/parent()` scope semantics.
-
-### FS-097 conditional builder + shared tray UI contract addendum
-
-FS-097 refines FS-094 Smart Builder behavior for the shared Input Tray and Conditional authoring model without changing DSL/runtime semantics.
+- Target header
+- Inputs
+- Build Output
+- Refine Result
+- Details
+- Footer actions
 
 Canonical contracts:
 
-- **Builder hierarchy contract:** for scalar targets, panel order is target context → shared `InputTray` → mapping method summary/change action → method-specific controls → sample output/diagnostics → details/footer.
-- **Method-independent tray contract:** tray is persistent builder shell state; method changes must not unmount, clear, or replace tray rows.
-- **Default unmapped behavior:** newly selected unmapped scalar targets open in Direct mapping with tray visible; first staged source fills direct mapping, additional selections are staged only.
-- **Tray grouping/provenance/usage contract:** rows preserve source provenance (primary/enrichment/constant/static/item/parent/expression), show per-usage indicators, and support slot-aware active-value routing when a conditional slot is focused.
-- **Source routing contract:** source-panel staging routes by state (`add-to-tray` vs `fill-current-value`) and focused slot; fill-mode writes slot-scoped input while still preserving top-level tray membership.
-- **Phase-one tray density constraints:** no separate Manage view; grouped compact rows are canonical. Internal tray scroll activates when content exceeds **5 rows** or **320px** height (whichever occurs first).
-- **Session-only staged row persistence:** unused staged tray rows are editor-session state only and are not written into mapping config; referenced inputs are reconstructed from saved expressions.
-- **Target-scoped tray session key:** smart tray/draft session state is isolated per target using a mapping-scoped key (`mappingId + targetPath` key contract; implemented as deterministic compound session key), preventing cross-target leakage while restoring previous target session state.
-- **Conditional guided model:** guided conditional editing is explicit **IF / THEN / OTHERWISE** with flat match mode (**All**/**Any**) only; nested logical groups are out of scope in guided mode.
-- **Method-switch confirmation contract:** switching from Conditional to non-conditional methods requires explicit confirmation that conditional-specific configuration is discarded; tray rows are preserved on both cancel and confirm paths.
-- **Compatibility/fallback boundary:** valid but unsupported nested or non-losslessly reconstructable conditional DSL remains authoritative in Advanced DSL; guided mode must not rewrite/guess these expressions.
+- **State/lifecycle contract:** `SmartBuilderDraft` tracks `availableInputs`, `recipe`, `resultSteps`, `recipeStatus` (`valid|incomplete|invalid`), `lastValidExpression`, and bounded undo snapshots.
+- **Recipe ownership contract:** Direct/fixed/constant/combine/coalesce/calculate/conditional/value-map flows explicitly own operand selection and ordering; extra tray rows never implicitly change behavior.
+- **Transform ownership contract:** only two canonical transform scopes exist: per-value steps (within recipe usage) and post-recipe result steps (`Refine Result`). Raw tray rows do not own transforms.
+- **Selection routing contract:** source panel emits staged metadata events; with focused slot, selection fills that slot (and adds to tray if missing); without focused slot, selection adds to tray and only first input may auto-seed Direct.
+- **Generator determinism contract:** expression generation uses explicit recipe operands only (no fallback to all tray rows) and emits no replacement DSL for incomplete recipes.
+- **Draft/save contract:** valid guided edits update draft expression immediately; incomplete guided states preserve `lastValidExpression` and block global Save until complete/discard/clear mapping.
+- **Hydration/fallback contract:** only lossless/decomposable expressions hydrate guided state; valid unsupported/non-lossless expressions remain unchanged in Advanced DSL with reason banner.
+- **Method-switch contract:** nontrivial recipe-kind switches require confirmation and preserve tray membership; undo restores full snapshot (tray + recipe + transforms + expression).
+- **Tray/session contract:** method-independent tray shell persists per target via deterministic `mappingId + targetPath` session key; staged-only rows are session-only and not persisted into mapping config/deployment snapshots.
+- **Density/accessibility contract:** compact grouped rows, internal tray scroll at >5 rows or >320px, neutral status for available/unreferenced rows, and accessible confirmation/focus-return/live-announcement behavior on Smart Builder mapping surfaces.
+- **Enrichment terminology contract:** guided UI uses **Enrichment input** labels while generated DSL keeps canonical enrichment expressions (`external("alias")`, `get(external("alias"), "path")`).
+- **Array handoff contract:** deep-array authoring actions (`array.map`, `array.filter`, `array.find`, `array.array`, `array.merge`) must hand off to `ArrayBuilder`; scalar Smart Builder does not author nested deep-array internals.
 
 #### Component hierarchy (Target View / ArrayBuilder) — FS-043, updated FS-051
 

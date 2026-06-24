@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { ConfirmDialog } from './ConfirmDialog';
+
 import type {
   BuilderInput,
   BuilderInputUsage,
@@ -29,10 +31,23 @@ const TYPE_BADGES: Record<BuilderInput['valueType'], { short: string; tone: stri
 
 const USAGE_LABELS: Record<BuilderInputUsageLocation, string> = {
   direct: 'Direct mapping',
+  'concat-part': 'Combine part',
+  'coalesce-operand': 'First available operand',
+  'coalesce-fallback': 'First available fallback',
+  'default-primary': 'Default primary value',
+  'default-fallback': 'Default fallback',
+  'math-start': 'Calculation start',
+  'math-operand': 'Calculation operand',
   'condition-left': 'IF left value',
   'condition-right': 'IF right value',
   then: 'THEN output',
   otherwise: 'OTHERWISE output',
+  'value-map-lookup': 'Used as lookup value',
+  'value-map-output': 'Mapped output',
+  'value-map-fallback': 'Lookup fallback',
+  'array-build-item': 'Array item',
+  'array-merge-item': 'Merge input',
+  'result-step-arg': 'Refine Result argument',
 };
 
 function formatSampleValue(input: BuilderInput): string {
@@ -71,6 +86,26 @@ function toGroupMeta(input: BuilderInput): { key: string; label: string } {
 
 function describeUsage(usage: BuilderInputUsage): string {
   const base = USAGE_LABELS[usage.location];
+  if (usage.location === 'concat-part' && usage.valueIndex !== undefined) {
+    return `${base} ${usage.valueIndex + 1}`;
+  }
+  if (usage.location === 'coalesce-operand' && usage.valueIndex !== undefined) {
+    return `${base} ${usage.valueIndex + 1}`;
+  }
+  if (usage.location === 'math-operand' && usage.operationIndex !== undefined) {
+    return `${base} ${usage.operationIndex + 1}`;
+  }
+  if (usage.location === 'value-map-output' && usage.mappingIndex !== undefined) {
+    return `${base} row ${usage.mappingIndex + 1}`;
+  }
+  if (
+    usage.location === 'result-step-arg'
+    && usage.stepIndex !== undefined
+    && usage.argIndex !== undefined
+  ) {
+    return `${base} (step ${usage.stepIndex + 1}, arg ${usage.argIndex + 1})`;
+  }
+
   if (usage.clauseIndex === undefined) return base;
 
   const conditionLabel = `condition ${usage.clauseIndex + 1}`;
@@ -220,12 +255,18 @@ export function InputTray({
                   const typeBadge = TYPE_BADGES[input.valueType] ?? TYPE_BADGES.unknown;
                   const usageList = usagesByInputId.get(input.id) ?? [];
                   const usageCount = usageList.length;
+                  const usageStateLabel = usageCount === 0
+                    ? 'Available'
+                    : usageCount === 1
+                      ? `Used in ${describeUsage(usageList[0]!)}`
+                      : `Used ${usageCount} times`;
                   return (
                     <li
                       key={input.id}
                       className="min-h-14 rounded border border-slate-700 bg-slate-900/60 px-2 py-1.5"
                       data-testid={`smart-input-tray-item-${input.id}`}
                       tabIndex={0}
+                      aria-label={`Input ${input.label}. Type ${typeBadge.label}. ${usageStateLabel}.`}
                     >
                       <div className="flex items-start gap-2">
                         <span
@@ -255,7 +296,7 @@ export function InputTray({
 
                           {usageCount === 0 ? (
                             <p className="text-[11px] text-slate-500" data-testid={`smart-input-tray-usage-${input.id}`}>
-                              Unused
+                              Available
                             </p>
                           ) : usageCount === 1 ? (
                             <p className="text-[11px] text-blue-300" data-testid={`smart-input-tray-usage-${input.id}`}>
@@ -271,6 +312,9 @@ export function InputTray({
                               </ul>
                             </details>
                           )}
+                          <p className="sr-only" data-testid={`smart-input-tray-state-${input.id}`}>
+                            State: {usageStateLabel}
+                          </p>
                         </div>
 
                         {onRemoveInput && (
@@ -294,44 +338,30 @@ export function InputTray({
         </div>
       )}
 
-      {pendingReferencedRemove && (
-        <div
-          className="mt-2 rounded border border-amber-700/70 bg-amber-950/30 p-2"
-          role="alertdialog"
-          aria-label="Confirm remove referenced input"
-          data-testid="smart-input-tray-remove-confirm"
-        >
-          <p className="text-xs font-medium text-amber-200">
-            Remove “{pendingReferencedRemove.label}” and clear all references?
-          </p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber-100" data-testid="smart-input-tray-remove-confirm-usages">
-            {pendingReferencedRemove.usages.map((usage, index) => (
-              <li key={`remove-usage-${index}`}>{describeUsage(usage)}</li>
-            ))}
-          </ul>
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded border border-amber-600 px-2 py-1 text-[11px] text-amber-100 hover:border-amber-500"
-              data-testid="smart-input-tray-remove-confirm-accept"
-              onClick={() => {
-                onRemoveInput?.(pendingReferencedRemove.inputId);
-                setPendingReferencedRemove(null);
-              }}
-            >
-              Remove and clear usages
-            </button>
-            <button
-              type="button"
-              className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-              data-testid="smart-input-tray-remove-confirm-cancel"
-              onClick={() => setPendingReferencedRemove(null)}
-            >
-              Cancel
-            </button>
+      <ConfirmDialog
+        open={pendingReferencedRemove !== null}
+        title="Remove referenced input"
+        message={pendingReferencedRemove ? (
+          <div data-testid="smart-input-tray-remove-confirm">
+            <p className="text-xs font-medium text-amber-200">
+              Remove “{pendingReferencedRemove.label}” and clear all references?
+            </p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber-100" data-testid="smart-input-tray-remove-confirm-usages">
+              {pendingReferencedRemove.usages.map((usage, index) => (
+                <li key={`remove-usage-${index}`}>{describeUsage(usage)}</li>
+              ))}
+            </ul>
           </div>
-        </div>
-      )}
+        ) : null}
+        confirmLabel="Remove and clear usages"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          if (!pendingReferencedRemove) return;
+          onRemoveInput?.(pendingReferencedRemove.inputId);
+          setPendingReferencedRemove(null);
+        }}
+        onCancel={() => setPendingReferencedRemove(null)}
+      />
     </section>
   );
 }

@@ -8,7 +8,7 @@ function makeAction(overrides: Partial<ResolvedSmartBuilderAction>): ResolvedSma
   return {
     action: {
       id: 'text.concat',
-      label: 'Combine text',
+      label: 'Combine values',
       category: 'text',
       appliesTo: 'tray',
       role: 'mappingMethod',
@@ -61,7 +61,7 @@ describe('BuilderActionList', () => {
     const onApplyAction = vi.fn();
     render(
       <BuilderActionList
-        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } })]}
+        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine values', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } })]}
         onApplyAction={onApplyAction}
       />, 
     );
@@ -72,7 +72,7 @@ describe('BuilderActionList', () => {
 
   it('hides disabled actions by default and reveals them via search', () => {
     const actions: ResolvedSmartBuilderAction[] = [
-      makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } }),
+      makeAction({ action: { id: 'text.concat', label: 'Combine values', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } }),
       makeAction({
         action: { id: 'number.add', label: 'Add numbers', category: 'number', appliesTo: 'tray', role: 'methodParameterAction', dslFunctions: ['add'] },
         availability: { enabled: false, reason: 'Unavailable: Convert to number first.' },
@@ -89,7 +89,7 @@ describe('BuilderActionList', () => {
   it('marks active action as pressed', () => {
     render(
       <BuilderActionList
-        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } })]}
+        actions={[makeAction({ action: { id: 'text.concat', label: 'Combine values', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'] } })]}
         activeActionId="text.concat"
       />,
     );

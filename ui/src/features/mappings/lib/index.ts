@@ -225,8 +225,12 @@ export type { DecomposeChainResult, DecomposeChainResult039 } from './chain-deco
 export {
   createEmptySmartBuilderDraft,
   createActionParameterDraft,
+  normalizeSmartBuilderDraft,
+  pushSmartBuilderSnapshot,
+  SMART_BUILDER_UNDO_HISTORY_LIMIT,
   updateSmartBuilderExpression,
   undoSmartBuilderExpression,
+  isSmartBuilderDraftSaveBlocked,
   resolveOrderedInputIds,
   setSlotScopedInput,
   normalizeActionParameterValues,
@@ -256,6 +260,8 @@ export type {
   SmartBuilderActionParameterValidationResult,
   SmartBuilderActionParameterValue,
   SmartBuilderActionParameterDraft,
+  SmartBuilderRecipeStatus,
+  SmartBuilderSnapshot,
   SmartBuilderDraft,
   SmartBuilderHydrationResult,
 } from './smart-builder-state';

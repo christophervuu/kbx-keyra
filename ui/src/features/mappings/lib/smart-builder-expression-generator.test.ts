@@ -32,7 +32,34 @@ describe('generateSmartBuilderExpression', () => {
     expect(generateSmartBuilderExpression(draft)).toBe('source("firstName")');
   });
 
-  it('uses insertion order for concat when inputIds are omitted', () => {
+  it('generates direct expression from per-value transforms when composition.value is present', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary',
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string',
+          transforms: [{ functionName: 'trim' }],
+        },
+      ],
+      composition: {
+        kind: 'direct',
+        inputId: 'a',
+        value: {
+          kind: 'input',
+          inputId: 'a',
+          transforms: [{ functionName: 'upper' }],
+        },
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe('upper(source("firstName"))');
+  });
+
+  it('AE-08: does not infer concat operands when inputIds are omitted', () => {
     const draft: SmartBuilderDraft = {
       ...makeBaseDraft(),
       inputs: [
@@ -56,12 +83,80 @@ describe('generateSmartBuilderExpression', () => {
       composition: { kind: 'concat' },
     };
 
-    expect(generateSmartBuilderExpression(draft)).toBe(
-      'concat(source("firstName"), source("lastName"))',
-    );
+    expect(generateSmartBuilderExpression(draft)).toBe('');
   });
 
-  it('uses insertion order for coalesce when inputIds are omitted', () => {
+  it('generates concat from explicit ordered parts including literals', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary',
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string',
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary',
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'concat',
+        inputIds: ['a', 'b'],
+        parts: [
+          { kind: 'input', inputId: 'a' },
+          { kind: 'static', value: ' ' },
+          { kind: 'input', inputId: 'b' },
+        ],
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe('concat(source("firstName"), " ", source("lastName"))');
+  });
+
+  it('generates concat in part order when reordered', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary',
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string',
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary',
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'concat',
+        inputIds: ['a', 'b'],
+        parts: [
+          { kind: 'input', inputId: 'b' },
+          { kind: 'static', value: ', ' },
+          { kind: 'input', inputId: 'a' },
+        ],
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe('concat(source("lastName"), ", ", source("firstName"))');
+  });
+
+  it('AE-11: does not infer coalesce operands when inputIds are omitted', () => {
     const draft: SmartBuilderDraft = {
       ...makeBaseDraft(),
       inputs: [
@@ -85,8 +180,43 @@ describe('generateSmartBuilderExpression', () => {
       composition: { kind: 'coalesce' },
     };
 
+    expect(generateSmartBuilderExpression(draft)).toBe('');
+  });
+
+  it('generates coalesce from explicit ordered values and fixed fallback only', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'preferred',
+          sourceKind: 'primary',
+          label: 'preferredName',
+          path: 'preferredName',
+          valueType: 'string',
+          transforms: [],
+        },
+        {
+          id: 'legal',
+          sourceKind: 'primary',
+          label: 'legalName',
+          path: 'legalName',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'coalesce',
+        inputIds: ['legal', 'preferred'],
+        values: [
+          { kind: 'input', inputId: 'legal' },
+          { kind: 'input', inputId: 'preferred' },
+        ],
+        fallback: { kind: 'static', value: 'UNKNOWN' },
+      },
+    };
+
     expect(generateSmartBuilderExpression(draft)).toBe(
-      'coalesce(source("preferredName"), source("legalName"))',
+      'coalesce(source("legalName"), source("preferredName"), "UNKNOWN")',
     );
   });
 
@@ -115,7 +245,7 @@ describe('generateSmartBuilderExpression', () => {
     );
   });
 
-  it('uses insertion order for math composition by default', () => {
+  it('AE-12: does not infer math operands from tray order when explicit operands are missing', () => {
     const draft: SmartBuilderDraft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'target.total',
@@ -143,7 +273,61 @@ describe('generateSmartBuilderExpression', () => {
       composition: { kind: 'math', operator: 'add' },
     };
 
-    expect(generateSmartBuilderExpression(draft)).toBe('add(source("subtotal"), source("tax"))');
+    expect(generateSmartBuilderExpression(draft)).toBe('');
+  });
+
+  it('AE-35: does not emit array(...) when explicit arrayBuild inputIds are missing', () => {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.items',
+        targetType: 'array',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'arr1',
+          sourceKind: 'primary',
+          label: 'itemsA',
+          path: 'itemsA',
+          valueType: 'array',
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'arrayBuild' },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe('');
+  });
+
+  it('AE-35: does not emit merge(...) when explicit arrayMerge inputIds are missing', () => {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.items',
+        targetType: 'array',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'arr1',
+          sourceKind: 'primary',
+          label: 'itemsA',
+          path: 'itemsA',
+          valueType: 'array',
+          transforms: [],
+        },
+        {
+          id: 'arr2',
+          sourceKind: 'primary',
+          label: 'itemsB',
+          path: 'itemsB',
+          valueType: 'array',
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'arrayMerge' },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe('');
   });
 
   it('generates ordered calculation nesting for subtotal + tax - discount', () => {
@@ -239,6 +423,46 @@ describe('generateSmartBuilderExpression', () => {
 
     expect(generateSmartBuilderExpression(draft)).toBe(
       'add(subtract(source("subtotal"), source("discount")), source("tax"))',
+    );
+  });
+
+  it('generates ordered calculation nesting with literal numeric operand', () => {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.ratio',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary',
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number',
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary',
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math',
+        startInputId: 'subtotal',
+        operations: [
+          { operator: 'add', inputId: 'tax' },
+          { operator: 'divide', operand: { kind: 'static', value: 2 } },
+        ],
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'divide(add(source("subtotal"), source("tax")), 2)',
     );
   });
 

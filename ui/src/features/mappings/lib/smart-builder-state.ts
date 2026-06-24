@@ -34,6 +34,14 @@ export type BuilderArgumentValue =
   | { readonly kind: 'expression'; readonly expression: string; readonly transforms?: readonly BuilderInputTransform[] }
   | { readonly kind: 'input'; readonly inputId: string; readonly transforms?: readonly BuilderInputTransform[] };
 
+export interface RecipeValue {
+  readonly source:
+    | { readonly kind: 'input'; readonly inputId: string }
+    | { readonly kind: 'fixed'; readonly value: unknown }
+    | { readonly kind: 'constant'; readonly constantName: string };
+  readonly steps: readonly BuilderInputTransform[];
+}
+
 export interface BuilderInputTransform {
   readonly functionName: string;
   readonly args?: readonly BuilderArgumentValue[];
@@ -51,6 +59,10 @@ export interface BuilderInput {
   readonly valueType: BuilderValueType;
   readonly sampleValue?: unknown;
   readonly nullable?: boolean;
+  /**
+   * Legacy compatibility only. FS-098 canonical transform ownership is on
+   * value usages (`BuilderArgumentValue.transforms`) and final result steps.
+   */
   readonly transforms: readonly BuilderInputTransform[];
 }
 
@@ -83,16 +95,34 @@ export type BuilderConditionMatchMode = 'all' | 'any';
 
 export type BuilderInputUsageLocation =
   | 'direct'
+  | 'concat-part'
+  | 'coalesce-operand'
+  | 'coalesce-fallback'
+  | 'default-primary'
+  | 'default-fallback'
+  | 'math-start'
+  | 'math-operand'
   | 'condition-left'
   | 'condition-right'
   | 'then'
-  | 'otherwise';
+  | 'otherwise'
+  | 'value-map-lookup'
+  | 'value-map-output'
+  | 'value-map-fallback'
+  | 'array-build-item'
+  | 'array-merge-item'
+  | 'result-step-arg';
 
 export interface BuilderInputUsage {
   readonly inputId: string;
   readonly location: BuilderInputUsageLocation;
   readonly clauseIndex?: number;
   readonly predicateIndex?: number;
+  readonly valueIndex?: number;
+  readonly operationIndex?: number;
+  readonly mappingIndex?: number;
+  readonly stepIndex?: number;
+  readonly argIndex?: number;
 }
 
 export interface BuilderConditionCompatibilityIssue {
@@ -118,13 +148,19 @@ export interface BuilderProjectValueMapSelection {
 }
 
 export type BuilderComposition =
-  | { readonly kind: 'direct'; readonly inputId: string }
+  | { readonly kind: 'direct'; readonly inputId: string; readonly value?: BuilderArgumentValue }
   | {
       readonly kind: 'concat';
       readonly inputIds?: readonly string[];
       readonly separator?: string;
+      readonly parts?: readonly BuilderArgumentValue[];
     }
-  | { readonly kind: 'coalesce'; readonly inputIds?: readonly string[]; readonly fallback?: BuilderArgumentValue }
+  | {
+      readonly kind: 'coalesce';
+      readonly inputIds?: readonly string[];
+      readonly values?: readonly BuilderArgumentValue[];
+      readonly fallback?: BuilderArgumentValue;
+    }
   | {
       readonly kind: 'default';
       readonly inputId: string;
@@ -137,7 +173,8 @@ export type BuilderComposition =
       readonly startInputId?: string;
       readonly operations?: readonly {
         readonly operator: 'add' | 'subtract' | 'multiply' | 'divide';
-        readonly inputId: string;
+        readonly inputId?: string;
+        readonly operand?: BuilderArgumentValue;
       }[];
     }
   | {
@@ -163,6 +200,76 @@ export type DraftValidationState =
   | { readonly status: 'valid' }
   | { readonly status: 'invalid'; readonly errors: readonly string[] }
   | { readonly status: 'pending' };
+
+export type SmartBuilderRecipeStatus =
+  | { readonly status: 'valid' }
+  | { readonly status: 'incomplete'; readonly reasons: readonly string[] }
+  | { readonly status: 'invalid'; readonly diagnostics: readonly string[] };
+
+export interface SmartBuilderSnapshot {
+  readonly availableInputs?: readonly BuilderInput[];
+  readonly inputs?: readonly BuilderInput[];
+  readonly focusedSlotId?: string | null;
+  readonly slotScopedInputs?: Readonly<Record<string, BuilderInput>>;
+  readonly recipe?: BuilderComposition | null;
+  readonly composition?: BuilderComposition | null;
+  readonly resultSteps?: readonly BuilderInputTransform[];
+  readonly postSteps?: readonly BuilderInputTransform[];
+  readonly recipeStatus: SmartBuilderRecipeStatus;
+  readonly validation?: DraftValidationState;
+  readonly expression: string;
+  readonly validExpression: string;
+  readonly lastValidExpression: string;
+  readonly previousExpressions?: readonly string[];
+  readonly pendingActionDraft?: SmartBuilderActionParameterDraft | null;
+}
+
+export const SMART_BUILDER_UNDO_HISTORY_LIMIT = 20;
+
+function createSmartBuilderSnapshot(draft: SmartBuilderDraft): SmartBuilderSnapshot {
+  const normalized = normalizeSmartBuilderDraft(draft);
+  return {
+    availableInputs: normalized.availableInputs,
+    inputs: normalized.inputs,
+    focusedSlotId: normalized.focusedSlotId ?? null,
+    slotScopedInputs: normalized.slotScopedInputs,
+    recipe: normalized.recipe,
+    composition: normalized.composition,
+    resultSteps: normalized.resultSteps,
+    postSteps: normalized.postSteps,
+    recipeStatus: normalized.recipeStatus ?? recipeStatusFromValidation(normalized.validation),
+    validation: normalized.validation,
+    expression: normalized.expression,
+    validExpression: normalized.validExpression ?? '',
+    lastValidExpression: normalized.lastValidExpression ?? '',
+    previousExpressions: normalized.previousExpressions,
+    pendingActionDraft: normalized.pendingActionDraft ?? null,
+  };
+}
+
+export function pushSmartBuilderSnapshot(input: {
+  previousDraft: SmartBuilderDraft;
+  nextDraft: SmartBuilderDraft;
+  limit?: number;
+}): SmartBuilderDraft {
+  const previous = normalizeSmartBuilderDraft(input.previousDraft);
+  const next = normalizeSmartBuilderDraft(input.nextDraft);
+  const limit = input.limit ?? SMART_BUILDER_UNDO_HISTORY_LIMIT;
+  const snapshot = createSmartBuilderSnapshot(previous);
+  const nextHistory = [...(next.undoHistory ?? []), snapshot].slice(-Math.max(1, limit));
+  const nextPreviousExpressions = (() => {
+    if (!previous.expression) return next.previousExpressions;
+    const current = next.previousExpressions;
+    if (current[current.length - 1] === previous.expression) return current;
+    return [...current, previous.expression];
+  })();
+
+  return normalizeSmartBuilderDraft({
+    ...next,
+    undoHistory: nextHistory,
+    previousExpressions: nextPreviousExpressions,
+  });
+}
 
 export interface SmartBuilderActionParameterValidationIssue {
   readonly fieldId: string;
@@ -195,13 +302,31 @@ export interface SmartBuilderDraft {
   readonly targetPath: string;
   readonly targetType: BuilderValueType;
   readonly isRequired: boolean;
+
+  /** Canonical FS-098 field: tray references available to recipe authoring. */
+  readonly availableInputs: readonly BuilderInput[];
+  /** Legacy compatibility alias (to be removed after migration): mirrors availableInputs. */
   readonly inputs: readonly BuilderInput[];
+
   readonly focusedSlotId?: string | null;
   readonly slotScopedInputs?: Readonly<Record<string, BuilderInput>>;
+
+  /** Canonical FS-098 field: active output recipe. */
+  readonly recipe: BuilderComposition | null;
+  /** Legacy compatibility alias (to be removed after migration): mirrors recipe. */
   readonly composition: BuilderComposition | null;
+
+  /** Canonical FS-098 field: final-result transform steps. */
+  readonly resultSteps: readonly BuilderInputTransform[];
+  /** Legacy compatibility alias (to be removed after migration): mirrors resultSteps. */
   readonly postSteps: readonly BuilderInputTransform[];
+
+  readonly recipeStatus?: SmartBuilderRecipeStatus;
   readonly expression: string;
+  readonly validExpression?: string;
+  readonly lastValidExpression?: string;
   readonly previousExpressions: readonly string[];
+  readonly undoHistory?: readonly SmartBuilderSnapshot[];
   readonly validation: DraftValidationState;
   readonly pendingActionDraft?: SmartBuilderActionParameterDraft | null;
 }
@@ -223,19 +348,173 @@ export function createEmptySmartBuilderDraft(input: {
   targetType: BuilderValueType;
   isRequired: boolean;
 }): SmartBuilderDraft {
-  return {
+  return normalizeSmartBuilderDraft({
     targetPath: input.targetPath,
     targetType: input.targetType,
     isRequired: input.isRequired,
+    availableInputs: [],
     inputs: [],
     focusedSlotId: null,
     slotScopedInputs: {},
+    recipe: null,
     composition: null,
+    resultSteps: [],
     postSteps: [],
+    recipeStatus: { status: 'incomplete', reasons: [] },
     expression: '',
+    validExpression: '',
+    lastValidExpression: '',
     previousExpressions: [],
+    undoHistory: [],
     validation: { status: 'pending' },
     pendingActionDraft: null,
+  });
+}
+
+function recipeStatusFromValidation(validation: DraftValidationState): SmartBuilderRecipeStatus {
+  switch (validation.status) {
+    case 'valid':
+      return { status: 'valid' };
+    case 'invalid':
+      return { status: 'invalid', diagnostics: validation.errors };
+    case 'pending':
+    default:
+      return { status: 'incomplete', reasons: [] };
+  }
+}
+
+function migrateLegacyTransformsOnArgumentValue(
+  value: BuilderArgumentValue,
+  transformsByInputId: ReadonlyMap<string, readonly BuilderInputTransform[]>,
+): BuilderArgumentValue {
+  if (value.kind !== 'input') return value;
+  if (value.transforms && value.transforms.length > 0) return value;
+
+  const legacy = transformsByInputId.get(value.inputId) ?? [];
+  if (legacy.length === 0) return value;
+  return {
+    ...value,
+    transforms: legacy,
+  };
+}
+
+function migrateLegacyInputTransformsToComposition(
+  composition: BuilderComposition | null,
+  transformsByInputId: ReadonlyMap<string, readonly BuilderInputTransform[]>,
+): BuilderComposition | null {
+  if (!composition) return composition;
+
+  switch (composition.kind) {
+    case 'direct': {
+      const existingValue = composition.value;
+      const migratedValue = existingValue
+        ? migrateLegacyTransformsOnArgumentValue(existingValue, transformsByInputId)
+        : (() => {
+            const legacy = transformsByInputId.get(composition.inputId) ?? [];
+            if (legacy.length === 0) return undefined;
+            return {
+              kind: 'input' as const,
+              inputId: composition.inputId,
+              transforms: legacy,
+            };
+          })();
+
+      return {
+        ...composition,
+        ...(migratedValue ? { value: migratedValue } : {}),
+      };
+    }
+    case 'default':
+      return {
+        ...composition,
+        fallback: migrateLegacyTransformsOnArgumentValue(composition.fallback, transformsByInputId),
+      };
+    case 'coalesce':
+      return {
+        ...composition,
+        ...(composition.fallback
+          ? { fallback: migrateLegacyTransformsOnArgumentValue(composition.fallback, transformsByInputId) }
+          : {}),
+      };
+    case 'condition':
+      return {
+        ...composition,
+        clauses: composition.clauses.map((clause) => ({
+          ...clause,
+          predicates: clause.predicates.map((predicate) => ({
+            ...predicate,
+            left: migrateLegacyTransformsOnArgumentValue(predicate.left, transformsByInputId),
+            ...(predicate.right
+              ? { right: migrateLegacyTransformsOnArgumentValue(predicate.right, transformsByInputId) }
+              : {}),
+          })),
+          thenOutput: migrateLegacyTransformsOnArgumentValue(clause.thenOutput, transformsByInputId),
+        })),
+        elseOutput: migrateLegacyTransformsOnArgumentValue(composition.elseOutput, transformsByInputId),
+      };
+    case 'valueMap':
+      return {
+        ...composition,
+        mappings: composition.mappings.map((entry) => ({
+          ...entry,
+          output: migrateLegacyTransformsOnArgumentValue(entry.output, transformsByInputId),
+        })),
+        fallback: migrateLegacyTransformsOnArgumentValue(composition.fallback, transformsByInputId),
+      };
+    default:
+      return composition;
+  }
+}
+
+export function normalizeSmartBuilderDraft(draft: SmartBuilderDraft): SmartBuilderDraft {
+  const sourceInputs = draft.inputs ?? draft.availableInputs ?? [];
+  const transformsByInputId = new Map<string, readonly BuilderInputTransform[]>(
+    sourceInputs
+      .filter((input) => input.transforms.length > 0)
+      .map((input) => [input.id, input.transforms] as const),
+  );
+
+  const availableInputs = sourceInputs.map((input) => ({
+    ...input,
+    transforms: [],
+  }));
+  const inputs = sourceInputs;
+
+  const recipePreMigration = draft.recipe ?? draft.composition ?? null;
+  const compositionPreMigration = draft.composition ?? draft.recipe ?? null;
+
+  const recipe = migrateLegacyInputTransformsToComposition(recipePreMigration, transformsByInputId);
+  const composition = migrateLegacyInputTransformsToComposition(compositionPreMigration, transformsByInputId);
+
+  const resultSteps = draft.resultSteps ?? draft.postSteps ?? [];
+  const postSteps = draft.postSteps ?? draft.resultSteps ?? [];
+
+  const hasRecipe = recipe !== null || composition !== null;
+  const recipeStatus = (draft.recipeStatus && (
+    draft.recipeStatus.status === 'valid'
+    || (draft.recipeStatus.status === 'invalid' && draft.recipeStatus.diagnostics.length > 0)
+    || (draft.recipeStatus.status === 'incomplete' && draft.recipeStatus.reasons.length > 0)
+  ))
+    ? draft.recipeStatus
+    : recipeStatusFromValidation(draft.validation);
+  const validExpression = draft.validExpression
+    ?? (recipeStatus.status === 'valid' && hasRecipe ? draft.expression : '');
+  const lastValidExpression = draft.lastValidExpression
+    ?? draft.validExpression
+    ?? (recipeStatus.status === 'valid' && hasRecipe ? draft.expression : '');
+
+  return {
+    ...draft,
+    availableInputs,
+    inputs,
+    recipe,
+    composition,
+    resultSteps,
+    postSteps,
+    recipeStatus,
+    validExpression,
+    lastValidExpression,
+    undoHistory: draft.undoHistory ?? [],
   };
 }
 
@@ -618,11 +897,42 @@ export function toSmartBuilderCompositionPatchFromParameters(input: {
       if (!input.firstInputId) return null;
       const fallbackRaw = typeof values.fallbackExpression === 'string'
         ? values.fallbackExpression
-        : '""';
+        : null;
+      const fallbackMode = typeof values.fallbackMode === 'string'
+        ? values.fallbackMode
+        : 'fixed';
+      const fallbackFromMode = (() => {
+        if (fallbackMode === 'null') return 'null';
+        if (fallbackMode === 'constant') {
+          const constantName = typeof values.fallbackConstantName === 'string' && values.fallbackConstantName.trim().length > 0
+            ? values.fallbackConstantName.trim()
+            : 'DEFAULT_CONSTANT';
+          return `constant("${constantName.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+        }
+        if (fallbackMode === 'input') {
+          const inputId = typeof values.fallbackInputId === 'string' ? values.fallbackInputId.trim() : '';
+          if (inputId.length > 0) {
+            return `source("${inputId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`;
+          }
+          return '""';
+        }
+
+        if (typeof values.fallbackFixedNumber === 'number') {
+          return String(values.fallbackFixedNumber);
+        }
+        if (typeof values.fallbackFixedBoolean === 'boolean') {
+          return values.fallbackFixedBoolean ? 'true' : 'false';
+        }
+        if (typeof values.fallbackFixedString === 'string') {
+          return `"${values.fallbackFixedString.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+        }
+        return '""';
+      })();
+      const resolvedFallbackRaw = fallbackRaw ?? fallbackFromMode;
       return {
         kind: 'default',
         inputId: input.firstInputId,
-        fallback: toArgumentValueFromDslExpression(fallbackRaw),
+        fallback: toArgumentValueFromDslExpression(resolvedFallbackRaw),
       };
     }
     default:
@@ -634,23 +944,253 @@ export function updateSmartBuilderExpression(
   draft: SmartBuilderDraft,
   expression: string,
 ): SmartBuilderDraft {
-  if (expression === draft.expression) return draft;
-  return {
-    ...draft,
-    previousExpressions: draft.expression ? [...draft.previousExpressions, draft.expression] : draft.previousExpressions,
+  const normalized = normalizeSmartBuilderDraft(draft);
+  const evaluatedStatus = evaluateSmartBuilderRecipeStatus({
+    draft: normalized,
     expression,
+  });
+
+  const shouldPreserveLastValidExpression =
+    evaluatedStatus.status === 'incomplete' && evaluatedStatus.reasons.length > 0;
+
+  const activeExpression = shouldPreserveLastValidExpression
+    ? (normalized.lastValidExpression
+      ?? normalized.validExpression
+      ?? normalized.expression
+      ?? '')
+    : expression;
+
+  const previousExpressions = activeExpression !== normalized.expression && normalized.expression
+    ? [...normalized.previousExpressions, normalized.expression]
+    : normalized.previousExpressions;
+
+  const next: SmartBuilderDraft = {
+    ...normalized,
+    previousExpressions,
+    recipeStatus: evaluatedStatus,
+    expression: activeExpression,
+    validExpression: evaluatedStatus.status === 'valid'
+      ? activeExpression
+      : (normalized.validExpression ?? ''),
+    lastValidExpression: evaluatedStatus.status === 'valid'
+      ? activeExpression
+      : (normalized.lastValidExpression ?? normalized.validExpression ?? ''),
   };
+
+  return normalizeSmartBuilderDraft(next);
+}
+
+function isArgumentMissing(
+  draft: SmartBuilderDraft,
+  value: BuilderArgumentValue | undefined,
+  options?: { treatEmptyStaticStringAsMissing?: boolean },
+): boolean {
+  if (!value) return true;
+
+  if (value.kind === 'input') {
+    if (!value.inputId || value.inputId.trim().length === 0) return true;
+    return !draft.inputs.some((input) => input.id === value.inputId);
+  }
+
+  if (value.kind === 'expression') {
+    return value.expression.trim().length === 0;
+  }
+
+  if (typeof value.value === 'string' && options?.treatEmptyStaticStringAsMissing) {
+    return value.value.trim().length === 0;
+  }
+
+  return false;
+}
+
+function evaluateSmartBuilderRecipeStatus(input: {
+  draft: SmartBuilderDraft;
+  expression: string;
+}): SmartBuilderRecipeStatus {
+  const composition = input.draft.composition;
+  if (!composition) {
+    return { status: 'incomplete', reasons: [] };
+  }
+
+  const reasons: string[] = [];
+
+  switch (composition.kind) {
+    case 'advancedExpression': {
+      if (composition.expression.trim().length === 0) {
+        reasons.push('Expression is required.');
+      }
+      break;
+    }
+    case 'direct': {
+      if (composition.value) {
+        if (isArgumentMissing(input.draft, composition.value)) {
+          reasons.push('Select a value for direct mapping.');
+        }
+      } else {
+        const hasInput = input.draft.inputs.some((entry) => entry.id === composition.inputId);
+        if (!hasInput) {
+          reasons.push('Select a source input.');
+        }
+      }
+      break;
+    }
+    case 'concat': {
+      const hasParts = (composition.parts?.length ?? 0) > 0;
+      const hasInputIds = (composition.inputIds?.length ?? 0) > 0;
+      if (!hasParts && !hasInputIds) {
+        reasons.push('Add at least one value to combine.');
+      }
+      break;
+    }
+    case 'coalesce': {
+      const hasValues = (composition.values?.length ?? 0) > 0;
+      const hasInputIds = (composition.inputIds?.length ?? 0) > 0;
+      if (!hasValues && !hasInputIds) {
+        reasons.push('Add at least one value to Use first available.');
+      }
+      break;
+    }
+    case 'default': {
+      const hasInput = input.draft.inputs.some((entry) => entry.id === composition.inputId);
+      if (!hasInput) {
+        reasons.push('Select a primary input.');
+      }
+      if (isArgumentMissing(input.draft, composition.fallback)) {
+        reasons.push('Fallback value is required.');
+      }
+      break;
+    }
+    case 'math': {
+      const hasOps = (composition.operations?.length ?? 0) > 0 || (composition.inputIds?.length ?? 0) > 1;
+      if (!hasOps) {
+        reasons.push('Add at least one calculation operation.');
+      }
+      if (composition.startInputId && !input.draft.inputs.some((entry) => entry.id === composition.startInputId)) {
+        reasons.push('Select a starting value for calculation.');
+      }
+      if (composition.operations?.some((operation) => !operation.inputId && !operation.operand)) {
+        reasons.push('Each calculation operation needs an operand.');
+      }
+      break;
+    }
+    case 'condition': {
+      if (composition.clauses.length === 0) {
+        reasons.push('Add at least one condition.');
+        break;
+      }
+
+      for (const clause of composition.clauses) {
+        if (clause.predicates.length === 0) {
+          reasons.push('Add at least one predicate.');
+          continue;
+        }
+
+        for (const predicate of clause.predicates) {
+          if (isArgumentMissing(input.draft, predicate.left, { treatEmptyStaticStringAsMissing: true })) {
+            reasons.push('IF left value is required.');
+          }
+          if (
+            predicate.operator !== 'isNull'
+            && predicate.operator !== 'isNotNull'
+            && predicate.operator !== 'isTruthy'
+            && predicate.operator !== 'isFalsy'
+            && isArgumentMissing(input.draft, predicate.right, { treatEmptyStaticStringAsMissing: true })
+          ) {
+            reasons.push('IF comparison value is required.');
+          }
+        }
+
+        if (isArgumentMissing(input.draft, clause.thenOutput, { treatEmptyStaticStringAsMissing: true })) {
+          reasons.push('THEN value is required.');
+        }
+      }
+
+      if (isArgumentMissing(input.draft, composition.elseOutput, { treatEmptyStaticStringAsMissing: true })) {
+        reasons.push('OTHERWISE value is required.');
+      }
+      break;
+    }
+    case 'valueMap': {
+      const hasLookupInput = input.draft.inputs.some((entry) => entry.id === composition.inputId);
+      if (!hasLookupInput) {
+        reasons.push('Select a lookup value.');
+      }
+      if (composition.scope === 'project' && !composition.project) {
+        reasons.push('Select a project value table.');
+      }
+      break;
+    }
+    case 'arrayBuild':
+    case 'arrayMerge': {
+      if ((composition.inputIds?.length ?? 0) === 0) {
+        reasons.push('Select at least one array input.');
+      }
+      break;
+    }
+  }
+
+  if (reasons.length > 0) {
+    return {
+      status: 'incomplete',
+      reasons: [...new Set(reasons)],
+    };
+  }
+
+  if (input.expression.trim().length === 0) {
+    return {
+      status: 'incomplete',
+      reasons: ['Finish required values to generate an expression.'],
+    };
+  }
+
+  return { status: 'valid' };
+}
+
+export function isSmartBuilderDraftSaveBlocked(draft: SmartBuilderDraft): boolean {
+  const normalized = normalizeSmartBuilderDraft(draft);
+  const status = normalized.recipeStatus;
+  return status.status === 'incomplete' && status.reasons.length > 0;
 }
 
 export function undoSmartBuilderExpression(draft: SmartBuilderDraft): SmartBuilderDraft {
-  if (draft.previousExpressions.length === 0) return draft;
-  const nextHistory = draft.previousExpressions.slice(0, -1);
-  const restored = draft.previousExpressions[draft.previousExpressions.length - 1] ?? '';
-  return {
-    ...draft,
+  const normalized = normalizeSmartBuilderDraft(draft);
+  if ((normalized.undoHistory ?? []).length > 0) {
+    const history = normalized.undoHistory ?? [];
+    const snapshot = history[history.length - 1];
+    const remainingHistory = history.slice(0, -1);
+    if (!snapshot) return normalized;
+
+    const restored: SmartBuilderDraft = {
+      ...normalized,
+      availableInputs: snapshot.availableInputs ?? snapshot.inputs ?? normalized.availableInputs,
+      inputs: snapshot.inputs ?? snapshot.availableInputs ?? normalized.inputs,
+      focusedSlotId: snapshot.focusedSlotId ?? null,
+      slotScopedInputs: snapshot.slotScopedInputs ?? {},
+      recipe: snapshot.recipe ?? snapshot.composition ?? null,
+      composition: snapshot.composition ?? snapshot.recipe ?? null,
+      resultSteps: snapshot.resultSteps ?? snapshot.postSteps ?? [],
+      postSteps: snapshot.postSteps ?? snapshot.resultSteps ?? [],
+      recipeStatus: snapshot.recipeStatus,
+      validation: snapshot.validation ?? normalized.validation,
+      expression: snapshot.expression,
+      validExpression: snapshot.validExpression,
+      lastValidExpression: snapshot.lastValidExpression,
+      previousExpressions: snapshot.previousExpressions ?? normalized.previousExpressions.slice(0, -1),
+      pendingActionDraft: snapshot.pendingActionDraft ?? null,
+      undoHistory: remainingHistory,
+    };
+
+    return normalizeSmartBuilderDraft(restored);
+  }
+
+  if (normalized.previousExpressions.length === 0) return normalized;
+  const nextHistory = normalized.previousExpressions.slice(0, -1);
+  const restored = normalized.previousExpressions[normalized.previousExpressions.length - 1] ?? '';
+  return normalizeSmartBuilderDraft({
+    ...normalized,
     previousExpressions: nextHistory,
     expression: restored,
-  };
+  });
 }
 
 export function resolveOrderedInputIds(
@@ -723,12 +1263,13 @@ export function hydrateSmartBuilderFromExpression(input: {
         ...(hydratedValueMap.noMatchBehavior ? { noMatchBehavior: hydratedValueMap.noMatchBehavior } : {}),
       },
     };
-    const generated = generateSmartBuilderExpression(draft);
+    const draftForGeneration = normalizeSmartBuilderDraft(draft);
+    const generated = generateSmartBuilderExpression(draftForGeneration);
 
     return {
       kind: 'guided',
       draft: {
-        ...draft,
+        ...draftForGeneration,
         expression: generated,
         validation: generated ? { status: 'valid' } : { status: 'pending' },
       },
@@ -744,12 +1285,35 @@ export function hydrateSmartBuilderFromExpression(input: {
       inputs: hydratedCondition.inputs,
       composition: hydratedCondition.composition,
     };
-    const generated = generateSmartBuilderExpression(draft);
+    const draftForGeneration = normalizeSmartBuilderDraft(draft);
+    const generated = generateSmartBuilderExpression(draftForGeneration);
 
     return {
       kind: 'guided',
       draft: {
-        ...draft,
+        ...draftForGeneration,
+        expression: generated,
+        validation: generated ? { status: 'valid' } : { status: 'pending' },
+      },
+    };
+  }
+
+  const hydratedRecipe = hydrateRepresentableRecipeCompositionFromAst(parsed.ast, expression, {
+    resolveSourceValueType,
+  });
+  if (hydratedRecipe) {
+    const draft: SmartBuilderDraft = {
+      ...createEmptySmartBuilderDraft(input),
+      inputs: hydratedRecipe.inputs,
+      composition: hydratedRecipe.composition,
+    };
+    const draftForGeneration = normalizeSmartBuilderDraft(draft);
+    const generated = generateSmartBuilderExpression(draftForGeneration);
+
+    return {
+      kind: 'guided',
+      draft: {
+        ...draftForGeneration,
         expression: generated,
         validation: generated ? { status: 'valid' } : { status: 'pending' },
       },
@@ -768,7 +1332,7 @@ export function hydrateSmartBuilderFromExpression(input: {
     return {
       kind: 'advanced',
       expression,
-      reason: 'complex-expression',
+      reason: conditionClassification ? 'complex-expression' : 'unsupported-decomposition',
       ...(conditionClassification ? { classification: conditionClassification } : {}),
     };
   }
@@ -784,16 +1348,391 @@ export function hydrateSmartBuilderFromExpression(input: {
         }
       : { kind: 'direct', inputId: hydrated.id },
   };
-  const generated = generateSmartBuilderExpression(draft);
+  const draftForGeneration = normalizeSmartBuilderDraft(draft);
+  const generated = generateSmartBuilderExpression(draftForGeneration);
 
   return {
     kind: 'guided',
     draft: {
-      ...draft,
+      ...draftForGeneration,
       expression: generated,
       validation: generated ? { status: 'valid' } : { status: 'pending' },
     },
   };
+}
+
+type RecipeHydrationContext = {
+  resolveSourceValueType: (path: string) => BuilderValueType;
+};
+
+type RecipeHydrationResult = {
+  readonly inputs: readonly BuilderInput[];
+  readonly composition: BuilderComposition;
+};
+
+type RecipeInputRegistry = {
+  readonly bySignature: Map<string, BuilderInput>;
+  readonly ordered: BuilderInput[];
+};
+
+function createRecipeInputRegistry(): RecipeInputRegistry {
+  return {
+    bySignature: new Map(),
+    ordered: [],
+  };
+}
+
+function astNodeToExpressionSlice(expression: string, node: AstNode): string {
+  return expression.slice(node.start, node.end).trim();
+}
+
+function astNodeToStaticValue(node: AstNode): unknown | undefined {
+  switch (node.type) {
+    case 'StringLiteral':
+      return node.value;
+    case 'NumberLiteral':
+      return node.value;
+    case 'BooleanLiteral':
+      return node.value;
+    case 'NullLiteral':
+      return null;
+    case 'ObjectTemplate': {
+      const output: Record<string, unknown> = {};
+      for (const property of node.properties) {
+        const value = astNodeToStaticValue(property.value);
+        if (value === undefined) return undefined;
+        output[property.key] = value;
+      }
+      return output;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function registerRecipeInput(
+  registry: RecipeInputRegistry,
+  signature: string,
+  builder: () => Omit<BuilderInput, 'id' | 'transforms'>,
+): BuilderInput {
+  const existing = registry.bySignature.get(signature);
+  if (existing) return existing;
+
+  const next: BuilderInput = {
+    id: `input-${registry.ordered.length + 1}`,
+    ...builder(),
+    transforms: [],
+  };
+  registry.bySignature.set(signature, next);
+  registry.ordered.push(next);
+  return next;
+}
+
+function tryHydrateRecipeInputFromAstNode(
+  node: AstNode,
+  registry: RecipeInputRegistry,
+  context: RecipeHydrationContext,
+): BuilderInput | null {
+  if (node.type !== 'FunctionCall') return null;
+
+  if (node.name === 'source') {
+    const [pathArg] = node.arguments;
+    if (!pathArg || pathArg.type !== 'StringLiteral') return null;
+    const path = pathArg.value;
+    return registerRecipeInput(registry, `primary:${path}`, () => ({
+      sourceKind: 'primary',
+      label: path,
+      path,
+      valueType: context.resolveSourceValueType(path),
+    }));
+  }
+
+  if (node.name === 'external') {
+    const [aliasArg] = node.arguments;
+    if (!aliasArg || aliasArg.type !== 'StringLiteral') return null;
+    const alias = aliasArg.value;
+    return registerRecipeInput(registry, `enrichment:${alias}:`, () => ({
+      sourceKind: 'enrichment',
+      label: alias,
+      externalName: alias,
+      valueType: 'unknown',
+    }));
+  }
+
+  if (node.name === 'get') {
+    const [externalArg, pathArg] = node.arguments;
+    if (!externalArg || !pathArg) return null;
+    if (externalArg.type !== 'FunctionCall' || externalArg.name !== 'external') return null;
+    const [aliasArg] = externalArg.arguments;
+    if (!aliasArg || aliasArg.type !== 'StringLiteral' || pathArg.type !== 'StringLiteral') return null;
+    const alias = aliasArg.value;
+    const path = pathArg.value;
+    return registerRecipeInput(registry, `enrichment:${alias}:${path}`, () => ({
+      sourceKind: 'enrichment',
+      label: `${alias}.${path}`,
+      externalName: alias,
+      path,
+      valueType: 'unknown',
+    }));
+  }
+
+  if (node.name === 'constant') {
+    const [constantArg] = node.arguments;
+    if (!constantArg || constantArg.type !== 'StringLiteral') return null;
+    const constantName = constantArg.value;
+    return registerRecipeInput(registry, `constant:${constantName}`, () => ({
+      sourceKind: 'constant',
+      label: constantName,
+      constantName,
+      valueType: 'unknown',
+    }));
+  }
+
+  if (node.name === 'item') {
+    const [pathArg] = node.arguments;
+    const path = pathArg?.type === 'StringLiteral' ? pathArg.value : '';
+    return registerRecipeInput(registry, `item:${path}`, () => ({
+      sourceKind: 'item',
+      label: path || 'item',
+      ...(path ? { path } : {}),
+      valueType: 'unknown',
+    }));
+  }
+
+  if (node.name === 'parent') {
+    const [pathArg] = node.arguments;
+    const path = pathArg?.type === 'StringLiteral' ? pathArg.value : '';
+    return registerRecipeInput(registry, `parent:${path}`, () => ({
+      sourceKind: 'parent',
+      label: path || 'parent',
+      ...(path ? { path } : {}),
+      valueType: 'unknown',
+    }));
+  }
+
+  if (node.name === 'static') {
+    const [staticArg] = node.arguments;
+    if (!staticArg) return null;
+    const staticValue = astNodeToStaticValue(staticArg);
+    if (staticValue === undefined) return null;
+    const serialized = JSON.stringify(staticValue);
+    const valueType: BuilderValueType = staticValue === null
+      ? 'null'
+      : typeof staticValue === 'string'
+        ? 'string'
+        : typeof staticValue === 'number'
+          ? 'number'
+          : typeof staticValue === 'boolean'
+            ? 'boolean'
+            : Array.isArray(staticValue)
+              ? 'array'
+              : typeof staticValue === 'object'
+                ? 'object'
+                : 'unknown';
+    return registerRecipeInput(registry, `static:${serialized}`, () => ({
+      sourceKind: 'static',
+      label: 'Fixed value',
+      staticValue,
+      valueType,
+    }));
+  }
+
+  return null;
+}
+
+function tryHydrateRecipeArgumentValueFromAstNode(
+  node: AstNode,
+  expression: string,
+  registry: RecipeInputRegistry,
+  context: RecipeHydrationContext,
+): BuilderArgumentValue {
+  const input = tryHydrateRecipeInputFromAstNode(node, registry, context);
+  if (input) {
+    return { kind: 'input', inputId: input.id };
+  }
+
+  const staticValue = astNodeToStaticValue(node);
+  if (staticValue !== undefined) {
+    return { kind: 'static', value: staticValue };
+  }
+
+  return {
+    kind: 'expression',
+    expression: astNodeToExpressionSlice(expression, node),
+  };
+}
+
+function tryHydrateRepresentableMathComposition(
+  node: AstNode,
+  registry: RecipeInputRegistry,
+  context: RecipeHydrationContext,
+): Extract<BuilderComposition, { kind: 'math' }> | null {
+  if (node.type !== 'FunctionCall') return null;
+  if (node.name !== 'add' && node.name !== 'subtract' && node.name !== 'multiply' && node.name !== 'divide') {
+    return null;
+  }
+
+  type MathOperation = { readonly operator: 'add' | 'subtract' | 'multiply' | 'divide'; readonly inputId: string };
+
+  const collect = (current: AstNode): { readonly startInputId: string; readonly operations: readonly MathOperation[] } | null => {
+    if (
+      current.type === 'FunctionCall'
+      && (current.name === 'add' || current.name === 'subtract' || current.name === 'multiply' || current.name === 'divide')
+    ) {
+      if (current.arguments.length !== 2) return null;
+      const [leftNode, rightNode] = current.arguments;
+      if (!leftNode || !rightNode) return null;
+
+      const leftCollected = collect(leftNode);
+      if (!leftCollected) return null;
+
+      const rightInput = tryHydrateRecipeInputFromAstNode(rightNode, registry, context);
+      if (!rightInput) return null;
+
+      return {
+        startInputId: leftCollected.startInputId,
+        operations: [
+          ...leftCollected.operations,
+          { operator: current.name, inputId: rightInput.id },
+        ],
+      };
+    }
+
+    const input = tryHydrateRecipeInputFromAstNode(current, registry, context);
+    if (!input) return null;
+    return {
+      startInputId: input.id,
+      operations: [],
+    };
+  };
+
+  const collected = collect(node);
+  if (!collected || collected.operations.length === 0) return null;
+
+  return {
+    kind: 'math',
+    startInputId: collected.startInputId,
+    operations: collected.operations,
+  };
+}
+
+function hydrateRepresentableRecipeCompositionFromAst(
+  ast: AstNode | null,
+  expression: string,
+  context: RecipeHydrationContext,
+): RecipeHydrationResult | null {
+  if (!ast || ast.type !== 'FunctionCall') return null;
+
+  const registry = createRecipeInputRegistry();
+
+  if (ast.name === 'concat') {
+    const argumentsList = [...ast.arguments];
+    if (argumentsList.length === 0) return null;
+
+    const parts = argumentsList.map((argument) => {
+      const staticValue = astNodeToStaticValue(argument);
+      if (staticValue !== undefined) {
+        return { kind: 'static' as const, value: staticValue };
+      }
+
+      const input = tryHydrateRecipeInputFromAstNode(argument, registry, context);
+      if (input) {
+        return { kind: 'input' as const, inputId: input.id };
+      }
+
+      return null;
+    });
+
+    if (parts.some((part) => part === null)) return null;
+
+    const explicitInputIds = parts
+      .filter((part): part is Extract<BuilderArgumentValue, { kind: 'input' }> => Boolean(part) && part.kind === 'input')
+      .map((part) => part.inputId);
+
+    return {
+      inputs: registry.ordered,
+      composition: {
+        kind: 'concat',
+        inputIds: explicitInputIds,
+        parts: parts.filter((part): part is BuilderArgumentValue => Boolean(part)),
+      },
+    };
+  }
+
+  if (ast.name === 'coalesce') {
+    const argumentsList = [...ast.arguments];
+    if (argumentsList.length === 0) return null;
+
+    const toArgumentValue = (node: AstNode): BuilderArgumentValue | null => {
+      const input = tryHydrateRecipeInputFromAstNode(node, registry, context);
+      if (input) return { kind: 'input', inputId: input.id };
+
+      const staticValue = astNodeToStaticValue(node);
+      if (staticValue !== undefined) {
+        return { kind: 'static', value: staticValue };
+      }
+
+      return null;
+    };
+
+    const valuesRaw = argumentsList.map((argument) => toArgumentValue(argument));
+    if (valuesRaw.some((value) => value === null)) return null;
+
+    const valuesAll = valuesRaw.filter((value): value is BuilderArgumentValue => Boolean(value));
+    const values = valuesAll.length > 1 ? valuesAll.slice(0, -1) : valuesAll;
+    const fallbackCandidate = valuesAll.length > 1 ? valuesAll[valuesAll.length - 1] : undefined;
+    const fallback = fallbackCandidate?.kind === 'input' ? undefined : fallbackCandidate;
+
+    const explicitInputIds = values
+      .filter((value): value is Extract<BuilderArgumentValue, { kind: 'input' }> => value.kind === 'input')
+      .map((value) => value.inputId);
+
+    return {
+      inputs: registry.ordered,
+      composition: {
+        kind: 'coalesce',
+        inputIds: explicitInputIds,
+        values,
+        ...(fallback ? { fallback } : {}),
+      },
+    };
+  }
+
+  if (ast.name === 'array') {
+    const inputIds = ast.arguments
+      .map((argument) => tryHydrateRecipeInputFromAstNode(argument, registry, context)?.id ?? null);
+    if (inputIds.length === 0 || !inputIds.every((id): id is string => Boolean(id))) return null;
+    return {
+      inputs: registry.ordered,
+      composition: {
+        kind: 'arrayBuild',
+        inputIds,
+      },
+    };
+  }
+
+  if (ast.name === 'merge') {
+    const inputIds = ast.arguments
+      .map((argument) => tryHydrateRecipeInputFromAstNode(argument, registry, context)?.id ?? null);
+    if (inputIds.length === 0 || !inputIds.every((id): id is string => Boolean(id))) return null;
+    return {
+      inputs: registry.ordered,
+      composition: {
+        kind: 'arrayMerge',
+        inputIds,
+      },
+    };
+  }
+
+  const hydratedMath = tryHydrateRepresentableMathComposition(ast, registry, context);
+  if (hydratedMath) {
+    return {
+      inputs: registry.ordered,
+      composition: hydratedMath,
+    };
+  }
+
+  return null;
 }
 
 function classifyUnsupportedConditional(
@@ -934,43 +1873,158 @@ export function getBuilderInputUsages(draft: SmartBuilderDraft): readonly Builde
   const composition = draft.composition;
   if (!composition) return [];
 
-  if (composition.kind === 'direct') {
-    return [{ inputId: composition.inputId, location: 'direct' }];
-  }
-
-  if (composition.kind !== 'condition') {
-    return [];
-  }
-
   const usages: BuilderInputUsage[] = [];
 
-  const collect = (
-    value: BuilderArgumentValue,
-    location: BuilderInputUsageLocation,
-    clauseIndex?: number,
-    predicateIndex?: number,
-  ) => {
-    if (value.kind !== 'input') return;
-    usages.push({
-      inputId: value.inputId,
-      location,
-      ...(clauseIndex !== undefined ? { clauseIndex } : {}),
-      ...(predicateIndex !== undefined ? { predicateIndex } : {}),
-    });
+  const pushUsage = (usage: BuilderInputUsage) => {
+    usages.push(usage);
   };
 
-  composition.clauses.forEach((clause, clauseIndex) => {
-    clause.predicates.forEach((predicate, predicateIndex) => {
-      collect(predicate.left, 'condition-left', clauseIndex, predicateIndex);
-      if (predicate.right) {
-        collect(predicate.right, 'condition-right', clauseIndex, predicateIndex);
+  const collectFromTransformStepArgs = (
+    steps: readonly BuilderInputTransform[] | undefined,
+    location: BuilderInputUsageLocation,
+    meta?: Omit<BuilderInputUsage, 'inputId' | 'location'>,
+  ) => {
+    for (let stepIndex = 0; stepIndex < (steps?.length ?? 0); stepIndex += 1) {
+      const step = steps?.[stepIndex];
+      if (!step) continue;
+      const args = step.args ?? [];
+      for (let argIndex = 0; argIndex < args.length; argIndex += 1) {
+        const arg = args[argIndex];
+        if (!arg) continue;
+        collectFromArgument(arg, location, {
+          ...meta,
+          stepIndex,
+          argIndex,
+        });
       }
-    });
+    }
+  };
 
-    collect(clause.thenOutput, 'then', clauseIndex);
-  });
+  const collectFromArgument = (
+    value: BuilderArgumentValue,
+    location: BuilderInputUsageLocation,
+    meta?: Omit<BuilderInputUsage, 'inputId' | 'location'>,
+  ) => {
+    if (value.kind === 'input') {
+      pushUsage({
+        inputId: value.inputId,
+        location,
+        ...(meta ?? {}),
+      });
+    }
 
-  collect(composition.elseOutput, 'otherwise');
+    collectFromTransformStepArgs(value.transforms, location, meta);
+  };
+
+  switch (composition.kind) {
+    case 'direct': {
+      if (composition.value) {
+        collectFromArgument(composition.value, 'direct');
+      } else {
+        pushUsage({ inputId: composition.inputId, location: 'direct' });
+      }
+      break;
+    }
+    case 'concat': {
+      if (composition.parts && composition.parts.length > 0) {
+        composition.parts.forEach((part, valueIndex) => {
+          collectFromArgument(part, 'concat-part', { valueIndex });
+        });
+      } else {
+        (composition.inputIds ?? []).forEach((inputId, valueIndex) => {
+          pushUsage({ inputId, location: 'concat-part', valueIndex });
+        });
+      }
+      break;
+    }
+    case 'coalesce': {
+      if (composition.values && composition.values.length > 0) {
+        composition.values.forEach((value, valueIndex) => {
+          collectFromArgument(value, 'coalesce-operand', { valueIndex });
+        });
+      } else {
+        (composition.inputIds ?? []).forEach((inputId, valueIndex) => {
+          pushUsage({ inputId, location: 'coalesce-operand', valueIndex });
+        });
+      }
+      if (composition.fallback) {
+        collectFromArgument(composition.fallback, 'coalesce-fallback');
+      }
+      break;
+    }
+    case 'default': {
+      pushUsage({ inputId: composition.inputId, location: 'default-primary' });
+      collectFromArgument(composition.fallback, 'default-fallback');
+      break;
+    }
+    case 'math': {
+      if (composition.startInputId && composition.operations) {
+        pushUsage({ inputId: composition.startInputId, location: 'math-start' });
+        composition.operations.forEach((operation, operationIndex) => {
+          if (operation.inputId) {
+            pushUsage({
+              inputId: operation.inputId,
+              location: 'math-operand',
+              operationIndex,
+            });
+          }
+          if (operation.operand) {
+            collectFromArgument(operation.operand, 'math-operand', { operationIndex });
+          }
+        });
+      } else {
+        const ordered = composition.inputIds ?? [];
+        ordered.forEach((inputId, valueIndex) => {
+          pushUsage({
+            inputId,
+            location: valueIndex === 0 ? 'math-start' : 'math-operand',
+            ...(valueIndex > 0 ? { operationIndex: valueIndex - 1 } : {}),
+          });
+        });
+      }
+      break;
+    }
+    case 'condition': {
+      composition.clauses.forEach((clause, clauseIndex) => {
+        clause.predicates.forEach((predicate, predicateIndex) => {
+          collectFromArgument(predicate.left, 'condition-left', { clauseIndex, predicateIndex });
+          if (predicate.right) {
+            collectFromArgument(predicate.right, 'condition-right', { clauseIndex, predicateIndex });
+          }
+        });
+
+        collectFromArgument(clause.thenOutput, 'then', { clauseIndex });
+      });
+
+      collectFromArgument(composition.elseOutput, 'otherwise');
+      break;
+    }
+    case 'valueMap': {
+      pushUsage({ inputId: composition.inputId, location: 'value-map-lookup' });
+      composition.mappings.forEach((entry, mappingIndex) => {
+        collectFromArgument(entry.output, 'value-map-output', { mappingIndex });
+      });
+      collectFromArgument(composition.fallback, 'value-map-fallback');
+      break;
+    }
+    case 'arrayBuild': {
+      (composition.inputIds ?? []).forEach((inputId, valueIndex) => {
+        pushUsage({ inputId, location: 'array-build-item', valueIndex });
+      });
+      break;
+    }
+    case 'arrayMerge': {
+      (composition.inputIds ?? []).forEach((inputId, valueIndex) => {
+        pushUsage({ inputId, location: 'array-merge-item', valueIndex });
+      });
+      break;
+    }
+    case 'advancedExpression': {
+      break;
+    }
+  }
+
+  collectFromTransformStepArgs(draft.resultSteps ?? draft.postSteps, 'result-step-arg');
 
   return usages;
 }
@@ -1883,6 +2937,22 @@ function hydrateFromSupportedExpression(
   const chain = decomposeToChain(expression);
   if ('error' in chain) return null;
   if (chain.chain.steps.some((step) => step.kind !== 'transform')) return null;
+  const disallowedDirectHydrationFunctions = new Set([
+    'concat',
+    'coalesce',
+    'add',
+    'subtract',
+    'multiply',
+    'divide',
+    'array',
+    'merge',
+    'valueMap',
+    'default',
+    'if',
+  ]);
+  if (chain.chain.steps.some((step) => disallowedDirectHydrationFunctions.has(step.functionName))) {
+    return null;
+  }
 
   const sourceExpr = generateSourceExprFromChainSource(chain.chain.source);
   if (!sourceExpr) return null;

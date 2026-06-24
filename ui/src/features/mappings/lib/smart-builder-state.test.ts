@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  SMART_BUILDER_UNDO_HISTORY_LIMIT,
   createActionParameterDraft,
   createEmptySmartBuilderDraft,
+  isSmartBuilderDraftSaveBlocked,
   getAllowedConditionOperatorsForLeftType,
   getBuilderInputUsages,
   getConditionCompatibilityIssues,
   getValidatedActionParameters,
   hydrateSmartBuilderFromExpression,
+  normalizeSmartBuilderDraft,
   normalizeActionParameterValues,
   serializeActionParameterDraft,
   toSmartBuilderCompositionPatchFromParameters,
@@ -15,9 +18,237 @@ import {
   undoSmartBuilderExpression,
   updateSmartBuilderExpression,
   validateActionParameterDraft,
+  pushSmartBuilderSnapshot,
 } from './smart-builder-state';
 
 describe('smart-builder-state', () => {
+  it('creates canonical empty draft fields with backward-compatible aliases', () => {
+    const draft = createEmptySmartBuilderDraft({
+      targetPath: 'target.name',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(draft.availableInputs).toEqual([]);
+    expect(draft.inputs).toEqual([]);
+    expect(draft.recipe).toBeNull();
+    expect(draft.composition).toBeNull();
+    expect(draft.resultSteps).toEqual([]);
+    expect(draft.postSteps).toEqual([]);
+    expect(draft.recipeStatus).toEqual({ status: 'incomplete', reasons: [] });
+    expect(draft.validExpression).toBe('');
+    expect(draft.lastValidExpression).toBe('');
+    expect(draft.undoHistory).toEqual([]);
+  });
+
+  it('normalizes legacy smart draft shape into canonical fields', () => {
+    const legacy = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      availableInputs: undefined,
+      recipe: undefined,
+      resultSteps: undefined,
+      recipeStatus: undefined,
+      validExpression: undefined,
+      lastValidExpression: undefined,
+      undoHistory: undefined,
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [{ functionName: 'trim' }],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'input-1' },
+      postSteps: [{ functionName: 'trim' }],
+      expression: 'source("firstName")',
+      validation: { status: 'valid' as const },
+    };
+
+    const normalized = normalizeSmartBuilderDraft(legacy);
+    expect(normalized.availableInputs).toHaveLength(1);
+    expect(normalized.inputs).toHaveLength(1);
+    expect(normalized.availableInputs[0]?.transforms).toEqual([]);
+    expect(normalized.recipe).toEqual({
+      kind: 'direct',
+      inputId: 'input-1',
+      value: {
+        kind: 'input',
+        inputId: 'input-1',
+        transforms: [{ functionName: 'trim' }],
+      },
+    });
+    expect(normalized.composition).toEqual({
+      kind: 'direct',
+      inputId: 'input-1',
+      value: {
+        kind: 'input',
+        inputId: 'input-1',
+        transforms: [{ functionName: 'trim' }],
+      },
+    });
+    expect(normalized.resultSteps).toEqual([{ functionName: 'trim' }]);
+    expect(normalized.postSteps).toEqual([{ functionName: 'trim' }]);
+    expect(normalized.recipeStatus).toEqual({ status: 'valid' });
+    expect(normalized.validExpression).toBe('source("firstName")');
+    expect(normalized.lastValidExpression).toBe('source("firstName")');
+    expect(normalized.undoHistory).toEqual([]);
+  });
+
+  it('preserves last valid expression when recipe status is incomplete', () => {
+    const draft = normalizeSmartBuilderDraft({
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      expression: 'if(eq(source("a"), "x"), "A", "B")',
+      recipeStatus: { status: 'incomplete', reasons: ['Missing THEN value'] },
+      validExpression: 'source("a")',
+      lastValidExpression: 'source("a")',
+    });
+
+    expect(draft.recipeStatus).toEqual({ status: 'incomplete', reasons: ['Missing THEN value'] });
+    expect(draft.expression).toBe('if(eq(source("a"), "x"), "A", "B")');
+    expect(draft.validExpression).toBe('source("a")');
+    expect(draft.lastValidExpression).toBe('source("a")');
+  });
+
+  it('keeps current expression when recipe has no unresolved incomplete reasons', () => {
+    const base = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'direct' as const,
+        inputId: 'input-1',
+      },
+      expression: 'source("firstName")',
+      validation: { status: 'valid' as const },
+      recipeStatus: { status: 'valid' as const },
+      validExpression: 'source("firstName")',
+      lastValidExpression: 'source("firstName")',
+    };
+
+    const next = updateSmartBuilderExpression(base, 'source("firstName")');
+    expect(next.expression).toBe('source("firstName")');
+    expect(next.recipeStatus).toEqual({ status: 'valid' });
+  });
+
+  it('reverts expression to last valid when unresolved incomplete recipe is produced', () => {
+    const base = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.name',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'default' as const,
+        inputId: 'input-1',
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+      },
+      expression: 'default(source("firstName"), "UNKNOWN")',
+      validation: { status: 'valid' as const },
+      recipeStatus: { status: 'valid' as const },
+      validExpression: 'default(source("firstName"), "UNKNOWN")',
+      lastValidExpression: 'default(source("firstName"), "UNKNOWN")',
+    };
+
+    const incomplete = {
+      ...base,
+      composition: {
+        kind: 'default' as const,
+        inputId: 'missing-input',
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+      },
+    };
+
+    const next = updateSmartBuilderExpression(incomplete, 'default(source("missing"), "UNKNOWN")');
+
+    expect(next.expression).toBe('default(source("firstName"), "UNKNOWN")');
+    expect(next.recipeStatus.status).toBe('incomplete');
+    if (next.recipeStatus.status !== 'incomplete') return;
+    expect(next.recipeStatus.reasons.length).toBeGreaterThan(0);
+    expect(isSmartBuilderDraftSaveBlocked(next)).toBe(true);
+  });
+
+  it('migrates legacy input-owned transforms for reused conditional input into per-usage transforms', () => {
+    const normalized = normalizeSmartBuilderDraft({
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.code',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'accountCode',
+          path: 'accountCode',
+          valueType: 'string' as const,
+          transforms: [{ functionName: 'upper' }],
+        },
+      ],
+      composition: {
+        kind: 'condition' as const,
+        clauses: [
+          {
+            predicates: [{
+              left: { kind: 'input', inputId: 'input-1' },
+              operator: 'eq',
+              right: { kind: 'static', value: 'ABC' },
+            }],
+            thenOutput: { kind: 'input', inputId: 'input-1' },
+          },
+        ],
+        elseOutput: { kind: 'input', inputId: 'input-1' },
+      },
+      validation: { status: 'valid' as const },
+      expression: 'if(eq(source("accountCode"), "ABC"), source("accountCode"), source("accountCode"))',
+    });
+
+    expect(normalized.availableInputs[0]?.transforms).toEqual([]);
+    expect(normalized.composition?.kind).toBe('condition');
+    if (normalized.composition?.kind !== 'condition') return;
+
+    const predicateLeft = normalized.composition.clauses[0]?.predicates[0]?.left;
+    const thenOutput = normalized.composition.clauses[0]?.thenOutput;
+    const elseOutput = normalized.composition.elseOutput;
+
+    expect(predicateLeft?.kind).toBe('input');
+    expect(predicateLeft?.transforms).toEqual([{ functionName: 'upper' }]);
+    expect(thenOutput.transforms).toEqual([{ functionName: 'upper' }]);
+    expect(elseOutput.transforms).toEqual([{ functionName: 'upper' }]);
+  });
+
   it('AE-05: undo restores prior direct expression after direct -> composed transition', () => {
     const initial = createEmptySmartBuilderDraft({
       targetPath: 'target.fullName',
@@ -50,6 +281,99 @@ describe('smart-builder-state', () => {
 
     const undone = undoSmartBuilderExpression(withSecond);
     expect(undone.expression).toBe('source("firstName")');
+  });
+
+  it('does not block save for placeholder incomplete recipe state with no reasons', () => {
+    const draft = createEmptySmartBuilderDraft({
+      targetPath: 'target.name',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(draft.recipeStatus).toEqual({ status: 'incomplete', reasons: [] });
+    expect(isSmartBuilderDraftSaveBlocked(draft)).toBe(false);
+  });
+
+  it('pushes full-state undo snapshots and restores recipe/order/steps via undo', () => {
+    const base = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.total',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'a',
+        operations: [{ operator: 'add' as const, inputId: 'b' }],
+      },
+      postSteps: [{ functionName: 'round' as const, args: [{ kind: 'static' as const, value: 2 }] }],
+      expression: 'round(add(source("subtotal"), source("tax")), 2)',
+      validation: { status: 'valid' as const },
+      recipeStatus: { status: 'valid' as const },
+      validExpression: 'round(add(source("subtotal"), source("tax")), 2)',
+      lastValidExpression: 'round(add(source("subtotal"), source("tax")), 2)',
+    };
+
+    const changed = {
+      ...base,
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'a',
+        operations: [{ operator: 'subtract' as const, inputId: 'b' }],
+      },
+      postSteps: [
+        { functionName: 'abs' as const },
+      ],
+      expression: 'abs(subtract(source("subtotal"), source("tax")))',
+      validation: { status: 'valid' as const },
+      recipeStatus: { status: 'valid' as const },
+      validExpression: 'abs(subtract(source("subtotal"), source("tax")))',
+      lastValidExpression: 'abs(subtract(source("subtotal"), source("tax")))',
+    };
+
+    const withSnapshot = pushSmartBuilderSnapshot({ previousDraft: base, nextDraft: changed });
+    expect(withSnapshot.undoHistory?.length).toBe(1);
+
+    const undone = undoSmartBuilderExpression(withSnapshot);
+    expect(undone.composition).toEqual(base.composition);
+    expect(undone.postSteps).toEqual(base.postSteps);
+    expect(undone.expression).toBe(base.expression);
+  });
+
+  it('bounds smart-builder undo history to configured max snapshots', () => {
+    let current = createEmptySmartBuilderDraft({
+      targetPath: 'target.name',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    for (let i = 0; i < SMART_BUILDER_UNDO_HISTORY_LIMIT + 7; i += 1) {
+      const next = {
+        ...current,
+        expression: `source("field_${i}")`,
+      };
+      current = pushSmartBuilderSnapshot({ previousDraft: current, nextDraft: next });
+    }
+
+    expect(current.undoHistory?.length).toBe(SMART_BUILDER_UNDO_HISTORY_LIMIT);
   });
 
   it('hydrates supported direct source expressions into guided draft', () => {
@@ -128,7 +452,7 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toBe('get(external("carrier"), "rateCode")');
   });
 
-  it('hydrates project value-table valueMap expressions into guided draft when metadata exists', () => {
+  it('AE-32: hydrates project value-table valueMap expressions into guided draft when metadata exists', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
       targetPath: 'target.status',
@@ -159,7 +483,27 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toContain('valueTable("order-status", "oms", "cdm")');
   });
 
-  it('hydrates exact inline value-map expression into guided draft', () => {
+  it('AE-29: hydrates saved direct rule into guided direct composition', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'source("customer.firstName")',
+      targetPath: 'target.firstName',
+      targetType: 'string',
+      isRequired: false,
+      sourceValueTypeByPath: {
+        'customer.firstName': 'string',
+      },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition).toEqual({
+      kind: 'direct',
+      inputId: 'input-1',
+    });
+    expect(result.draft.inputs[0]?.path).toBe('customer.firstName');
+  });
+
+  it('AE-19: hydrates exact inline value-map expression into guided draft', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'valueMap(source("channel"), {"web": "WEB_PORTAL", "mobile": "MOBILE_APP", "store": "RETAIL_STORE"}, "UNKNOWN")',
       targetPath: 'target.channel',
@@ -176,7 +520,7 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toContain('valueMap(source("channel"), {');
   });
 
-  it('hydrates exact project value-map expression with return-input fallback into guided draft', () => {
+  it('AE-20: hydrates exact project value-map expression with return-input fallback into guided draft', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), source("status"))',
       targetPath: 'target.status',
@@ -246,7 +590,7 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toContain('valueTable("order-status", "oms", "cdm")');
   });
 
-  it('hydrates representable conditional expression with all-match predicates', () => {
+  it('AE-31: hydrates representable conditional expression with all-match predicates', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'if(and(eq(source("transaction.priority"), "expedited"), eq(source("transaction.channel"), "web")), source("customer.accountTier"), "STANDARD")',
       targetPath: 'target.priority',
@@ -288,7 +632,118 @@ describe('smart-builder-state', () => {
     expect(result.draft.expression).toBe('if(or(eq(source("a"), "1"), eq(source("b"), "2")), "Y", "N")');
   });
 
-  it('returns advanced-mode result for non-decomposable expression', () => {
+  it('AE-30: hydrates representable concat expression into explicit ordered parts', () => {
+    const expression = 'concat(source("customer.firstName"), " ", source("customer.lastName"))';
+    const result = hydrateSmartBuilderFromExpression({
+      expression,
+      targetPath: 'target.fullName',
+      targetType: 'string',
+      isRequired: false,
+      sourceValueTypeByPath: {
+        'customer.firstName': 'string',
+        'customer.lastName': 'string',
+      },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition).toEqual({
+      kind: 'concat',
+      inputIds: ['input-1', 'input-2'],
+      parts: [
+        { kind: 'input', inputId: 'input-1' },
+        { kind: 'static', value: ' ' },
+        { kind: 'input', inputId: 'input-2' },
+      ],
+    });
+    expect(result.draft.expression).toBe(expression);
+  });
+
+  it('hydrates representable coalesce expression with explicit fallback into guided draft', () => {
+    const expression = 'coalesce(source("nickname"), source("legalName"), "UNKNOWN")';
+    const result = hydrateSmartBuilderFromExpression({
+      expression,
+      targetPath: 'target.displayName',
+      targetType: 'string',
+      isRequired: false,
+      sourceValueTypeByPath: {
+        nickname: 'string',
+        legalName: 'string',
+      },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition).toEqual({
+      kind: 'coalesce',
+      inputIds: ['input-1', 'input-2'],
+      values: [
+        { kind: 'input', inputId: 'input-1' },
+        { kind: 'input', inputId: 'input-2' },
+      ],
+      fallback: { kind: 'static', value: 'UNKNOWN' },
+    });
+    expect(result.draft.expression).toBe(expression);
+  });
+
+  it('hydrates representable nested math expression into calculation start+operations model', () => {
+    const expression = 'add(subtract(source("subtotal"), source("discount")), source("shipping"))';
+    const result = hydrateSmartBuilderFromExpression({
+      expression,
+      targetPath: 'target.total',
+      targetType: 'number',
+      isRequired: false,
+      sourceValueTypeByPath: {
+        subtotal: 'number',
+        discount: 'number',
+        shipping: 'number',
+      },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition).toEqual({
+      kind: 'math',
+      startInputId: 'input-1',
+      operations: [
+        { operator: 'subtract', inputId: 'input-2' },
+        { operator: 'add', inputId: 'input-3' },
+      ],
+    });
+    expect(result.draft.expression).toBe(expression);
+  });
+
+  it('keeps concat with transformed input in advanced mode (non-lossless part ownership)', () => {
+    const expression = 'concat(upper(source("firstName")), " ", source("lastName"))';
+    const result = hydrateSmartBuilderFromExpression({
+      expression,
+      targetPath: 'target.fullName',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(result.kind).toBe('advanced');
+    if (result.kind !== 'advanced') return;
+    expect(result.reason).toBe('unsupported-decomposition');
+    expect(result.expression).toBe(expression);
+  });
+
+  it('returns strict advanced fallback for non-lossless coalesce ownership without partial reconstruction', () => {
+    const expression = 'coalesce(trim(source("nickname")), source("legalName"))';
+    const result = hydrateSmartBuilderFromExpression({
+      expression,
+      targetPath: 'target.displayName',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(result.kind).toBe('advanced');
+    if (result.kind !== 'advanced') return;
+    expect(result.reason).toBe('unsupported-decomposition');
+    expect(result.expression).toBe(expression);
+  });
+
+  it('AE-33: returns advanced-mode result for non-decomposable expression', () => {
     const result = hydrateSmartBuilderFromExpression({
       expression: 'if(startsWith(source("emailA"), "A"), "MATCH", "NO_MATCH")',
       targetPath: 'target.match',
@@ -330,7 +785,7 @@ describe('smart-builder-state', () => {
     expect(result.classification).toBe('non-lossless-condition-value');
   });
 
-  it('classifies transformed predicate operands as non-lossless legacy conditional shapes', () => {
+  it('AE-34: classifies transformed predicate operands as non-lossless legacy conditional shapes', () => {
     const expression = 'if(eq(lower(source("priority")), "expedited"), "Y", "N")';
     const result = hydrateSmartBuilderFromExpression({
       expression,
@@ -628,7 +1083,8 @@ describe('smart-builder-state', () => {
       actionId: 'null.default',
       firstInputId: 'input-1',
       values: {
-        fallbackExpression: '"N/A"',
+        fallbackMode: 'fixed',
+        fallbackFixedString: 'N/A',
       },
     });
 
@@ -636,6 +1092,23 @@ describe('smart-builder-state', () => {
       kind: 'default',
       inputId: 'input-1',
       fallback: { kind: 'static', value: 'N/A' },
+    });
+  });
+
+  it('maps null.default constant fallback mode into expression patch', () => {
+    const composition = toSmartBuilderCompositionPatchFromParameters({
+      actionId: 'null.default',
+      firstInputId: 'input-1',
+      values: {
+        fallbackMode: 'constant',
+        fallbackConstantName: 'DEFAULT_CURRENCY',
+      },
+    });
+
+    expect(composition).toEqual({
+      kind: 'default',
+      inputId: 'input-1',
+      fallback: { kind: 'expression', expression: 'constant("DEFAULT_CURRENCY")' },
     });
   });
 
@@ -662,6 +1135,183 @@ describe('smart-builder-state', () => {
 
     expect(getBuilderInputUsages(draft)).toEqual([
       { inputId: 'priorityInput', location: 'direct' },
+    ]);
+  });
+
+  it('derives recursive usage contexts for valueMap lookup/output/fallback and result-step args', () => {
+    const draft = normalizeSmartBuilderDraft({
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.channel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'lookupInput',
+          sourceKind: 'primary' as const,
+          label: 'channel',
+          path: 'channel',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'mappedOutputInput',
+          sourceKind: 'primary' as const,
+          label: 'channelCanonical',
+          path: 'channelCanonical',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'fallbackInput',
+          sourceKind: 'primary' as const,
+          label: 'channelFallback',
+          path: 'channelFallback',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'resultArgInput',
+          sourceKind: 'primary' as const,
+          label: 'suffix',
+          path: 'suffix',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'lookupInput',
+        scope: 'inline' as const,
+        mappings: [
+          {
+            whenValue: 'web',
+            output: { kind: 'input' as const, inputId: 'mappedOutputInput' },
+          },
+        ],
+        fallback: { kind: 'input' as const, inputId: 'fallbackInput' },
+      },
+      resultSteps: [
+        {
+          functionName: 'concat',
+          args: [{ kind: 'input' as const, inputId: 'resultArgInput' }],
+        },
+      ],
+    });
+
+    expect(getBuilderInputUsages(draft)).toEqual([
+      { inputId: 'lookupInput', location: 'value-map-lookup' },
+      { inputId: 'mappedOutputInput', location: 'value-map-output', mappingIndex: 0 },
+      { inputId: 'fallbackInput', location: 'value-map-fallback' },
+      { inputId: 'resultArgInput', location: 'result-step-arg', stepIndex: 0, argIndex: 0 },
+    ]);
+  });
+
+  it('derives recursive usage contexts for explicit concat/coalesce/math recipes', () => {
+    const concatDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        { id: 'a', sourceKind: 'primary' as const, label: 'first', path: 'first', valueType: 'string' as const, transforms: [] },
+        { id: 'b', sourceKind: 'primary' as const, label: 'last', path: 'last', valueType: 'string' as const, transforms: [] },
+      ],
+      composition: {
+        kind: 'concat' as const,
+        inputIds: ['a', 'b'],
+        parts: [
+          { kind: 'input' as const, inputId: 'a' },
+          { kind: 'static' as const, value: ' ' },
+          { kind: 'input' as const, inputId: 'b' },
+        ],
+      },
+    };
+
+    expect(getBuilderInputUsages(concatDraft)).toEqual([
+      { inputId: 'a', location: 'concat-part', valueIndex: 0 },
+      { inputId: 'b', location: 'concat-part', valueIndex: 2 },
+    ]);
+
+    const coalesceDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.displayName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        { id: 'a', sourceKind: 'primary' as const, label: 'nick', path: 'nick', valueType: 'string' as const, transforms: [] },
+        { id: 'b', sourceKind: 'primary' as const, label: 'legal', path: 'legal', valueType: 'string' as const, transforms: [] },
+        { id: 'c', sourceKind: 'primary' as const, label: 'default', path: 'default', valueType: 'string' as const, transforms: [] },
+      ],
+      composition: {
+        kind: 'coalesce' as const,
+        inputIds: ['a', 'b'],
+        values: [
+          { kind: 'input' as const, inputId: 'a' },
+          { kind: 'input' as const, inputId: 'b' },
+        ],
+        fallback: { kind: 'input' as const, inputId: 'c' },
+      },
+    };
+
+    expect(getBuilderInputUsages(coalesceDraft)).toEqual([
+      { inputId: 'a', location: 'coalesce-operand', valueIndex: 0 },
+      { inputId: 'b', location: 'coalesce-operand', valueIndex: 1 },
+      { inputId: 'c', location: 'coalesce-fallback' },
+    ]);
+
+    const mathDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.total',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        { id: 'a', sourceKind: 'primary' as const, label: 'subtotal', path: 'subtotal', valueType: 'number' as const, transforms: [] },
+        { id: 'b', sourceKind: 'primary' as const, label: 'discount', path: 'discount', valueType: 'number' as const, transforms: [] },
+        { id: 'c', sourceKind: 'primary' as const, label: 'shipping', path: 'shipping', valueType: 'number' as const, transforms: [] },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'a',
+        operations: [
+          { operator: 'subtract' as const, inputId: 'b' },
+          { operator: 'add' as const, inputId: 'c' },
+        ],
+      },
+    };
+
+    expect(getBuilderInputUsages(mathDraft)).toEqual([
+      { inputId: 'a', location: 'math-start' },
+      { inputId: 'b', location: 'math-operand', operationIndex: 0 },
+      { inputId: 'c', location: 'math-operand', operationIndex: 1 },
+    ]);
+
+    const mathWithLiteralDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'target.ratio',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        { id: 'start', sourceKind: 'primary' as const, label: 'subtotal', path: 'subtotal', valueType: 'number' as const, transforms: [] },
+        { id: 'tax', sourceKind: 'primary' as const, label: 'tax', path: 'tax', valueType: 'number' as const, transforms: [] },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'start',
+        operations: [
+          { operator: 'add' as const, inputId: 'tax' },
+          { operator: 'divide' as const, operand: { kind: 'static' as const, value: 2 } },
+        ],
+      },
+    };
+
+    expect(getBuilderInputUsages(mathWithLiteralDraft)).toEqual([
+      { inputId: 'start', location: 'math-start' },
+      { inputId: 'tax', location: 'math-operand', operationIndex: 0 },
     ]);
   });
 

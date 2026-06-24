@@ -3,7 +3,6 @@ import type {
   BuilderInput,
   SmartBuilderDraft,
 } from './smart-builder-state';
-import { resolveOrderedInputIds } from './smart-builder-state';
 
 function quote(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -67,17 +66,8 @@ function argumentValueToExpression(
 function inputExpression(input: BuilderInput): string {
   let expression = inputBaseExpression(input);
   if (!expression) return '';
-
-  for (const transform of input.transforms) {
-    const argExpressions = (transform.args ?? []).map((arg) => {
-      if (arg.kind === 'static') return literalToDsl(arg.value);
-      if (arg.kind === 'expression') return arg.expression;
-      if (arg.kind === 'input') return `__input_ref__${arg.inputId}`;
-      return '';
-    });
-    expression = `${transform.functionName}(${[expression, ...argExpressions].filter(Boolean).join(', ')})`;
-  }
-
+  // FS-098 canonical transform ownership is per-value usage (argument transforms)
+  // and final-result steps, not raw tray inputs.
   return expression;
 }
 
@@ -104,12 +94,13 @@ function resolveInputReferences(
   });
 }
 
-function resolveInputExpressions(
+function resolveExplicitInputExpressions(
   draft: SmartBuilderDraft,
   explicitInputIds?: readonly string[],
 ): readonly string[] {
-  const orderedIds = resolveOrderedInputIds(draft, explicitInputIds);
-  return orderedIds
+  if (!explicitInputIds || explicitInputIds.length === 0) return [];
+
+  return explicitInputIds
     .map((id) => findInput(draft, id))
     .filter((input): input is BuilderInput => Boolean(input))
     .map((input) => inputExpression(input))
@@ -186,14 +177,25 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
       baseExpression = composition.expression;
       break;
     case 'direct': {
+      if (composition.value) {
+        baseExpression = argumentValueToExpression(draft, composition.value);
+        break;
+      }
       const input = findInput(draft, composition.inputId);
       baseExpression = input ? inputExpression(input) : '';
       break;
     }
     case 'concat': {
-      const expressions = resolveInputExpressions(draft, composition.inputIds);
+      const hasExplicitParts = Boolean(composition.parts && composition.parts.length > 0);
+      const expressions = hasExplicitParts
+        ? (composition.parts ?? []).map((part) => argumentValueToExpression(draft, part)).filter(Boolean)
+        : resolveExplicitInputExpressions(draft, composition.inputIds);
       if (expressions.length === 0) {
         baseExpression = '';
+        break;
+      }
+      if (hasExplicitParts) {
+        baseExpression = `concat(${expressions.join(', ')})`;
         break;
       }
       if (!composition.separator) {
@@ -207,7 +209,9 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
       break;
     }
     case 'coalesce': {
-      const expressions = resolveInputExpressions(draft, composition.inputIds);
+      const expressions = composition.values && composition.values.length > 0
+        ? composition.values.map((value) => argumentValueToExpression(draft, value)).filter(Boolean)
+        : resolveExplicitInputExpressions(draft, composition.inputIds);
       const withFallback = composition.fallback
         ? [...expressions, argumentValueToExpression(draft, composition.fallback)]
         : expressions;
@@ -243,9 +247,15 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         }
 
         for (const operation of composition.operations) {
-          const operandInput = findInput(draft, operation.inputId);
-          if (!operandInput) continue;
-          const operandExpression = inputExpression(operandInput);
+          const operandExpression = (() => {
+            if (operation.operand) {
+              return argumentValueToExpression(draft, operation.operand);
+            }
+            if (!operation.inputId) return '';
+            const operandInput = findInput(draft, operation.inputId);
+            if (!operandInput) return '';
+            return inputExpression(operandInput);
+          })();
           if (!operandExpression) continue;
           acc = `${operation.operator}(${acc}, ${operandExpression})`;
         }
@@ -254,7 +264,7 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         break;
       }
 
-      const expressions = resolveInputExpressions(draft, composition.inputIds);
+      const expressions = resolveExplicitInputExpressions(draft, composition.inputIds);
       if (expressions.length === 0) {
         baseExpression = '';
         break;
@@ -308,12 +318,20 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
       break;
     }
     case 'arrayBuild': {
-      const expressions = resolveInputExpressions(draft, composition.inputIds);
+      const expressions = resolveExplicitInputExpressions(draft, composition.inputIds);
+      if (expressions.length === 0) {
+        baseExpression = '';
+        break;
+      }
       baseExpression = `array(${expressions.join(', ')})`;
       break;
     }
     case 'arrayMerge': {
-      const expressions = resolveInputExpressions(draft, composition.inputIds);
+      const expressions = resolveExplicitInputExpressions(draft, composition.inputIds);
+      if (expressions.length === 0) {
+        baseExpression = '';
+        break;
+      }
       baseExpression = `merge(${expressions.join(', ')})`;
       break;
     }

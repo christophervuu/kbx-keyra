@@ -82,7 +82,7 @@ export const UNSUPPORTED_DSL_FUNCTIONS = {
 
 export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEntry[] = [
   // text
-  { id: 'text.concat', label: 'Combine text', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'], constraints: { minInputs: 2 } },
+  { id: 'text.concat', label: 'Combine values', category: 'text', appliesTo: 'tray', role: 'mappingMethod', dslFunctions: ['concat'], constraints: { minInputs: 2 } },
   { id: 'text.upper', label: 'Uppercase', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['upper'], constraints: { minInputs: 1, maxInputs: 1 } },
   { id: 'text.lower', label: 'Lowercase', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['lower'], constraints: { minInputs: 1, maxInputs: 1 } },
   { id: 'text.trim', label: 'Trim spaces', category: 'text', appliesTo: 'input', role: 'inputTransform', dslFunctions: ['trim'], constraints: { minInputs: 1, maxInputs: 1 } },
@@ -289,12 +289,61 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
     constraints: { minInputs: 1, maxInputs: 1 },
     parameters: [
       {
-        id: 'fallbackExpression',
-        label: 'Fallback value',
-        kind: 'dsl-expression',
+        id: 'fallbackMode',
+        label: 'Fallback value from',
+        kind: 'enum',
         required: true,
-        defaultValue: '""',
+        defaultValue: 'fixed',
+        options: [
+          { value: 'fixed', label: 'Fixed value' },
+          { value: 'input', label: 'Input field' },
+          { value: 'constant', label: 'Constant' },
+          { value: 'null', label: 'Null value' },
+        ],
+      },
+      {
+        id: 'fallbackFixedString',
+        label: 'Fallback text',
+        kind: 'string',
+        required: false,
+        defaultValue: '',
+        constraints: { allowEmpty: true },
+      },
+      {
+        id: 'fallbackFixedNumber',
+        label: 'Fallback number',
+        kind: 'number',
+        required: false,
+        defaultValue: 0,
+      },
+      {
+        id: 'fallbackFixedBoolean',
+        label: 'Fallback true/false',
+        kind: 'boolean',
+        required: false,
+        defaultValue: false,
+      },
+      {
+        id: 'fallbackInputId',
+        label: 'Fallback input id',
+        kind: 'string',
+        required: false,
         constraints: { minLength: 1 },
+      },
+      {
+        id: 'fallbackConstantName',
+        label: 'Fallback constant name',
+        kind: 'string',
+        required: false,
+        defaultValue: 'DEFAULT_CONSTANT',
+        constraints: { minLength: 1 },
+      },
+      {
+        id: 'fallbackExpression',
+        label: 'Fallback expression (legacy)',
+        kind: 'dsl-expression',
+        required: false,
+        constraints: { allowEmpty: true },
       },
     ],
   },
@@ -302,7 +351,7 @@ export const SMART_BUILDER_ACTION_CATALOG: readonly SmartBuilderActionCatalogEnt
   { id: 'null.isNull', label: 'Is missing', category: 'null', appliesTo: 'input', role: 'conditionPredicate', dslFunctions: ['isNull'], constraints: { minInputs: 1, maxInputs: 1 } },
 
   // lookup
-  { id: 'lookup.valueMap', label: 'Value Mapping', category: 'lookup', appliesTo: 'input', role: 'mappingMethod', dslFunctions: ['valueMap'], constraints: { minInputs: 1, maxInputs: 1 } },
+  { id: 'lookup.valueMap', label: 'Value Mapping', category: 'lookup', appliesTo: 'input', role: 'mappingMethod', dslFunctions: ['valueMap'], constraints: { minInputs: 1 } },
 
   // array
   { id: 'array.map', label: 'Map array', category: 'array', appliesTo: 'array-scope', role: 'arrayAction', dslFunctions: ['map'], constraints: { minInputs: 1, requiresArrayContext: true } },

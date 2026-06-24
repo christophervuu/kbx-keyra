@@ -1866,6 +1866,43 @@ describe('useMappingEditor', () => {
 
       expect(result.current.canSave).toBe(false);
     });
+
+    it('is false when save is externally blocked even with unsaved changes', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+      expect(result.current.hasUnsavedChanges).toBe(true);
+      expect(result.current.canSave).toBe(true);
+
+      act(() => { result.current.actions.setSaveBlocked(true); });
+      expect(result.current.canSave).toBe(false);
+
+      act(() => { result.current.actions.setSaveBlocked(false); });
+      expect(result.current.canSave).toBe(true);
+    });
+
+    it('save() is a no-op while externally blocked', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+      act(() => { result.current.actions.addRule({ target: 'X', expression: 'static("x")' }); });
+      act(() => { result.current.actions.setSaveBlocked(true); });
+
+      await act(async () => {
+        const saveResult = await result.current.actions.save();
+        expect(saveResult).toBeUndefined();
+      });
+
+      expect(adapter.saveMapping).not.toHaveBeenCalled();
+      expect(result.current.hasUnsavedChanges).toBe(true);
+    });
   });
 
   describe('currentRevision', () => {

@@ -151,6 +151,11 @@ describe('EditorTopBar', () => {
     expect(screen.getByTestId('save-button')).not.toBeDisabled();
   });
 
+  it('Save button remains disabled when canSave=false even if unsavedChangeCount > 0', () => {
+    renderWithRouter(<EditorTopBar {...DEFAULT_TOP_BAR_PROPS} canSave={false} unsavedChangeCount={3} saveStatus="unsaved" />);
+    expect(screen.getByTestId('save-button')).toBeDisabled();
+  });
+
   it('routes More menu actions through callbacks', () => {
     const onHistoryToggle = vi.fn();
     const onOpenTestLab = vi.fn();

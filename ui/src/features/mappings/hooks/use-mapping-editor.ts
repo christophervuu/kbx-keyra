@@ -142,6 +142,8 @@ export interface MappingEditorActions {
    */
   canNavigateAway: () => { allowed: boolean; reason: 'unsaved' | null };
 
+  /** Toggle external save blocking (e.g., unresolved incomplete Smart Builder drafts). */
+  setSaveBlocked: (blocked: boolean) => void;
   /** Trigger AI validation for the current mapping (manual-only). */
   runAiValidation: (options?: { sampleData?: ValidationSampleDataInput }) => void;
   /** Retry the last AI validation request for the current mapping. */
@@ -500,7 +502,10 @@ function isDraftChanged(
  * @param onRuleApplied - Optional callback fired after each successful applyRule call
  *   (used by the inline preview strip in T-05 for auto-run behavior)
  */
-export function useMappingEditor(mappingId: string, onRuleApplied?: () => void): UseMappingEditorResult {
+export function useMappingEditor(
+  mappingId: string,
+  onRuleApplied?: () => void,
+): UseMappingEditorResult {
   const adapter = useAdapter();
   const {
     state: aiValidationState,
@@ -542,6 +547,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   // Save state
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaveBlocked, setIsSaveBlocked] = useState(false);
 
   // Keep onRuleApplied callback in a ref so applyRule doesn't need it as a dep
   const onRuleAppliedRef = useRef<(() => void) | undefined>(onRuleApplied);
@@ -844,7 +850,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
   const saveRef = useRef<() => void>(() => {});
 
   const save = useCallback(async (): Promise<{ noChange: boolean } | undefined> => {
-    if (!config || saveInProgressRef.current || !hasUnsavedChanges) return undefined;
+    if (!config || saveInProgressRef.current || !hasUnsavedChanges || isSaveBlocked) return undefined;
 
     saveInProgressRef.current = true;
     setSaveState('saving');
@@ -936,7 +942,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, currentRevision, rules, draftRules, configOptions, hasUnsavedChanges, adapter, mappingId, draftKey, targetTypeByPath]);
+  }, [config, version, currentRevision, rules, draftRules, configOptions, hasUnsavedChanges, isSaveBlocked, adapter, mappingId, draftKey, targetTypeByPath]);
 
   // Keep ref up to date for keyboard handler
   useEffect(() => {
@@ -1174,6 +1180,10 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     void loadData();
   }, [loadData]);
 
+  const setSaveBlocked = useCallback((blocked: boolean) => {
+    setIsSaveBlocked(blocked);
+  }, []);
+
   const runAiValidation = useCallback(
     (options?: { sampleData?: ValidationSampleDataInput }) => {
       runAiValidationInternal({
@@ -1345,6 +1355,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       discardDraftRestore,
       retry,
       canNavigateAway,
+      setSaveBlocked,
       runAiValidation,
       retryAiValidation,
       resetAiValidation,
@@ -1355,7 +1366,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
       updateDraft, commitDraft, revertDraft, revertAllDrafts, getDraftExpression,
       getUnsavedChangeSummary, applyRule, save, createVersion, acceptDraftRestore,
       discardDraftRestore, retry, canNavigateAway,
-      runAiValidation, retryAiValidation, resetAiValidation,
+      setSaveBlocked, runAiValidation, retryAiValidation, resetAiValidation,
     ],
   );
 
@@ -1388,7 +1399,7 @@ export function useMappingEditor(mappingId: string, onRuleApplied?: () => void):
     schemasLoaded,
     saveStatus,
     hasUnsavedChanges,
-    canSave: hasUnsavedChanges,
+    canSave: hasUnsavedChanges && !isSaveBlocked,
     hasDraft,
     draftRestoreState,
     unsavedChangeCount,

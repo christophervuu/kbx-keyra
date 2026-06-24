@@ -1369,9 +1369,7 @@ describe('ScalarFieldBuilder', () => {
     expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Value Mapping');
     expect(screen.getByTestId('smart-value-map-config')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('smart-recipe-change-base'));
-    fireEvent.click(screen.getByTestId('smart-picker-action-lookup.valueMap'));
-    expect(onSmartApplyAction).toHaveBeenCalledWith('lookup.valueMap');
+    expect(onSmartApplyAction).not.toHaveBeenCalled();
 
     expect(screen.getByTestId('smart-value-map-scope-inline')).toBeInTheDocument();
     expect(screen.getByTestId('smart-value-map-scope-project')).toBeInTheDocument();
@@ -1642,7 +1640,8 @@ describe('ScalarFieldBuilder', () => {
       onSmartCancelActionParameterDraft,
     });
 
-    fireEvent.click(screen.getByTestId('smart-recipe-add-transform'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-menu-toggle'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-menu-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
     fireEvent.click(screen.getByTestId('smart-picker-action-text.substring'));
     expect(onSmartBeginActionParameterEdit).toHaveBeenCalledWith('text.substring');
@@ -1651,7 +1650,10 @@ describe('ScalarFieldBuilder', () => {
     expect(onSmartUpdateActionParameterDraft).toHaveBeenCalledWith('text.substring', 'start', '2');
 
     fireEvent.click(screen.getByTestId('smart-parameter-apply'));
-    expect(onSmartApplyAction).toHaveBeenCalledWith('text.substring', undefined);
+    expect(onSmartApplyAction).toHaveBeenCalledWith('text.substring', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
 
     fireEvent.click(screen.getByTestId('smart-parameter-cancel'));
     expect(onSmartCancelActionParameterDraft).toHaveBeenCalled();

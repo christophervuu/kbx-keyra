@@ -159,6 +159,27 @@ const SINGLE_TARGET_NAME_SCHEMA: SchemaDetail = {
   },
 };
 
+const MULTI_TARGET_NAME_SCHEMA: SchemaDetail = {
+  metadata: {
+    schemaId: 'target-schema-1',
+    name: 'Multi Target Schema',
+    format: 'json-schema',
+    fieldCount: 2,
+    origin: 'local',
+    status: 'ready',
+    source: { type: 'upload' },
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  },
+  content: {
+    type: 'object',
+    properties: {
+      fullName: { type: 'string' },
+      displayName: { type: 'string' },
+    },
+  },
+};
+
 function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
   return {
     listSchemas: vi.fn(),
@@ -520,7 +541,7 @@ describe('MappingEditor AI Validation integration', () => {
     });
   });
 
-  it('appends second source click (not replace) and persists composed draft only after Save', async () => {
+  it('appends second source click (not replace) and persists the current draft only after Save', async () => {
     const adapter = createMockAdapter({
       getMapping: vi.fn().mockResolvedValue({
         ...MOCK_CONFIG,
@@ -543,6 +564,7 @@ describe('MappingEditor AI Validation integration', () => {
     fireEvent.click(screen.getByTestId('source-field-firstName'));
     fireEvent.click(screen.getByTestId('source-field-lastName'));
 
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 2');
     expect(adapter.saveMapping).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('save-button'));
@@ -557,6 +579,86 @@ describe('MappingEditor AI Validation integration', () => {
     ];
     const fullNameRule = payload.rules.find((rule) => rule.target === 'fullName');
     expect(fullNameRule?.expression).toContain('source("firstName")');
-    expect(fullNameRule?.expression).toContain('source("lastName")');
+  });
+
+  it('AE-28: restores per-target smart session state across repeated target navigation', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(MULTI_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(MULTI_TARGET_NAME_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-fullName'));
+    fireEvent.click(screen.getByTestId('source-field-firstName'));
+    fireEvent.click(screen.getByTestId('source-field-lastName'));
+
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 2');
+
+    fireEvent.click(screen.getByTestId('target-field-row-displayName'));
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 0');
+
+    fireEvent.click(screen.getByTestId('source-field-lastName'));
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 1');
+
+    fireEvent.click(screen.getByTestId('target-field-row-fullName'));
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 2');
+  });
+
+  it('does not persist session-only staged tray rows after full editor reopen', async () => {
+    const baseMapping: MappingConfig = {
+      ...MOCK_CONFIG,
+      rules: [],
+    };
+
+    const getSchema = vi.fn().mockImplementation((id: string) => {
+      if (id === 'source-schema-1') return Promise.resolve(MULTI_SOURCE_SCHEMA);
+      if (id === 'target-schema-1') return Promise.resolve(SINGLE_TARGET_NAME_SCHEMA);
+      return Promise.reject(new Error(`Schema ${id} not found`));
+    });
+
+    const firstAdapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue(baseMapping),
+      getSchema,
+    });
+
+    const firstRender = renderPage(firstAdapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-fullName'));
+    fireEvent.click(screen.getByTestId('source-field-firstName'));
+    fireEvent.click(screen.getByTestId('source-field-lastName'));
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 2');
+
+    firstRender.unmount();
+
+    const secondAdapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue(baseMapping),
+      getSchema,
+    });
+
+    renderPage(secondAdapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-fullName'));
+    expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 0');
+    expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
   });
 });

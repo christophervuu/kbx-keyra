@@ -23,6 +23,15 @@ export interface ResolvedSmartBuilderAction {
   readonly availability: SmartBuilderActionAvailability;
 }
 
+export interface ChangeLogicOption {
+  readonly id: string;
+  readonly label: string;
+  readonly enabled: boolean;
+  readonly reason?: string;
+  readonly sortOrder: number;
+}
+
+
 function classifyInputType(input: BuilderInput): BuilderValueType {
   return input.valueType;
 }
@@ -226,4 +235,72 @@ export function resolveSmartBuilderActionsFromDraft(
     hasArrayScope,
     pendingActionDraft: draft.pendingActionDraft,
   });
+}
+
+export function resolveChangeLogicOptionsFromDraft(
+  draft: SmartBuilderDraft,
+): readonly ChangeLogicOption[] {
+  const resolved = resolveSmartBuilderActionsFromDraft(draft);
+  const byActionId = new Map(resolved.map((entry) => [entry.action.id, entry] as const));
+
+  const numberAddAvailability = byActionId.get('number.add')?.availability;
+
+  const options: ChangeLogicOption[] = [
+    {
+      id: 'base.direct',
+      label: 'Use one value',
+      enabled: draft.inputs.length > 0,
+      reason: draft.inputs.length > 0 ? undefined : 'Unavailable: add at least one input.',
+      sortOrder: 10,
+    },
+    {
+      id: 'base.fixed',
+      label: 'Fixed value',
+      enabled: true,
+      sortOrder: 15,
+    },
+    {
+      id: 'base.constant',
+      label: 'Constant',
+      enabled: true,
+      sortOrder: 18,
+    },
+    {
+      id: 'text.concat',
+      label: 'Combine values',
+      enabled: byActionId.get('text.concat')?.availability.enabled ?? false,
+      reason: byActionId.get('text.concat')?.availability.reason,
+      sortOrder: 20,
+    },
+    {
+      id: 'null.coalesce',
+      label: 'Use first available',
+      enabled: byActionId.get('null.coalesce')?.availability.enabled ?? false,
+      reason: byActionId.get('null.coalesce')?.availability.reason,
+      sortOrder: 30,
+    },
+    {
+      id: 'base.calculation',
+      label: 'Calculate',
+      enabled: numberAddAvailability?.enabled ?? false,
+      reason: numberAddAvailability?.reason,
+      sortOrder: 40,
+    },
+    {
+      id: 'condition.compare',
+      label: 'Conditional',
+      enabled: byActionId.get('condition.compare')?.availability.enabled ?? false,
+      reason: byActionId.get('condition.compare')?.availability.reason,
+      sortOrder: 50,
+    },
+    {
+      id: 'lookup.valueMap',
+      label: 'Value Mapping',
+      enabled: byActionId.get('lookup.valueMap')?.availability.enabled ?? false,
+      reason: byActionId.get('lookup.valueMap')?.availability.reason,
+      sortOrder: 60,
+    },
+  ];
+
+  return options.sort((a, b) => a.sortOrder - b.sortOrder);
 }

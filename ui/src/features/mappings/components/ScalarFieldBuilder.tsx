@@ -67,6 +67,7 @@ import { toLegacyChainBuilderState } from '../lib/chain-legacy-adapter';
 import { decomposeExpression as decomposeExpressionNew } from '../lib/pipeline-decomposer';
 import { hydrateSmartBuilderFromExpression } from '../lib/smart-builder-state';
 import type {
+  BuilderArgumentValue,
   BuilderComposition,
   BuilderInput,
   BuilderValueType,
@@ -183,9 +184,43 @@ export interface ScalarFieldBuilderProps {
     actionId: string,
     options?: {
       editingStepIndex?: number;
-      editingStepScope?: 'input-transform' | 'output-step';
+      editingStepScope?: 'value-step' | 'result-step';
+      valueStepMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      valueStepRemoveIndex?: number;
+      valueStepTarget?:
+        | { readonly kind: 'direct' }
+        | { readonly kind: 'concat-part'; readonly partIndex: number };
       calculationInputId?: string;
       setAsStartInputId?: string;
+      directInputId?: string;
+      fixedValue?: unknown;
+      constantName?: string;
+      concatParts?: readonly BuilderArgumentValue[];
+      concatMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      coalesceValues?: readonly BuilderArgumentValue[];
+      coalesceMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      coalesceFallbackValue?: unknown;
+      clearCoalesceFallback?: boolean;
+      calculationLiteralOperand?: unknown;
+      calculationSetLiteralOperandAtIndex?: number;
+      calculationMoveOperation?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      outputStepMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      outputStepRemoveIndex?: number;
       valueMapScope?: ValueTableScope;
       valueMapProjectSelection?: {
         readonly ref: MappingRuleProjectValueTableRef;
@@ -218,8 +253,6 @@ export interface ScalarFieldBuilderProps {
   onSmartCancelActionParameterDraft?: () => void;
   smartActiveActionId?: string | null;
   smartActionAnnouncement?: string | null;
-  smartConcatSeparator?: string;
-  onSmartConcatSeparatorChange?: (separator: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -607,8 +640,6 @@ export function ScalarFieldBuilder({
   onSmartCancelActionParameterDraft,
   smartActiveActionId = null,
   smartActionAnnouncement = null,
-  smartConcatSeparator = ' ',
-  onSmartConcatSeparatorChange,
   valueMapProjectState,
   onValueMapScopeChange,
   onValueMapProjectTableSelect,
@@ -1490,8 +1521,6 @@ export function ScalarFieldBuilder({
               onCancelActionParameterDraft={onSmartCancelActionParameterDraft}
               activeActionId={smartActiveActionId}
               actionAnnouncement={smartActionAnnouncement}
-              concatSeparator={smartConcatSeparator}
-              onConcatSeparatorChange={onSmartConcatSeparatorChange}
               valueMapProjectState={valueMapProjectState}
               onValueMapScopeChange={onValueMapScopeChange}
               onValueMapProjectTableSelect={onValueMapProjectTableSelect}

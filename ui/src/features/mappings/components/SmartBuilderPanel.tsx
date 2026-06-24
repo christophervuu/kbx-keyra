@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { InputTray } from './InputTray';
 import type { StagedInputField } from './SourceSchemaPanel';
 import { findSmartBuilderActionById, getSmartBuilderActionParameters } from '../lib/smart-builder-action-catalog';
-import { resolveSmartBuilderActionsFromDraft } from '../lib/smart-builder-action-resolver';
+import { resolveChangeLogicOptionsFromDraft, resolveSmartBuilderActionsFromDraft } from '../lib/smart-builder-action-resolver';
 import {
   getAllowedConditionOperatorsForLeftType,
   getBuilderInputUsages,
@@ -23,7 +23,6 @@ import type {
   SmartBuilderHydrationResult,
 } from '../lib/smart-builder-state';
 
-import { evaluateExpression } from '@/lib/engine';
 import type {
   ValueTableDirection,
   ValueTableNoMatchMode,
@@ -31,30 +30,9 @@ import type {
   ValueTableScope,
 } from '@/lib/types/domain';
 
-type ConditionSampleState = 'missing-input' | 'missing-field' | 'null' | 'value';
-
-interface ConditionSampleValueDetail {
-  readonly state: ConditionSampleState;
-  readonly display: string;
-}
-
-interface ConditionPredicateSampleDetail {
-  readonly clauseIndex: number;
-  readonly predicateIndex: number;
-  readonly expression: string;
-  readonly outcome: boolean | null;
-  readonly left: ConditionSampleValueDetail;
-  readonly right?: ConditionSampleValueDetail;
-}
-
-interface ConditionSampleDiagnostics {
-  readonly blocked: boolean;
-  readonly incompleteReasons: readonly string[];
-  readonly predicateDetails: readonly ConditionPredicateSampleDetail[];
-  readonly selectedBranch: string;
-  readonly selectedBranchResult: string;
-  readonly selectedBranchResultState: 'ok' | 'error' | 'pending';
-  readonly observedStates: readonly ConditionSampleState[];
+interface ConditionValidationState {
+  readonly status: 'ready' | 'incomplete' | 'invalid';
+  readonly message: string;
 }
 
 type ConditionSlotKey = `left-${number}` | `right-${number}` | 'then' | 'otherwise';
@@ -71,37 +49,9 @@ function literalToDsl(value: unknown): string {
   return quoteDslString(JSON.stringify(value));
 }
 
-function formatSampleDisplay(value: unknown): string {
-  if (value === null) return 'null';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function resolvePathValue(document: unknown, fieldPath: string): { readonly found: boolean; readonly value: unknown } {
-  if (document === null || document === undefined) {
-    return { found: false, value: undefined };
-  }
-
-  const normalized = fieldPath.replace(/\[(\d+)\]/g, '.$1');
-  const segments = normalized.split('.').filter((segment) => segment.length > 0);
-  let current: unknown = document;
-
-  for (const segment of segments) {
-    if (current === null || current === undefined || typeof current !== 'object') {
-      return { found: false, value: undefined };
-    }
-    if (!(segment in (current as Record<string, unknown>))) {
-      return { found: false, value: undefined };
-    }
-    current = (current as Record<string, unknown>)[segment];
-  }
-
-  return { found: true, value: current };
+function parseConstantNameFromExpression(expression: string): string | null {
+  const match = expression.trim().match(/^constant\("([^"]+)"\)$/);
+  return match?.[1] ?? null;
 }
 
 interface ValueMapProjectTableOption {
@@ -119,6 +69,14 @@ interface ValueMapDirectionOption {
   readonly enabled: boolean;
   readonly reason?: string;
 }
+
+const ARRAY_HANDOFF_ACTION_IDS = new Set<string>([
+  'array.map',
+  'array.filter',
+  'array.find',
+  'array.array',
+  'array.merge',
+]);
 
 export interface ValueMapProjectUiState {
   readonly scope: ValueTableScope;
@@ -152,9 +110,43 @@ interface SmartBuilderPanelProps {
     actionId: string,
     options?: {
       editingStepIndex?: number;
-      editingStepScope?: 'input-transform' | 'output-step';
+      editingStepScope?: 'value-step' | 'result-step';
       calculationInputId?: string;
       setAsStartInputId?: string;
+      directInputId?: string;
+      fixedValue?: unknown;
+      constantName?: string;
+      concatParts?: readonly BuilderArgumentValue[];
+      concatMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      coalesceValues?: readonly BuilderArgumentValue[];
+      coalesceMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      coalesceFallbackValue?: unknown;
+      clearCoalesceFallback?: boolean;
+      calculationLiteralOperand?: unknown;
+      calculationSetLiteralOperandAtIndex?: number;
+      calculationMoveOperation?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      outputStepMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      outputStepRemoveIndex?: number;
+      valueStepMove?: {
+        readonly fromIndex: number;
+        readonly toIndex: number;
+      };
+      valueStepRemoveIndex?: number;
+      valueStepTarget?:
+        | { readonly kind: 'direct' }
+        | { readonly kind: 'concat-part'; readonly partIndex: number };
     },
   ) => void;
   readonly onBeginActionParameterEdit?: (
@@ -170,8 +162,6 @@ interface SmartBuilderPanelProps {
   readonly onCancelActionParameterDraft?: () => void;
   readonly activeActionId?: string | null;
   readonly actionAnnouncement?: string | null;
-  readonly concatSeparator?: string;
-  readonly onConcatSeparatorChange?: (separator: string) => void;
   readonly valueMapProjectState?: ValueMapProjectUiState;
   readonly onValueMapScopeChange?: (scope: ValueTableScope) => void;
   readonly onValueMapProjectTableSelect?: (tableId: string) => void;
@@ -206,8 +196,6 @@ export function SmartBuilderPanel({
   onCancelActionParameterDraft,
   activeActionId = null,
   actionAnnouncement = null,
-  concatSeparator = ' ',
-  onConcatSeparatorChange,
   valueMapProjectState,
   onValueMapScopeChange,
   onValueMapProjectTableSelect,
@@ -222,21 +210,68 @@ export function SmartBuilderPanel({
   sourceSampleData = null,
   enrichmentSampleData = {},
 }: SmartBuilderPanelProps) {
+  const conditionSlotButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const previousFocusedSlotIdRef = useRef<string | null>(null);
   const [showAddInput, setShowAddInput] = useState(false);
-  const [pickerMode, setPickerMode] = useState<'base' | 'transform' | 'step' | null>(null);
+  const [pickerMode, setPickerMode] = useState<'base' | 'step' | null>(null);
   const [pickerQuery, setPickerQuery] = useState('');
   const [expandedDisabledId, setExpandedDisabledId] = useState<string | null>(null);
   const [parameterEditorStepIndex, setParameterEditorStepIndex] = useState<number | null>(null);
-  const [parameterEditorStepScope, setParameterEditorStepScope] = useState<'input-transform' | 'output-step' | null>(null);
+  const [parameterEditorStepScope, setParameterEditorStepScope] = useState<'value-step' | 'result-step' | null>(null);
   const [openParameterDropdownId, setOpenParameterDropdownId] = useState<string | null>(null);
   const [activeConditionSlot, setActiveConditionSlot] = useState<ConditionSlotKey | null>(null);
+  const [stepPickerScope, setStepPickerScope] = useState<'result' | { readonly kind: 'direct' } | { readonly kind: 'concat-part'; readonly partIndex: number }>('result');
+  const [openConcatPartMenuIndex, setOpenConcatPartMenuIndex] = useState<number | null>(null);
+  const [openDirectValueMenu, setOpenDirectValueMenu] = useState(false);
+  const [parameterEditorValueStepTarget, setParameterEditorValueStepTarget] = useState<
+    { readonly kind: 'direct' } | { readonly kind: 'concat-part'; readonly partIndex: number } | null
+  >(null);
   const [conditionPickerModeBySlot, setConditionPickerModeBySlot] = useState<Partial<Record<ConditionSlotKey, ConditionPickerMode>>>({});
   const [parameterDropdownPosition, setParameterDropdownPosition] = useState<{
     readonly top: number;
     readonly left: number;
     readonly width: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (hydration.kind !== 'guided') {
+      previousFocusedSlotIdRef.current = null;
+      return;
+    }
+
+    const currentFocusedSlotId = hydration.draft.focusedSlotId ?? null;
+    const previousFocusedSlotId = previousFocusedSlotIdRef.current;
+    previousFocusedSlotIdRef.current = currentFocusedSlotId;
+
+    if (previousFocusedSlotId && !currentFocusedSlotId) {
+      const rawPreviousKey = previousFocusedSlotId.startsWith('condition:')
+        ? previousFocusedSlotId.replace('condition:', '')
+        : previousFocusedSlotId === 'fallback:default'
+          ? 'fallback:default'
+          : null;
+
+      const previousKey = rawPreviousKey === 'left'
+        ? 'left-0'
+        : rawPreviousKey === 'right'
+          ? 'right-0'
+          : rawPreviousKey === 'else'
+            ? 'otherwise'
+            : rawPreviousKey;
+
+      const focusId = requestAnimationFrame(() => {
+        if (previousKey) {
+          conditionSlotButtonRefs.current.get(previousKey)?.focus();
+        }
+      });
+
+      return () => {
+        cancelAnimationFrame(focusId);
+      };
+    }
+  }, [hydration]);
   void activeActionId;
+  void sourceSampleData;
+  void enrichmentSampleData;
 
   const openParameterDropdown = (fieldId: string, anchor: HTMLInputElement) => {
     const rect = anchor.getBoundingClientRect();
@@ -271,6 +306,7 @@ export function SmartBuilderPanel({
   }
 
   const actions = resolveSmartBuilderActionsFromDraft(hydration.draft);
+  const changeLogicOptions = resolveChangeLogicOptionsFromDraft(hydration.draft);
   const inputUsages = getBuilderInputUsages(hydration.draft);
   const pendingActionDraft = hydration.draft.pendingActionDraft ?? null;
   const hasArrayScope =
@@ -280,365 +316,63 @@ export function SmartBuilderPanel({
     ? hydration.draft.composition
     : null;
   const hasEnabledArrayActions = actions.some(
-    (entry) => entry.action.category === 'array' && entry.availability.enabled,
+    (entry) => ARRAY_HANDOFF_ACTION_IDS.has(entry.action.id) && entry.availability.enabled,
   );
   const conditionCompatibilityIssues = conditionComposition
     ? getConditionCompatibilityIssues(hydration.draft, conditionComposition)
     : [];
 
-  const conditionSampleDiagnostics: ConditionSampleDiagnostics | null = conditionComposition
+  const conditionValidationState: ConditionValidationState | null = conditionComposition
     ? (() => {
       const firstClause = conditionComposition.clauses[0];
-      if (!firstClause) {
+      if (!firstClause || firstClause.predicates.length === 0) {
         return {
-          blocked: true,
-          incompleteReasons: ['Add at least one condition clause.'],
-          predicateDetails: [],
-          selectedBranch: 'Not selected',
-          selectedBranchResult: 'Condition is incomplete.',
-          selectedBranchResultState: 'pending' as const,
-          observedStates: [],
+          status: 'incomplete',
+          message: 'Add at least one condition.',
         };
-      }
-
-      const observedStates = new Set<ConditionSampleState>();
-      const unresolvedInputLabels = new Set<string>();
-
-      const inspectArgument = (value: BuilderArgumentValue): ConditionSampleValueDetail => {
-        if (value.kind === 'static') {
-          if (value.value === null) {
-            observedStates.add('null');
-            return { state: 'null', display: 'null' };
-          }
-          observedStates.add('value');
-          return { state: 'value', display: formatSampleDisplay(value.value) };
-        }
-
-        if (value.kind === 'expression') {
-          if (!value.expression.trim()) {
-            observedStates.add('missing-field');
-            return { state: 'missing-field', display: 'Missing field (empty expression)' };
-          }
-          const { value: evaluated, error } = evaluateExpression(
-            value.expression,
-            sourceSampleData,
-            {},
-            enrichmentSampleData,
-          );
-          if (error) {
-            observedStates.add('missing-field');
-            return { state: 'missing-field', display: `Missing field (${error})` };
-          }
-          if (evaluated === null) {
-            observedStates.add('null');
-            return { state: 'null', display: 'null' };
-          }
-          observedStates.add('value');
-          return { state: 'value', display: formatSampleDisplay(evaluated) };
-        }
-
-        const input = hydration.draft.inputs.find((entry) => entry.id === value.inputId);
-        if (!input) {
-          observedStates.add('missing-input');
-          unresolvedInputLabels.add(value.inputId);
-          return { state: 'missing-input', display: `Missing input (${value.inputId})` };
-        }
-
-        if (input.sourceKind === 'enrichment') {
-          const alias = input.externalName ?? '';
-          const enrichmentDocument = alias ? enrichmentSampleData[alias] : undefined;
-          if (!alias || enrichmentDocument === undefined || enrichmentDocument === null) {
-            observedStates.add('missing-input');
-            unresolvedInputLabels.add(input.label);
-            return {
-              state: 'missing-input',
-              display: `Missing input sample (${alias || input.label})`,
-            };
-          }
-
-          if (input.path && input.path.trim().length > 0) {
-            const resolved = resolvePathValue(enrichmentDocument, input.path);
-            if (!resolved.found) {
-              observedStates.add('missing-field');
-              return {
-                state: 'missing-field',
-                display: `Missing field (${alias}.${input.path})`,
-              };
-            }
-            if (resolved.value === null) {
-              observedStates.add('null');
-              return { state: 'null', display: 'null' };
-            }
-            observedStates.add('value');
-            return { state: 'value', display: formatSampleDisplay(resolved.value) };
-          }
-
-          if (enrichmentDocument === null) {
-            observedStates.add('null');
-            return { state: 'null', display: 'null' };
-          }
-
-          observedStates.add('value');
-          return { state: 'value', display: formatSampleDisplay(enrichmentDocument) };
-        }
-
-        if (input.sourceKind === 'primary') {
-          if (sourceSampleData === null || sourceSampleData === undefined) {
-            observedStates.add('missing-input');
-            unresolvedInputLabels.add(input.label);
-            return { state: 'missing-input', display: 'Missing input sample (primary source)' };
-          }
-
-          if (input.path && input.path.trim().length > 0) {
-            const resolved = resolvePathValue(sourceSampleData, input.path);
-            if (!resolved.found) {
-              observedStates.add('missing-field');
-              return { state: 'missing-field', display: `Missing field (${input.path})` };
-            }
-            if (resolved.value === null) {
-              observedStates.add('null');
-              return { state: 'null', display: 'null' };
-            }
-            observedStates.add('value');
-            return { state: 'value', display: formatSampleDisplay(resolved.value) };
-          }
-
-          observedStates.add('value');
-          return { state: 'value', display: input.sampleValue !== undefined ? formatSampleDisplay(input.sampleValue) : input.label };
-        }
-
-        if (input.sampleValue === undefined) {
-          observedStates.add('missing-input');
-          unresolvedInputLabels.add(input.label);
-          return { state: 'missing-input', display: `Missing input sample (${input.label})` };
-        }
-
-        if (input.sampleValue === null) {
-          observedStates.add('null');
-          return { state: 'null', display: 'null' };
-        }
-
-        observedStates.add('value');
-        return { state: 'value', display: formatSampleDisplay(input.sampleValue) };
-      };
-
-      const toArgumentDslExpression = (value: BuilderArgumentValue): string => {
-        if (value.kind === 'static') return literalToDsl(value.value);
-        if (value.kind === 'expression') return value.expression;
-        const input = hydration.draft.inputs.find((entry) => entry.id === value.inputId);
-        if (!input) return 'null';
-        if (input.sourceKind === 'primary') {
-          return input.path ? `source(${quoteDslString(input.path)})` : 'source("")';
-        }
-        if (input.sourceKind === 'enrichment') {
-          if (input.externalName && input.path) {
-            return `get(external(${quoteDslString(input.externalName)}), ${quoteDslString(input.path)})`;
-          }
-          if (input.externalName) return `external(${quoteDslString(input.externalName)})`;
-        }
-        return 'null';
-      };
-
-      const evaluatePredicate = (predicate: BuilderPredicate): { readonly detail: ConditionPredicateSampleDetail; readonly complete: boolean } => {
-        const left = inspectArgument(predicate.left);
-        const leftDsl = toArgumentDslExpression(predicate.left);
-
-        if (predicate.operator === 'isNull' || predicate.operator === 'isNotNull' || predicate.operator === 'isTruthy' || predicate.operator === 'isFalsy') {
-          const expression =
-            predicate.operator === 'isNull'
-              ? `isNull(${leftDsl})`
-              : predicate.operator === 'isNotNull'
-                ? `not(isNull(${leftDsl}))`
-                : predicate.operator === 'isTruthy'
-                  ? `not(isNull(${leftDsl}))`
-                  : `isNull(${leftDsl})`;
-          if (left.state === 'missing-input' || left.state === 'missing-field') {
-            return {
-              detail: {
-                clauseIndex: 0,
-                predicateIndex: 0,
-                expression,
-                outcome: null,
-                left,
-              },
-              complete: false,
-            };
-          }
-
-          const result = evaluateExpression(expression, sourceSampleData, {}, enrichmentSampleData);
-          return {
-            detail: {
-              clauseIndex: 0,
-              predicateIndex: 0,
-              expression,
-              outcome: result.error ? null : Boolean(result.value),
-              left,
-            },
-            complete: !result.error,
-          };
-        }
-
-        if (!predicate.right) {
-          return {
-            detail: {
-              clauseIndex: 0,
-              predicateIndex: 0,
-              expression: `${predicate.operator}(${leftDsl}, <missing>)`,
-              outcome: null,
-              left,
-            },
-            complete: false,
-          };
-        }
-
-        const right = inspectArgument(predicate.right);
-        const rightDsl = toArgumentDslExpression(predicate.right);
-
-        const expression = `${predicate.operator}(${leftDsl}, ${rightDsl})`;
-        if (left.state === 'missing-input' || left.state === 'missing-field' || right.state === 'missing-input' || right.state === 'missing-field') {
-          return {
-            detail: {
-              clauseIndex: 0,
-              predicateIndex: 0,
-              expression,
-              outcome: null,
-              left,
-              right,
-            },
-            complete: false,
-          };
-        }
-
-        const result = evaluateExpression(expression, sourceSampleData, {}, enrichmentSampleData);
-        return {
-          detail: {
-            clauseIndex: 0,
-            predicateIndex: 0,
-            expression,
-            outcome: result.error ? null : Boolean(result.value),
-            left,
-            right,
-          },
-          complete: !result.error,
-        };
-      };
-
-      const predicateDetails: ConditionPredicateSampleDetail[] = [];
-      let conditionOutcome: boolean | null = null;
-      const incompleteReasons: string[] = [];
-
-      firstClause.predicates.forEach((predicate, predicateIndex) => {
-        const evaluated = evaluatePredicate(predicate);
-        predicateDetails.push({
-          ...evaluated.detail,
-          clauseIndex: 0,
-          predicateIndex,
-        });
-        if (!evaluated.complete) {
-          if (!incompleteReasons.includes('Condition is incomplete or has missing sample values.')) {
-            incompleteReasons.push('Condition is incomplete or has missing sample values.');
-          }
-          return;
-        }
-
-        if (evaluated.detail.outcome === null) {
-          if (!incompleteReasons.includes('Unable to evaluate one or more condition predicates.')) {
-            incompleteReasons.push('Unable to evaluate one or more condition predicates.');
-          }
-          return;
-        }
-
-        if (conditionOutcome === null) {
-          conditionOutcome = evaluated.detail.outcome;
-          return;
-        }
-        conditionOutcome = conditionComposition.matchMode === 'any'
-          ? conditionOutcome || evaluated.detail.outcome
-          : conditionOutcome && evaluated.detail.outcome;
-      });
-
-      if (firstClause.predicates.length === 0) {
-        incompleteReasons.push('Add at least one condition predicate.');
-      }
-
-      if (conditionCompatibilityIssues.length > 0) {
-        incompleteReasons.push('Resolve compatibility issues before running sample evaluation.');
       }
 
       const isConditionValueIncomplete = (value: BuilderArgumentValue): boolean => {
-        if (value.kind === 'static') return typeof value.value === 'string' ? value.value.trim().length === 0 : false;
+        if (value.kind === 'static') {
+          return typeof value.value === 'string' ? value.value.trim().length === 0 : false;
+        }
         if (value.kind === 'expression') return value.expression.trim().length === 0;
         return value.inputId.trim().length === 0;
       };
-      const thenIncomplete = isConditionValueIncomplete(firstClause.thenOutput);
-      const elseIncomplete = isConditionValueIncomplete(conditionComposition.elseOutput);
-      if (thenIncomplete || elseIncomplete) {
-        incompleteReasons.push('THEN and OTHERWISE values are required.');
-      }
 
-      if (unresolvedInputLabels.size > 0) {
-        incompleteReasons.push(`Missing sample input: ${Array.from(unresolvedInputLabels).join(', ')}`);
-      }
-
-      const blocked = incompleteReasons.length > 0 || conditionOutcome === null;
-      const selectedBranch = blocked
-        ? 'Not selected'
-        : conditionOutcome
-          ? 'THEN'
-          : 'OTHERWISE';
-      const selectedBranchValue = !blocked
-        ? (conditionOutcome ? firstClause.thenOutput : conditionComposition.elseOutput)
-        : null;
-
-      let selectedBranchResult = blocked
-        ? 'Condition is incomplete.'
-        : '';
-      let selectedBranchResultState: 'ok' | 'error' | 'pending' = blocked ? 'pending' : 'ok';
-
-      if (selectedBranchValue && !blocked) {
-        if (selectedBranchValue.kind === 'static') {
-          selectedBranchResult = formatSampleDisplay(selectedBranchValue.value);
-        } else {
-          const expression = selectedBranchValue.kind === 'expression'
-            ? selectedBranchValue.expression
-            : (() => {
-              const input = hydration.draft.inputs.find((entry) => entry.id === selectedBranchValue.inputId);
-              if (!input) return '';
-              if (input.sourceKind === 'primary') {
-                return input.path ? `source(${quoteDslString(input.path)})` : '';
-              }
-              if (input.sourceKind === 'enrichment') {
-                if (input.externalName && input.path) {
-                  return `get(external(${quoteDslString(input.externalName)}), ${quoteDslString(input.path)})`;
-                }
-                if (input.externalName) return `external(${quoteDslString(input.externalName)})`;
-              }
-              return '';
-            })();
-          if (!expression) {
-            selectedBranchResult = 'Missing input.';
-            selectedBranchResultState = 'pending';
-          } else {
-            const evaluated = evaluateExpression(expression, sourceSampleData, {}, enrichmentSampleData);
-            if (evaluated.error) {
-              selectedBranchResult = evaluated.error;
-              selectedBranchResultState = 'error';
-            } else {
-              selectedBranchResult = formatSampleDisplay(evaluated.value);
-              selectedBranchResultState = 'ok';
-            }
-          }
+      const hasIncompletePredicate = firstClause.predicates.some((predicate) => {
+        if (isConditionValueIncomplete(predicate.left)) return true;
+        if (predicate.operator === 'isNull' || predicate.operator === 'isNotNull' || predicate.operator === 'isTruthy' || predicate.operator === 'isFalsy') {
+          return false;
         }
+        if (!predicate.right) return true;
+        return isConditionValueIncomplete(predicate.right);
+      });
+
+      if (hasIncompletePredicate) {
+        return {
+          status: 'incomplete',
+          message: 'Finish each IF condition to continue.',
+        };
+      }
+
+      if (isConditionValueIncomplete(firstClause.thenOutput) || isConditionValueIncomplete(conditionComposition.elseOutput)) {
+        return {
+          status: 'incomplete',
+          message: 'THEN and OTHERWISE values are required.',
+        };
+      }
+
+      if (conditionCompatibilityIssues.length > 0) {
+        return {
+          status: 'invalid',
+          message: 'Fix highlighted condition value mismatches.',
+        };
       }
 
       return {
-        blocked,
-        incompleteReasons,
-        predicateDetails,
-        selectedBranch,
-        selectedBranchResult,
-        selectedBranchResultState,
-        observedStates: Array.from(observedStates),
+        status: 'ready',
+        message: 'Condition is complete.',
       };
     })()
     : null;
@@ -698,10 +432,10 @@ export function SmartBuilderPanel({
       case 'lt': return 'Less than';
       case 'lte': return 'Less or equal';
       case 'contains': return 'Contains';
-      case 'isNull': return 'Is missing';
-      case 'isNotNull': return 'Is not missing';
-      case 'isTruthy': return 'Has value';
-      case 'isFalsy': return 'Missing value';
+      case 'isNull': return 'Is empty';
+      case 'isNotNull': return 'Is not empty';
+      case 'isTruthy': return 'Is true';
+      case 'isFalsy': return 'Is false';
       default: return operator;
     }
   };
@@ -792,7 +526,7 @@ export function SmartBuilderPanel({
 
     return (
       <div className="mt-1.5 rounded border border-slate-800 bg-slate-950/40 px-2 py-2" data-testid={`smart-condition-picker-${slot}`}>
-        <p className="text-[11px] font-semibold text-slate-300">Choose result value</p>
+        <p className="text-[11px] font-semibold text-slate-300">Choose value</p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <button
             type="button"
@@ -936,7 +670,14 @@ export function SmartBuilderPanel({
   const mappingMethodId = (() => {
     const composition = hydration.draft.composition;
     if (!composition) return hydration.draft.inputs.length === 0 ? 'base.direct' : 'base.none';
-    if (composition.kind === 'direct' || composition.kind === 'default') return 'base.direct';
+    if (composition.kind === 'direct') {
+      if (composition.value?.kind === 'static') return 'base.fixed';
+      if (composition.value?.kind === 'expression' && parseConstantNameFromExpression(composition.value.expression)) {
+        return 'base.constant';
+      }
+      return 'base.direct';
+    }
+    if (composition.kind === 'default') return 'base.direct';
     if (composition.kind === 'concat') return 'text.concat';
     if (composition.kind === 'coalesce') return 'null.coalesce';
     if (composition.kind === 'condition') return 'condition.compare';
@@ -958,7 +699,7 @@ export function SmartBuilderPanel({
   })();
   const mappingMethodLabel =
     mappingMethodId === 'text.concat'
-      ? 'Combine text'
+      ? 'Combine values'
       : mappingMethodId === 'null.coalesce'
         ? 'Use first available'
         : mappingMethodId === 'condition.compare'
@@ -979,14 +720,20 @@ export function SmartBuilderPanel({
                         ? 'Divide numbers'
                         : mappingMethodId === 'base.none'
                           ? 'Needs action'
-                        : 'Direct Mapping';
+                        : mappingMethodId === 'base.fixed'
+                          ? 'Fixed value'
+                          : mappingMethodId === 'base.constant'
+                            ? 'Constant'
+                            : 'Use one value';
   const isMethodNeedsAction = mappingMethodId === 'base.none';
 
-  const defaultFallback = hydration.draft.composition?.kind === 'default'
-    ? hydration.draft.composition.fallback
-    : null;
-
   const defaultPrimaryInput = (() => {
+    if (hydration.draft.composition?.kind === 'direct') {
+      if (hydration.draft.composition.value?.kind === 'input') {
+        return hydration.draft.inputs.find((input) => input.id === hydration.draft.composition?.value?.inputId) ?? null;
+      }
+      return hydration.draft.inputs.find((input) => input.id === hydration.draft.composition?.inputId) ?? hydration.draft.inputs[0] ?? null;
+    }
     if (hydration.draft.composition?.kind === 'default') {
       return hydration.draft.inputs.find((input) => input.id === hydration.draft.composition?.inputId) ?? hydration.draft.inputs[0] ?? null;
     }
@@ -994,28 +741,6 @@ export function SmartBuilderPanel({
       return hydration.draft.inputs[0] ?? null;
     }
     return null;
-  })();
-
-  const defaultFallbackExpression = (() => {
-    if (!defaultFallback) return '""';
-    if (defaultFallback.kind === 'static') {
-      if (typeof defaultFallback.value === 'string') {
-        return `"${defaultFallback.value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-      }
-      if (defaultFallback.value === null) return 'null';
-      return String(defaultFallback.value);
-    }
-    return defaultFallback.expression;
-  })();
-
-  const defaultFallbackLabel = (() => {
-    if (!defaultFallback) return null;
-    if (defaultFallback.kind === 'static') {
-      if (typeof defaultFallback.value === 'string') return `"${defaultFallback.value}"`;
-      if (defaultFallback.value === null) return 'null';
-      return String(defaultFallback.value);
-    }
-    return defaultFallback.expression;
   })();
 
   const calculationRows = (() => {
@@ -1030,10 +755,17 @@ export function SmartBuilderPanel({
         start,
         operations: composition.operations
           .map((operation) => {
-            const input = hydration.draft.inputs.find((entry) => entry.id === operation.inputId);
-            return input ? { operator: operation.operator, input } : null;
+            const operand = operation.operand
+              ? operation.operand
+              : operation.inputId
+                ? { kind: 'input' as const, inputId: operation.inputId }
+                : null;
+            return operand ? { operator: operation.operator, operand } : null;
           })
-          .filter((row): row is { operator: 'add' | 'subtract' | 'multiply' | 'divide'; input: BuilderInput } => Boolean(row)),
+          .filter((row): row is {
+            operator: 'add' | 'subtract' | 'multiply' | 'divide';
+            operand: BuilderArgumentValue;
+          } => Boolean(row)),
       };
     }
 
@@ -1046,7 +778,7 @@ export function SmartBuilderPanel({
       start,
       operations: rest.map((input) => ({
         operator: composition.operator ?? 'add',
-        input,
+        operand: { kind: 'input' as const, inputId: input.id },
       })),
     };
   })();
@@ -1055,16 +787,45 @@ export function SmartBuilderPanel({
     if (!calculationRows) return false;
     return calculationRows.operations.some((operation) =>
       operation.operator === 'divide'
-      && operation.input.sourceKind === 'static'
-      && Number(operation.input.staticValue) === 0,
+      && operation.operand.kind === 'static'
+      && Number(operation.operand.value) === 0,
     );
   })();
+
+  const describeCalculationOperand = (operand: BuilderArgumentValue): string => {
+    if (operand.kind === 'input') {
+      const input = hydration.draft.inputs.find((entry) => entry.id === operand.inputId);
+      return input?.label ?? 'input';
+    }
+    if (operand.kind === 'static') {
+      return literalToDsl(operand.value);
+    }
+    return operand.expression;
+  };
+
+  const actionIdForCalculationOperator = (operator: 'add' | 'subtract' | 'multiply' | 'divide'): 'number.add' | 'number.subtract' | 'number.multiply' | 'number.divide' => (
+    operator === 'add'
+      ? 'number.add'
+      : operator === 'subtract'
+        ? 'number.subtract'
+        : operator === 'multiply'
+          ? 'number.multiply'
+          : 'number.divide'
+  );
 
   const usedInputIds = (() => {
     const composition = hydration.draft.composition;
     if (!composition) return new Set<string>();
 
-    if (composition.kind === 'direct') return new Set([composition.inputId]);
+    if (composition.kind === 'direct') {
+      if (composition.value?.kind === 'input') {
+        return new Set([composition.value.inputId]);
+      }
+      if (composition.value && composition.value.kind !== 'input') {
+        return new Set<string>();
+      }
+      return new Set([composition.inputId]);
+    }
     if (composition.kind === 'concat' || composition.kind === 'coalesce' || composition.kind === 'arrayBuild' || composition.kind === 'arrayMerge') {
       const ids = composition.inputIds ?? hydration.draft.inputs.map((input) => input.id);
       return new Set(ids);
@@ -1076,7 +837,12 @@ export function SmartBuilderPanel({
     }
     if (composition.kind === 'math') {
       if (composition.startInputId && composition.operations) {
-        return new Set([composition.startInputId, ...composition.operations.map((entry) => entry.inputId)]);
+        const ids = new Set<string>([composition.startInputId]);
+        composition.operations.forEach((entry) => {
+          if (entry.inputId) ids.add(entry.inputId);
+          if (entry.operand?.kind === 'input') ids.add(entry.operand.inputId);
+        });
+        return ids;
       }
       const ids = composition.inputIds ?? hydration.draft.inputs.map((input) => input.id);
       return new Set(ids);
@@ -1099,28 +865,53 @@ export function SmartBuilderPanel({
   })();
 
   const unusedInputs = hydration.draft.inputs.filter((input) => !usedInputIds.has(input.id));
-  const canSuggestCombineText = hydration.draft.inputs.length > 1
+  const canSuggestCombineValues = hydration.draft.inputs.length > 1
     && hydration.draft.inputs.every((input) => input.valueType === 'string');
 
   const composePreview = (() => {
     if (hydration.draft.inputs.length === 0) return '--';
     if (mappingMethodId === 'text.concat') {
-      const separatorLabel = concatSeparator === ' '
-        ? '[space]'
-        : concatSeparator === ', '
-          ? '[, ]'
-          : concatSeparator === '-'
-            ? '[-]'
-            : concatSeparator === ''
-              ? ''
-              : `[${concatSeparator}]`;
-      if (!separatorLabel) {
-        return hydration.draft.inputs.map((input) => input.label).join(' + ');
-      }
-      return hydration.draft.inputs.map((input) => input.label).join(` + ${separatorLabel} + `);
+      const concatComposition = hydration.draft.composition?.kind === 'concat'
+        ? hydration.draft.composition
+        : null;
+      const partLabels = (concatComposition?.parts ?? [])
+        .map((part) => {
+          if (part.kind === 'input') {
+            const input = hydration.draft.inputs.find((entry) => entry.id === part.inputId);
+            return input?.label ?? 'input';
+          }
+          if (part.kind === 'static') {
+            if (typeof part.value === 'string' && part.value.length === 1 && part.value === ' ') return '[space]';
+            return literalToDsl(part.value);
+          }
+          return part.expression;
+        });
+      return partLabels.length > 0 ? partLabels.join(' + ') : '--';
     }
     if (mappingMethodId === 'null.coalesce') {
-      return hydration.draft.inputs.map((input) => input.label).join(' -> first available');
+      const coalesceComposition = hydration.draft.composition?.kind === 'coalesce'
+        ? hydration.draft.composition
+        : null;
+      const labels = (coalesceComposition?.values ?? [])
+        .map((value) => {
+          if (value.kind === 'input') {
+            const input = hydration.draft.inputs.find((entry) => entry.id === value.inputId);
+            return input?.label ?? 'input';
+          }
+          if (value.kind === 'static') return literalToDsl(value.value);
+          return value.expression;
+        });
+      const fallback = coalesceComposition?.fallback;
+      if (fallback) {
+        if (fallback.kind === 'static') labels.push(`fallback ${literalToDsl(fallback.value)}`);
+        else if (fallback.kind === 'input') {
+          const input = hydration.draft.inputs.find((entry) => entry.id === fallback.inputId);
+          labels.push(`fallback ${input?.label ?? 'input'}`);
+        } else {
+          labels.push(`fallback ${fallback.expression}`);
+        }
+      }
+      return labels.length > 0 ? labels.join(' -> ') : '--';
     }
     if ((mappingMethodId === 'base.calculation'
       || mappingMethodId === 'number.add'
@@ -1132,11 +923,23 @@ export function SmartBuilderPanel({
       );
       return [
         calculationRows.start.label,
-        ...calculationRows.operations.map((operation) => `${symbol(operation.operator)} ${operation.input.label}`),
+        ...calculationRows.operations.map((operation) => `${symbol(operation.operator)} ${describeCalculationOperand(operation.operand)}`),
       ].join(' ');
     }
     if (mappingMethodId === 'base.direct') {
       return defaultPrimaryInput?.label ?? hydration.draft.inputs[0]?.label ?? '--';
+    }
+    if (mappingMethodId === 'base.fixed') {
+      const fixed = hydration.draft.composition?.kind === 'direct' && hydration.draft.composition.value?.kind === 'static'
+        ? hydration.draft.composition.value.value
+        : '';
+      return literalToDsl(fixed);
+    }
+    if (mappingMethodId === 'base.constant') {
+      const constantName = hydration.draft.composition?.kind === 'direct' && hydration.draft.composition.value?.kind === 'expression'
+        ? parseConstantNameFromExpression(hydration.draft.composition.value.expression)
+        : null;
+      return constantName ? `constant(${quoteDslString(constantName)})` : 'constant("DEFAULT_CONSTANT")';
     }
     if (mappingMethodId === 'base.none') {
       return 'Choose how selected inputs should be used.';
@@ -1148,67 +951,32 @@ export function SmartBuilderPanel({
   const valueMapComposition = hydration.draft.composition?.kind === 'valueMap'
     ? hydration.draft.composition
     : null;
+  const valueMapLookupInput = valueMapComposition
+    ? hydration.draft.inputs.find((input) => input.id === valueMapComposition.inputId) ?? null
+    : null;
   void onValueMapConvertInlineToProject;
 
-  const basePickerActions = (() => {
-    const options = [
-      {
-        id: 'base.direct',
-        label: 'Direct Mapping',
-        enabled: hydration.draft.inputs.length <= 1,
-        reason:
-          hydration.draft.inputs.length > 1
-            ? 'Direct Mapping is only valid with exactly one input.'
-            : undefined,
-      },
-      { id: 'condition.compare', label: 'Conditional' },
-      { id: 'lookup.valueMap', label: 'Value Mapping' },
-    ];
-    const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
-    return options.map((option) => {
-      if (option.id === 'base.direct') {
-        return { id: option.id, label: option.label, enabled: option.enabled, reason: option.reason };
-      }
-      const resolved = resolvedById.get(option.id);
-      return {
-        id: option.id,
-        label: option.label,
-        enabled: resolved?.availability.enabled ?? false,
-        reason: resolved?.availability.reason ?? 'Unavailable in current context.',
-      };
-    });
-  })();
-
-  const transformPickerActions = (() => {
-    if (mappingMethodId === 'base.none') {
-      return [] as { id: string; label: string; enabled: boolean; reason: string }[];
-    }
-    const options = actions
-      .filter((entry) =>
-        entry.action.role === 'inputTransform'
-        && entry.action.id !== 'advanced.expression')
-      .map((entry) => ({ id: entry.action.id, label: entry.action.label }));
-    const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
-    return options.map((option) => {
-      const resolved = resolvedById.get(option.id);
-      return {
-        id: option.id,
-        label: option.label,
-        enabled: resolved?.availability.enabled ?? false,
-        reason: resolved?.availability.reason ?? 'Unavailable in current context.',
-      };
-    });
-  })();
+  const basePickerActions = changeLogicOptions.map((option) => ({
+    id: option.id,
+    label: option.label,
+    enabled: option.enabled && option.id !== mappingMethodId,
+    reason: option.id === mappingMethodId ? 'Already selected.' : option.reason,
+  }));
 
   const stepPickerActions = (() => {
     if (mappingMethodId === 'base.none') {
       return [] as { id: string; label: string; enabled: boolean; reason: string }[];
     }
+    const isResultScope = stepPickerScope === 'result';
     const options = actions
-      .filter((entry) =>
-        entry.action.role === 'outputStep'
-        && entry.action.id !== 'advanced.expression'
-        && entry.action.id !== 'null.default')
+      .filter((entry) => {
+        if (entry.action.id === 'advanced.expression') {
+          return false;
+        }
+        return isResultScope
+          ? entry.action.role === 'outputStep'
+          : entry.action.role === 'inputTransform' || entry.action.id === 'null.default';
+      })
       .map((entry) => ({ id: entry.action.id, label: entry.action.label }));
     const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
     return options.map((option) => {
@@ -1222,15 +990,43 @@ export function SmartBuilderPanel({
     });
   })();
 
+  const valueMapFallbackInputType = (() => {
+    if (!valueMapProjectState) return 'text' as const;
+    const fallbackValue = valueMapProjectState.fallbackValue;
+    if (typeof fallbackValue === 'number') return 'number' as const;
+    return 'text' as const;
+  })();
+
+  const showBuildOutput = (() => {
+    const composition = hydration.draft.composition;
+    if (!composition) return hydration.draft.inputs.length > 0;
+
+    const hasInputId = (inputId: string) => hydration.draft.inputs.some((input) => input.id === inputId);
+
+    if (composition.kind === 'direct') {
+      if (composition.value && composition.value.kind !== 'input') return true;
+      return hasInputId(composition.inputId);
+    }
+
+    if (composition.kind === 'default') {
+      return hasInputId(composition.inputId);
+    }
+
+    if (composition.kind === 'advancedExpression') {
+      return composition.expression.trim().length > 0;
+    }
+
+    return true;
+  })();
+  const showInitialStartGuidance = hydration.draft.inputs.length === 0 && !showBuildOutput;
+
   const effectivePickerMode = pickerMode ?? (isMethodNeedsAction ? 'base' : null);
   const activePickerActions =
     effectivePickerMode === 'base'
       ? basePickerActions
-      : effectivePickerMode === 'transform'
-        ? transformPickerActions
-        : effectivePickerMode === 'step'
-          ? stepPickerActions
-          : [];
+      : effectivePickerMode === 'step'
+        ? stepPickerActions
+        : [];
   const supportsPickerSearch = effectivePickerMode !== 'base';
   const normalizedPickerQuery = supportsPickerSearch ? pickerQuery.trim().toLowerCase() : '';
   const visibleEnabledPickerActions = activePickerActions.filter((action) => {
@@ -1260,6 +1056,85 @@ export function SmartBuilderPanel({
   const pendingActionLabel = pendingActionDraft
     ? (findSmartBuilderActionById(pendingActionDraft.actionId)?.label ?? pendingActionDraft.actionId)
     : null;
+
+  const pendingNullDefaultFallbackMode = (() => {
+    if (!pendingActionDraft || pendingActionDraft.actionId !== 'null.default') return 'fixed';
+    const explicit = pendingActionDraft.values.fallbackMode;
+    if (typeof explicit === 'string' && explicit.length > 0) return explicit;
+    const legacy = pendingActionDraft.values.fallbackExpression;
+    if (typeof legacy === 'string') {
+      const trimmed = legacy.trim();
+      if (trimmed === 'null') return 'null';
+      if (/^constant\("[\s\S]*"\)$/.test(trimmed)) return 'constant';
+      if (/^source\("[\s\S]*"\)$/.test(trimmed)) return 'input';
+    }
+    return 'fixed';
+  })();
+
+  const pendingNullDefaultInputOptions = pendingActionDraft?.actionId === 'null.default'
+    ? hydration.draft.inputs.map((input) => ({ id: input.id, label: input.label }))
+    : [];
+  const pendingNullDefaultSelectedInputId = (() => {
+    if (!pendingActionDraft || pendingActionDraft.actionId !== 'null.default') return '';
+    const raw = pendingActionDraft.values.fallbackInputId;
+    if (typeof raw === 'string' && raw.length > 0) return raw;
+    return pendingNullDefaultInputOptions[0]?.id ?? '';
+  })();
+  const pendingNullDefaultConstantName = (() => {
+    if (!pendingActionDraft || pendingActionDraft.actionId !== 'null.default') return 'DEFAULT_CONSTANT';
+    const explicit = pendingActionDraft.values.fallbackConstantName;
+    if (typeof explicit === 'string') return explicit;
+    const legacy = pendingActionDraft.values.fallbackExpression;
+    if (typeof legacy === 'string') {
+      const match = legacy.trim().match(/^constant\("([\s\S]*)"\)$/);
+      if (match?.[1] !== undefined) {
+        return match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      }
+    }
+    return 'DEFAULT_CONSTANT';
+  })();
+  const pendingNullDefaultFixedString = (() => {
+    if (!pendingActionDraft || pendingActionDraft.actionId !== 'null.default') return '';
+    const explicit = pendingActionDraft.values.fallbackFixedString;
+    if (typeof explicit === 'string') return explicit;
+    const legacy = pendingActionDraft.values.fallbackExpression;
+    if (typeof legacy === 'string') {
+      const trimmed = legacy.trim();
+      const quoted = trimmed.match(/^"([\s\S]*)"$/);
+      if (quoted?.[1] !== undefined) {
+        return quoted[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      }
+    }
+    return '';
+  })();
+  const pendingNullDefaultFixedNumber = (() => {
+    if (!pendingActionDraft || pendingActionDraft.actionId !== 'null.default') return 0;
+    const explicit = pendingActionDraft.values.fallbackFixedNumber;
+    if (typeof explicit === 'number' && Number.isFinite(explicit)) return explicit;
+    const legacy = pendingActionDraft.values.fallbackExpression;
+    if (typeof legacy === 'string' && legacy.trim().length > 0 && Number.isFinite(Number(legacy.trim()))) {
+      return Number(legacy.trim());
+    }
+    return 0;
+  })();
+  const pendingNullDefaultFixedBoolean = (() => {
+    if (!pendingActionDraft || pendingActionDraft.actionId !== 'null.default') return false;
+    const explicit = pendingActionDraft.values.fallbackFixedBoolean;
+    if (typeof explicit === 'boolean') return explicit;
+    const legacy = pendingActionDraft.values.fallbackExpression;
+    if (legacy === 'true') return true;
+    if (legacy === 'false') return false;
+    return false;
+  })();
+  const nullDefaultInputModeMissingInput = pendingActionDraft?.actionId === 'null.default'
+    && pendingNullDefaultFallbackMode === 'input'
+    && pendingNullDefaultInputOptions.length === 0;
+  const parameterApplyLabel = pendingActionDraft?.actionId === 'null.default' && parameterEditorStepScope === 'result-step'
+    ? 'Add step'
+    : 'Apply';
+  const isParameterApplyDisabled = Boolean(
+    !pendingActionDraft?.validation.isValid || nullDefaultInputModeMissingInput,
+  );
 
   const resolveParameterizedActionForTransformStep = (
     step: BuilderInputTransform,
@@ -1340,17 +1215,58 @@ export function SmartBuilderPanel({
         const fallbackExpression = fallbackArg?.kind === 'expression'
           ? fallbackArg.expression
           : fallbackArg?.kind === 'input'
-            ? ''
+            ? `source(${quoteDslString(fallbackArg.inputId)})`
             : typeof fallbackArg?.value === 'string'
-              ? `"${fallbackArg.value}"`
+              ? quoteDslString(fallbackArg.value)
               : typeof fallbackArg?.value === 'number' || typeof fallbackArg?.value === 'boolean'
                 ? String(fallbackArg.value)
                 : fallbackArg?.value === null
                   ? 'null'
                   : '""';
+
+        const fallbackMode = fallbackArg?.kind === 'input'
+          ? 'input'
+          : fallbackArg?.kind === 'expression' && /^constant\("[\s\S]*"\)$/.test(fallbackExpression.trim())
+            ? 'constant'
+            : fallbackArg?.kind === 'static' && fallbackArg.value === null
+              ? 'null'
+              : 'fixed';
+
+        const fallbackConstantName = (() => {
+          if (fallbackMode !== 'constant') return 'DEFAULT_CONSTANT';
+          const match = fallbackExpression.trim().match(/^constant\("([\s\S]*)"\)$/);
+          return match?.[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\') ?? 'DEFAULT_CONSTANT';
+        })();
+
+        const fallbackInputId = (() => {
+          if (fallbackArg?.kind === 'input') return fallbackArg.inputId;
+          const match = fallbackExpression.trim().match(/^source\("([\s\S]*)"\)$/);
+          const sourcePath = match?.[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\') ?? '';
+          if (!sourcePath) return '';
+          const matchedInput = hydration.draft.inputs.find((input) => input.path === sourcePath);
+          return matchedInput?.id ?? '';
+        })();
+
+        const fallbackFixedString = fallbackArg?.kind === 'static' && typeof fallbackArg.value === 'string'
+          ? fallbackArg.value
+          : '';
+        const fallbackFixedNumber = fallbackArg?.kind === 'static' && typeof fallbackArg.value === 'number'
+          ? fallbackArg.value
+          : 0;
+        const fallbackFixedBoolean = fallbackArg?.kind === 'static' && typeof fallbackArg.value === 'boolean'
+          ? fallbackArg.value
+          : false;
         return {
           actionId: 'null.default',
-          values: { fallbackExpression },
+          values: {
+            fallbackMode,
+            fallbackExpression,
+            fallbackInputId,
+            fallbackConstantName,
+            fallbackFixedString,
+            fallbackFixedNumber,
+            fallbackFixedBoolean,
+          },
         };
       }
       default:
@@ -1387,8 +1303,6 @@ export function SmartBuilderPanel({
     && activeDropdownOptions.length > 0,
   );
 
-  const isDefaultFallbackParameterEditor = pendingActionDraft?.actionId === 'null.default';
-
   const parameterEditorBlock = pendingActionDraft && pendingParameterDefinitions.length > 0
     ? (
       <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-parameter-editor">
@@ -1397,7 +1311,104 @@ export function SmartBuilderPanel({
         </p>
 
         <div className="mt-2 space-y-2" data-testid="smart-parameter-fields">
-          {pendingParameterDefinitions.map((definition) => {
+          {pendingActionDraft.actionId === 'null.default' ? (
+            <div data-testid="smart-null-default-parameter-fields" className="space-y-2">
+              <div>
+                <p className="mb-1 block text-[11px] text-slate-300">Fallback value from</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { value: 'fixed', label: 'Fixed value' },
+                    { value: 'input', label: 'Input field' },
+                    { value: 'constant', label: 'Constant' },
+                    { value: 'null', label: 'Null value' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      data-testid={`smart-null-default-mode-${option.value}`}
+                      className={`rounded border px-2 py-1 text-left text-xs ${pendingNullDefaultFallbackMode === option.value ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'}`}
+                      onClick={() => onUpdateActionParameterDraft?.(pendingActionDraft.actionId, 'fallbackMode', option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {pendingNullDefaultFallbackMode === 'fixed' && (
+                <div data-testid="smart-null-default-fixed-editor">
+                  {targetType === 'number' || targetType === 'integer' ? (
+                    <input
+                      data-testid="smart-null-default-fixed-number"
+                      type="number"
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                      value={String(pendingNullDefaultFixedNumber)}
+                      onChange={(event) => onUpdateActionParameterDraft?.(pendingActionDraft.actionId, 'fallbackFixedNumber', event.target.value)}
+                    />
+                  ) : targetType === 'boolean' ? (
+                    <select
+                      data-testid="smart-null-default-fixed-boolean"
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                      value={pendingNullDefaultFixedBoolean ? 'true' : 'false'}
+                      onChange={(event) => onUpdateActionParameterDraft?.(pendingActionDraft.actionId, 'fallbackFixedBoolean', event.target.value === 'true')}
+                    >
+                      <option value="true">True</option>
+                      <option value="false">False</option>
+                    </select>
+                  ) : (
+                    <input
+                      data-testid="smart-null-default-fixed-string"
+                      type="text"
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                      value={pendingNullDefaultFixedString}
+                      placeholder="Enter fallback value"
+                      onChange={(event) => onUpdateActionParameterDraft?.(pendingActionDraft.actionId, 'fallbackFixedString', event.target.value)}
+                    />
+                  )}
+                </div>
+              )}
+
+              {pendingNullDefaultFallbackMode === 'input' && (
+                <div data-testid="smart-null-default-input-editor">
+                  {pendingNullDefaultInputOptions.length > 0 ? (
+                    <select
+                      data-testid="smart-null-default-input-select"
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                      value={pendingNullDefaultSelectedInputId}
+                      onChange={(event) => onUpdateActionParameterDraft?.(pendingActionDraft.actionId, 'fallbackInputId', event.target.value)}
+                    >
+                      {pendingNullDefaultInputOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-[11px] text-amber-300" data-testid="smart-null-default-input-empty">
+                      Add an input to use as fallback.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {pendingNullDefaultFallbackMode === 'constant' && (
+                <div data-testid="smart-null-default-constant-editor">
+                  <input
+                    data-testid="smart-null-default-constant-input"
+                    type="text"
+                    className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    value={pendingNullDefaultConstantName}
+                    placeholder="DEFAULT_CONSTANT"
+                    onChange={(event) => onUpdateActionParameterDraft?.(pendingActionDraft.actionId, 'fallbackConstantName', event.target.value)}
+                  />
+                </div>
+              )}
+
+              {pendingNullDefaultFallbackMode === 'null' && (
+                <p className="text-[11px] text-slate-400" data-testid="smart-null-default-null-note">
+                  Result will remain null when value is missing.
+                </p>
+              )}
+            </div>
+          ) : pendingParameterDefinitions.map((definition) => {
             const rawValue = pendingActionDraft.values[definition.id];
             const fieldError = actionParameterIssuesByFieldId.get(definition.id);
             const sharedInputClassName = [
@@ -1492,9 +1503,11 @@ export function SmartBuilderPanel({
           })}
         </div>
 
-        {!pendingActionDraft.validation.isValid && (
+        {(!pendingActionDraft.validation.isValid || nullDefaultInputModeMissingInput) && (
           <p className="mt-2 text-[11px] text-red-400" data-testid="smart-parameter-editor-error">
-            Fix highlighted fields before applying.
+            {nullDefaultInputModeMissingInput
+              ? 'Add an input fallback before applying.'
+              : 'Fix highlighted fields before applying.'}
           </p>
         )}
 
@@ -1503,22 +1516,25 @@ export function SmartBuilderPanel({
             type="button"
             data-testid="smart-parameter-apply"
             className="rounded border border-blue-700 bg-blue-900/30 px-2 py-1 text-[11px] text-blue-100 enabled:hover:bg-blue-900/50 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!pendingActionDraft.validation.isValid}
+            disabled={isParameterApplyDisabled}
             onClick={() => {
-              onApplyAction?.(pendingActionDraft.actionId, parameterEditorStepIndex === null
-                ? undefined
-                : {
-                  editingStepIndex: parameterEditorStepIndex,
-                  ...(parameterEditorStepScope ? { editingStepScope: parameterEditorStepScope } : {}),
-                });
+              const applyOptions = {
+                ...(parameterEditorStepIndex === null ? {} : { editingStepIndex: parameterEditorStepIndex }),
+                ...(parameterEditorStepScope ? { editingStepScope: parameterEditorStepScope } : {}),
+                ...(parameterEditorStepScope === 'value-step' && parameterEditorValueStepTarget
+                  ? { valueStepTarget: parameterEditorValueStepTarget }
+                  : {}),
+              };
+              onApplyAction?.(pendingActionDraft.actionId, Object.keys(applyOptions).length > 0 ? applyOptions : undefined);
               if (pendingActionDraft.actionId === 'null.default') {
                 onConditionFocusedSlotChange?.(null);
               }
               setParameterEditorStepIndex(null);
               setParameterEditorStepScope(null);
+              setParameterEditorValueStepTarget(null);
             }}
           >
-            Apply
+            {parameterApplyLabel}
           </button>
           <button
             type="button"
@@ -1540,6 +1556,7 @@ export function SmartBuilderPanel({
                 }
                 setParameterEditorStepIndex(null);
                 setParameterEditorStepScope(null);
+                setParameterEditorValueStepTarget(null);
                 onCancelActionParameterDraft?.();
               }}
             >
@@ -1560,6 +1577,20 @@ export function SmartBuilderPanel({
 
       <div className="min-h-0 flex-1 space-y-2.5 px-3 py-3">
         <div>
+          {(hydration.draft.undoHistory?.length ?? 0) > 0 && (
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                data-testid="smart-undo-change"
+                className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                onClick={() => onApplyAction?.('base.undo')}
+                aria-label="Undo last Smart Builder change"
+              >
+                Undo
+              </button>
+            </div>
+          )}
+
           <InputTray
             inputs={hydration.draft.inputs}
             usages={inputUsages}
@@ -1577,20 +1608,7 @@ export function SmartBuilderPanel({
                 data-testid="smart-add-static"
                 className="rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200 hover:border-slate-500"
                 onClick={() => {
-                  const input = hydration.draft.inputs.find((entry) => entry.sourceKind === 'static' && entry.staticValue === '');
-                  if (input) {
-                    onInputToggle?.(input);
-                    return;
-                  }
-
-                  onStageField?.({
-                    path: 'fixedValue',
-                    kind: 'static',
-                    label: 'Fixed value',
-                    staticValue: '',
-                    valueType: 'string',
-                    expression: 'static("")',
-                  });
+                  onApplyAction?.('base.fixed', { fixedValue: '' });
                 }}
               >
                 Fixed value
@@ -1600,20 +1618,7 @@ export function SmartBuilderPanel({
                 data-testid="smart-add-constant"
                 className="rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200 hover:border-slate-500"
                 onClick={() => {
-                  const input = hydration.draft.inputs.find((entry) => entry.sourceKind === 'constant' && entry.constantName === 'DEFAULT_CONSTANT');
-                  if (input) {
-                    onInputToggle?.(input);
-                    return;
-                  }
-
-                  onStageField?.({
-                    path: 'DEFAULT_CONSTANT',
-                    kind: 'constant',
-                    label: 'Constant',
-                    constantName: 'DEFAULT_CONSTANT',
-                    valueType: 'unknown',
-                    expression: 'constant("DEFAULT_CONSTANT")',
-                  });
+                  onApplyAction?.('base.constant', { constantName: 'DEFAULT_CONSTANT' });
                 }}
               >
                 Constant
@@ -1711,21 +1716,45 @@ export function SmartBuilderPanel({
             )}
           </div>
 
-          {hydration.draft.inputs.length === 0 && (
+          {showInitialStartGuidance && (
             <div className="mt-2 rounded border border-slate-700 bg-slate-900/40 px-2.5 py-2" data-testid="smart-builder-empty-state">
-              <p className="text-sm font-medium text-slate-100">Start by selecting input fields</p>
+              <p className="text-sm font-medium text-slate-100">No inputs selected yet.</p>
               <p className="mt-1 text-xs text-slate-400">
-                Other ways to fill this field: fixed value, constant, enrichment input, or Advanced expression.
+                Select a field from Input Fields or add another value.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="smart-builder-empty-actions">
+                <button
+                  type="button"
+                  data-testid="smart-empty-use-fixed-value"
+                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                  onClick={() => onApplyAction?.('base.fixed', { fixedValue: '' })}
+                >
+                  Use fixed value
+                </button>
+                <button
+                  type="button"
+                  data-testid="smart-empty-use-constant"
+                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                  onClick={() => onApplyAction?.('base.constant', { constantName: 'DEFAULT_CONSTANT' })}
+                >
+                  Use constant
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500" data-testid="smart-builder-empty-advanced-note">
+                More complex logic can be created in Advanced DSL.
               </p>
             </div>
           )}
+
+          {/* coalesce editor is rendered inside Build Output with method-specific controls */}
         </div>
 
-        <div className="rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-mapping-recipe">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Mapping method</p>
+          {showBuildOutput && (
+          <div className="rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-mapping-recipe">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Build Output</p>
 
             <div className="flex items-center justify-between" data-testid="smart-recipe-base-row">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">Method</p>
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Logic</p>
               {!isMethodNeedsAction && hydration.draft.inputs.length > 0 && (
               <button
                 type="button"
@@ -1737,14 +1766,204 @@ export function SmartBuilderPanel({
                   setExpandedDisabledId(null);
                 }}
               >
-                Change method
+                Change logic
               </button>
               )}
             </div>
 
             <p className="mt-1 text-xs text-slate-100" data-testid="smart-recipe-base-label">{mappingMethodLabel}</p>
+            {mappingMethodId === 'base.fixed' && hydration.draft.composition?.kind === 'direct' && hydration.draft.composition.value?.kind === 'static' && (
+              <div className="mt-2 space-y-1" data-testid="smart-fixed-value-section">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Fixed value</p>
+                {(targetType === 'number' || targetType === 'integer') ? (
+                  <input
+                    type="number"
+                    data-testid="smart-fixed-value-input"
+                    className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    value={
+                      typeof hydration.draft.composition.value.value === 'number'
+                        ? String(hydration.draft.composition.value.value)
+                        : hydration.draft.composition.value.value === ''
+                          ? ''
+                          : '0'
+                    }
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      const next = raw === '' ? '' : Number(raw);
+                      onApplyAction?.('base.fixed', { fixedValue: next });
+                    }}
+                  />
+                ) : targetType === 'boolean' ? (
+                  <select
+                    data-testid="smart-fixed-value-boolean"
+                    className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    value={hydration.draft.composition.value.value === false ? 'false' : 'true'}
+                    onChange={(event) => {
+                      onApplyAction?.('base.fixed', { fixedValue: event.target.value === 'true' });
+                    }}
+                  >
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    data-testid="smart-fixed-value-input"
+                    className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    value={
+                      typeof hydration.draft.composition.value.value === 'string'
+                        ? hydration.draft.composition.value.value
+                        : ''
+                    }
+                    placeholder="Enter fixed value"
+                    onChange={(event) => {
+                      onApplyAction?.('base.fixed', { fixedValue: event.target.value });
+                    }}
+                  />
+                )}
+              </div>
+            )}
             {mappingMethodId === 'base.direct' && !defaultPrimaryInput && (
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-empty-direct">Select an input to continue.</p>
+            )}
+            {mappingMethodId === 'base.direct' && hydration.draft.inputs.length > 0 && hydration.draft.composition?.kind === 'direct' && (
+              <div className="mt-2 space-y-1" data-testid="smart-direct-value-section">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Selected value</p>
+                <div className="space-y-1" role="radiogroup" aria-label="Use one value">
+                  {hydration.draft.inputs.map((input) => {
+                    const selected = input.id === defaultPrimaryInput?.id;
+                    const selectedValue = hydration.draft.composition?.value?.kind === 'input'
+                      && hydration.draft.composition.value.inputId === input.id
+                      ? hydration.draft.composition.value
+                      : selected
+                        ? ({ kind: 'input', inputId: input.id, transforms: [] } as BuilderArgumentValue)
+                        : null;
+                    return (
+                      <div key={input.id}>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            data-testid={`smart-direct-value-option-${input.id}`}
+                            className={`flex-1 rounded border px-2 py-1.5 text-left text-xs ${selected ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 bg-slate-900/70 text-slate-100 hover:border-slate-500'}`}
+                            onClick={() => {
+                              if (selected) return;
+                              onApplyAction?.('base.direct.select', { directInputId: input.id });
+                            }}
+                          >
+                            {input.label}
+                          </button>
+                          {selected && (
+                            <button
+                              type="button"
+                              data-testid="smart-direct-value-menu-toggle"
+                              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+                              aria-label={`Open value menu for ${input.label}`}
+                              onClick={() => {
+                                setOpenDirectValueMenu((prev) => !prev);
+                                setOpenConcatPartMenuIndex(null);
+                              }}
+                            >
+                              ⋮
+                            </button>
+                          )}
+                        </div>
+
+                        {selected && openDirectValueMenu && (
+                          <div className="mt-1 rounded border border-slate-800 bg-slate-950/40 p-1" data-testid="smart-direct-value-menu">
+                            <button
+                              type="button"
+                              data-testid="smart-direct-value-menu-add-step"
+                              className="w-full rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                              onClick={() => {
+                                setStepPickerScope({ kind: 'direct' });
+                                setPickerMode('step');
+                                setOpenDirectValueMenu(false);
+                                setPickerQuery('');
+                                setExpandedDisabledId(null);
+                              }}
+                            >
+                              Add step
+                            </button>
+                          </div>
+                        )}
+
+                        {selected && selectedValue && (selectedValue.transforms?.length ?? 0) > 0 && (
+                          <ol className="mt-1 space-y-1 pl-3" data-testid="smart-direct-value-steps-list">
+                            {(selectedValue.transforms ?? []).map((step, stepIndex) => (
+                              <li key={`direct-step-${step.functionName}-${stepIndex}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] text-slate-300">{step.functionName}</span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      data-testid={`smart-direct-value-step-move-up-${stepIndex}`}
+                                      disabled={stepIndex === 0}
+                                      className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 disabled:opacity-50"
+                                      aria-label={`Move ${step.functionName} step up for ${input.label}`}
+                                      onClick={() => onApplyAction?.('base.valueStep.move', {
+                                        valueStepTarget: { kind: 'direct' },
+                                        valueStepMove: { fromIndex: stepIndex, toIndex: stepIndex - 1 },
+                                      })}
+                                    >
+                                      ↑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-testid={`smart-direct-value-step-move-down-${stepIndex}`}
+                                      disabled={stepIndex >= (selectedValue.transforms?.length ?? 0) - 1}
+                                      className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 disabled:opacity-50"
+                                      aria-label={`Move ${step.functionName} step down for ${input.label}`}
+                                      onClick={() => onApplyAction?.('base.valueStep.move', {
+                                        valueStepTarget: { kind: 'direct' },
+                                        valueStepMove: { fromIndex: stepIndex, toIndex: stepIndex + 1 },
+                                      })}
+                                    >
+                                      ↓
+                                    </button>
+                                    {(() => {
+                                      const parameterized = resolveParameterizedActionForTransformStep(step);
+                                      if (!parameterized) return null;
+                                      return (
+                                        <button
+                                          type="button"
+                                          data-testid={`smart-direct-value-step-edit-${stepIndex}`}
+                                          className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200"
+                                          onClick={() => {
+                                            onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
+                                            setParameterEditorStepIndex(stepIndex);
+                                            setParameterEditorStepScope('value-step');
+                                            setParameterEditorValueStepTarget({ kind: 'direct' });
+                                          }}
+                                        >
+                                          Edit
+                                        </button>
+                                      );
+                                    })()}
+                                    <button
+                                      type="button"
+                                      data-testid={`smart-direct-value-step-remove-${stepIndex}`}
+                                      className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200"
+                                      aria-label={`Remove ${step.functionName} step from ${input.label}`}
+                                      onClick={() => onApplyAction?.('base.valueStep.remove', {
+                                        valueStepTarget: { kind: 'direct' },
+                                        valueStepRemoveIndex: stepIndex,
+                                      })}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             {shouldRenderMethodPreview && (
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-preview">{composePreview}</p>
@@ -1754,7 +1973,7 @@ export function SmartBuilderPanel({
               <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-base-picker">
                 <div className="mb-1 flex items-center justify-between">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    Choose mapping method
+                    Choose output logic
                   </p>
                   {!isMethodNeedsAction && (
                     <button
@@ -1769,21 +1988,19 @@ export function SmartBuilderPanel({
                 </div>
 
                 <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
-                  {basePickerActions.map((action) => (
+                  {basePickerActions.filter((action) => action.enabled).map((action) => (
                     <div key={action.id}>
                       <button
                         type="button"
                         data-testid={`smart-picker-action-${action.id}`}
-                        disabled={!action.enabled}
-                        className={`w-full rounded border px-2 py-1.5 text-left text-xs ${action.enabled ? 'border-slate-700 bg-slate-900/70 text-slate-100 hover:border-slate-500' : 'cursor-not-allowed border-slate-800 bg-slate-950/70 text-slate-500'}`}
+                        className="w-full rounded border border-slate-700 bg-slate-900/70 px-2 py-1.5 text-left text-xs text-slate-100 hover:border-slate-500"
                         onClick={() => {
-                          if (!action.enabled) return;
-
                           const parameterDefinitions = getSmartBuilderActionParameters(action.id);
                           if (parameterDefinitions.length > 0) {
                             onBeginActionParameterEdit?.(action.id);
                             setParameterEditorStepIndex(null);
                             setParameterEditorStepScope(null);
+                            setParameterEditorValueStepTarget(null);
                             setPickerMode(null);
                             return;
                           }
@@ -1791,19 +2008,33 @@ export function SmartBuilderPanel({
                           onApplyAction?.(action.id);
                           setParameterEditorStepIndex(null);
                           setParameterEditorStepScope(null);
+                          setParameterEditorValueStepTarget(null);
                           setPickerMode(null);
                         }}
                       >
                         {action.label}
                       </button>
-                      {!action.enabled && action.reason && (
-                        <p className="mt-1 text-[11px] text-slate-500" data-testid={`smart-picker-disabled-reason-${action.id}`}>
-                          {action.reason}
-                        </p>
-                      )}
                     </div>
                   ))}
                 </div>
+
+                {basePickerActions.some((action) => !action.enabled) && (
+                  <details className="mt-2" data-testid="smart-base-picker-unavailable">
+                    <summary className="cursor-pointer text-[11px] text-slate-400">Unavailable options</summary>
+                    <ul className="mt-1 space-y-1.5" data-testid="smart-base-picker-unavailable-list">
+                      {basePickerActions.filter((action) => !action.enabled).map((action) => (
+                        <li
+                          key={`unavailable-${action.id}`}
+                          className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1.5"
+                          data-testid={`smart-picker-disabled-${action.id}`}
+                        >
+                          <p className="text-xs text-slate-300">{action.label}</p>
+                          {action.reason && <p className="text-[11px] text-slate-500">{action.reason}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             )}
 
@@ -1813,7 +2044,7 @@ export function SmartBuilderPanel({
                   <p className="text-[11px] uppercase tracking-wide text-slate-500">IF</p>
                   {(conditionComposition.clauses[0]?.predicates.length ?? 0) > 1 && (
                     <label className="flex items-center gap-1.5 text-[11px] text-slate-300" htmlFor="smart-condition-match-mode-select">
-                      Match
+                      Apply to
                       <select
                         id="smart-condition-match-mode-select"
                         data-testid="smart-condition-match-mode-select"
@@ -1824,10 +2055,10 @@ export function SmartBuilderPanel({
                           updateCondition({ ...conditionComposition, matchMode: nextMode });
                         }}
                       >
-                        <option value="all">all</option>
-                        <option value="any">any</option>
+                        <option value="all">All</option>
+                        <option value="any">Any</option>
                       </select>
-                      condition
+                      conditions
                     </label>
                   )}
                 </div>
@@ -1845,6 +2076,13 @@ export function SmartBuilderPanel({
                           <button
                             type="button"
                             data-testid={`smart-condition-left-${index}`}
+                            ref={(element) => {
+                              if (element) {
+                                conditionSlotButtonRefs.current.set(`left-${index}`, element);
+                                return;
+                              }
+                              conditionSlotButtonRefs.current.delete(`left-${index}`);
+                            }}
                             className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
                             onClick={() => {
                               openConditionSlotPicker(`left-${index}`, 'input');
@@ -1895,15 +2133,22 @@ export function SmartBuilderPanel({
                           ))}
                         </select>
                         {(predicate.operator === 'isNull' || predicate.operator === 'isNotNull' || predicate.operator === 'isTruthy' || predicate.operator === 'isFalsy') ? (
-                          <span className="pt-2 text-[11px] text-slate-500">No comparison value</span>
+                          <span className="pt-2 text-[11px] text-slate-500">No value needed</span>
                         ) : (
                           <div>
-                            <button
-                              type="button"
-                              data-testid={`smart-condition-right-${index}`}
-                              className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
-                              onClick={() => {
-                                openConditionSlotPicker(`right-${index}`, predicate.right?.kind === 'static' ? 'fixed' : 'input');
+                          <button
+                            type="button"
+                            data-testid={`smart-condition-right-${index}`}
+                            ref={(element) => {
+                              if (element) {
+                                conditionSlotButtonRefs.current.set(`right-${index}`, element);
+                                return;
+                              }
+                              conditionSlotButtonRefs.current.delete(`right-${index}`);
+                            }}
+                            className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
+                            onClick={() => {
+                              openConditionSlotPicker(`right-${index}`, predicate.right?.kind === 'static' ? 'fixed' : 'input');
                                 onConditionFocusedSlotChange?.('condition:right');
                               }}
                             >
@@ -1981,6 +2226,13 @@ export function SmartBuilderPanel({
                     <button
                       type="button"
                       data-testid="smart-condition-then"
+                      ref={(element) => {
+                        if (element) {
+                          conditionSlotButtonRefs.current.set('then', element);
+                          return;
+                        }
+                        conditionSlotButtonRefs.current.delete('then');
+                      }}
                       aria-label="THEN value"
                       className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
                       onClick={() => {
@@ -2001,6 +2253,13 @@ export function SmartBuilderPanel({
                     <button
                       type="button"
                       data-testid="smart-condition-otherwise"
+                      ref={(element) => {
+                        if (element) {
+                          conditionSlotButtonRefs.current.set('otherwise', element);
+                          return;
+                        }
+                        conditionSlotButtonRefs.current.delete('otherwise');
+                      }}
                       aria-label="OTHERWISE value"
                       className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-left text-xs text-slate-100 hover:border-slate-500"
                       onClick={() => {
@@ -2019,100 +2278,421 @@ export function SmartBuilderPanel({
                 </div>
 
                 <div
-                  className={`mt-3 rounded border px-2 py-1.5 ${conditionSampleDiagnostics?.blocked
-                    ? 'border-amber-700/60 bg-amber-950/20'
-                    : 'border-emerald-700/40 bg-emerald-950/20'}`}
+                  className={`mt-3 rounded border px-2 py-1.5 ${conditionValidationState?.status === 'ready'
+                    ? 'border-emerald-700/40 bg-emerald-950/20'
+                    : conditionValidationState?.status === 'invalid'
+                      ? 'border-red-700/60 bg-red-950/20'
+                      : 'border-amber-700/60 bg-amber-950/20'}`}
                   data-testid="smart-condition-status"
                 >
-                  {conditionSampleDiagnostics?.blocked ? (
-                    <p className="text-[11px] text-amber-200" data-testid="smart-condition-status-blocked">
-                      Complete condition values before previewing output.
-                      {conditionSampleDiagnostics?.incompleteReasons[0]
-                        ? ` ${conditionSampleDiagnostics.incompleteReasons[0]}`
-                        : ''}
+                  {conditionValidationState?.status === 'ready' ? (
+                    <p className="text-[11px] text-emerald-300" data-testid="smart-condition-status-ready">
+                      {conditionValidationState.message}
+                    </p>
+                  ) : conditionValidationState?.status === 'invalid' ? (
+                    <p className="text-[11px] text-red-200" data-testid="smart-condition-status-blocked">
+                      {conditionValidationState.message}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-emerald-300" data-testid="smart-condition-status-ready">
-                      Ready. {conditionSampleDiagnostics?.selectedBranch ?? 'THEN'} branch will return {conditionSampleDiagnostics?.selectedBranchResult ?? '--'}.
+                    <p className="text-[11px] text-amber-200" data-testid="smart-condition-status-blocked">
+                      {conditionValidationState?.message ?? 'Finish condition values to continue.'}
                     </p>
                   )}
                 </div>
               </div>
             )}
 
-            {mappingMethodId === 'base.direct' && hydration.draft.inputs.length > 0 && (
-              <div className="mt-3" data-testid="smart-missing-value-section">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Fallback</p>
+            {mappingMethodId === 'text.concat' && (
+            <div className="mt-2" data-testid="smart-concat-parts-controls">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Combine parts</p>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    { key: 'space', label: 'Space', value: ' ' },
+                    { key: 'comma', label: 'Comma', value: ', ' },
+                    { key: 'dash', label: 'Dash', value: '-' },
+                  ].map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      data-testid={`smart-concat-add-literal-${option.key}`}
+                      className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                      onClick={() => {
+                        const current = hydration.draft.composition?.kind === 'concat'
+                          ? (hydration.draft.composition.parts ?? [])
+                          : [];
+                        onApplyAction?.('text.concat', {
+                          concatParts: [...current, { kind: 'static', value: option.value }],
+                        });
+                      }}
+                    >
+                      + {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {hydration.draft.composition?.kind === 'concat' && (hydration.draft.composition.parts?.length ?? 0) > 0 ? (
+                <ol className="mt-2 space-y-1" data-testid="smart-concat-parts-list">
+                  {(hydration.draft.composition.parts ?? []).map((part, index, parts) => {
+                    const label = part.kind === 'input'
+                      ? (hydration.draft.inputs.find((input) => input.id === part.inputId)?.label ?? 'input')
+                      : part.kind === 'static'
+                        ? literalToDsl(part.value)
+                        : part.expression;
+                    return (
+                      <li key={`concat-part-${index}`} className="rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5" data-testid={`smart-concat-part-${index}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-slate-200">{label}</span>
+                          <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              data-testid={`smart-concat-move-up-${index}`}
+                              disabled={index === 0}
+                              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 enabled:hover:border-slate-500 disabled:opacity-40"
+                              aria-label={`Move ${label} up`}
+                              onClick={() => onApplyAction?.('text.concat', { concatMove: { fromIndex: index, toIndex: index - 1 } })}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`smart-concat-move-down-${index}`}
+                              disabled={index >= parts.length - 1}
+                              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 enabled:hover:border-slate-500 disabled:opacity-40"
+                              aria-label={`Move ${label} down`}
+                              onClick={() => onApplyAction?.('text.concat', { concatMove: { fromIndex: index, toIndex: index + 1 } })}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`smart-concat-part-menu-toggle-${index}`}
+                              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                              aria-label={`Open menu for ${label}`}
+                              onClick={() => {
+                                setOpenConcatPartMenuIndex((prev) => (prev === index ? null : index));
+                                setOpenDirectValueMenu(false);
+                              }}
+                            >
+                              ⋮
+                            </button>
+                          </div>
+                        </div>
+
+                        {openConcatPartMenuIndex === index && (
+                          <div className="mt-1 rounded border border-slate-800 bg-slate-950/40 p-1" data-testid={`smart-concat-part-menu-${index}`}>
+                            <button
+                              type="button"
+                              data-testid={`smart-concat-part-menu-add-step-${index}`}
+                              className="w-full rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                              onClick={() => {
+                                setStepPickerScope({ kind: 'concat-part', partIndex: index });
+                                setPickerMode('step');
+                                setOpenConcatPartMenuIndex(null);
+                                setPickerQuery('');
+                                setExpandedDisabledId(null);
+                              }}
+                            >
+                              Add step
+                            </button>
+                            {part.kind !== 'expression' && (
+                              <button
+                                type="button"
+                                data-testid={`smart-concat-part-menu-replace-${index}`}
+                                className="mt-0.5 w-full rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                                onClick={() => {
+                                  setOpenConcatPartMenuIndex(null);
+                                }}
+                              >
+                                Replace value
+                              </button>
+                            )}
+                            {part.kind === 'static' && (
+                              <button
+                                type="button"
+                                data-testid={`smart-concat-part-menu-edit-${index}`}
+                                className="mt-0.5 w-full rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                                onClick={() => {
+                                  const nextLiteral = window.prompt('Edit literal value', typeof part.value === 'string' ? part.value : String(part.value ?? ''));
+                                  if (nextLiteral === null) return;
+                                  const current = hydration.draft.composition?.kind === 'concat'
+                                    ? [...(hydration.draft.composition.parts ?? [])]
+                                    : [];
+                                  const targetPart = current[index];
+                                  if (!targetPart || targetPart.kind !== 'static') return;
+                                  current[index] = { ...targetPart, value: nextLiteral };
+                                  onApplyAction?.('text.concat', { concatParts: current });
+                                  setOpenConcatPartMenuIndex(null);
+                                }}
+                              >
+                                Edit value
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              data-testid={`smart-concat-part-menu-remove-${index}`}
+                              className="mt-0.5 w-full rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                              onClick={() => {
+                                onApplyAction?.('text.concat', {
+                                  concatParts: parts.filter((_, partIndex) => partIndex !== index),
+                                });
+                                setOpenConcatPartMenuIndex(null);
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
+
+                        {(part.transforms?.length ?? 0) > 0 && (
+                          <ol className="mt-1 space-y-1 pl-3" data-testid={`smart-concat-part-steps-${index}`}>
+                            {(part.transforms ?? []).map((step, stepIndex) => (
+                              <li key={`concat-part-step-${index}-${step.functionName}-${stepIndex}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] text-slate-300">{step.functionName}</span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      data-testid={`smart-concat-part-step-move-up-${index}-${stepIndex}`}
+                                      disabled={stepIndex === 0}
+                                      className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 disabled:opacity-50"
+                                      aria-label={`Move ${step.functionName} step up for ${label}`}
+                                      onClick={() => onApplyAction?.('base.valueStep.move', {
+                                        valueStepTarget: { kind: 'concat-part', partIndex: index },
+                                        valueStepMove: { fromIndex: stepIndex, toIndex: stepIndex - 1 },
+                                      })}
+                                    >
+                                      ↑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-testid={`smart-concat-part-step-move-down-${index}-${stepIndex}`}
+                                      disabled={stepIndex >= (part.transforms?.length ?? 0) - 1}
+                                      className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 disabled:opacity-50"
+                                      aria-label={`Move ${step.functionName} step down for ${label}`}
+                                      onClick={() => onApplyAction?.('base.valueStep.move', {
+                                        valueStepTarget: { kind: 'concat-part', partIndex: index },
+                                        valueStepMove: { fromIndex: stepIndex, toIndex: stepIndex + 1 },
+                                      })}
+                                    >
+                                      ↓
+                                    </button>
+                                    {(() => {
+                                      const parameterized = resolveParameterizedActionForTransformStep(step);
+                                      if (!parameterized) return null;
+                                      return (
+                                        <button
+                                          type="button"
+                                          data-testid={`smart-concat-part-step-edit-${index}-${stepIndex}`}
+                                          className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200"
+                                          onClick={() => {
+                                            onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
+                                            setParameterEditorStepIndex(stepIndex);
+                                            setParameterEditorStepScope('value-step');
+                                            setParameterEditorValueStepTarget({ kind: 'concat-part', partIndex: index });
+                                          }}
+                                        >
+                                          Edit
+                                        </button>
+                                      );
+                                    })()}
+                                    <button
+                                      type="button"
+                                      data-testid={`smart-concat-part-step-remove-${index}-${stepIndex}`}
+                                      className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200"
+                                      aria-label={`Remove ${step.functionName} step from ${label}`}
+                                      onClick={() => onApplyAction?.('base.valueStep.remove', {
+                                        valueStepTarget: { kind: 'concat-part', partIndex: index },
+                                        valueStepRemoveIndex: stepIndex,
+                                      })}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : (
+                <p className="mt-1 text-xs text-slate-400" data-testid="smart-concat-parts-empty">No parts yet.</p>
+              )}
+
+              <div className="mt-2 flex flex-wrap gap-1">
+                {hydration.draft.inputs.map((input) => (
                   <button
+                    key={`concat-add-input-${input.id}`}
                     type="button"
-                    data-testid="smart-missing-value-add-change"
-                    className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                    data-testid={`smart-concat-add-input-${input.id}`}
+                    className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
                     onClick={() => {
-                      onConditionFocusedSlotChange?.('fallback:default');
-                      onBeginActionParameterEdit?.('null.default', {
-                        fallbackExpression: defaultFallbackExpression,
+                      const current = hydration.draft.composition?.kind === 'concat'
+                        ? (hydration.draft.composition.parts ?? [])
+                        : [];
+                      onApplyAction?.('text.concat', {
+                        concatParts: [...current, { kind: 'input', inputId: input.id }],
                       });
                     }}
                   >
-                    {defaultFallback ? 'Change fallback' : 'Add fallback'}
-                  </button>
-                </div>
-
-                {defaultFallbackLabel ? (
-                  <p className="mt-1 break-all text-xs text-slate-400" data-testid="smart-missing-value-current">
-                    {defaultFallbackLabel}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-slate-100" data-testid="smart-missing-value-none">None</p>
-                )}
-
-                {isDefaultFallbackParameterEditor && parameterEditorBlock}
-
-                {defaultFallback && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      data-testid="smart-missing-value-remove"
-                      className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                      onClick={() => {
-                        onConditionFocusedSlotChange?.(null);
-                        onApplyAction?.('base.direct');
-                      }}
-                    >
-                      Remove fallback
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {mappingMethodId === 'text.concat' && (
-            <div className="mt-2" data-testid="smart-concat-separator-controls">
-              <p className="mb-1 text-[11px] text-slate-400">Separator</p>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { key: 'space', label: 'Space', value: ' ' },
-                  { key: 'comma', label: 'Comma', value: ', ' },
-                  { key: 'dash', label: 'Dash', value: '-' },
-                  { key: 'none', label: 'None', value: '' },
-                ].map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    data-testid={`smart-concat-separator-${option.key}`}
-                    onClick={() => onConcatSeparatorChange?.(option.value)}
-                    className={`rounded border px-2 py-1 text-[11px] ${concatSeparator === option.value ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
-                  >
-                    {option.label}
+                    + {input.label}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
+            {mappingMethodId === 'null.coalesce' && hydration.draft.composition?.kind === 'coalesce' && (
+              <div className="mt-2" data-testid="smart-coalesce-values-controls">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-slate-400">Ordered values</p>
+                </div>
+
+                {(hydration.draft.composition.values?.length ?? 0) > 0 ? (
+                  <ol className="mt-2 space-y-1" data-testid="smart-coalesce-values-list">
+                    {(hydration.draft.composition.values ?? []).map((value, index, values) => {
+                      const label = value.kind === 'input'
+                        ? (hydration.draft.inputs.find((input) => input.id === value.inputId)?.label ?? 'input')
+                        : value.kind === 'static'
+                          ? literalToDsl(value.value)
+                          : value.expression;
+                      return (
+                        <li key={`coalesce-value-${index}`} className="rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5" data-testid={`smart-coalesce-value-${index}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-slate-200">{label}</span>
+                            <div className="flex flex-wrap gap-1">
+                              <button
+                                type="button"
+                                data-testid={`smart-coalesce-move-up-${index}`}
+                                disabled={index === 0}
+                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 enabled:hover:border-slate-500 disabled:opacity-40"
+                                onClick={() => onApplyAction?.('null.coalesce', { coalesceMove: { fromIndex: index, toIndex: index - 1 } })}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                data-testid={`smart-coalesce-move-down-${index}`}
+                                disabled={index >= values.length - 1}
+                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 enabled:hover:border-slate-500 disabled:opacity-40"
+                                onClick={() => onApplyAction?.('null.coalesce', { coalesceMove: { fromIndex: index, toIndex: index + 1 } })}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                data-testid={`smart-coalesce-remove-value-${index}`}
+                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                                onClick={() => onApplyAction?.('null.coalesce', {
+                                  coalesceValues: values.filter((_, valueIndex) => valueIndex !== index),
+                                })}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400" data-testid="smart-coalesce-values-empty">No values yet.</p>
+                )}
+
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {hydration.draft.inputs.map((input) => (
+                    <button
+                      key={`coalesce-add-input-${input.id}`}
+                      type="button"
+                      data-testid={`smart-coalesce-add-input-${input.id}`}
+                      className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                      onClick={() => {
+                        const current = hydration.draft.composition?.kind === 'coalesce'
+                          ? (hydration.draft.composition.values ?? [])
+                          : [];
+                        onApplyAction?.('null.coalesce', {
+                          coalesceValues: [...current, { kind: 'input', inputId: input.id }],
+                        });
+                      }}
+                    >
+                      + {input.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-2 rounded border border-slate-800 bg-slate-950/30 px-2 py-1.5" data-testid="smart-coalesce-fallback-controls">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-400">Optional fallback</p>
+                    {hydration.draft.composition.fallback && (
+                      <button
+                        type="button"
+                        data-testid="smart-coalesce-fallback-clear"
+                        className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                        onClick={() => onApplyAction?.('null.coalesce', { clearCoalesceFallback: true })}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    data-testid="smart-coalesce-fallback-input"
+                    className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                    placeholder="Fallback value"
+                    value={hydration.draft.composition.fallback?.kind === 'static' ? String(hydration.draft.composition.fallback.value ?? '') : ''}
+                    onChange={(event) => onApplyAction?.('null.coalesce', { coalesceFallbackValue: event.target.value })}
+                  />
+                </div>
+              </div>
+            )}
+
           {mappingMethodId === 'lookup.valueMap' && valueMapProjectState && valueMapComposition && (
             <div className="mt-3 rounded border border-slate-800 bg-slate-950/30 px-2.5 py-2" data-testid="smart-value-map-config">
+              <div className="mb-2 rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5" data-testid="smart-value-map-lookup-selector">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Lookup value</p>
+                  <span className="text-[11px] text-blue-300">Used as lookup value</span>
+                </div>
+                <div className="mt-1 space-y-1" role="radiogroup" aria-label="Value mapping lookup value">
+                  {hydration.draft.inputs.map((input) => {
+                    const selected = valueMapComposition.inputId === input.id;
+                    return (
+                      <button
+                        key={`smart-value-map-lookup-${input.id}`}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        data-testid={`smart-value-map-lookup-option-${input.id}`}
+                        className={`w-full rounded border px-2 py-1 text-left text-xs ${selected ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 bg-slate-900/70 text-slate-100 hover:border-slate-500'}`}
+                        onClick={() => {
+                          if (selected) return;
+                          onApplyAction?.('lookup.valueMap', {
+                            directInputId: input.id,
+                            valueMapScope: valueMapProjectState.scope,
+                            valueMapProjectSelection: valueMapComposition.project
+                              ? { ref: valueMapComposition.project.ref }
+                              : undefined,
+                            valueMapNoMatchMode: valueMapProjectState.noMatchMode,
+                            valueMapFallbackValue: valueMapProjectState.fallbackValue,
+                          });
+                        }}
+                      >
+                        {input.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {valueMapLookupInput && (
+                  <p className="mt-1 text-[11px] text-slate-400" data-testid="smart-value-map-lookup-current">
+                    Current lookup: {valueMapLookupInput.label}
+                  </p>
+                )}
+              </div>
+
               <p className="text-[11px] uppercase tracking-wide text-slate-500">Value table scope</p>
               <div className="mt-1 flex gap-1.5" role="group" aria-label="Value map scope">
                 <button
@@ -2260,12 +2840,12 @@ export function SmartBuilderPanel({
                 </select>
                 {valueMapProjectState.noMatchMode === 'fallback_value' && (
                   <input
-                    type="text"
+                    type={valueMapFallbackInputType}
                     data-testid="smart-value-map-fallback-input"
                     value={String(valueMapProjectState.fallbackValue ?? '')}
                     onChange={(event) => onValueMapFallbackValueChange?.(event.target.value)}
                     className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
-                    placeholder="Fallback value"
+                    placeholder={valueMapFallbackInputType === 'number' ? 'Fallback number' : 'Fallback value'}
                   />
                 )}
               </div>
@@ -2278,55 +2858,6 @@ export function SmartBuilderPanel({
             && mappingMethodId !== 'lookup.valueMap'
             && mappingMethodId !== 'condition.compare' && (
             <>
-              <div className="mt-3" data-testid="smart-recipe-input-transforms">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Input transforms</p>
-                  <button
-                    type="button"
-                    data-testid="smart-recipe-add-transform"
-                    className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                    onClick={() => {
-                      setPickerMode((prev) => (prev === 'transform' ? null : 'transform'));
-                      setPickerQuery('');
-                      setExpandedDisabledId(null);
-                    }}
-                  >
-                    + Add input transform
-                  </button>
-                </div>
-                {(hydration.draft.inputs[0]?.transforms.length ?? 0) === 0 ? (
-                  <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-input-transforms-none">None</p>
-                ) : (
-                  <ol className="mt-1 space-y-1 text-xs text-slate-300" data-testid="smart-recipe-input-transforms-list">
-                    {(hydration.draft.inputs[0]?.transforms ?? []).map((step, index) => (
-                      <li key={`${step.functionName}-${index}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span>{index + 1}. {step.functionName}</span>
-                          {(() => {
-                            const parameterized = resolveParameterizedActionForTransformStep(step);
-                            if (!parameterized) return null;
-                            return (
-                              <button
-                                type="button"
-                                data-testid={`smart-recipe-input-transform-edit-${index}`}
-                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                                onClick={() => {
-                                  onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
-                                  setParameterEditorStepIndex(index);
-                                  setParameterEditorStepScope('input-transform');
-                                }}
-                              >
-                                Edit
-                              </button>
-                            );
-                          })()}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-
               {(mappingMethodId === 'base.calculation'
                 || mappingMethodId === 'number.add'
                 || mappingMethodId === 'number.subtract'
@@ -2348,54 +2879,127 @@ export function SmartBuilderPanel({
                         Starting value
                       </button>
                     </div>
-                    {calculationRows.operations.map((row) => (
-                      <div key={`${row.operator}-${row.input.id}`} className="space-y-1 rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5">
+                    {calculationRows.operations.map((row, operationIndex) => (
+                      <div key={`${row.operator}-${operationIndex}`} className="space-y-1 rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5">
                         <div className="flex items-center justify-between gap-2">
                           <span>
                             {row.operator === 'add' ? '+' : row.operator === 'subtract' ? '-' : row.operator === 'multiply' ? '×' : '÷'}{' '}
-                            <span className="font-medium text-slate-100">{row.input.label}</span>
+                            <span className="font-medium text-slate-100">{describeCalculationOperand(row.operand)}</span>
                           </span>
-                          <button
-                            type="button"
-                            data-testid={`smart-calculation-set-start-${row.input.id}`}
-                            className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                            onClick={() => onApplyAction?.('number.add', { setAsStartInputId: row.input.id })}
-                          >
-                            Set as start
-                          </button>
+                          <div className="flex flex-wrap gap-1">
+                            {row.operand.kind === 'input' && (
+                              <button
+                                type="button"
+                                data-testid={`smart-calculation-set-start-${row.operand.inputId}`}
+                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                                onClick={() => onApplyAction?.('number.add', { setAsStartInputId: row.operand.inputId })}
+                              >
+                                Set as start
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              data-testid={`smart-calculation-move-up-${operationIndex}`}
+                              aria-label={`Move operation ${operationIndex + 1} up`}
+                              disabled={operationIndex === 0}
+                              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 enabled:hover:border-slate-500 disabled:opacity-40"
+                              onClick={() => onApplyAction?.('number.add', { calculationMoveOperation: { fromIndex: operationIndex, toIndex: operationIndex - 1 } })}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`smart-calculation-move-down-${operationIndex}`}
+                              aria-label={`Move operation ${operationIndex + 1} down`}
+                              disabled={operationIndex >= calculationRows.operations.length - 1}
+                              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 enabled:hover:border-slate-500 disabled:opacity-40"
+                              onClick={() => onApplyAction?.('number.add', { calculationMoveOperation: { fromIndex: operationIndex, toIndex: operationIndex + 1 } })}
+                            >
+                              ↓
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1" data-testid={`smart-calculation-operators-${row.input.id}`}>
+                        <div className="flex flex-wrap gap-1" data-testid={`smart-calculation-operators-${operationIndex}`}>
                           <button
                             type="button"
-                            data-testid={`smart-calculation-operator-add-${row.input.id}`}
+                            data-testid={`smart-calculation-operator-add-${operationIndex}`}
                             className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'add' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
-                            onClick={() => onApplyAction?.('number.add', { calculationInputId: row.input.id })}
+                            onClick={() => onApplyAction?.('number.add', row.operand.kind === 'input'
+                              ? { calculationInputId: row.operand.inputId }
+                              : {
+                                calculationSetLiteralOperandAtIndex: operationIndex,
+                                calculationLiteralOperand: row.operand.kind === 'static' ? row.operand.value : 0,
+                              })}
                           >
                             + Add
                           </button>
                           <button
                             type="button"
-                            data-testid={`smart-calculation-operator-subtract-${row.input.id}`}
+                            data-testid={`smart-calculation-operator-subtract-${operationIndex}`}
                             className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'subtract' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
-                            onClick={() => onApplyAction?.('number.subtract', { calculationInputId: row.input.id })}
+                            onClick={() => onApplyAction?.('number.subtract', row.operand.kind === 'input'
+                              ? { calculationInputId: row.operand.inputId }
+                              : {
+                                calculationSetLiteralOperandAtIndex: operationIndex,
+                                calculationLiteralOperand: row.operand.kind === 'static' ? row.operand.value : 0,
+                              })}
                           >
                             − Subtract
                           </button>
                           <button
                             type="button"
-                            data-testid={`smart-calculation-operator-multiply-${row.input.id}`}
+                            data-testid={`smart-calculation-operator-multiply-${operationIndex}`}
                             className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'multiply' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
-                            onClick={() => onApplyAction?.('number.multiply', { calculationInputId: row.input.id })}
+                            onClick={() => onApplyAction?.('number.multiply', row.operand.kind === 'input'
+                              ? { calculationInputId: row.operand.inputId }
+                              : {
+                                calculationSetLiteralOperandAtIndex: operationIndex,
+                                calculationLiteralOperand: row.operand.kind === 'static' ? row.operand.value : 0,
+                              })}
                           >
                             × Multiply
                           </button>
                           <button
                             type="button"
-                            data-testid={`smart-calculation-operator-divide-${row.input.id}`}
+                            data-testid={`smart-calculation-operator-divide-${operationIndex}`}
                             className={`rounded border px-2 py-0.5 text-[11px] ${row.operator === 'divide' ? 'border-blue-600 bg-blue-900/30 text-blue-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
-                            onClick={() => onApplyAction?.('number.divide', { calculationInputId: row.input.id })}
+                            onClick={() => onApplyAction?.('number.divide', row.operand.kind === 'input'
+                              ? { calculationInputId: row.operand.inputId }
+                              : {
+                                calculationSetLiteralOperandAtIndex: operationIndex,
+                                calculationLiteralOperand: row.operand.kind === 'static' ? row.operand.value : 0,
+                              })}
                           >
                             ÷ Divide
+                          </button>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            step="any"
+                            data-testid={`smart-calculation-literal-${operationIndex}`}
+                            className="h-7 w-32 rounded border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-100"
+                            placeholder="Literal operand"
+                            value={row.operand.kind === 'static' && typeof row.operand.value === 'number' ? String(row.operand.value) : ''}
+                            onChange={(event) => {
+                              const nextValue = event.target.value === '' ? 0 : Number(event.target.value);
+                              if (!Number.isFinite(nextValue)) return;
+                              onApplyAction?.(actionIdForCalculationOperator(row.operator), {
+                                calculationSetLiteralOperandAtIndex: operationIndex,
+                                calculationLiteralOperand: nextValue,
+                              });
+                            }}
+                          />
+                          <button
+                            type="button"
+                            data-testid={`smart-calculation-use-literal-${operationIndex}`}
+                            className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                            onClick={() => onApplyAction?.(actionIdForCalculationOperator(row.operator), {
+                              calculationSetLiteralOperandAtIndex: operationIndex,
+                              calculationLiteralOperand: row.operand.kind === 'static' ? row.operand.value : 0,
+                            })}
+                          >
+                            Use literal
                           </button>
                         </div>
                       </div>
@@ -2414,48 +3018,77 @@ export function SmartBuilderPanel({
                 </div>
               )}
 
-              <div className="mt-3" data-testid="smart-recipe-steps">
+              <div className="mt-3" data-testid="smart-recipe-steps" aria-label="Refine Result">
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Output steps</p>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Refine Result</p>
                   <button
                     type="button"
                     data-testid="smart-recipe-add-step"
                     className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
                     onClick={() => {
+                      setStepPickerScope('result');
                       setPickerMode((prev) => (prev === 'step' ? null : 'step'));
                       setPickerQuery('');
                       setExpandedDisabledId(null);
                     }}
                   >
-                    + Add output step
+                    + Add step
                   </button>
                 </div>
-                {hydration.draft.postSteps.length === 0 ? (
-                  <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-steps-none">None</p>
-                ) : (
+                {hydration.draft.postSteps.length > 0 && (
                   <ol className="mt-1 space-y-1 text-xs text-slate-300" data-testid="smart-recipe-steps-list">
                     {hydration.draft.postSteps.map((step, index) => (
                       <li key={`${step.functionName}-${index}`} className="rounded border border-slate-800 bg-slate-950/30 px-2 py-1">
                         <div className="flex items-center justify-between gap-2">
                           <span>{index + 1}. {step.functionName}</span>
-                          {(() => {
-                            const parameterized = resolveParameterizedActionForTransformStep(step);
-                            if (!parameterized) return null;
-                            return (
-                              <button
-                                type="button"
-                                data-testid={`smart-recipe-step-edit-${index}`}
-                                className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
-                                onClick={() => {
-                                  onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
-                                  setParameterEditorStepIndex(index);
-                                  setParameterEditorStepScope('output-step');
-                                }}
-                              >
-                                Edit
-                              </button>
-                            );
-                          })()}
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              data-testid={`smart-recipe-step-move-up-${index}`}
+                              disabled={index === 0}
+                              className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => onApplyAction?.('base.resultStep.move', { outputStepMove: { fromIndex: index, toIndex: index - 1 } })}
+                              aria-label={`Move result step ${index + 1} up`}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`smart-recipe-step-move-down-${index}`}
+                              disabled={index === hydration.draft.postSteps.length - 1}
+                              className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-200 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => onApplyAction?.('base.resultStep.move', { outputStepMove: { fromIndex: index, toIndex: index + 1 } })}
+                              aria-label={`Move result step ${index + 1} down`}
+                            >
+                              ↓
+                            </button>
+                            {(() => {
+                              const parameterized = resolveParameterizedActionForTransformStep(step);
+                              if (!parameterized) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  data-testid={`smart-recipe-step-edit-${index}`}
+                                  className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                                  onClick={() => {
+                                    onBeginActionParameterEdit?.(parameterized.actionId, parameterized.values);
+                                    setParameterEditorStepIndex(index);
+                                    setParameterEditorStepScope('result-step');
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                              );
+                            })()}
+                            <button
+                              type="button"
+                              data-testid={`smart-recipe-step-remove-${index}`}
+                              className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                              onClick={() => onApplyAction?.('base.resultStep.remove', { outputStepRemoveIndex: index })}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       </li>
                     ))}
@@ -2467,26 +3100,38 @@ export function SmartBuilderPanel({
 
           {isMethodNeedsAction && hydration.draft.inputs.length >= 2 && (
             <div
-              className="mt-2 rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1.5"
+              className="mt-2 rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5"
               data-testid="smart-base-needs-action"
             >
-              <p className="text-[11px] text-amber-200">
-                Multiple inputs selected. Choose a mapping method.
+              <p className="text-[11px] text-slate-300">
+                Multiple inputs are available. Choose output logic to use them.
               </p>
             </div>
           )}
 
           {!isMethodNeedsAction && unusedInputs.length > 0 && (
-            <div className="mt-2 rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1.5" data-testid="smart-unused-input-notice">
-              <p className="text-[11px] text-amber-200">{unusedInputs.length} selected input{unusedInputs.length === 1 ? ' is' : 's are'} not used.</p>
-              {canSuggestCombineText && (
+            <div className="mt-2 rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5" data-testid="smart-unused-input-notice">
+              <p className="text-[11px] text-slate-300">{unusedInputs.length} available input{unusedInputs.length === 1 ? '' : 's'} not used by current output logic.</p>
+              <button
+                type="button"
+                data-testid="smart-unused-input-change-logic"
+                className="mt-1 rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                onClick={() => {
+                  setPickerMode('base');
+                  setPickerQuery('');
+                  setExpandedDisabledId(null);
+                }}
+              >
+                Change logic
+              </button>
+              {canSuggestCombineValues && (
                 <button
                   type="button"
                   data-testid="smart-unused-input-combine"
-                  className="mt-1 rounded border border-amber-700 px-2 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/30"
+                  className="ml-1 mt-1 rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
                   onClick={() => onApplyAction?.('text.concat')}
                 >
-                  Combine selected text
+                  Combine available values
                 </button>
               )}
               {(mappingMethodId === 'base.calculation'
@@ -2539,17 +3184,17 @@ export function SmartBuilderPanel({
             </div>
           )}
 
-          {!isDefaultFallbackParameterEditor && parameterEditorBlock}
+          {parameterEditorBlock}
 
-            {mappingMethodId !== 'lookup.valueMap' && (effectivePickerMode === 'transform' || effectivePickerMode === 'step') && (
+            {mappingMethodId !== 'lookup.valueMap' && effectivePickerMode === 'step' && (
               <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid={`smart-${effectivePickerMode}-picker`}>
                 <div className="mb-1 flex items-center justify-between">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                   {effectivePickerMode === 'base'
                     ? 'Choose mapping method'
-                    : effectivePickerMode === 'transform'
-                      ? 'Add input transform'
-                      : 'Add output step'}
+                    : stepPickerScope === 'result'
+                      ? 'Add result step'
+                      : 'Add value step'}
                 </p>
                 {!isMethodNeedsAction && (
                   <button
@@ -2589,14 +3234,23 @@ export function SmartBuilderPanel({
                       if (parameterDefinitions.length > 0) {
                         onBeginActionParameterEdit?.(action.id);
                         setParameterEditorStepIndex(null);
-                        setParameterEditorStepScope(null);
+                        setParameterEditorStepScope(stepPickerScope === 'result' ? 'result-step' : 'value-step');
+                        setParameterEditorValueStepTarget(
+                          stepPickerScope === 'result' ? null : stepPickerScope,
+                        );
                         setPickerMode(null);
                         return;
                       }
 
-                      onApplyAction?.(action.id);
+                      onApplyAction?.(action.id, stepPickerScope === 'result'
+                        ? { editingStepScope: 'result-step' }
+                        : {
+                            editingStepScope: 'value-step',
+                            valueStepTarget: stepPickerScope,
+                          });
                       setParameterEditorStepIndex(null);
                       setParameterEditorStepScope(null);
+                      setParameterEditorValueStepTarget(null);
                       setPickerMode(null);
                     }}
                   >
@@ -2633,6 +3287,7 @@ export function SmartBuilderPanel({
               </div>
             )}
           </div>
+          )}
 
         {hasEnabledArrayActions && (
           <div

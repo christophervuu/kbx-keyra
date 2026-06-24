@@ -74,12 +74,12 @@ export interface SourceSchemaPanelProps {
   }[];
   /** Optional className for the outer container. */
   className?: string;
-  /** Current source selection mode for browse interactions. */
-  selectionMode?: 'add-to-tray' | 'fill-current-value';
-  /** Enables Fill Current Value mode when a builder value slot is active. */
+  /** Indicates an active builder value slot can be filled from the source tree. */
   canFillCurrentValue?: boolean;
-  /** Called when the source selection mode changes. */
-  onSelectionModeChange?: (mode: 'add-to-tray' | 'fill-current-value') => void;
+  /** Indicates explicit Add Input multi-select flow is active. */
+  isExplicitAddInputMode?: boolean;
+  /** Toggles contextual explicit Add Input mode while a slot-fill context is active. */
+  onExplicitAddInputModeChange?: (enabled: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -520,9 +520,9 @@ export function SourceSchemaPanel({
   onStageField,
   selectedInputs = [],
   className = '',
-  selectionMode = 'add-to-tray',
   canFillCurrentValue = false,
-  onSelectionModeChange,
+  isExplicitAddInputMode = false,
+  onExplicitAddInputModeChange,
 }: SourceSchemaPanelProps) {
   void sourceSchemaName;
   const previewCtx = useContext(PreviewContext);
@@ -685,45 +685,33 @@ export function SourceSchemaPanel({
           </p>
         )}
 
-        <div className="mt-2" data-testid="source-selection-mode">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Selection mode</p>
-          <div className="mt-1 flex items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="source-mode-add-to-tray"
-              aria-pressed={selectionMode === 'add-to-tray'}
-              onClick={() => onSelectionModeChange?.('add-to-tray')}
-              className={[
-                'rounded border px-2 py-1 text-[11px] transition-colors',
-                selectionMode === 'add-to-tray'
-                  ? 'border-blue-500/60 bg-blue-900/40 text-blue-200'
-                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700',
-              ].join(' ')}
-            >
-              Add to tray
-            </button>
-            <button
-              type="button"
-              data-testid="source-mode-fill-current"
-              aria-pressed={selectionMode === 'fill-current-value'}
-              disabled={!canFillCurrentValue}
-              onClick={() => onSelectionModeChange?.('fill-current-value')}
-              className={[
-                'rounded border px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-                selectionMode === 'fill-current-value'
-                  ? 'border-blue-500/60 bg-blue-900/40 text-blue-200'
-                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700',
-              ].join(' ')}
-            >
-              Fill current value
-            </button>
-          </div>
-          <p className="mt-1 text-[10px] text-slate-500" data-testid="source-selection-mode-hint">
-            {selectionMode === 'fill-current-value'
-              ? 'Single-select a field to fill the active builder value.'
-              : 'Select fields to stage in Inputs without replacing active values.'}
+        <div className="mt-2" data-testid="source-selection-context">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Selection behavior</p>
+          <p className="mt-1 text-[10px] text-slate-500" data-testid="source-selection-context-hint">
+            {isExplicitAddInputMode
+              ? 'Add Input mode: select one or more fields to add to Inputs.'
+              : canFillCurrentValue
+                ? 'Select a field to fill the active value slot. Selection also adds it to Inputs.'
+                : 'Select fields to add them to Inputs.'}
           </p>
+          {canFillCurrentValue && (
+            <button
+              type="button"
+              data-testid="source-selection-context-toggle-add-input"
+              className="mt-1 rounded border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:border-slate-500"
+              onClick={() => onExplicitAddInputModeChange?.(!isExplicitAddInputMode)}
+            >
+              {isExplicitAddInputMode ? 'Back to slot fill' : 'Add Input instead'}
+            </button>
+          )}
         </div>
+        <p className="sr-only" aria-live="polite" data-testid="source-selection-context-announcement">
+          {isExplicitAddInputMode
+            ? 'Selection mode: Add Input. Focus returns to the active recipe slot after choosing a source field.'
+            : canFillCurrentValue
+              ? 'Selection mode: Fill active recipe slot. Focus returns to that slot after choosing a source field.'
+              : 'Selection mode: Add input to tray.'}
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

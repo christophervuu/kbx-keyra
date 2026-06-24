@@ -10,10 +10,15 @@ import {
   resolveBuilderTargetPath,
   resolveInitialSelectedSampleId,
   shouldConfirmConditionalMethodSwitch,
+  shouldHandoffArrayActionFromSmartBuilder,
   shouldUseArrayBuilderForSmartDraft,
 } from './MappingEditor';
 
-import { createEmptySmartBuilderDraft } from '@/features/mappings/lib';
+import {
+  createEmptySmartBuilderDraft,
+  pushSmartBuilderSnapshot,
+  undoSmartBuilderExpression,
+} from '@/features/mappings/lib';
 import type { SchemaSamplePayloadMetadata, SchemaTreeNode } from '@/lib/types/domain';
 
 const makeNode = (
@@ -173,11 +178,11 @@ describe('resolveInitialSelectedSampleId', () => {
 
 describe('applyStagedInputToSmartDraft', () => {
   it('discovery: legacy slot-based focusedSlotId aliases map to deterministic conditional slot writes', () => {
-    const legacySlotAliases: readonly { readonly slot: string; readonly expectedExpressionFragment: string }[] = [
-      { slot: 'condition:left', expectedExpressionFragment: 'eq(source("candidate"), "")' },
-      { slot: 'condition:right', expectedExpressionFragment: 'eq("", source("candidate"))' },
-      { slot: 'condition:then', expectedExpressionFragment: ', source("candidate"), "NO_MATCH")' },
-      { slot: 'condition:else', expectedExpressionFragment: ', "MATCH", source("candidate"))' },
+    const legacySlotAliases: readonly { readonly slot: string }[] = [
+      { slot: 'condition:left' },
+      { slot: 'condition:right' },
+      { slot: 'condition:then' },
+      { slot: 'condition:else' },
     ];
 
     for (const entry of legacySlotAliases) {
@@ -214,7 +219,7 @@ describe('applyStagedInputToSmartDraft', () => {
 
       expect(result.outcome).toBe('filled-focused-slot');
       expect(result.draft.slotScopedInputs?.[entry.slot]?.path).toBe('candidate');
-      expect(result.expression).toContain(entry.expectedExpressionFragment);
+      expect(result.expression).toBe('');
     }
   });
 
@@ -252,7 +257,7 @@ describe('applyStagedInputToSmartDraft', () => {
 
     expect(result.outcome).toBe('filled-focused-slot');
     expect(result.draft.slotScopedInputs?.['condition:left']?.path).toBe('candidate');
-    expect(result.expression).toContain('eq(source("candidate"), "")');
+    expect(result.expression).toBe('');
   });
 
   it('normalizes known legacy focused-slot aliases to canonical slot ids', () => {
@@ -265,7 +270,7 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(normalizeLegacySmartSlotId(null)).toBeNull();
   });
 
-  it('creates direct draft on first staged input', () => {
+  it('AE-02: creates direct draft on first staged input', () => {
     const draft = createEmptySmartBuilderDraft({
       targetPath: 'order.id',
       targetType: 'string',
@@ -399,7 +404,7 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(result.draft.slotScopedInputs?.['condition:left']?.path).toBe('candidate');
   });
 
-  it('fills focused condition right slot and generates deterministic condition expression', () => {
+  it('AE-24: fills focused condition right slot and generates deterministic condition expression', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'order.reviewFlag',
@@ -716,6 +721,42 @@ describe('applyStagedInputToSmartDraft', () => {
     expect(second.expression).toBe('source("firstName")');
   });
 
+  it('AE-04: keeps direct recipe stable with five available tray inputs', () => {
+    const base = createEmptySmartBuilderDraft({
+      targetPath: 'customer.fullName',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    const first = applyStagedInputToSmartDraft({
+      draft: base,
+      staged: {
+        path: 'firstName',
+        kind: 'primary',
+        valueType: 'string',
+        expression: 'source("firstName")',
+      },
+    });
+
+    const stagedPaths = ['lastName', 'middleName', 'nickname', 'displayName'] as const;
+    const finalResult = stagedPaths.reduce((current, path) => applyStagedInputToSmartDraft({
+      draft: current.draft,
+      staged: {
+        path,
+        kind: 'primary',
+        valueType: 'string',
+        expression: `source("${path}")`,
+      },
+    }), first);
+
+    expect(finalResult.draft.inputs).toHaveLength(5);
+    expect(finalResult.draft.composition).toEqual({
+      kind: 'direct',
+      inputId: finalResult.draft.inputs[0]?.id,
+    });
+    expect(finalResult.expression).toBe('source("firstName")');
+  });
+
   it('toggles off an already-added source field instead of duplicating it', () => {
     const base = createEmptySmartBuilderDraft({
       targetPath: 'order.fullName',
@@ -744,10 +785,10 @@ describe('applyStagedInputToSmartDraft', () => {
     });
 
     expect(second.draft.inputs).toHaveLength(0);
-    expect(second.expression).toBe('');
+    expect(second.expression).toBe('source("firstName")');
   });
 
-  it('supports explicit Add-to-Tray mode by ignoring duplicate clicks', () => {
+  it('AE-25: supports explicit Add-to-Tray mode by ignoring duplicate clicks', () => {
     const base = createEmptySmartBuilderDraft({
       targetPath: 'order.fullName',
       targetType: 'string',
@@ -883,6 +924,22 @@ describe('shouldUseArrayBuilderForSmartDraft', () => {
   });
 });
 
+describe('shouldHandoffArrayActionFromSmartBuilder', () => {
+  it('AE-35: returns true for array handoff action IDs', () => {
+    expect(shouldHandoffArrayActionFromSmartBuilder('array.map')).toBe(true);
+    expect(shouldHandoffArrayActionFromSmartBuilder('array.filter')).toBe(true);
+    expect(shouldHandoffArrayActionFromSmartBuilder('array.find')).toBe(true);
+    expect(shouldHandoffArrayActionFromSmartBuilder('array.array')).toBe(true);
+    expect(shouldHandoffArrayActionFromSmartBuilder('array.merge')).toBe(true);
+  });
+
+  it('returns false for non-array actions and unknown IDs', () => {
+    expect(shouldHandoffArrayActionFromSmartBuilder('text.concat')).toBe(false);
+    expect(shouldHandoffArrayActionFromSmartBuilder('lookup.valueMap')).toBe(false);
+    expect(shouldHandoffArrayActionFromSmartBuilder('not-a-real-action')).toBe(false);
+  });
+});
+
 describe('applySmartActionToDraft', () => {
   it('applies text.concat to existing tray inputs', () => {
     const draft = {
@@ -917,7 +974,7 @@ describe('applySmartActionToDraft', () => {
     expect(next.expression).toBe('concat(source("firstName"), " ", source("lastName"))');
   });
 
-  it('applies text.upper as an input transform and updates expression', () => {
+  it('applies text.upper as a direct value-step and updates expression', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.tierUpper',
@@ -937,12 +994,16 @@ describe('applySmartActionToDraft', () => {
       composition: { kind: 'direct' as const, inputId: 'a' },
     };
 
-    const next = applySmartActionToDraft(draft, 'text.upper');
-    expect(next.inputs[0]?.transforms).toEqual([{ functionName: 'upper' }]);
+    const next = applySmartActionToDraft(draft, 'text.upper', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
+    expect(next.composition?.kind).toBe('direct');
+    expect(next.composition?.value?.transforms).toEqual([{ functionName: 'upper' }]);
     expect(next.expression).toBe('upper(source("loyaltyTier"))');
   });
 
-  it('applies text.lower and text.trim as stacked input transforms', () => {
+  it('applies text.lower and text.trim as stacked direct value-steps', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.normalizedTier',
@@ -962,14 +1023,20 @@ describe('applySmartActionToDraft', () => {
       composition: { kind: 'direct' as const, inputId: 'a' },
     };
 
-    const lowered = applySmartActionToDraft(draft, 'text.lower');
+    const lowered = applySmartActionToDraft(draft, 'text.lower', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
     expect(lowered.expression).toBe('lower(source("loyaltyTier"))');
 
-    const trimmedAfterLower = applySmartActionToDraft(lowered, 'text.trim');
+    const trimmedAfterLower = applySmartActionToDraft(lowered, 'text.trim', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
     expect(trimmedAfterLower.expression).toBe('trim(lower(source("loyaltyTier")))');
   });
 
-  it('applies text.phoneDigits as a guided multi-step normalization chain', () => {
+  it('applies text.phoneDigits as a direct value-step alias', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.phoneDigits',
@@ -989,13 +1056,14 @@ describe('applySmartActionToDraft', () => {
       composition: { kind: 'direct' as const, inputId: 'a' },
     };
 
-    const next = applySmartActionToDraft(draft, 'text.phoneDigits');
-    expect(next.expression).toBe(
-      'replaceAll(replaceAll(replaceAll(replaceAll(trim(source("phone")), "(", ""), ")", ""), "-", ""), " ", "")',
-    );
+    const next = applySmartActionToDraft(draft, 'text.phoneDigits', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
+    expect(next.expression).toBe('trim(source("phone"))');
   });
 
-  it('applies text.substring as an input transform with default start index', () => {
+  it('applies text.substring as a direct value-step with default start index', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.emailDomain',
@@ -1015,10 +1083,24 @@ describe('applySmartActionToDraft', () => {
           ],
         },
       ],
-      composition: { kind: 'direct' as const, inputId: 'a' },
+      composition: {
+        kind: 'direct' as const,
+        inputId: 'a',
+        value: {
+          kind: 'input' as const,
+          inputId: 'a',
+          transforms: [
+            { functionName: 'trim' as const },
+            { functionName: 'lower' as const },
+          ],
+        },
+      },
     };
 
-    const next = applySmartActionToDraft(draft, 'text.substring');
+    const next = applySmartActionToDraft(draft, 'text.substring', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
     expect(next.expression).toBe('substring(lower(trim(source("email"))), 0)');
   });
 
@@ -1047,7 +1129,10 @@ describe('applySmartActionToDraft', () => {
       },
     };
 
-    const next = applySmartActionToDraft(draft, 'text.substring');
+    const next = applySmartActionToDraft(draft, 'text.substring', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
     expect(next.expression).toBe('substring(source("name"), 1, 3)');
   });
 
@@ -1076,7 +1161,10 @@ describe('applySmartActionToDraft', () => {
       },
     };
 
-    const next = applySmartActionToDraft(draft, 'text.replace');
+    const next = applySmartActionToDraft(draft, 'text.replace', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
     expect(next.expression).toBe('replace(source("raw"), " ", "-")');
   });
 
@@ -1100,7 +1188,10 @@ describe('applySmartActionToDraft', () => {
       composition: { kind: 'direct' as const, inputId: 'a' },
       pendingActionDraft: {
         actionId: 'null.default',
-        values: { fallbackExpression: '"UNKNOWN"' },
+        values: {
+          fallbackMode: 'fixed',
+          fallbackFixedString: 'UNKNOWN',
+        },
         validation: { isValid: true, issues: [] },
       },
     };
@@ -1137,7 +1228,10 @@ describe('applySmartActionToDraft', () => {
       },
     };
 
-    const next = applySmartActionToDraft(draft, 'date.format');
+    const next = applySmartActionToDraft(draft, 'date.format', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'direct' },
+    });
     expect(next.expression).toBe('formatDate(source("issuedOn"), "YYYY/MM/DD", "YYYY-MM-DD")');
   });
 
@@ -1192,12 +1286,239 @@ describe('applySmartActionToDraft', () => {
           transforms: [],
         },
       ],
-      composition: { kind: 'concat' as const, inputIds: ['a'], separator: ' ' },
+      composition: { kind: 'concat' as const, inputIds: ['a'] },
     };
 
     const next = applySmartActionToDraft(draft, 'base.direct');
     expect(next.composition).toEqual({ kind: 'direct', inputId: 'a' });
     expect(next.expression).toBe('source("firstName")');
+  });
+
+  it('supports base.direct.select to switch direct source without changing tray membership', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    const next = applySmartActionToDraft(draft, 'base.direct.select', { directInputId: 'b' });
+    expect(next.composition).toEqual({ kind: 'direct', inputId: 'b' });
+    expect(next.inputs.map((input) => input.id)).toEqual(['a', 'b']);
+    expect(next.expression).toBe('source("lastName")');
+  });
+
+  it('supports base.fixed as direct static recipe-local value (no tray dependency)', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.status',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    const next = applySmartActionToDraft(draft, 'base.fixed', { fixedValue: 'ACTIVE' });
+    expect(next.composition).toEqual({
+      kind: 'direct',
+      inputId: 'a',
+      value: { kind: 'static', value: 'ACTIVE' },
+    });
+    expect(next.expression).toBe('"ACTIVE"');
+    expect(next.inputs).toHaveLength(1);
+  });
+
+  it('supports base.constant as direct expression-backed recipe-local value', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.status',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    const next = applySmartActionToDraft(draft, 'base.constant', { constantName: 'DEFAULT_STATUS' });
+    expect(next.composition).toEqual({
+      kind: 'direct',
+      inputId: 'a',
+      value: { kind: 'expression', expression: 'constant("DEFAULT_STATUS")' },
+    });
+    expect(next.expression).toBe('constant("DEFAULT_STATUS")');
+    expect(next.inputs).toHaveLength(1);
+  });
+
+  it('AE-09: supports text.concat part reordering and literal parts without tray-order inference', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'concat' as const,
+        inputIds: ['a', 'b'],
+        parts: [
+          { kind: 'input' as const, inputId: 'a' },
+          { kind: 'static' as const, value: ' ' },
+          { kind: 'input' as const, inputId: 'b' },
+        ],
+      },
+    };
+
+    const reordered = applySmartActionToDraft(draft, 'text.concat', {
+      concatMove: { fromIndex: 2, toIndex: 0 },
+    });
+
+    expect(reordered.composition).toEqual({
+      kind: 'concat',
+      inputIds: ['b', 'a'],
+      parts: [
+        { kind: 'input', inputId: 'b' },
+        { kind: 'input', inputId: 'a' },
+        { kind: 'static', value: ' ' },
+      ],
+    });
+    expect(reordered.expression).toBe('concat(source("lastName"), source("firstName"), " ")');
+
+    const explicitParts = applySmartActionToDraft(draft, 'text.concat', {
+      concatParts: [
+        { kind: 'input', inputId: 'b' },
+        { kind: 'static', value: ', ' },
+        { kind: 'input', inputId: 'a' },
+      ],
+    });
+
+    expect(explicitParts.expression).toBe('concat(source("lastName"), ", ", source("firstName"))');
+    expect(explicitParts.composition?.kind).toBe('concat');
+    if (explicitParts.composition?.kind !== 'concat') return;
+    expect(explicitParts.composition.inputIds).toEqual(['b', 'a']);
+  });
+
+  it('supports null.coalesce explicit value ordering and fixed fallback independent of tray extras', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.displayName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'preferredName',
+          path: 'preferredName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'legalName',
+          path: 'legalName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'c',
+          sourceKind: 'primary' as const,
+          label: 'legacyName',
+          path: 'legacyName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'coalesce' as const,
+        inputIds: ['a', 'b'],
+        values: [
+          { kind: 'input' as const, inputId: 'a' },
+          { kind: 'input' as const, inputId: 'b' },
+        ],
+      },
+    };
+
+    const reordered = applySmartActionToDraft(draft, 'null.coalesce', {
+      coalesceMove: { fromIndex: 0, toIndex: 1 },
+    });
+    expect(reordered.expression).toBe('coalesce(source("legalName"), source("preferredName"))');
+
+    const explicit = applySmartActionToDraft(draft, 'null.coalesce', {
+      coalesceValues: [
+        { kind: 'input', inputId: 'b' },
+        { kind: 'input', inputId: 'a' },
+      ],
+      coalesceFallbackValue: 'UNKNOWN',
+    });
+
+    expect(explicit.expression).toBe('coalesce(source("legalName"), source("preferredName"), "UNKNOWN")');
+    expect(explicit.composition).toEqual({
+      kind: 'coalesce',
+      inputIds: ['b', 'a'],
+      values: [
+        { kind: 'input', inputId: 'b' },
+        { kind: 'input', inputId: 'a' },
+      ],
+      fallback: { kind: 'static', value: 'UNKNOWN' },
+    });
   });
 
   it('keeps tray inputs when switching conditional to direct', () => {
@@ -1245,7 +1566,7 @@ describe('applySmartActionToDraft', () => {
     expect(next.inputs.map((input) => input.id)).toEqual(['a', 'b']);
   });
 
-  it('identifies conditional-to-non-conditional actions that require confirmation', () => {
+  it('AE-26: identifies conditional-to-non-conditional actions that require confirmation', () => {
     const conditionDraft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.priorityFlag',
@@ -1473,6 +1794,107 @@ describe('applySmartActionToDraft', () => {
     expect(normalized.expression).toBe('subtract(source("b"), source("a"))');
   });
 
+  it('reorders explicit math operations deterministically', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.total',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'fee',
+          sourceKind: 'primary' as const,
+          label: 'fee',
+          path: 'fee',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [
+          { operator: 'add' as const, inputId: 'tax' },
+          { operator: 'subtract' as const, inputId: 'fee' },
+        ],
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'number.add', {
+      calculationMoveOperation: { fromIndex: 1, toIndex: 0 },
+    });
+
+    expect(next.composition?.kind).toBe('math');
+    if (next.composition?.kind !== 'math') return;
+    expect(next.composition.operations).toEqual([
+      { operator: 'subtract', inputId: 'fee' },
+      { operator: 'add', inputId: 'tax' },
+    ]);
+    expect(next.expression).toBe('add(subtract(source("subtotal"), source("fee")), source("tax"))');
+  });
+
+  it('sets a literal math operand at index and applies selected operator', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.ratio',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'add' as const, inputId: 'tax' }],
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'number.divide', {
+      calculationSetLiteralOperandAtIndex: 0,
+      calculationLiteralOperand: 2,
+    });
+
+    expect(next.composition?.kind).toBe('math');
+    if (next.composition?.kind !== 'math') return;
+    expect(next.composition.operations).toEqual([
+      { operator: 'divide', operand: { kind: 'static', value: 2 } },
+    ]);
+    expect(next.expression).toBe('divide(source("subtotal"), 2)');
+  });
+
   it('applies output-step actions as post steps instead of replacing composition', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -1526,6 +1948,108 @@ describe('applySmartActionToDraft', () => {
     expect(casted.expression).toBe('cast(round(add(source("subtotal"), source("tax")), 2), "string")');
   });
 
+  it('AE-07: supports explicit Refine Result step reorder and remove actions', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.total',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'subtotal' },
+      postSteps: [
+        { functionName: 'round' as const, args: [{ kind: 'static' as const, value: 0 }] },
+        { functionName: 'abs' as const },
+      ],
+    };
+
+    const moved = applySmartActionToDraft(draft, 'base.resultStep.move', {
+      outputStepMove: { fromIndex: 1, toIndex: 0 },
+    });
+    expect(moved.postSteps).toEqual([
+      { functionName: 'abs' },
+      { functionName: 'round', args: [{ kind: 'static', value: 0 }] },
+    ]);
+
+    const removed = applySmartActionToDraft(moved, 'base.resultStep.remove', {
+      outputStepRemoveIndex: 0,
+    });
+    expect(removed.postSteps).toEqual([
+      { functionName: 'round', args: [{ kind: 'static', value: 0 }] },
+    ]);
+  });
+
+  it('AE-27: restores full smart-draft state from snapshot undo after method replacement and step reorder', () => {
+    const before = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'concat' as const,
+        parts: [
+          { kind: 'input' as const, inputId: 'a' },
+          { kind: 'static' as const, value: ' ' },
+          { kind: 'input' as const, inputId: 'b' },
+        ],
+      },
+      postSteps: [{ functionName: 'trim' as const }],
+      expression: 'trim(concat(source("firstName"), " ", source("lastName")))',
+      validation: { status: 'valid' as const },
+      recipeStatus: { status: 'valid' as const },
+      validExpression: 'trim(concat(source("firstName"), " ", source("lastName")))',
+      lastValidExpression: 'trim(concat(source("firstName"), " ", source("lastName")))',
+    };
+
+    const replaced = applySmartActionToDraft(before, 'base.direct.select', { directInputId: 'b' });
+    const moved = applySmartActionToDraft(
+      {
+        ...replaced,
+        postSteps: [
+          { functionName: 'upper' as const },
+          { functionName: 'trim' as const },
+        ],
+      },
+      'base.resultStep.move',
+      { outputStepMove: { fromIndex: 1, toIndex: 0 } },
+    );
+
+    const withSnapshot = pushSmartBuilderSnapshot({ previousDraft: before, nextDraft: moved });
+    const undone = undoSmartBuilderExpression(withSnapshot);
+
+    expect(undone.composition).toEqual(before.composition);
+    expect(undone.postSteps).toEqual(before.postSteps);
+    expect(undone.expression).toBe(before.expression);
+  });
+
   it('maps null.default to default composition, not output-step wrapping', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -1546,7 +2070,10 @@ describe('applySmartActionToDraft', () => {
       composition: { kind: 'direct' as const, inputId: 'name' },
       pendingActionDraft: {
         actionId: 'null.default',
-        values: { fallbackExpression: '"UNKNOWN"' },
+        values: {
+          fallbackMode: 'fixed',
+          fallbackFixedString: 'UNKNOWN',
+        },
         validation: { isValid: true, issues: [] },
       },
     };
@@ -1558,6 +2085,48 @@ describe('applySmartActionToDraft', () => {
       fallback: { kind: 'static', value: 'UNKNOWN' },
     });
     expect(next.expression).toBe('default(source("name"), "UNKNOWN")');
+  });
+
+  it('adds null.default as result step when apply scope is result-step', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'payment.currency',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'currency',
+          sourceKind: 'primary' as const,
+          label: 'payment.currency',
+          path: 'payment.currency',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'currency' },
+      pendingActionDraft: {
+        actionId: 'null.default',
+        values: {
+          fallbackMode: 'fixed',
+          fallbackFixedString: 'USD',
+        },
+        validation: { isValid: true, issues: [] },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'null.default', {
+      editingStepScope: 'result-step',
+    });
+
+    expect(next.composition).toEqual({ kind: 'direct', inputId: 'currency' });
+    expect(next.postSteps).toEqual([
+      {
+        functionName: 'default',
+        args: [{ kind: 'static', value: 'USD' }],
+      },
+    ]);
+    expect(next.expression).toBe('default(source("payment.currency"), "USD")');
   });
 
   it('builds project-scoped value map with explicit no-match modes', () => {
@@ -1621,6 +2190,165 @@ describe('applySmartActionToDraft', () => {
       fallbackValue: 'UNKNOWN',
     });
     expect(withFallbackValue.expression).toContain('valueTable(');
+  });
+
+  it('AE-21: supports value-map explicit lookup input selection with extra tray inputs', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'legacyStatus',
+          sourceKind: 'primary' as const,
+          label: 'legacyStatus',
+          path: 'legacyStatus',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'status',
+        scope: 'inline' as const,
+        project: null,
+        mappings: [{ whenValue: 'A', output: { kind: 'static' as const, value: 'Alpha' } }],
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      directInputId: 'legacyStatus',
+      valueMapScope: 'inline',
+    });
+
+    expect(next.composition?.kind).toBe('valueMap');
+    if (next.composition?.kind !== 'valueMap') return;
+    expect(next.composition.inputId).toBe('legacyStatus');
+    expect(next.composition.mappings).toEqual([
+      { whenValue: 'A', output: { kind: 'static', value: 'Alpha' } },
+    ]);
+    expect(next.expression).toContain('source("legacyStatus")');
+    expect(next.expression).not.toContain('source("status")');
+  });
+
+  it('keeps project value-map pinning metadata intact when changing explicit lookup input', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'alt',
+          sourceKind: 'primary' as const,
+          label: 'alt',
+          path: 'alt',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'status',
+        scope: 'project' as const,
+        project: {
+          ref: {
+            scope: 'project' as const,
+            valueTableId: 'vt-1',
+            tableKey: 'status_codes',
+            revision: 7,
+            inputSideKey: 'code',
+            outputSideKey: 'label',
+          },
+          tableName: 'Status Codes',
+          tableStatus: 'active' as const,
+          currentRevision: 8,
+          directionSupport: { aToB: true, bToA: false },
+        },
+        mappings: [],
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    const next = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      directInputId: 'alt',
+      valueMapScope: 'project',
+    });
+
+    expect(next.composition?.kind).toBe('valueMap');
+    if (next.composition?.kind !== 'valueMap') return;
+    expect(next.composition.inputId).toBe('alt');
+    expect(next.composition.scope).toBe('project');
+    expect(next.composition.project).toEqual(draft.composition.project);
+  });
+
+  it('normalizes value-map fallback value by numeric target type', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'order.statusCode',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary' as const,
+          label: 'status',
+          path: 'status',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'status' },
+    };
+
+    const withNumericString = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      valueMapScope: 'inline',
+      valueMapNoMatchMode: 'fallback_value',
+      valueMapFallbackValue: '42',
+    });
+
+    expect(withNumericString.composition?.kind).toBe('valueMap');
+    if (withNumericString.composition?.kind !== 'valueMap') return;
+    expect(withNumericString.composition.noMatchBehavior).toEqual({
+      mode: 'fallback_value',
+      fallbackValue: 42,
+    });
+    expect(withNumericString.composition.fallback).toEqual({ kind: 'static', value: 42 });
+
+    const withInvalidNumeric = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      valueMapScope: 'inline',
+      valueMapNoMatchMode: 'fallback_value',
+      valueMapFallbackValue: 'not-a-number',
+    });
+    expect(withInvalidNumeric.composition?.kind).toBe('valueMap');
+    if (withInvalidNumeric.composition?.kind !== 'valueMap') return;
+    expect(withInvalidNumeric.composition.noMatchBehavior).toEqual({
+      mode: 'fallback_value',
+      fallbackValue: 0,
+    });
   });
 
   it('preserves existing inline mappings when re-applying value-map action', () => {

@@ -120,6 +120,48 @@ describe('InputTray', () => {
     expect(screen.getByTestId('smart-input-tray-usage-details-input-1')).toHaveTextContent('IF left value (condition 1, check 1)');
   });
 
+  it('renders neutral Available status for unreferenced staged inputs', () => {
+    render(
+      <InputTray
+        inputs={[
+          makeInput({ id: 'input-1', sourceKind: 'primary', label: 'firstName', path: 'firstName' }),
+          makeInput({ id: 'input-2', sourceKind: 'primary', label: 'lastName', path: 'lastName' }),
+        ]}
+        usages={[
+          { inputId: 'input-1', location: 'direct' },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-input-tray-usage-input-2')).toHaveTextContent('Available');
+  });
+
+  it('renders deterministic contextual labels for lookup/recipe-part usages', () => {
+    render(
+      <InputTray
+        inputs={[
+          makeInput({ id: 'input-1', sourceKind: 'primary', label: 'firstName', path: 'firstName' }),
+          makeInput({ id: 'input-2', sourceKind: 'primary', label: 'lastName', path: 'lastName' }),
+          makeInput({ id: 'input-3', sourceKind: 'primary', label: 'email', path: 'email' }),
+        ]}
+        usages={[
+          { inputId: 'input-1', location: 'concat-part', valueIndex: 0 },
+          { inputId: 'input-1', location: 'value-map-lookup' },
+          { inputId: 'input-2', location: 'concat-part', valueIndex: 1 },
+          { inputId: 'input-3', location: 'value-map-output', mappingIndex: 0 },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-input-tray-usage-input-2')).toHaveTextContent('Used in: Combine part 2');
+    expect(screen.getByTestId('smart-input-tray-usage-input-3')).toHaveTextContent('Used in: Mapped output row 1');
+
+    fireEvent.click(screen.getByText('Used 2×'));
+    const details = screen.getByTestId('smart-input-tray-usage-details-input-1');
+    expect(details).toHaveTextContent('Combine part 1');
+    expect(details).toHaveTextContent('Used as lookup value');
+  });
+
   it('prevents duplicate rows using input+path identity', () => {
     render(
       <InputTray
@@ -181,7 +223,21 @@ describe('InputTray', () => {
     expect(screen.getByTestId('smart-input-tray-item-focus-1')).toHaveAttribute('tabIndex', '0');
   });
 
-  it('removes unreferenced input immediately', () => {
+  it('includes non-color state text and accessible row label', () => {
+    render(
+      <InputTray
+        inputs={[makeInput({ id: 'state-1', label: 'firstName', valueType: 'string' })]}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-input-tray-state-state-1')).toHaveTextContent('State: Available');
+    expect(screen.getByTestId('smart-input-tray-item-state-1')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('Input firstName. Type String. Available.'),
+    );
+  });
+
+  it('AE-22: removes unreferenced input immediately', () => {
     const onRemoveInput = vi.fn();
     render(
       <InputTray
@@ -194,7 +250,7 @@ describe('InputTray', () => {
     expect(onRemoveInput).toHaveBeenCalledWith('input-1');
   });
 
-  it('requires confirmation before removing referenced input and lists affected usages', () => {
+  it('AE-23: requires confirmation before removing referenced input and lists affected usages', () => {
     const onRemoveInput = vi.fn();
     render(
       <InputTray
@@ -209,12 +265,32 @@ describe('InputTray', () => {
 
     fireEvent.click(screen.getByTestId('smart-input-tray-remove-input-1'));
     expect(screen.getByTestId('smart-input-tray-remove-confirm')).toBeInTheDocument();
+    expect(screen.getByTestId('confirm-dialog')).toHaveAttribute('role', 'alertdialog');
     expect(screen.getByTestId('smart-input-tray-remove-confirm-usages')).toHaveTextContent('IF left value');
     expect(screen.getByTestId('smart-input-tray-remove-confirm-usages')).toHaveTextContent('OTHERWISE output');
     expect(screen.getByTestId('smart-input-tray-remove-confirm-usages')).toHaveTextContent('condition 1, check 1');
     expect(onRemoveInput).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId('smart-input-tray-remove-confirm-accept'));
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'));
     expect(onRemoveInput).toHaveBeenCalledWith('input-1');
+  });
+
+  it('lists deterministic contextual usage labels in referenced-remove confirmation', () => {
+    const onRemoveInput = vi.fn();
+    render(
+      <InputTray
+        inputs={[makeInput({ id: 'input-1', sourceKind: 'primary', label: 'lookupField', path: 'lookupField' })]}
+        usages={[
+          { inputId: 'input-1', location: 'value-map-lookup' },
+          { inputId: 'input-1', location: 'coalesce-operand', valueIndex: 1 },
+        ]}
+        onRemoveInput={onRemoveInput}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-input-tray-remove-input-1'));
+    const usageList = screen.getByTestId('smart-input-tray-remove-confirm-usages');
+    expect(usageList).toHaveTextContent('Used as lookup value');
+    expect(usageList).toHaveTextContent('First available operand 2');
   });
 });
