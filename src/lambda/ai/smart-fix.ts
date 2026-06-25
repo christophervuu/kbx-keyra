@@ -6,11 +6,9 @@ import {
 import {
   ERROR_CODES,
   conflict,
-  errorResponse,
   generateRequestId,
   getItem,
   getObject,
-  jsonResponse,
   notFound,
   parseBody,
   query,
@@ -19,6 +17,13 @@ import {
 } from '../shared/index.js';
 import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
 import { validate } from '../../engine/index.js';
+import {
+  aiErrorResponse,
+  aiJsonResponse,
+  aiOptionsResponse,
+  isOptionsRequest,
+} from './cors.js';
+import { logAiHandlerError, mapKnownAiFailure } from './error-logging.js';
 
 interface SmartFixDiagnosticInput {
   readonly code: string;
@@ -568,16 +573,21 @@ function resolveExplanation(data: SmartFixAIOutput): string {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+
+  if (isOptionsRequest(event)) {
+    return aiOptionsResponse(requestId);
+  }
+
   const correlationId = readCorrelationId(event.headers);
   const requestBody = parseBody(event);
 
   if (!requestBody) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
   }
 
   const parsed = parseSmartFixBody(requestBody);
   if (!parsed) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Missing or invalid required Smart Fix fields',
       400,
@@ -589,7 +599,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const scope = parsed.diagnosticScope ?? 'all';
   const selectedDiagnostics = selectDiagnostics(parsed.diagnostics, scope, parsed.selectedDiagnosticIndex);
   if (!selectedDiagnostics) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Invalid selectedDiagnosticIndex for diagnosticScope=single',
       400,
@@ -606,11 +616,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!mapping) {
       const err = notFound('Mapping', parsed.mappingId, requestId);
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     if (!mapping.sourceSchemaId || !mapping.targetSchemaId || !mapping.configS3Key) {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         `Mapping '${parsed.mappingId}' is missing required schema/config references`,
         400,
@@ -628,7 +638,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const rules = Array.isArray(mappingConfig.rules) ? mappingConfig.rules : [];
     const selectedRule = rules[parsed.ruleIndex];
     if (!selectedRule || typeof selectedRule !== 'object') {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         `Rule index '${parsed.ruleIndex}' is out of range for mapping '${parsed.mappingId}'`,
         400,
@@ -644,7 +654,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     };
 
     if (currentRule.target !== parsed.targetPath) {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         `Rule targetPath mismatch for index '${parsed.ruleIndex}'`,
         400,
@@ -658,7 +668,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         'Rule snapshot is stale. Re-run fix on latest rule before applying.',
         requestId,
       );
-      return errorResponse(
+      return aiErrorResponse(
         staleError.code,
         staleError.message,
         staleError.statusCode,
@@ -678,7 +688,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         'Rule hash mismatch. Re-run fix on latest rule before applying.',
         requestId,
       );
-      return errorResponse(
+      return aiErrorResponse(
         staleError.code,
         staleError.message,
         staleError.statusCode,
@@ -700,12 +710,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!sourceSchemaMeta) {
       const err = notFound('Schema', mapping.sourceSchemaId, requestId);
-      return errorResponse(err.code, `Source ${err.message}`, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, `Source ${err.message}`, err.statusCode, err.retryable, requestId);
     }
 
     if (!targetSchemaMeta) {
       const err = notFound('Schema', mapping.targetSchemaId, requestId);
-      return errorResponse(err.code, `Target ${err.message}`, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, `Target ${err.message}`, err.statusCode, err.retryable, requestId);
     }
 
     const retrievalStartedAt = Date.now();
@@ -756,7 +766,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     if (context.includedDiagnosticCount === 0) {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         'No diagnostics could be included within Smart Fix context limits',
         400,
@@ -805,7 +815,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           code: 'INVALID_MODEL_OUTPUT',
           message: 'Model response failed schema validation: corrected expression must be a non-empty string',
         });
-        return errorResponse(
+        return aiErrorResponse(
           normalized.code,
           normalized.message,
           normalized.statusCode,
@@ -846,7 +856,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         },
       };
 
-      return jsonResponse(
+      return aiJsonResponse(
         200,
         {
           ...result,
@@ -857,15 +867,21 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const normalized = normalizeAIError(result.error);
-    return errorResponse(
+    return aiErrorResponse(
       normalized.code,
       normalized.message,
       normalized.statusCode,
       normalized.retryable,
       requestId,
     );
-  } catch {
-    return errorResponse(
+  } catch (error) {
+    const known = mapKnownAiFailure(error);
+    if (known) {
+      return aiErrorResponse(known.code, known.message, known.statusCode, known.retryable, requestId);
+    }
+
+    logAiHandlerError('[smart-fix lambda]', requestId, error);
+    return aiErrorResponse(
       ERROR_CODES.INTERNAL_ERROR,
       'Unexpected error while handling request',
       500,

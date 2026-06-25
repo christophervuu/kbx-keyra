@@ -59,7 +59,7 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('No inputs selected yet.');
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('Select a field from Input Fields or add another value.');
     expect(screen.getByTestId('smart-empty-use-fixed-value')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-empty-use-constant')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-empty-use-constant')).not.toBeInTheDocument();
     expect(screen.getByTestId('smart-builder-empty-advanced-note')).toHaveTextContent('More complex logic can be created in Advanced DSL.');
     expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
@@ -241,7 +241,7 @@ describe('SmartBuilderPanel', () => {
     expect(onEnterAdvancedMode).toHaveBeenCalled();
   });
 
-  it('opens add-output-step picker and launches parameter editor for round', () => {
+  it('opens final-transformation picker and launches parameter editor for round', () => {
     const onApplyAction = vi.fn();
     const onBeginActionParameterEdit = vi.fn();
     const draft = createEmptySmartBuilderDraft({
@@ -263,8 +263,20 @@ describe('SmartBuilderPanel', () => {
             valueType: 'number' as const,
             transforms: [],
           },
+          {
+            id: 'input-2',
+            sourceKind: 'primary' as const,
+            label: 'tax',
+            path: 'tax',
+            valueType: 'number' as const,
+            transforms: [],
+          },
         ],
-        composition: { kind: 'direct' as const, inputId: 'input-1' },
+        composition: {
+          kind: 'math' as const,
+          startInputId: 'input-1',
+          operations: [{ operator: 'add' as const, inputId: 'input-2' }],
+        },
       },
     };
 
@@ -279,6 +291,7 @@ describe('SmartBuilderPanel', () => {
     );
 
     fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
+    expect(screen.getByText('Add final transformation')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('smart-picker-action-number.round'));
 
     expect(onBeginActionParameterEdit).toHaveBeenCalledWith('number.round');
@@ -999,7 +1012,8 @@ describe('SmartBuilderPanel', () => {
     );
 
     expect(screen.getByTestId('smart-direct-value-section')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-recipe-steps')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-direct-value-add-step')).toBeInTheDocument();
     expect(screen.getByTestId('smart-action-live-region')).toBeInTheDocument();
   });
 
@@ -1278,7 +1292,7 @@ describe('SmartBuilderPanel', () => {
     expect(screen.queryByTestId('smart-step-picker')).not.toBeInTheDocument();
   });
 
-  it('does not show substring action in add-output-step picker', () => {
+  it('shows substring and convert type actions in direct transformation picker', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.emailDomain',
@@ -1306,13 +1320,13 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
-    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
+    fireEvent.click(screen.getByTestId('smart-direct-value-add-step'));
 
-    expect(screen.queryByTestId('smart-picker-action-text.substring')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-picker-action-text.substring')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-picker-action-convert.cast')).toBeInTheDocument();
   });
 
-  it('does not surface input-transform unavailable rows in output-step picker', () => {
+  it('surfaces input-transform unavailable rows in direct transformation picker when pending draft is invalid', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.emailDomain',
@@ -1348,10 +1362,10 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
 
-    expect(screen.queryByTestId('smart-picker-disabled-text.substring')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-picker-disabled-text.substring')).toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-text.substring')).not.toBeInTheDocument();
   });
 
@@ -1387,7 +1401,7 @@ describe('SmartBuilderPanel', () => {
     expect(screen.queryByText('Fallback')).not.toBeInTheDocument();
   });
 
-  it('routes null.default from Refine Result add-step flow into parameter-edit mode', () => {
+  it('routes null.default from direct transformation add flow into parameter-edit mode', () => {
     const onBeginActionParameterEdit = vi.fn();
     const onApplyAction = vi.fn();
     const draft = {
@@ -1419,7 +1433,7 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'default' } });
     fireEvent.click(screen.getByTestId('smart-picker-action-null.default'));
 
@@ -1546,13 +1560,11 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
-    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'format' } });
-    expect(screen.queryByTestId('smart-picker-action-date.format')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-add-step')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('smart-direct-value-menu-toggle'));
-    fireEvent.click(screen.getByTestId('smart-direct-value-menu-add-step'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'format' } });
+    expect(screen.getByText('Add transformation')).toBeInTheDocument();
     expect(screen.getByTestId('smart-picker-action-date.format')).toBeInTheDocument();
   });
 
@@ -1588,13 +1600,76 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-direct-value-menu-toggle'));
-    fireEvent.click(screen.getByTestId('smart-direct-value-menu-add-step'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'format' } });
     fireEvent.click(screen.getByTestId('smart-picker-action-date.format'));
 
     expect(onBeginActionParameterEdit).toHaveBeenCalledWith('date.format');
     expect(onApplyAction).not.toHaveBeenCalled();
+  });
+
+  it('keeps Add Value Step anchored under selected concat input part and applies trim as value-step', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'firstName',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'lastName',
+          sourceKind: 'primary' as const,
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'concat' as const,
+        inputIds: ['firstName', 'lastName'],
+        parts: [
+          { kind: 'input' as const, inputId: 'firstName' },
+          { kind: 'static' as const, value: ' ' },
+          { kind: 'input' as const, inputId: 'lastName' },
+        ],
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.fullName"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-recipe-add-step'));
+    expect(screen.getByText('Add final transformation')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('smart-concat-part-menu-toggle-0'));
+    fireEvent.click(screen.getByTestId('smart-concat-part-menu-add-step-0'));
+
+    const firstNamePart = screen.getByTestId('smart-concat-part-0');
+    expect(within(firstNamePart).getByText('Add transformation')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'trim' } });
+    fireEvent.click(screen.getByTestId('smart-picker-action-text.trim'));
+
+    expect(onApplyAction).toHaveBeenCalledWith('text.trim', {
+      editingStepScope: 'value-step',
+      valueStepTarget: { kind: 'concat-part', partIndex: 0 },
+    });
   });
 
   it('renders parameter editor with field validation and blocked apply when invalid', () => {
@@ -1928,7 +2003,11 @@ describe('SmartBuilderPanel', () => {
           transforms: [],
         },
       ],
-      composition: { kind: 'direct' as const, inputId: 'a' },
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'a',
+        operations: [{ operator: 'add' as const, inputId: 'b' }],
+      },
     };
 
     render(
@@ -1945,6 +2024,7 @@ describe('SmartBuilderPanel', () => {
     expect(screen.queryByTestId('smart-picker-action-number.subtract')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-condition.if')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-text.upper')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-picker-action-convert.cast')).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'round' } });
     expect(screen.getByTestId('smart-picker-action-number.round')).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'default' } });
@@ -2146,10 +2226,12 @@ describe('SmartBuilderPanel', () => {
     const steps = screen.getByTestId('smart-recipe-steps');
     const pos = formula.compareDocumentPosition(steps);
     expect((pos & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+    expect(screen.getByText('Final transformations')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-recipe-add-step')).toHaveTextContent('+ Add transformation');
     expect(screen.getByTestId('smart-recipe-steps-list')).toHaveTextContent('round');
   });
 
-  it('renders Refine Result empty state with add-step affordance', () => {
+  it('does not render Final transformations section for direct mapping', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.name',
@@ -2178,13 +2260,54 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    expect(screen.getByTestId('smart-recipe-steps')).toBeInTheDocument();
-    expect(screen.getByText('Refine Result')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-recipe-add-step')).toHaveTextContent('+ Add step');
-    expect(screen.queryByTestId('smart-recipe-steps-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-add-step')).not.toBeInTheDocument();
+    expect(screen.queryByText('Final transformations')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-direct-value-add-step')).toHaveTextContent('+ Add transformation');
   });
 
-  it('supports Refine Result step reorder and remove controls', () => {
+  it('renders legacy direct postSteps in selected-value transformations for compatibility', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'gross',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'subtotal',
+          sourceKind: 'primary' as const,
+          label: 'subtotal',
+          path: 'subtotal',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+        {
+          id: 'tax',
+          sourceKind: 'primary' as const,
+          label: 'tax',
+          path: 'tax',
+          valueType: 'number' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'subtotal' },
+      postSteps: [{ functionName: 'round', args: [{ kind: 'static' as const, value: 2 }] }],
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="gross"
+        targetType="number"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    expect(screen.queryByTestId('smart-recipe-steps')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-direct-value-steps-list')).toHaveTextContent('round');
+  });
+
+  it('supports Final transformations step reorder and remove controls', () => {
     const onApplyAction = vi.fn();
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -2202,7 +2325,11 @@ describe('SmartBuilderPanel', () => {
           transforms: [],
         },
       ],
-      composition: { kind: 'direct' as const, inputId: 'subtotal' },
+      composition: {
+        kind: 'math' as const,
+        startInputId: 'subtotal',
+        operations: [{ operator: 'add' as const, inputId: 'tax' }],
+      },
       postSteps: [
         { functionName: 'round' as const, args: [{ kind: 'static' as const, value: 2 }] },
         { functionName: 'abs' as const },
@@ -2234,7 +2361,7 @@ describe('SmartBuilderPanel', () => {
     });
   });
 
-  it('hydrates round output-step edit values and decimals parameter field', () => {
+  it('hydrates round direct-value step edit values and decimals parameter field', () => {
     const onBeginActionParameterEdit = vi.fn();
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -2252,8 +2379,16 @@ describe('SmartBuilderPanel', () => {
           transforms: [],
         },
       ],
-      composition: { kind: 'direct' as const, inputId: 'subtotal' },
-      postSteps: [{ functionName: 'round', args: [{ kind: 'static' as const, value: 2 }] }],
+      composition: {
+        kind: 'direct' as const,
+        inputId: 'subtotal',
+        value: {
+          kind: 'input' as const,
+          inputId: 'subtotal',
+          transforms: [{ functionName: 'round', args: [{ kind: 'static' as const, value: 2 }] }],
+        },
+      },
+      postSteps: [],
       pendingActionDraft: {
         actionId: 'number.round',
         values: { decimals: 2 },
@@ -2270,7 +2405,7 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('smart-recipe-step-edit-0'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-step-edit-0'));
     expect(onBeginActionParameterEdit).toHaveBeenCalledWith('number.round', { decimals: 2 });
 
     expect(screen.getByTestId('smart-parameter-field-decimals')).toBeInTheDocument();

@@ -97,4 +97,19 @@ describe('delete-mapping handler', () => {
       }),
     );
   });
+
+  it('returns 204 when mapping config object is already missing in S3', async () => {
+    sharedMocks.deleteObject.mockRejectedValueOnce({
+      appError: {
+        code: 'RESOURCE_NOT_FOUND',
+      },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(204);
+    expect(sharedMocks.deleteItem).toHaveBeenCalledTimes(1);
+    expect(sharedMocks.deleteObject).toHaveBeenCalledTimes(1);
+  });
 });

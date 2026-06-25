@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { AIError } from '../../../src/lib/ai/types.js';
 import type { APIGatewayProxyEvent } from '../../../src/lambda/shared/index.js';
 
 const invokeAIMock = vi.hoisted(() => vi.fn());
@@ -28,10 +29,11 @@ vi.mock('../../../src/lib/ai/index.js', () => {
   };
 });
 
-function createEvent(body: string | null): APIGatewayProxyEvent {
+function createEvent(body: string | null, overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayProxyEvent {
   return {
     body,
     headers: {},
+    ...overrides,
   };
 }
 
@@ -92,6 +94,19 @@ describe('aiExplainRule handler', () => {
     expect(invokeAIMock).toHaveBeenCalledWith('explain-rule', {
       targetPath: 'Order.Id',
       expression: 'source("id")',
+    });
+  });
+
+  it('handles OPTIONS preflight with AI CORS headers', async () => {
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(createEvent(null, { httpMethod: 'OPTIONS' }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers).toMatchObject({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'OPTIONS,POST',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     });
   });
 
@@ -296,6 +311,74 @@ describe('aiExplainRule handler', () => {
       code: 'INTERNAL_ERROR',
       statusCode: 500,
       retryable: false,
+    });
+  });
+
+  it('surfaces CONFIG_ERROR thrown from invokeAI as canonical INTERNAL_ERROR with non-generic message', async () => {
+    const configError: AIError = {
+      success: false,
+      error: {
+        code: 'CONFIG_ERROR',
+        message: 'Missing required configuration: GITHUB_TOKEN',
+      },
+      promptId: 'explain-rule',
+    };
+
+    invokeAIMock.mockRejectedValue(configError);
+
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetPath: 'Order.Id',
+          expression: 'source("id")',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(500);
+    const parsed = JSON.parse(response.body) as {
+      error: { code: string; message: string; statusCode: number; retryable: boolean };
+    };
+    expect(parsed.error).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      message: 'Missing required configuration: GITHUB_TOKEN',
+      statusCode: 500,
+      retryable: false,
+    });
+  });
+
+  it('maps thrown AI MODEL_ERROR envelopes to canonical SERVICE_UNAVAILABLE', async () => {
+    invokeAIMock.mockRejectedValue({
+      success: false,
+      error: {
+        code: 'MODEL_RATE_LIMITED',
+        message: 'Rate limited',
+      },
+      promptId: 'explain-rule',
+    });
+
+    const { handler } = await import('../../../src/lambda/ai/explain-rule.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetPath: 'Order.Id',
+          expression: 'source("id")',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(503);
+    const parsed = JSON.parse(response.body) as {
+      error: { code: string; message: string; statusCode: number; retryable: boolean };
+    };
+    expect(parsed.error).toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Rate limited',
+      statusCode: 503,
+      retryable: true,
     });
   });
 

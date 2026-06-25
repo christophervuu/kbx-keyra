@@ -264,6 +264,23 @@ describe('aiSuggestExpression handler', () => {
     });
   });
 
+  it('handles OPTIONS preflight with AI CORS headers', async () => {
+    const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
+
+    const response = await handler({
+      body: null,
+      headers: {},
+      httpMethod: 'OPTIONS',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers).toMatchObject({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'OPTIONS,POST',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    });
+  });
+
   it('returns VALIDATION_ERROR when mappingId is missing', async () => {
     const { handler } = await import('../../../src/lambda/ai/suggest-expression.js');
 

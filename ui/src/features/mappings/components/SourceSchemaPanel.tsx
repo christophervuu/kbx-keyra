@@ -685,33 +685,6 @@ export function SourceSchemaPanel({
           </p>
         )}
 
-        <div className="mt-2" data-testid="source-selection-context">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Selection behavior</p>
-          <p className="mt-1 text-[10px] text-slate-500" data-testid="source-selection-context-hint">
-            {isExplicitAddInputMode
-              ? 'Add Input mode: select one or more fields to add to Inputs.'
-              : canFillCurrentValue
-                ? 'Select a field to fill the active value slot. Selection also adds it to Inputs.'
-                : 'Select fields to add them to Inputs.'}
-          </p>
-          {canFillCurrentValue && (
-            <button
-              type="button"
-              data-testid="source-selection-context-toggle-add-input"
-              className="mt-1 rounded border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300 hover:border-slate-500"
-              onClick={() => onExplicitAddInputModeChange?.(!isExplicitAddInputMode)}
-            >
-              {isExplicitAddInputMode ? 'Back to slot fill' : 'Add Input instead'}
-            </button>
-          )}
-        </div>
-        <p className="sr-only" aria-live="polite" data-testid="source-selection-context-announcement">
-          {isExplicitAddInputMode
-            ? 'Selection mode: Add Input. Focus returns to the active recipe slot after choosing a source field.'
-            : canFillCurrentValue
-              ? 'Selection mode: Fill active recipe slot. Focus returns to that slot after choosing a source field.'
-              : 'Selection mode: Add input to tray.'}
-        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

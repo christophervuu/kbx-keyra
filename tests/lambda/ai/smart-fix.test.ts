@@ -43,10 +43,11 @@ vi.mock('../../../src/lib/ai/index.js', () => {
 
 vi.mock('../../../src/lambda/shared/index.js', () => sharedMocks);
 
-function createEvent(body: string | null): APIGatewayProxyEvent {
+function createEvent(body: string | null, overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayProxyEvent {
   return {
     body,
     headers: {},
+    ...overrides,
   };
 }
 
@@ -351,6 +352,19 @@ describe('aiSmartFix handler', () => {
     expect(invokeArgs.diagnosticsContext.indexOf('KEYRA-E005')).toBeLessThan(
       invokeArgs.diagnosticsContext.indexOf('KEYRA-W001'),
     );
+  });
+
+  it('handles OPTIONS preflight with AI CORS headers', async () => {
+    const { handler } = await import('../../../src/lambda/ai/smart-fix.js');
+
+    const response = await handler(createEvent(null, { httpMethod: 'OPTIONS' }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers).toMatchObject({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'OPTIONS,POST',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    });
   });
 
   it('uses single diagnostic scope when explicitly requested', async () => {

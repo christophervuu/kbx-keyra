@@ -7,7 +7,7 @@ import { renderPrompt } from './prompt-renderer.js';
 import { resolveInvocationProfile } from './routing.js';
 import { validateInvokePayload, validatePromptContract } from './invocation-guards.js';
 import { createTelemetrySession } from './telemetry.js';
-import { resolvePromptId } from './prompt-ids.js';
+import { getLegacyAliasesForCanonicalPromptId, resolvePromptId } from './prompt-ids.js';
 import { getResponseSchemaContract } from './response-contracts.js';
 import type {
   AIInvocationFailure,
@@ -107,20 +107,42 @@ export async function invokeAI<T = unknown>(
   let promptRecord: PromptRecord;
   try {
     const loadedPrompt = await promptRegistry.getLatestPrompt(resolvedPromptId);
-    if (!loadedPrompt) {
-      const failure: AIInvocationFailure = {
-        success: false,
-        error: {
-          code: 'PROMPT_NOT_FOUND',
-          message: `No prompt found for promptId: ${resolvedPromptId}`,
-        },
-        promptId: resolvedPromptId,
-      };
 
-      return emitAndReturnFailure(failure);
+    if (loadedPrompt) {
+      promptRecord = loadedPrompt;
+    } else {
+      const legacyAliases = getLegacyAliasesForCanonicalPromptId(resolvedPromptId);
+      let fallbackRecord: PromptRecord | null = null;
+
+      for (const legacyAlias of legacyAliases) {
+        // Compatibility fallback for environments still keyed by legacy prompt IDs.
+        // Canonical ID remains authoritative; fallback is only used on canonical miss.
+        // eslint-disable-next-line no-await-in-loop
+        const candidate = await promptRegistry.getLatestPrompt(legacyAlias);
+        if (candidate) {
+          fallbackRecord = {
+            ...candidate,
+            promptId: resolvedPromptId,
+          };
+          break;
+        }
+      }
+
+      if (!fallbackRecord) {
+        const failure: AIInvocationFailure = {
+          success: false,
+          error: {
+            code: 'PROMPT_NOT_FOUND',
+            message: `No prompt found for promptId: ${resolvedPromptId}`,
+          },
+          promptId: resolvedPromptId,
+        };
+
+        return emitAndReturnFailure(failure);
+      }
+
+      promptRecord = fallbackRecord;
     }
-
-    promptRecord = loadedPrompt;
   } catch (error) {
     const failure: AIInvocationFailure = {
       success: false,

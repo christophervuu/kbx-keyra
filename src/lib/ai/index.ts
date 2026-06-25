@@ -26,6 +26,7 @@ export {
   PROMPT_ID_ALIASES,
   PROMPT_ID_ALIAS_POLICY,
   resolvePromptId,
+  getLegacyAliasesForCanonicalPromptId,
   type CanonicalPromptId,
   type PromptIdAlias,
   type PromptIdResolution,

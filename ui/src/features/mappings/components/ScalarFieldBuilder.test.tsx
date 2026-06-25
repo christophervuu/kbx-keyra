@@ -1666,8 +1666,7 @@ describe('ScalarFieldBuilder', () => {
       onSmartCancelActionParameterDraft,
     });
 
-    fireEvent.click(screen.getByTestId('smart-direct-value-menu-toggle'));
-    fireEvent.click(screen.getByTestId('smart-direct-value-menu-add-step'));
+    fireEvent.click(screen.getByTestId('smart-direct-value-add-step'));
     fireEvent.change(screen.getByTestId('smart-picker-search'), { target: { value: 'substring' } });
     fireEvent.click(screen.getByTestId('smart-picker-action-text.substring'));
     expect(onSmartBeginActionParameterEdit).toHaveBeenCalledWith('text.substring');

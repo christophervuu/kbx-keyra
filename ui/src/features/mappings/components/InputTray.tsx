@@ -14,6 +14,8 @@ interface InputTrayProps {
   readonly className?: string;
   readonly onRemoveInput?: (inputId: string) => void;
   readonly onToggleAddInput?: () => void;
+  readonly showBuilderEmptyGuidance?: boolean;
+  readonly onUseFixedValue?: () => void;
 }
 
 const TYPE_BADGES: Record<BuilderInput['valueType'], { short: string; tone: string; label: string }> = {
@@ -47,7 +49,7 @@ const USAGE_LABELS: Record<BuilderInputUsageLocation, string> = {
   'value-map-fallback': 'Lookup fallback',
   'array-build-item': 'Array item',
   'array-merge-item': 'Merge input',
-  'result-step-arg': 'Refine Result argument',
+  'result-step-arg': 'Final transformation argument',
 };
 
 function formatSampleValue(input: BuilderInput): string {
@@ -119,6 +121,8 @@ export function InputTray({
   className = '',
   onRemoveInput,
   onToggleAddInput,
+  showBuilderEmptyGuidance = false,
+  onUseFixedValue,
 }: InputTrayProps) {
   const [pendingReferencedRemove, setPendingReferencedRemove] = useState<{
     readonly inputId: string;
@@ -228,9 +232,29 @@ export function InputTray({
           className="rounded border border-dashed border-slate-700 bg-slate-900/40 px-3 py-3 text-xs text-slate-400"
           data-testid="smart-input-tray-empty"
         >
-          No inputs selected yet.
-          <br />
-          Add a source field to build this mapping.
+          {showBuilderEmptyGuidance ? (
+            <div data-testid="smart-builder-empty-state">
+              <p className="text-sm font-medium text-slate-100">No inputs selected yet.</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Select a field from Input Fields or add another value.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="smart-builder-empty-actions">
+                <button
+                  type="button"
+                  data-testid="smart-empty-use-fixed-value"
+                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                  onClick={() => onUseFixedValue?.()}
+                >
+                  Use fixed value
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500" data-testid="smart-builder-empty-advanced-note">
+                More complex logic can be created in Advanced DSL.
+              </p>
+            </div>
+          ) : (
+            <>No inputs selected yet.</>
+          )}
         </div>
       ) : (
         <div

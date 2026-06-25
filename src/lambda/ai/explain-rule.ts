@@ -1,13 +1,18 @@
 import {
   ERROR_CODES,
-  errorResponse,
   generateRequestId,
-  jsonResponse,
   parseBody,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
+import {
+  aiErrorResponse,
+  aiJsonResponse,
+  aiOptionsResponse,
+  isOptionsRequest,
+} from './cors.js';
+import { logAiHandlerError, mapKnownAiFailure } from './error-logging.js';
 
 interface ExplainRuleOutput {
   explanation: string;
@@ -53,25 +58,30 @@ function normalizeExplainRuleOutput(data: ExplainRuleOutput): ExplainRuleOutput 
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+
+  if (isOptionsRequest(event)) {
+    return aiOptionsResponse(requestId);
+  }
+
   const requestBody = parseBody(event);
 
   if (!requestBody) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
   }
 
   const targetPath = requestBody.targetPath;
   if (typeof targetPath !== 'string') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetPath', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetPath', 400, false, requestId);
   }
 
   const expression = requestBody.expression;
   if (typeof expression !== 'string') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: expression', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: expression', 400, false, requestId);
   }
 
   const normalizedExpression = expression.trim();
   if (normalizedExpression.length === 0) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Expression must be a non-empty string',
       400,
@@ -81,7 +91,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   if (!hasMeaningfulDslFragment(normalizedExpression)) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Expression is completely unparsable: no meaningful DSL fragment found',
       400,
@@ -104,7 +114,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           code: 'INVALID_MODEL_OUTPUT',
           message: 'Model response failed schema validation: explanation must be non-empty',
         });
-        return errorResponse(
+        return aiErrorResponse(
           normalized.code,
           normalized.message,
           normalized.statusCode,
@@ -113,19 +123,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         );
       }
 
-      return jsonResponse(200, { ...result, data: explanation }, requestId);
+      return aiJsonResponse(200, { ...result, data: explanation }, requestId);
     }
 
     const normalized = normalizeAIError(result.error);
-    return errorResponse(
+    return aiErrorResponse(
       normalized.code,
       normalized.message,
       normalized.statusCode,
       normalized.retryable,
       requestId,
     );
-  } catch {
-    return errorResponse(
+  } catch (error) {
+    const known = mapKnownAiFailure(error);
+    if (known) {
+      return aiErrorResponse(known.code, known.message, known.statusCode, known.retryable, requestId);
+    }
+
+    logAiHandlerError('[explain-rule lambda]', requestId, error);
+    return aiErrorResponse(
       ERROR_CODES.INTERNAL_ERROR,
       'Unexpected error while handling request',
       500,

@@ -6,6 +6,7 @@ import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
 import type { CurrentDeployments } from '@/lib/api/types';
 import type { AppError } from '@/lib/state/app-error';
+import { toAppError } from '@/lib/state/app-error';
 import type {
   DeployStatus,
   MappingMetadata,
@@ -138,6 +139,11 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
   useEffect(() => {
     projectRef.current = project;
   }, [project]);
+
+  const mappingsMetaRef = useRef<MappingMetadata[]>([]);
+  useEffect(() => {
+    mappingsMetaRef.current = mappingsMeta;
+  }, [mappingsMeta]);
 
   // ---------------------------------------------------------------------------
   // Load
@@ -370,8 +376,49 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   const deleteMappingAction = useCallback(
     async (mappingId: string) => {
-      await adapter.deleteMapping(mappingId);
-      setMappingsMeta((prev) => prev.filter((m) => m.mappingId !== mappingId));
+      const currentMappings = mappingsMetaRef.current;
+      const removedIndex = currentMappings.findIndex((m) => m.mappingId === mappingId);
+      const removedMapping = removedIndex >= 0 ? currentMappings[removedIndex] : null;
+
+      if (removedIndex >= 0) {
+        setMappingsMeta((prev) => prev.filter((m) => m.mappingId !== mappingId));
+      }
+
+      try {
+        await adapter.deleteMapping(mappingId);
+      } catch (error: unknown) {
+        const appError = toAppError(error);
+
+        if (appError.code === 'MALFORMED_RESPONSE') {
+          return;
+        }
+
+        try {
+          await adapter.getMapping(mappingId);
+        } catch (verifyError: unknown) {
+          const verifyAppError = toAppError(verifyError);
+          if (
+            verifyAppError.statusCode === 404
+            || verifyAppError.code === 'RESOURCE_NOT_FOUND'
+            || verifyAppError.code === 'NOT_FOUND'
+          ) {
+            return;
+          }
+        }
+
+        if (removedMapping && removedIndex >= 0) {
+          setMappingsMeta((prev) => {
+            const alreadyRestored = prev.some((m) => m.mappingId === mappingId);
+            if (alreadyRestored) return prev;
+            const next = [...prev];
+            const insertIndex = Math.min(Math.max(removedIndex, 0), next.length);
+            next.splice(insertIndex, 0, removedMapping);
+            return next;
+          });
+        }
+
+        throw error;
+      }
     },
     [adapter],
   );

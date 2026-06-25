@@ -33,12 +33,31 @@ export interface PromptIdResolution {
 
 const CANONICAL_PROMPT_ID_SET = new Set<CanonicalPromptId>(Object.values(PROMPT_IDS));
 
+const LEGACY_ALIASES_BY_CANONICAL: Readonly<Record<CanonicalPromptId, readonly PromptIdAlias[]>> =
+  Object.values(PROMPT_IDS).reduce<Record<CanonicalPromptId, PromptIdAlias[]>>((acc, canonicalPromptId) => {
+    acc[canonicalPromptId] = Object.entries(PROMPT_ID_ALIASES)
+      .filter(([, canonical]) => canonical === canonicalPromptId)
+      .map(([alias]) => alias as PromptIdAlias);
+    return acc;
+  }, {
+    [PROMPT_IDS.EXPLAIN_RULE]: [],
+    [PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL]: [],
+    [PROMPT_IDS.SMART_FIX]: [],
+    [PROMPT_IDS.AI_VALIDATION]: [],
+    [PROMPT_IDS.AUTO_MAP]: [],
+    [PROMPT_IDS.FIELD_DESCRIPTION]: [],
+  });
+
 export function isCanonicalPromptId(value: string): value is CanonicalPromptId {
   return CANONICAL_PROMPT_ID_SET.has(value as CanonicalPromptId);
 }
 
 export function isSupportedPromptId(value: string): value is CanonicalPromptId | PromptIdAlias {
   return isCanonicalPromptId(value) || value in PROMPT_ID_ALIASES;
+}
+
+export function getLegacyAliasesForCanonicalPromptId(canonicalPromptId: CanonicalPromptId): readonly PromptIdAlias[] {
+  return LEGACY_ALIASES_BY_CANONICAL[canonicalPromptId] ?? [];
 }
 
 export function resolvePromptId(requestedPromptId: string): PromptIdResolution | null {

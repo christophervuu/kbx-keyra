@@ -300,6 +300,86 @@ describe('useProjectOverview', () => {
     expect(result.current.mappings).toHaveLength(0);
   });
 
+  it('deleteMappingAction keeps optimistic removal when delete returns MALFORMED_RESPONSE', async () => {
+    const malformedDeleteError = Object.assign(new Error('Received malformed response envelope from server.'), {
+      code: 'MALFORMED_RESPONSE',
+      retryable: false,
+    });
+
+    const adapter = createMockAdapter({
+      deleteMapping: vi.fn().mockRejectedValue(malformedDeleteError),
+    });
+
+    const { result } = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+    expect(result.current.mappings).toHaveLength(1);
+
+    await act(async () => {
+      await expect(result.current.deleteMappingAction('mapping-1')).resolves.toBeUndefined();
+    });
+
+    expect(adapter.deleteMapping).toHaveBeenCalledWith('mapping-1');
+    expect(result.current.mappings).toHaveLength(0);
+  });
+
+  it('deleteMappingAction restores mapping when delete fails for non-malformed errors', async () => {
+    const adapter = createMockAdapter({
+      deleteMapping: vi.fn().mockRejectedValue(new Error('Delete failed')),
+      getMapping: vi.fn().mockResolvedValue({
+        id: 'mapping-1',
+        name: 'Mapping One',
+        version: 1,
+        engineVersion: '2.0.0',
+        config: {},
+        rules: [],
+      }),
+    });
+
+    const { result } = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+    expect(result.current.mappings).toHaveLength(1);
+
+    await act(async () => {
+      await expect(result.current.deleteMappingAction('mapping-1')).rejects.toThrow('Delete failed');
+    });
+
+    expect(adapter.deleteMapping).toHaveBeenCalledWith('mapping-1');
+    expect(adapter.getMapping).toHaveBeenCalledWith('mapping-1');
+    expect(result.current.mappings).toHaveLength(1);
+    expect(result.current.mappings[0].mappingId).toBe('mapping-1');
+  });
+
+  it('deleteMappingAction keeps removal when delete errors but follow-up getMapping returns not found', async () => {
+    const adapter = createMockAdapter({
+      deleteMapping: vi.fn().mockRejectedValue(new Error('Delete failed')),
+      getMapping: vi.fn().mockRejectedValue(Object.assign(new Error('not found'), {
+        code: 'RESOURCE_NOT_FOUND',
+        statusCode: 404,
+      })),
+    });
+
+    const { result } = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: makeWrapper(adapter),
+    });
+
+    await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+    expect(result.current.mappings).toHaveLength(1);
+
+    await act(async () => {
+      await expect(result.current.deleteMappingAction('mapping-1')).resolves.toBeUndefined();
+    });
+
+    expect(adapter.deleteMapping).toHaveBeenCalledWith('mapping-1');
+    expect(adapter.getMapping).toHaveBeenCalledWith('mapping-1');
+    expect(result.current.mappings).toHaveLength(0);
+  });
+
   it('duplicateMappingAction adds a copy to the mappings list', async () => {
     const adapter = createMockAdapter();
 

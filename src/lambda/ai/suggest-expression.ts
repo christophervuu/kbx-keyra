@@ -5,18 +5,23 @@ import {
 } from '../../lib/ai/telemetry.js';
 import {
   ERROR_CODES,
+  generateRequestId,
   getItem,
   getObject,
   notFound,
-  query,
-  errorResponse,
-  generateRequestId,
-  jsonResponse,
   parseBody,
+  query,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
+import {
+  aiErrorResponse,
+  aiJsonResponse,
+  aiOptionsResponse,
+  isOptionsRequest,
+} from './cors.js';
+import { logAiHandlerError, mapKnownAiFailure } from './error-logging.js';
 import { validate } from '../../engine/index.js';
 
 interface MappingMetadataRecord {
@@ -230,31 +235,36 @@ function validateGeneratedExpression(params: {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+
+  if (isOptionsRequest(event)) {
+    return aiOptionsResponse(requestId);
+  }
+
   const correlationId = readCorrelationId(event.headers);
   const requestBody = parseBody(event);
 
   if (!requestBody) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
   }
 
   const instruction = requestBody.instruction;
   if (typeof instruction !== 'string' || instruction === '') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: instruction', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: instruction', 400, false, requestId);
   }
 
   const targetPath = requestBody.targetPath;
   if (typeof targetPath !== 'string' || targetPath === '') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetPath', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetPath', 400, false, requestId);
   }
 
   const targetType = requestBody.targetType;
   if (typeof targetType !== 'string' || targetType === '') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetType', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: targetType', 400, false, requestId);
   }
 
   const mappingId = requestBody.mappingId;
   if (typeof mappingId !== 'string' || mappingId === '') {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: mappingId', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required field: mappingId', 400, false, requestId);
   }
 
   const targetDescription =
@@ -268,11 +278,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!mapping) {
       const err = notFound('Mapping', mappingId, requestId);
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     if (!mapping.sourceSchemaId || !mapping.targetSchemaId) {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         `Mapping '${mappingId}' is missing required source/target schema references`,
         400,
@@ -294,12 +304,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!sourceSchemaMeta) {
       const err = notFound('Schema', mapping.sourceSchemaId, requestId);
-      return errorResponse(err.code, `Source ${err.message}`, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, `Source ${err.message}`, err.statusCode, err.retryable, requestId);
     }
 
     if (!targetSchemaMeta) {
       const err = notFound('Schema', mapping.targetSchemaId, requestId);
-      return errorResponse(err.code, `Target ${err.message}`, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, `Target ${err.message}`, err.statusCode, err.retryable, requestId);
     }
 
     const retrievalStartedAt = Date.now();
@@ -333,7 +343,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     if (sourceContext.includedNodeCount === 0) {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         `Source schema '${mapping.sourceSchemaId}' has no retrievable context for suggestion generation`,
         400,
@@ -376,7 +386,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           code: 'INVALID_MODEL_OUTPUT',
           message: 'Model response failed schema validation: expression must be a non-empty string',
         });
-        return errorResponse(
+        return aiErrorResponse(
           normalized.code,
           normalized.message,
           normalized.statusCode,
@@ -393,7 +403,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         targetSchema,
       });
 
-      return jsonResponse(
+      return aiJsonResponse(
         200,
         {
           ...result,
@@ -416,15 +426,21 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const normalized = normalizeAIError(result.error);
-    return errorResponse(
+    return aiErrorResponse(
       normalized.code,
       normalized.message,
       normalized.statusCode,
       normalized.retryable,
       requestId,
     );
-  } catch {
-    return errorResponse(
+  } catch (error) {
+    const known = mapKnownAiFailure(error);
+    if (known) {
+      return aiErrorResponse(known.code, known.message, known.statusCode, known.retryable, requestId);
+    }
+
+    logAiHandlerError('[suggest-expression lambda]', requestId, error);
+    return aiErrorResponse(
       ERROR_CODES.INTERNAL_ERROR,
       'Unexpected error while handling request',
       500,

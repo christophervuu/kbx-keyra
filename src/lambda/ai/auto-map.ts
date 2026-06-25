@@ -12,15 +12,20 @@ import {
 } from '../../lib/ai/telemetry.js';
 import {
   ERROR_CODES,
-  errorResponse,
   getItem,
   generateRequestId,
-  jsonResponse,
   notFound,
   parseBody,
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
+import {
+  aiErrorResponse,
+  aiJsonResponse,
+  aiOptionsResponse,
+  isOptionsRequest,
+} from './cors.js';
+import { logAiHandlerError, mapKnownAiFailure, serializeUnknownError } from './error-logging.js';
 
 const AUTO_MAP_LOG_PREFIX = '[auto-map lambda]';
 const LOG_TEXT_LIMIT = 400;
@@ -110,18 +115,6 @@ function summarizeTextField(value: unknown):
   return {
     length: value.length,
     preview: truncateForLog(value),
-  };
-}
-
-function autoMapJsonResponse(statusCode: number, payload: unknown, requestId?: string): APIGatewayProxyResult {
-  const base = jsonResponse(statusCode, payload, requestId);
-  return {
-    ...base,
-    headers: {
-      ...(base.headers ?? {}),
-      'Access-Control-Allow-Methods': 'OPTIONS,POST',
-      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-    },
   };
 }
 
@@ -418,7 +411,7 @@ async function resolveSourceSchemaId(params: {
   }
 
   if (!params.mappingId) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Missing required retrieval identity: provide sourceSchemaId or mappingId',
       400,
@@ -434,11 +427,11 @@ async function resolveSourceSchemaId(params: {
 
   if (!mapping) {
     const err = notFound('Mapping', params.mappingId, params.requestId);
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable, params.requestId);
+    return aiErrorResponse(err.code, err.message, err.statusCode, err.retryable, params.requestId);
   }
 
   if (!mapping.sourceSchemaId || mapping.sourceSchemaId.trim() === '') {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       `Mapping '${params.mappingId}' is missing required source schema reference`,
       400,
@@ -787,11 +780,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     bodyLength: typeof event.body === 'string' ? event.body.length : 0,
   });
 
-  if (event.httpMethod === 'OPTIONS') {
+  if (isOptionsRequest(event)) {
     console.info(`${AUTO_MAP_LOG_PREFIX} options preflight`);
-    return autoMapJsonResponse(200, {
-      ok: true,
-    }, requestId);
+    return aiOptionsResponse(requestId);
   }
 
   const requestBody = parseBody(event);
@@ -799,7 +790,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     console.error(`${AUTO_MAP_LOG_PREFIX} invalid request body`, {
       bodyPreview: typeof event.body === 'string' ? truncateForLog(event.body) : null,
     });
-    return autoMapJsonResponse(400, {
+    return aiJsonResponse(400, {
       error: 'Invalid request body',
     }, requestId);
   }
@@ -828,7 +819,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   } else if (modeRaw === 'section' || modeRaw === 'whole') {
     mode = modeRaw;
   } else {
-    return autoMapJsonResponse(400, {
+    return aiJsonResponse(400, {
       error: 'Invalid mode: expected "section" or "whole"',
     }, requestId);
   }
@@ -853,7 +844,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       hasVisibleTargetPaths: visibleTargetPaths.length > 0,
       hasSectionPath: typeof sectionPathRaw === 'string' && sectionPathRaw !== '',
     });
-    return autoMapJsonResponse(400, {
+    return aiJsonResponse(400, {
       error: 'Missing required field: targetSection, visibleTargetPaths, or sectionPath',
     }, requestId);
   }
@@ -1040,7 +1031,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   });
 
   if (noContextReason !== undefined) {
-    return autoMapJsonResponse(200, {
+    return aiJsonResponse(200, {
       success: true,
       promptId: 'auto-map',
       model: 'none',
@@ -1054,7 +1045,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   if (typeof sourceContext !== 'string' || sourceContext.trim() === '') {
-    return autoMapJsonResponse(400, {
+    return aiJsonResponse(400, {
       error: 'Missing required field: sourceContext',
     }, requestId);
   }
@@ -1078,7 +1069,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         chunkTarget,
       });
 
-      return autoMapJsonResponse(202, {
+      return aiJsonResponse(202, {
         success: true,
         promptId: 'auto-map',
         model: 'orchestrated',
@@ -1096,9 +1087,10 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       }, requestId);
     } catch (error) {
       console.error(`${AUTO_MAP_LOG_PREFIX} step functions handoff failed`, {
-        message: error instanceof Error ? error.message : 'unknown-handoff-error',
+        requestId,
+        error: serializeUnknownError(error),
       });
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.SERVICE_UNAVAILABLE,
         'Auto-Map orchestration is temporarily unavailable',
         503,
@@ -1164,7 +1156,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (successfulChunkResults.length === 0) {
       if (!firstFailureNormalized) {
-        return errorResponse(
+        return aiErrorResponse(
           ERROR_CODES.INTERNAL_ERROR,
           'Auto-Map produced no chunk results',
           500,
@@ -1173,7 +1165,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         );
       }
 
-      return errorResponse(
+      return aiErrorResponse(
         firstFailureNormalized.code,
         firstFailureNormalized.message,
         firstFailureNormalized.statusCode,
@@ -1225,7 +1217,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       console.error(`${AUTO_MAP_LOG_PREFIX} ai success payload missing rules array`, {
         rulesType: typeof rulesValue,
       });
-      return autoMapJsonResponse(200, {
+      return aiJsonResponse(200, {
         ...result,
         data: {
           ...(result.data as Record<string, unknown>),
@@ -1289,7 +1281,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       enrichedRuleCount: enrichedRules.length,
     });
 
-    return autoMapJsonResponse(200, {
+    return aiJsonResponse(200, {
       ...result,
       data: {
         ...(result.data as Record<string, unknown>),
@@ -1310,9 +1302,14 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         scopeMeta,
       },
     }, requestId);
-  } catch {
-    console.error(`${AUTO_MAP_LOG_PREFIX} unexpected handler error`);
-    return errorResponse(
+  } catch (error) {
+    const known = mapKnownAiFailure(error);
+    if (known) {
+      return aiErrorResponse(known.code, known.message, known.statusCode, known.retryable, requestId);
+    }
+
+    logAiHandlerError(AUTO_MAP_LOG_PREFIX, requestId, error);
+    return aiErrorResponse(
       ERROR_CODES.INTERNAL_ERROR,
       'Unexpected error while handling request',
       500,

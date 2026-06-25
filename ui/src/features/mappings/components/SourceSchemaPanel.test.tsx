@@ -499,56 +499,18 @@ describe('SourceSchemaPanel', () => {
     expect(badges[1].className).toContain('min-w-[2rem]');
   });
 
-  it('renders contextual slot-fill prompt and explicit add-input toggle when active slot exists', () => {
-    const onExplicitAddInputModeChange = vi.fn();
+  it('does not render selection behavior helper block', () => {
     renderPanel({
       parsedSourceSchema: FLAT_SCHEMA,
       onStageField: vi.fn(),
       canFillCurrentValue: true,
       isExplicitAddInputMode: false,
-      onExplicitAddInputModeChange,
+      onExplicitAddInputModeChange: vi.fn(),
     });
 
-    expect(screen.getByTestId('source-selection-context-hint')).toHaveTextContent('Select a field to fill the active value slot. Selection also adds it to Inputs.');
-    expect(screen.getByTestId('source-selection-context-toggle-add-input')).toHaveTextContent('Add Input instead');
-
-    fireEvent.click(screen.getByTestId('source-selection-context-toggle-add-input'));
-    expect(onExplicitAddInputModeChange).toHaveBeenCalledWith(true);
-  });
-
-  it('shows default add-to-inputs prompt when no active slot is available', () => {
-    renderPanel({
-      parsedSourceSchema: FLAT_SCHEMA,
-      onStageField: vi.fn(),
-      canFillCurrentValue: false,
-    });
-
+    expect(screen.queryByTestId('source-selection-context')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-selection-context-hint')).not.toBeInTheDocument();
     expect(screen.queryByTestId('source-selection-context-toggle-add-input')).not.toBeInTheDocument();
-    expect(screen.getByTestId('source-selection-context-hint')).toHaveTextContent('Select fields to add them to Inputs.');
-  });
-
-  it('shows explicit Add Input multi-select prompt when contextual add mode is enabled', () => {
-    renderPanel({
-      parsedSourceSchema: FLAT_SCHEMA,
-      onStageField: vi.fn(),
-      canFillCurrentValue: true,
-      isExplicitAddInputMode: true,
-    });
-
-    expect(screen.getByTestId('source-selection-context-hint')).toHaveTextContent('Add Input mode: select one or more fields to add to Inputs.');
-    expect(screen.getByTestId('source-selection-context-toggle-add-input')).toHaveTextContent('Back to slot fill');
-  });
-
-  it('announces contextual selection mode and focus return guidance for active slot selection', () => {
-    renderPanel({
-      parsedSourceSchema: FLAT_SCHEMA,
-      onStageField: vi.fn(),
-      canFillCurrentValue: true,
-      isExplicitAddInputMode: false,
-    });
-
-    expect(screen.getByTestId('source-selection-context-announcement')).toHaveTextContent(
-      'Selection mode: Fill active recipe slot. Focus returns to that slot after choosing a source field.',
-    );
+    expect(screen.queryByTestId('source-selection-context-announcement')).not.toBeInTheDocument();
   });
 });

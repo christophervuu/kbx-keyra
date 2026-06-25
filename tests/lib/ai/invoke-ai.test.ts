@@ -245,6 +245,70 @@ describe('invokeAI', () => {
     expect(getLatestPrompt).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to legacy prompt key when canonical natural-language-to-dsl record is missing', async () => {
+    modelInvokeMock.mockResolvedValue({
+      success: true,
+      data: {
+        content: '{"expression":"source(\\"InvoiceCurrency\\")"}',
+      },
+      promptId: PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL,
+      model: 'openai/gpt-4.1-mini',
+    } as AIResponse<unknown>);
+
+    const getLatestPrompt = vi.fn(async (promptId: string) => {
+      if (promptId === PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL) {
+        return null;
+      }
+
+      if (promptId === 'nl-to-rule') {
+        return createPromptRecord({
+          promptId: 'nl-to-rule' as PromptRecord['promptId'],
+        });
+      }
+
+      return null;
+    });
+
+    const { invokeAI } = await import('../../../src/lib/ai/invoke-ai.js');
+
+    const result = await invokeAI(PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL, { instruction: 'map field' }, {
+      promptRegistry: {
+        getLatestPrompt,
+      },
+      dslAssetLoader: {
+        loadDslReference: async () => '# DSL',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(getLatestPrompt).toHaveBeenNthCalledWith(1, PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL);
+    expect(getLatestPrompt).toHaveBeenNthCalledWith(2, 'nl-to-rule');
+  });
+
+  it('returns PROMPT_NOT_FOUND when canonical and legacy alias prompt keys are both missing', async () => {
+    const getLatestPrompt = vi.fn(async () => null);
+
+    const { invokeAI } = await import('../../../src/lib/ai/invoke-ai.js');
+
+    const result = await invokeAI(PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL, { instruction: 'map field' }, {
+      promptRegistry: {
+        getLatestPrompt,
+      },
+      dslAssetLoader: {
+        loadDslReference: async () => '# DSL',
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('PROMPT_NOT_FOUND');
+      expect(result.error.message).toBe('No prompt found for promptId: natural-language-to-dsl');
+    }
+
+    expect(getLatestPrompt).toHaveBeenNthCalledWith(1, PROMPT_IDS.NATURAL_LANGUAGE_TO_DSL);
+    expect(getLatestPrompt).toHaveBeenNthCalledWith(2, 'nl-to-rule');
+  });
+
   it('propagates prompt selection metadata into invocation diagnostics context', async () => {
     modelInvokeMock.mockResolvedValue({
       success: true,

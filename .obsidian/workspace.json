@@ -182,6 +182,8 @@
   },
   "active": "6f9518702ec634e2",
   "lastOpenFiles": [
+    "src/lambda/ai/error-logging.ts",
+    "src/lambda/ai/cors.ts",
     "forge/active/FS-099/tasks/T-11.md",
     "forge/active/FS-099/tasks/T-10.md",
     "forge/active/FS-099/tasks/T-09.md",
@@ -205,7 +207,6 @@
     "forge/active/FS-099/spec.md",
     "forge/active/FS-098/spec.md",
     "forge/active/FS-099/tasks",
-    "forge/active/FS-099",
     "forge/active/FS-098/tasks/T-21.md",
     "forge/active/FS-098/tasks/T-20.md",
     "forge/active/FS-098/tasks/T-19.md",

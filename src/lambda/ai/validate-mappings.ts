@@ -1,10 +1,8 @@
 import {
   ERROR_CODES,
-  errorResponse,
   generateRequestId,
   getItem,
   getObject,
-  jsonResponse,
   notFound,
   parseBody,
   query,
@@ -17,6 +15,13 @@ import {
   emitRetrievalTelemetry,
   readCorrelationId,
 } from '../../lib/ai/telemetry.js';
+import {
+  aiErrorResponse,
+  aiJsonResponse,
+  aiOptionsResponse,
+  isOptionsRequest,
+} from './cors.js';
+import { logAiHandlerError, mapKnownAiFailure } from './error-logging.js';
 
 type ValidationIssueCategory = 'correctness' | 'completeness' | 'maintainability' | 'risk';
 type ValidationIssueSeverity = 'info' | 'warning' | 'error';
@@ -355,15 +360,20 @@ function isBatchPayload(requestBody: Record<string, unknown>): boolean {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const requestId = generateRequestId();
+
+  if (isOptionsRequest(event)) {
+    return aiOptionsResponse(requestId);
+  }
+
   const correlationId = readCorrelationId(event.headers);
   const requestBody = parseBody(event);
 
   if (!requestBody) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, 'Invalid request body', 400, false, requestId);
   }
 
   if (isBatchPayload(requestBody)) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Batch validation is not supported in V1. Provide a single mappingId.',
       400,
@@ -374,7 +384,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   const parsed = parseValidateMappingsBody(requestBody);
   if (!parsed) {
-    return errorResponse(
+    return aiErrorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Missing or invalid required fields: mappingId and optional sampleData { contentType, content }',
       400,
@@ -385,7 +395,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   const sampleDataError = validateSampleDataBounds(parsed.sampleData);
   if (sampleDataError) {
-    return errorResponse(ERROR_CODES.VALIDATION_ERROR, sampleDataError, 400, false, requestId);
+    return aiErrorResponse(ERROR_CODES.VALIDATION_ERROR, sampleDataError, 400, false, requestId);
   }
 
   try {
@@ -396,11 +406,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!mapping) {
       const err = notFound('Mapping', parsed.mappingId, requestId);
-      return errorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
+      return aiErrorResponse(err.code, err.message, err.statusCode, err.retryable, requestId);
     }
 
     if (!mapping.sourceSchemaId || !mapping.targetSchemaId || !mapping.configS3Key) {
-      return errorResponse(
+      return aiErrorResponse(
         ERROR_CODES.VALIDATION_ERROR,
         `Mapping '${parsed.mappingId}' is missing required schema/config references`,
         400,
@@ -487,7 +497,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           message:
             'Model response failed schema validation: report must include summary and issues[] with canonical category/severity enums',
         });
-        return errorResponse(
+        return aiErrorResponse(
           normalized.code,
           normalized.message,
           normalized.statusCode,
@@ -496,19 +506,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         );
       }
 
-      return jsonResponse(200, result, requestId);
+      return aiJsonResponse(200, result, requestId);
     }
 
     const normalized = normalizeAIError(result.error);
-    return errorResponse(
+    return aiErrorResponse(
       normalized.code,
       normalized.message,
       normalized.statusCode,
       normalized.retryable,
       requestId,
     );
-  } catch {
-    return errorResponse(
+  } catch (error) {
+    const known = mapKnownAiFailure(error);
+    if (known) {
+      return aiErrorResponse(known.code, known.message, known.statusCode, known.retryable, requestId);
+    }
+
+    logAiHandlerError('[validate-mappings lambda]', requestId, error);
+    return aiErrorResponse(
       ERROR_CODES.INTERNAL_ERROR,
       'Unexpected error while handling request',
       500,

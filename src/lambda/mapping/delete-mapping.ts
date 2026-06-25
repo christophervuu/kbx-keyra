@@ -95,6 +95,27 @@ function normalizeLinkedSchemaIds(project: Pick<ProjectRecord, 'linkedSchemaIds'
   return normalized;
 }
 
+function isMissingS3ObjectError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const typed = error as {
+    appError?: { code?: unknown };
+    code?: unknown;
+    Code?: unknown;
+    name?: unknown;
+  };
+
+  return (
+    typed.appError?.code === ERROR_CODES.RESOURCE_NOT_FOUND
+    || typed.appError?.code === 'RESOURCE_NOT_FOUND'
+    || typed.code === 'RESOURCE_NOT_FOUND'
+    || typed.Code === 'NoSuchKey'
+    || typed.name === 'NoSuchKey'
+  );
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
@@ -168,10 +189,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    await deleteObject({
-      Bucket: getContentBucketOrThrow(),
-      Key: existing.configS3Key,
-    });
+    try {
+      await deleteObject({
+        Bucket: getContentBucketOrThrow(),
+        Key: existing.configS3Key,
+      });
+    } catch (error) {
+      // Mapping metadata is already removed. Treat missing config blob as a
+      // successful idempotent delete and only fail on unexpected S3 errors.
+      if (!isMissingS3ObjectError(error)) {
+        throw error;
+      }
+    }
 
     return jsonResponse(204, null);
   } catch {

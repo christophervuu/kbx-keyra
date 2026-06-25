@@ -80,10 +80,11 @@ vi.mock('@aws-sdk/client-sfn', () => {
   };
 });
 
-function createEvent(body: string | null): APIGatewayProxyEvent {
+function createEvent(body: string | null, overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayProxyEvent {
   return {
     body,
     headers: {},
+    ...overrides,
   };
 }
 
@@ -224,6 +225,19 @@ describe('aiAutoMap handler', () => {
         requestId: expect.any(String),
         correlationId: undefined,
       },
+    });
+  });
+
+  it('handles OPTIONS preflight with AI CORS headers', async () => {
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(createEvent(null, { httpMethod: 'OPTIONS' }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers).toMatchObject({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'OPTIONS,POST',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     });
   });
 

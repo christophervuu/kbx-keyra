@@ -5,7 +5,11 @@ import { ComplexExpressionWarning } from './ComplexExpressionWarning';
 import { InputTray } from './InputTray';
 import type { StagedInputField } from './SourceSchemaPanel';
 import { findSmartBuilderActionById, getSmartBuilderActionParameters } from '../lib/smart-builder-action-catalog';
-import { resolveChangeLogicOptionsFromDraft, resolveSmartBuilderActionsFromDraft } from '../lib/smart-builder-action-resolver';
+import {
+  resolveChangeLogicOptionsFromDraft,
+  resolveSmartBuilderActions,
+  resolveSmartBuilderActionsFromDraft,
+} from '../lib/smart-builder-action-resolver';
 import {
   getAllowedConditionOperatorsForLeftType,
   getBuilderInputUsages,
@@ -224,7 +228,6 @@ export function SmartBuilderPanel({
   const [activeConditionSlot, setActiveConditionSlot] = useState<ConditionSlotKey | null>(null);
   const [stepPickerScope, setStepPickerScope] = useState<'result' | { readonly kind: 'direct' } | { readonly kind: 'concat-part'; readonly partIndex: number }>('result');
   const [openConcatPartMenuIndex, setOpenConcatPartMenuIndex] = useState<number | null>(null);
-  const [openDirectValueMenu, setOpenDirectValueMenu] = useState(false);
   const [parameterEditorValueStepTarget, setParameterEditorValueStepTarget] = useState<
     { readonly kind: 'direct' } | { readonly kind: 'concat-part'; readonly partIndex: number } | null
   >(null);
@@ -950,6 +953,7 @@ export function SmartBuilderPanel({
   })();
 
   const shouldRenderMethodPreview = mappingMethodId !== 'base.direct';
+  const showFinalTransformations = mappingMethodId !== 'base.direct';
   const valueMapComposition = hydration.draft.composition?.kind === 'valueMap'
     ? hydration.draft.composition
     : null;
@@ -965,22 +969,59 @@ export function SmartBuilderPanel({
     reason: option.id === mappingMethodId ? 'Already selected.' : option.reason,
   }));
 
+  const stepPickerScopedInputs = (() => {
+    if (stepPickerScope === 'result') {
+      return hydration.draft.inputs;
+    }
+
+    const composition = hydration.draft.composition;
+    if (stepPickerScope.kind === 'direct') {
+      if (composition?.kind === 'direct') {
+        const selectedInputId = composition.value?.kind === 'input'
+          ? composition.value.inputId
+          : composition.inputId;
+        const selectedInput = hydration.draft.inputs.find((input) => input.id === selectedInputId)
+          ?? defaultPrimaryInput;
+        return selectedInput ? [selectedInput] : [];
+      }
+      return defaultPrimaryInput ? [defaultPrimaryInput] : [];
+    }
+
+    if (stepPickerScope.kind === 'concat-part' && composition?.kind === 'concat') {
+      const selectedPart = composition.parts?.[stepPickerScope.partIndex];
+      if (selectedPart?.kind === 'input') {
+        const selectedInput = hydration.draft.inputs.find((input) => input.id === selectedPart.inputId);
+        return selectedInput ? [selectedInput] : [];
+      }
+    }
+
+    return [] as BuilderInput[];
+  })();
+
+  const stepPickerResolvedActions = resolveSmartBuilderActions({
+    targetType: hydration.draft.targetType,
+    isRequired: hydration.draft.isRequired,
+    inputs: stepPickerScopedInputs,
+    hasArrayScope,
+    pendingActionDraft: hydration.draft.pendingActionDraft,
+  });
+
   const stepPickerActions = (() => {
     if (mappingMethodId === 'base.none') {
       return [] as { id: string; label: string; enabled: boolean; reason: string }[];
     }
     const isResultScope = stepPickerScope === 'result';
-    const options = actions
+    const options = stepPickerResolvedActions
       .filter((entry) => {
         if (entry.action.id === 'advanced.expression') {
           return false;
         }
         return isResultScope
           ? entry.action.role === 'outputStep'
-          : entry.action.role === 'inputTransform' || entry.action.id === 'null.default';
+          : entry.action.role === 'inputTransform' || entry.action.id === 'null.default' || entry.action.id === 'convert.cast';
       })
       .map((entry) => ({ id: entry.action.id, label: entry.action.label }));
-    const resolvedById = new Map(actions.map((entry) => [entry.action.id, entry]));
+    const resolvedById = new Map(stepPickerResolvedActions.map((entry) => [entry.action.id, entry]));
     return options.map((option) => {
       const resolved = resolvedById.get(option.id);
       return {
@@ -1040,6 +1081,109 @@ export function SmartBuilderPanel({
     if (action.enabled || !normalizedPickerQuery) return false;
     return `${action.label} ${action.reason ?? ''}`.toLowerCase().includes(normalizedPickerQuery);
   });
+
+  const stepPickerBlock = mappingMethodId !== 'lookup.valueMap' && effectivePickerMode === 'step'
+    ? (
+      <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid={`smart-${effectivePickerMode}-picker`}>
+        <div className="mb-1 flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {effectivePickerMode === 'base'
+              ? 'Choose mapping method'
+              : stepPickerScope === 'result'
+                ? 'Add final transformation'
+                : 'Add transformation'}
+          </p>
+          {!isMethodNeedsAction && (
+            <button
+              type="button"
+              className="text-[11px] text-slate-500 hover:text-slate-300"
+              data-testid="smart-picker-close"
+              onClick={() => setPickerMode(null)}
+            >
+              Close
+            </button>
+          )}
+        </div>
+
+        {supportsPickerSearch && (
+          <input
+            type="search"
+            value={pickerQuery}
+            onChange={(event) => {
+              setPickerQuery(event.target.value);
+              setExpandedDisabledId(null);
+            }}
+            placeholder="Search actions..."
+            data-testid="smart-picker-search"
+            className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+          />
+        )}
+
+        <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
+          {visibleEnabledPickerActions.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              data-testid={`smart-picker-action-${action.id}`}
+              className="w-full rounded border border-slate-700 bg-slate-900/70 px-2 py-1.5 text-left text-xs text-slate-100 hover:border-slate-500"
+              onClick={() => {
+                const parameterDefinitions = getSmartBuilderActionParameters(action.id);
+                if (parameterDefinitions.length > 0) {
+                  onBeginActionParameterEdit?.(action.id);
+                  setParameterEditorStepIndex(null);
+                  setParameterEditorStepScope(stepPickerScope === 'result' ? 'result-step' : 'value-step');
+                  setParameterEditorValueStepTarget(
+                    stepPickerScope === 'result' ? null : stepPickerScope,
+                  );
+                  setPickerMode(null);
+                  return;
+                }
+
+                onApplyAction?.(action.id, stepPickerScope === 'result'
+                  ? { editingStepScope: 'result-step' }
+                  : {
+                      editingStepScope: 'value-step',
+                      valueStepTarget: stepPickerScope,
+                    });
+                setParameterEditorStepIndex(null);
+                setParameterEditorStepScope(null);
+                setParameterEditorValueStepTarget(null);
+                setPickerMode(null);
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+
+        {(supportsPickerSearch && normalizedPickerQuery.length > 0 && visibleDisabledPickerActions.length > 0) && (
+          <ul className="mt-2 space-y-1.5" data-testid="smart-picker-disabled-actions">
+            {visibleDisabledPickerActions.map((action) => {
+              const expanded = expandedDisabledId === action.id;
+              return (
+                <li
+                  key={action.id}
+                  className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1.5"
+                  data-testid={`smart-picker-disabled-${action.id}`}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left"
+                    onClick={() => {
+                      setExpandedDisabledId((prev) => (prev === action.id ? null : action.id));
+                    }}
+                  >
+                    <p className="text-xs text-slate-300">{action.label}</p>
+                    {expanded && <p className="text-[11px] text-slate-500">{action.reason}</p>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    )
+    : null;
 
   const actionParameterIssuesByFieldId = (() => {
     const grouped = new Map<string, string>();
@@ -1598,6 +1742,8 @@ export function SmartBuilderPanel({
             usages={inputUsages}
             onRemoveInput={onInputRemove}
             onToggleAddInput={() => setShowAddInput((prev) => !prev)}
+            showBuilderEmptyGuidance={showInitialStartGuidance}
+            onUseFixedValue={() => onApplyAction?.('base.fixed', { fixedValue: '' })}
           />
 
           <div className="mt-2" data-testid="smart-add-input-section">
@@ -1718,36 +1864,6 @@ export function SmartBuilderPanel({
             )}
           </div>
 
-          {showInitialStartGuidance && (
-            <div className="mt-2 rounded border border-slate-700 bg-slate-900/40 px-2.5 py-2" data-testid="smart-builder-empty-state">
-              <p className="text-sm font-medium text-slate-100">No inputs selected yet.</p>
-              <p className="mt-1 text-xs text-slate-400">
-                Select a field from Input Fields or add another value.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="smart-builder-empty-actions">
-                <button
-                  type="button"
-                  data-testid="smart-empty-use-fixed-value"
-                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                  onClick={() => onApplyAction?.('base.fixed', { fixedValue: '' })}
-                >
-                  Use fixed value
-                </button>
-                <button
-                  type="button"
-                  data-testid="smart-empty-use-constant"
-                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                  onClick={() => onApplyAction?.('base.constant', { constantName: 'DEFAULT_CONSTANT' })}
-                >
-                  Use constant
-                </button>
-              </div>
-              <p className="mt-2 text-[11px] text-slate-500" data-testid="smart-builder-empty-advanced-note">
-                More complex logic can be created in Advanced DSL.
-              </p>
-            </div>
-          )}
-
           {/* coalesce editor is rendered inside Build Output with method-specific controls */}
         </div>
 
@@ -1828,18 +1944,49 @@ export function SmartBuilderPanel({
             {mappingMethodId === 'base.direct' && !defaultPrimaryInput && (
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-empty-direct">Select an input to continue.</p>
             )}
-            {mappingMethodId === 'base.direct' && hydration.draft.inputs.length > 0 && hydration.draft.composition?.kind === 'direct' && (
+            {mappingMethodId === 'base.direct' && hydration.draft.inputs.length > 0 && (
               <div className="mt-2 space-y-1" data-testid="smart-direct-value-section">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Selected value</p>
                 <div className="space-y-1" role="radiogroup" aria-label="Use one value">
                   {hydration.draft.inputs.map((input) => {
                     const selected = input.id === defaultPrimaryInput?.id;
-                    const selectedValue = hydration.draft.composition?.value?.kind === 'input'
-                      && hydration.draft.composition.value.inputId === input.id
-                      ? hydration.draft.composition.value
-                      : selected
-                        ? ({ kind: 'input', inputId: input.id, transforms: [] } as BuilderArgumentValue)
-                        : null;
+                    const selectedValue = (() => {
+                      if (!selected) return null;
+
+                      const composition = hydration.draft.composition;
+                      if (composition?.kind === 'direct') {
+                        if (composition.value?.kind === 'input' && composition.value.inputId === input.id) {
+                          const directTransforms = composition.value.transforms ?? [];
+                          return {
+                            ...composition.value,
+                            transforms: directTransforms.length > 0 ? directTransforms : (hydration.draft.postSteps ?? []),
+                          };
+                        }
+                        const seededTransforms = input.transforms ?? [];
+                        return {
+                          kind: 'input',
+                          inputId: input.id,
+                          transforms: seededTransforms.length > 0 ? seededTransforms : (hydration.draft.postSteps ?? []),
+                        } as BuilderArgumentValue;
+                      }
+
+                      if (composition?.kind === 'default' && composition.inputId === input.id) {
+                        return {
+                          kind: 'input',
+                          inputId: input.id,
+                          transforms: [
+                            ...(input.transforms ?? []),
+                            { functionName: 'default', args: [composition.fallback] },
+                          ],
+                        } as BuilderArgumentValue;
+                      }
+
+                      return {
+                        kind: 'input',
+                        inputId: input.id,
+                        transforms: input.transforms ?? [],
+                      } as BuilderArgumentValue;
+                    })();
                     return (
                       <div key={input.id}>
                         <div className="flex items-center gap-1">
@@ -1859,37 +2006,23 @@ export function SmartBuilderPanel({
                           {selected && (
                             <button
                               type="button"
-                              data-testid="smart-direct-value-menu-toggle"
+                              data-testid="smart-direct-value-add-step"
                               className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
-                              aria-label={`Open value menu for ${input.label}`}
-                              onClick={() => {
-                                setOpenDirectValueMenu((prev) => !prev);
-                                setOpenConcatPartMenuIndex(null);
-                              }}
-                            >
-                              ⋮
-                            </button>
-                          )}
-                        </div>
-
-                        {selected && openDirectValueMenu && (
-                          <div className="mt-1 rounded border border-slate-800 bg-slate-950/40 p-1" data-testid="smart-direct-value-menu">
-                            <button
-                              type="button"
-                              data-testid="smart-direct-value-menu-add-step"
-                              className="w-full rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                              aria-label={`Add step for ${input.label}`}
                               onClick={() => {
                                 setStepPickerScope({ kind: 'direct' });
                                 setPickerMode('step');
-                                setOpenDirectValueMenu(false);
+                                setOpenConcatPartMenuIndex(null);
                                 setPickerQuery('');
                                 setExpandedDisabledId(null);
                               }}
                             >
-                              Add step
+                              + Add transformation
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
+
+                        {selected && stepPickerScope !== 'result' && stepPickerBlock}
 
                         {selected && selectedValue && (selectedValue.transforms?.length ?? 0) > 0 && (
                           <ol className="mt-1 space-y-1 pl-3" data-testid="smart-direct-value-steps-list">
@@ -2374,7 +2507,6 @@ export function SmartBuilderPanel({
                               aria-label={`Open menu for ${label}`}
                               onClick={() => {
                                 setOpenConcatPartMenuIndex((prev) => (prev === index ? null : index));
-                                setOpenDirectValueMenu(false);
                               }}
                             >
                               ⋮
@@ -2396,7 +2528,7 @@ export function SmartBuilderPanel({
                                 setExpandedDisabledId(null);
                               }}
                             >
-                              Add step
+                              Add transformation
                             </button>
                             {part.kind !== 'expression' && (
                               <button
@@ -2446,6 +2578,11 @@ export function SmartBuilderPanel({
                             </button>
                           </div>
                         )}
+
+                        {stepPickerScope !== 'result'
+                          && stepPickerScope.kind === 'concat-part'
+                          && stepPickerScope.partIndex === index
+                          && stepPickerBlock}
 
                         {(part.transforms?.length ?? 0) > 0 && (
                           <ol className="mt-1 space-y-1 pl-3" data-testid={`smart-concat-part-steps-${index}`}>
@@ -3020,9 +3157,10 @@ export function SmartBuilderPanel({
                 </div>
               )}
 
-              <div className="mt-3" data-testid="smart-recipe-steps" aria-label="Refine Result">
+              {showFinalTransformations && (
+                <div className="mt-3" data-testid="smart-recipe-steps" aria-label="Final transformations">
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Refine Result</p>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Final transformations</p>
                   <button
                     type="button"
                     data-testid="smart-recipe-add-step"
@@ -3034,7 +3172,7 @@ export function SmartBuilderPanel({
                       setExpandedDisabledId(null);
                     }}
                   >
-                    + Add step
+                    + Add transformation
                   </button>
                 </div>
                 {hydration.draft.postSteps.length > 0 && (
@@ -3096,7 +3234,8 @@ export function SmartBuilderPanel({
                     ))}
                   </ol>
                 )}
-              </div>
+                </div>
+              )}
             </>
           )}
 
@@ -3188,106 +3327,7 @@ export function SmartBuilderPanel({
 
           {parameterEditorBlock}
 
-            {mappingMethodId !== 'lookup.valueMap' && effectivePickerMode === 'step' && (
-              <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid={`smart-${effectivePickerMode}-picker`}>
-                <div className="mb-1 flex items-center justify-between">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  {effectivePickerMode === 'base'
-                    ? 'Choose mapping method'
-                    : stepPickerScope === 'result'
-                      ? 'Add result step'
-                      : 'Add value step'}
-                </p>
-                {!isMethodNeedsAction && (
-                  <button
-                    type="button"
-                    className="text-[11px] text-slate-500 hover:text-slate-300"
-                    data-testid="smart-picker-close"
-                    onClick={() => setPickerMode(null)}
-                  >
-                    Close
-                  </button>
-                )}
-              </div>
-
-              {supportsPickerSearch && (
-                <input
-                  type="search"
-                  value={pickerQuery}
-                  onChange={(event) => {
-                    setPickerQuery(event.target.value);
-                    setExpandedDisabledId(null);
-                  }}
-                  placeholder="Search actions..."
-                  data-testid="smart-picker-search"
-                  className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
-                />
-              )}
-
-              <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
-                {visibleEnabledPickerActions.map((action) => (
-                  <button
-                    key={action.id}
-                    type="button"
-                    data-testid={`smart-picker-action-${action.id}`}
-                    className="w-full rounded border border-slate-700 bg-slate-900/70 px-2 py-1.5 text-left text-xs text-slate-100 hover:border-slate-500"
-                    onClick={() => {
-                      const parameterDefinitions = getSmartBuilderActionParameters(action.id);
-                      if (parameterDefinitions.length > 0) {
-                        onBeginActionParameterEdit?.(action.id);
-                        setParameterEditorStepIndex(null);
-                        setParameterEditorStepScope(stepPickerScope === 'result' ? 'result-step' : 'value-step');
-                        setParameterEditorValueStepTarget(
-                          stepPickerScope === 'result' ? null : stepPickerScope,
-                        );
-                        setPickerMode(null);
-                        return;
-                      }
-
-                      onApplyAction?.(action.id, stepPickerScope === 'result'
-                        ? { editingStepScope: 'result-step' }
-                        : {
-                            editingStepScope: 'value-step',
-                            valueStepTarget: stepPickerScope,
-                          });
-                      setParameterEditorStepIndex(null);
-                      setParameterEditorStepScope(null);
-                      setParameterEditorValueStepTarget(null);
-                      setPickerMode(null);
-                    }}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-
-                {(supportsPickerSearch && normalizedPickerQuery.length > 0 && visibleDisabledPickerActions.length > 0) && (
-                  <ul className="mt-2 space-y-1.5" data-testid="smart-picker-disabled-actions">
-                  {visibleDisabledPickerActions.map((action) => {
-                    const expanded = expandedDisabledId === action.id;
-                    return (
-                      <li
-                        key={action.id}
-                        className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1.5"
-                        data-testid={`smart-picker-disabled-${action.id}`}
-                      >
-                        <button
-                          type="button"
-                          className="w-full text-left"
-                          onClick={() => {
-                            setExpandedDisabledId((prev) => (prev === action.id ? null : action.id));
-                          }}
-                        >
-                          <p className="text-xs text-slate-300">{action.label}</p>
-                          {expanded && <p className="text-[11px] text-slate-500">{action.reason}</p>}
-                        </button>
-                      </li>
-                    );
-                  })}
-                  </ul>
-                )}
-              </div>
-            )}
+            {stepPickerScope === 'result' && stepPickerBlock}
           </div>
           )}
 
