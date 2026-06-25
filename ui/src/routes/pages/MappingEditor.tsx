@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 
@@ -33,6 +34,7 @@ import {
 } from '@/features/mappings/components';
 import { MappingEditorPage } from '@/features/mappings/components';
 import { RuleList } from '@/features/mappings/components';
+import { OutputDisplay } from '@/features/mappings/components/preview/OutputDisplay';
 import { usePreviewContext } from '@/features/mappings/context/preview-context';
 import { useAutoMapWorkspace, useExpressionBuilder, useMappingEditor, useTargetStatus, useVersionHistory } from '@/features/mappings/hooks';
 import {
@@ -55,6 +57,8 @@ import {
   toSmartBuilderTransformArgsFromParameters,
   undoSmartBuilderExpression,
   updateSmartBuilderExpression,
+  buildRenderableOutput,
+  resolveOutputNodeSelection,
 } from '@/features/mappings/lib';
 import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-display';
 import type { EditorView } from '@/features/mappings/types';
@@ -73,6 +77,8 @@ import type {
   ValueTablePrimitiveValue,
   ValueTableScope,
   ValueTableStatus,
+  OutputPathIndex,
+  PreviewExecutionState,
 } from '@/lib/types/domain';
 import { PATHS } from '@/routes/paths';
 
@@ -216,6 +222,64 @@ function toTargetFieldType(type: SchemaTreeNode['type']): ChildFieldInfo['fieldT
     default:
       return 'string';
   }
+}
+
+function toBuilderSourceValueType(type: SchemaTreeNode['type']): SmartBuilderDraft['targetType'] {
+  switch (type) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'object':
+    case 'array':
+    case 'null':
+    case 'any':
+      return type;
+    default:
+      return 'unknown';
+  }
+}
+
+function isRuleTypeDebugEnabled(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('keyra:debug:rule-type') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function debugRuleTypeLog(message: string, payload?: unknown): void {
+  if (!isRuleTypeDebugEnabled()) return;
+  if (payload === undefined) {
+    console.info(`[rule-type-debug] ${message}`);
+    return;
+  }
+  console.info(`[rule-type-debug] ${message}`, payload);
+}
+
+export function hydrateUnknownPrimaryInputTypes(
+  draft: SmartBuilderDraft,
+  sourceValueTypeByPath: Readonly<Record<string, SmartBuilderDraft['targetType']>>,
+): SmartBuilderDraft {
+  let changed = false;
+  const inputs = draft.inputs.map((input) => {
+    if (input.sourceKind !== 'primary' || input.valueType !== 'unknown' || !input.path) {
+      return input;
+    }
+
+    const resolvedType = sourceValueTypeByPath[input.path];
+    if (!resolvedType || resolvedType === 'unknown') {
+      return input;
+    }
+
+    changed = true;
+    return {
+      ...input,
+      valueType: resolvedType,
+    };
+  });
+
+  return changed ? { ...draft, inputs } : draft;
 }
 
 function resolveValueAtPath(sourceData: unknown, fieldPath: string): unknown {
@@ -2229,16 +2293,18 @@ export default function MappingEditor() {
       updateMappingDefaultSample(sample.sampleId);
     }
 
+    // Set requested context immediately so Output does not continue showing
+    // stale results from a previous sample when payload loading fails.
+    setSelectedSampleId(sample.sampleId);
+
     if (options?.payloadHint) {
       setSamplePayloadCache((prev) => ({ ...prev, [sample.sampleId]: options.payloadHint! }));
-      setSelectedSampleId(sample.sampleId);
       return;
     }
 
     try {
       const payload = await loadSamplePayload(sample);
       setSamplePayloadCache((prev) => ({ ...prev, [sample.sampleId]: payload }));
-      setSelectedSampleId(sample.sampleId);
     } catch (err) {
       setSampleActionError(err instanceof Error ? err.message : 'Failed to load selected sample payload.');
     }
@@ -2321,36 +2387,100 @@ export default function MappingEditor() {
     }
   }, [adapter, sampleContentInput, sampleNameInput, selectSample, sourceSchemaDataFormat, sourceSchemaId]);
 
-  const sampleOutputByTargetPath = useMemo(() => {
+  const inlinePreviewResult = useMemo(() => {
     if (
       selectedSampleParsed === null
       || editor.config === null
       || editor.sourceSchemaDetail === null
       || editor.targetSchemaDetail === null
-      || editor.parsedTargetSchema === null
     ) {
-      return undefined;
+      return null;
     }
 
     try {
-      const execution = executeMapping(
+      return executeMapping(
         editor.config,
         selectedSampleParsed,
         editor.sourceSchemaDetail.content,
         editor.targetSchemaDetail.content,
       );
-
-      return buildSampleOutputByTargetPath(editor.parsedTargetSchema.nodes, execution.output);
     } catch {
-      return undefined;
+      return null;
     }
   }, [
     editor.config,
-    editor.parsedTargetSchema,
     editor.sourceSchemaDetail,
     editor.targetSchemaDetail,
     selectedSampleParsed,
   ]);
+
+  const sampleOutputByTargetPath = useMemo(() => {
+    if (
+      inlinePreviewResult === null
+      || editor.parsedTargetSchema === null
+    ) {
+      return undefined;
+    }
+
+    return buildSampleOutputByTargetPath(editor.parsedTargetSchema.nodes, inlinePreviewResult.output);
+  }, [
+    inlinePreviewResult,
+    editor.parsedTargetSchema,
+  ]);
+
+  const inlineOutputPathIndex: OutputPathIndex | null = useMemo(() => {
+    if (!inlinePreviewResult) return null;
+    return buildRenderableOutput(inlinePreviewResult.output).pathIndex;
+  }, [inlinePreviewResult]);
+
+  const [outputResolverNotice, setOutputResolverNotice] = useState<string | null>(null);
+  const [outputInteractionAnnouncement, setOutputInteractionAnnouncement] = useState<string | null>(null);
+
+  const handleOutputPathActivate = useCallback((runtimePath: string) => {
+    if (!editor.parsedTargetSchema) {
+      setOutputResolverNotice('No editable target found');
+      return;
+    }
+
+    const entry = inlineOutputPathIndex?.[runtimePath];
+    const targetSchemaPaths = new Set(collectTargetSchemaPaths(editor.parsedTargetSchema.nodes));
+    const resolution = resolveOutputNodeSelection({
+      runtimePath,
+      pathEntry: entry,
+      rules: editor.rules,
+      targetSchemaPaths,
+    });
+
+    if (resolution.kind === 'unresolvable') {
+      setOutputResolverNotice('No editable target found');
+      return;
+    }
+
+    setOutputResolverNotice(null);
+    const resolvedBuilderPath = resolveBuilderTargetPath(editor.parsedTargetSchema.nodes, resolution.targetPath);
+    setSelectedTargetPath(resolvedBuilderPath);
+    setOutputInteractionAnnouncement(`Opened builder for ${resolution.targetPath}`);
+  }, [editor.parsedTargetSchema, editor.rules, inlineOutputPathIndex]);
+
+  const handleOutputPathKeyDown = useCallback((runtimePath: string, event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    handleOutputPathActivate(runtimePath);
+  }, [handleOutputPathActivate]);
+
+  useEffect(() => {
+    if (!outputResolverNotice) return;
+    const timer = setTimeout(() => setOutputResolverNotice(null), 3000);
+    return () => clearTimeout(timer);
+  }, [outputResolverNotice]);
+
+  useEffect(() => {
+    if (!outputInteractionAnnouncement) return;
+    const timer = setTimeout(() => setOutputInteractionAnnouncement(null), 1800);
+    return () => clearTimeout(timer);
+  }, [outputInteractionAnnouncement]);
 
   const sampleArrayItemCountByTargetPath = useMemo(() => {
     if (selectedSampleParsed === null || editor.parsedTargetSchema === null) {
@@ -2561,6 +2691,7 @@ export default function MappingEditor() {
   // View state (must be before handleAutoMapTrigger)
   // ---------------------------------------------------------------------------
   const [view, setView] = useState<EditorView>(() => (initialPendingSectionPath !== null ? 'automap' : 'target'));
+  const [activePanelView, setActivePanelView] = useState<'fields' | 'output'>('fields');
 
   // ---------------------------------------------------------------------------
   // Auto-Map workspace mode state (FS-048 T-02)
@@ -2694,6 +2825,15 @@ export default function MappingEditor() {
   const [valueMapAdoptionPrompt, setValueMapAdoptionPrompt] = useState<ValueMapAdoptionPromptState | null>(null);
   const [smartMethodSwitchPrompt, setSmartMethodSwitchPrompt] = useState<SmartMethodSwitchPromptState | null>(null);
 
+  const sourceValueTypeByPath = useMemo<Readonly<Record<string, SmartBuilderDraft['targetType']>>>(() => {
+    return Object.fromEntries(
+      (editor.parsedSourceSchema?.nodes ?? []).map((sourceNode) => [
+        sourceNode.path,
+        toBuilderSourceValueType(sourceNode.type),
+      ]),
+    );
+  }, [editor.parsedSourceSchema?.nodes]);
+
   useEffect(() => {
     smartDraftByTargetRef.current = new Map();
     setSmartDraftByTargetState({});
@@ -2712,14 +2852,15 @@ export default function MappingEditor() {
       focusedSlotId: normalizeLegacySmartSlotId(draft.focusedSlotId),
       slotScopedInputs: normalizeLegacySlotScopedInputs(draft.slotScopedInputs),
     });
+    const typeHydratedDraft = hydrateUnknownPrimaryInputTypes(normalizedDraftInput, sourceValueTypeByPath);
 
     const previousDraft = smartDraftByTargetRef.current.get(targetSessionKey);
     const normalizedDraft = options?.recordSnapshot && previousDraft
       ? pushSmartBuilderSnapshot({
         previousDraft,
-        nextDraft: normalizedDraftInput,
+        nextDraft: typeHydratedDraft,
       })
-      : normalizedDraftInput;
+      : typeHydratedDraft;
 
     smartDraftByTargetRef.current.set(targetSessionKey, normalizedDraft);
     setSmartDraftByTargetState((prev) => ({ ...prev, [targetSessionKey]: normalizedDraft }));
@@ -2733,7 +2874,7 @@ export default function MappingEditor() {
         },
       };
     });
-  }, [mappingId]);
+  }, [mappingId, sourceValueTypeByPath]);
 
   const undoSmartDraftForTarget = useCallback((targetPath: string): SmartBuilderDraft | null => {
     const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
@@ -2829,6 +2970,10 @@ export default function MappingEditor() {
       }
 
       setView(nextView);
+
+      if (nextView !== 'target') {
+        setActivePanelView('fields');
+      }
     },
     [view, selectedTargetPath, selectedRuleIndex, editor.rules, resolveSelectedTargetPath],
   );
@@ -2949,6 +3094,15 @@ export default function MappingEditor() {
     return findNodeByPath(editor.parsedTargetSchema.nodes, selectedTargetPath) ?? null;
   }, [selectedTargetPath, editor.parsedTargetSchema]);
 
+  useEffect(() => {
+    if (view !== 'target' || activePanelView !== 'output' || selectedNode === null) {
+      return;
+    }
+
+    const builderPanel = document.querySelector('[data-testid="builder-panel"]') as HTMLElement | null;
+    builderPanel?.focus();
+  }, [activePanelView, selectedNode, view]);
+
   const selectedNodeStatus = useMemo((): TargetFieldStatus => {
     if (!selectedTargetPath || !targetMappingStatus) return 'unmapped';
     return targetMappingStatus.get(selectedTargetPath) ?? 'unmapped';
@@ -2972,6 +3126,14 @@ export default function MappingEditor() {
 
   const selectedTargetFieldType = selectedNode ? toTargetFieldType(selectedNode.type) : 'string';
 
+  useEffect(() => {
+    debugRuleTypeLog('selected target snapshot', {
+      selectedTargetPath,
+      selectedNodeType: selectedNode?.type ?? null,
+      selectedTargetFieldType,
+    });
+  }, [selectedTargetPath, selectedNode?.type, selectedTargetFieldType]);
+
   const hydrateSmartDraftForTarget = useCallback((targetPath: string) => {
     const node = editor.parsedTargetSchema
       ? findNodeByPath(editor.parsedTargetSchema.nodes, targetPath)
@@ -2992,7 +3154,7 @@ export default function MappingEditor() {
       sourceValueTypeByPath: Object.fromEntries(
         (editor.parsedSourceSchema?.nodes ?? []).map((sourceNode) => [
           sourceNode.path,
-          toTargetFieldType(sourceNode.type),
+          toBuilderSourceValueType(sourceNode.type),
         ]),
       ),
       ruleValueTableRef: existingRule?.valueTableRef,
@@ -3005,12 +3167,16 @@ export default function MappingEditor() {
     const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
     const existing = smartDraftByTargetRef.current.get(targetSessionKey);
     if (existing) {
+      const hydratedExisting = hydrateUnknownPrimaryInputTypes(existing, sourceValueTypeByPath);
+      if (hydratedExisting !== existing) {
+        smartDraftByTargetRef.current.set(targetSessionKey, hydratedExisting);
+      }
       if (syncState) {
         setSmartDraftByTargetState((prev) => (
-          prev[targetSessionKey] ? prev : { ...prev, [targetSessionKey]: existing }
+          prev[targetSessionKey] ? prev : { ...prev, [targetSessionKey]: hydratedExisting }
         ));
       }
-      return { draft: existing, guided: true as const };
+      return { draft: hydratedExisting, guided: true as const };
     }
 
     const hydrated = hydrateSmartDraftForTarget(targetPath);
@@ -3023,7 +3189,7 @@ export default function MappingEditor() {
       setSmartDraftForTarget(targetPath, hydrated.draft);
     }
     return { draft: hydrated.draft, guided: true as const };
-  }, [hydrateSmartDraftForTarget, mappingId, setSmartDraftForTarget]);
+  }, [hydrateSmartDraftForTarget, mappingId, setSmartDraftForTarget, sourceValueTypeByPath]);
 
   const selectedNodeSmartHydration = (() => {
     if (!selectedNode) return null;
@@ -3365,7 +3531,6 @@ export default function MappingEditor() {
     resolveSmartDraftForTarget,
     setSmartDraftForTarget,
     syncRuleValueMapMetadataForTarget,
-    undoSmartDraftForTarget,
     upsertValueMapSelectionStateForTarget,
   ]);
 
@@ -3700,6 +3865,67 @@ export default function MappingEditor() {
       />
     );
 
+  const outputDisplayState: PreviewExecutionState =
+    selectedSample === null
+      ? { status: 'idle' }
+      : sampleActionError
+        ? { status: 'error', error: sampleActionError }
+        : inlinePreviewResult
+          ? { status: 'success', result: inlinePreviewResult }
+          : { status: 'idle' };
+
+  const showOutputMissingSampleState =
+    activePanelView === 'output'
+    && selectedSample === null;
+
+  const showOutputContextErrorNotice =
+    activePanelView === 'output'
+    && selectedSample !== null
+    && sampleActionError !== null;
+
+  const targetOutputContent = (
+    <div className="h-full">
+      {outputResolverNotice ? (
+        <div
+          className="border-b border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-200"
+          role="status"
+          data-testid="output-resolver-notice"
+        >
+          {outputResolverNotice}
+        </div>
+      ) : null}
+
+      {showOutputMissingSampleState ? (
+        <div className="border-b border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-300" data-testid="output-missing-sample-state">
+          <p className="font-medium text-slate-200">Select a sample to preview output.</p>
+          <p className="mt-0.5 text-slate-400">Use the sample picker in the header, or add a new sample payload.</p>
+        </div>
+      ) : null}
+
+      {showOutputContextErrorNotice ? (
+        <div className="border-b border-red-700/40 bg-red-900/20 px-3 py-2 text-xs text-red-200" data-testid="output-context-error-state" role="status">
+          Unable to generate output for the current sample context. Showing no output for this context.
+        </div>
+      ) : null}
+
+      {outputInteractionAnnouncement ? (
+        <div className="sr-only" role="status" aria-live="polite" data-testid="output-interaction-announcement">
+          {outputInteractionAnnouncement}
+        </div>
+      ) : null}
+
+      <div className="border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-400" data-testid="output-test-lab-handoff-note">
+        Need advanced diagnostics or comparison? Open Test Lab. It may load saved or default context instead of this exact Output state.
+      </div>
+
+      <OutputDisplay
+        state={outputDisplayState}
+        onPathClick={handleOutputPathActivate}
+        onPathKeyDown={handleOutputPathKeyDown}
+      />
+    </div>
+  );
+
   const autoMapWorkspaceContent = (
     <AutoMapWorkspace
       status={autoMapWorkspace.status}
@@ -3906,6 +4132,14 @@ export default function MappingEditor() {
           const resolved = resolveSmartDraftForTarget(selectedTargetPath);
           if (!resolved.guided || resolved.draft === null) return;
 
+          debugRuleTypeLog('smart apply action start', {
+            actionId,
+            selectedTargetPath,
+            selectedTargetFieldType,
+            currentDraftExpression: resolved.draft.expression,
+            options,
+          });
+
           if (actionId === 'base.undo') {
             const restored = undoSmartDraftForTarget(selectedTargetPath);
             if (!restored) return;
@@ -3970,6 +4204,12 @@ export default function MappingEditor() {
             ...nextDraft,
             pendingActionDraft: null,
           };
+          debugRuleTypeLog('smart apply action result', {
+            actionId,
+            selectedTargetPath,
+            selectedTargetFieldType,
+            nextDraftExpression: nextDraftCleared.expression,
+          });
           setSmartDraftForTarget(selectedTargetPath, nextDraftCleared, { recordSnapshot: true });
           upsertValueMapSelectionStateForTarget(
             selectedTargetPath,
@@ -4070,7 +4310,20 @@ export default function MappingEditor() {
         onValueMapDirectionSelect={(direction) => {
           if (!selectedTargetPath) return;
           const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
-          const state = valueMapProjectSelectionByTarget[targetSessionKey];
+          const state = (() => {
+            const cached = valueMapProjectSelectionByTarget[targetSessionKey];
+            if (cached) return cached;
+
+            const existingDraft = smartDraftByTargetState[targetSessionKey];
+            if (existingDraft) {
+              return deriveValueMapProjectSelectionState(selectedTargetPath, existingDraft);
+            }
+
+            const hydrated = hydrateSmartDraftForTarget(selectedTargetPath);
+            if (hydrated.kind === 'advanced') return null;
+            return deriveValueMapProjectSelectionState(selectedTargetPath, hydrated.draft);
+          })();
+
           if (!state?.tableId) return;
           void applyValueMapSelectionToDraft({
             targetPath: selectedTargetPath,
@@ -4310,6 +4563,7 @@ export default function MappingEditor() {
         targetSchemaName={editor.targetSchemaName}
         sourceContent={sourceContent}
         targetWorklistContent={targetWorklistContent}
+        targetOutputContent={targetOutputContent}
         builderContent={builderContent}
         panelMode={panelMode}
         onConfigToggle={() => setIsConfigOpen((prev) => !prev)}
@@ -4346,6 +4600,9 @@ export default function MappingEditor() {
         hideSourcePanel={isSourcePanelHidden}
         hideBuilderPanel={isBuilderPanelHidden}
         targetPanelCondensed={selectedNode !== null && !isBuilderPanelHidden}
+        activePanelView={activePanelView}
+        onActivePanelViewChange={setActivePanelView}
+        showPanelViewToggle={view === 'target'}
         onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
         onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />

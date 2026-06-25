@@ -97,6 +97,70 @@ describe('get-mapping handler', () => {
     expect(parsed.config.externalSources).toEqual(['legacyAlias']);
   });
 
+  it('normalizes schema refs from metadata when config refs are missing', async () => {
+    sharedMocks.getItem.mockResolvedValueOnce({
+      mappingId: 'map-1',
+      configS3Key: 'mappings/map-1/config.json',
+      sourceSchemaId: 'schema-source-meta',
+      targetSchemaId: 'schema-target-meta',
+    });
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        id: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 2,
+        engineVersion: '1.0.0',
+        config: {},
+        rules: [],
+      }),
+    );
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    const parsed = JSON.parse(result.body) as {
+      sourceSchemaRef?: { schemaId: string; type: string };
+      targetSchemaRef?: { schemaId: string; type: string };
+    };
+    expect(parsed.sourceSchemaRef).toEqual({ schemaId: 'schema-source-meta', type: 'local' });
+    expect(parsed.targetSchemaRef).toEqual({ schemaId: 'schema-target-meta', type: 'local' });
+  });
+
+  it('overrides stale config schema refs with metadata schema ids', async () => {
+    sharedMocks.getItem.mockResolvedValueOnce({
+      mappingId: 'map-1',
+      configS3Key: 'mappings/map-1/config.json',
+      sourceSchemaId: 'schema-source-meta',
+      targetSchemaId: 'schema-target-meta',
+    });
+    sharedMocks.getObject.mockResolvedValueOnce(
+      JSON.stringify({
+        id: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 2,
+        engineVersion: '1.0.0',
+        sourceSchemaRef: { schemaId: 'stale-source', type: 'local' },
+        targetSchemaRef: { schemaId: 'stale-target', type: 'github', commitSha: 'abc123' },
+        config: {},
+        rules: [],
+      }),
+    );
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    const parsed = JSON.parse(result.body) as {
+      sourceSchemaRef?: { schemaId: string; type: string };
+      targetSchemaRef?: { schemaId: string; type: string; commitSha?: string };
+    };
+    expect(parsed.sourceSchemaRef).toEqual({ schemaId: 'schema-source-meta', type: 'local' });
+    expect(parsed.targetSchemaRef).toEqual({ schemaId: 'schema-target-meta', type: 'github', commitSha: 'abc123' });
+  });
+
   it('missing mapping returns 404', async () => {
     sharedMocks.getItem.mockResolvedValueOnce(null);
 

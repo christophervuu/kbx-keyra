@@ -1290,6 +1290,34 @@ export interface PreviewContextValue {
   readonly lastResult: ExecutionResult | null;
 }
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly [key: string]: JsonValue }
+  | readonly JsonValue[];
+
+export type OutputPathNodeKind = 'property' | 'array-item' | 'element' | 'attribute' | 'text';
+
+export interface OutputPathEntry {
+  readonly runtimePath: string;
+  readonly targetSchemaPath?: string;
+  readonly owningRuleTargetPath?: string;
+  readonly nodeKind: OutputPathNodeKind;
+}
+
+export type OutputPathIndex = Readonly<Record<string, OutputPathEntry>>;
+
+export interface RenderableOutput {
+  readonly format: 'json';
+  readonly value: JsonValue;
+  readonly serializedText: string;
+  readonly pathIndex: OutputPathIndex;
+  readonly nodeCount: number;
+  readonly serializedSizeBytes: number;
+}
+
 export type PreviewExecutionState =
   | { readonly status: 'idle' }
   | { readonly status: 'executing' }

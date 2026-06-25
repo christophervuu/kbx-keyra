@@ -333,6 +333,53 @@ describe('useMappingEditor', () => {
       expect(result.current.schemasLoaded).toBe(false);
       expect(result.current.sourceSchemaName).toBeNull();
       expect(result.current.targetSchemaName).toBeNull();
+      expect(result.current.schemaLoadWarnings).toEqual([
+        expect.objectContaining({
+          role: 'source',
+          schemaId: 'source-schema-1',
+          message: 'Schema not found',
+        }),
+        expect.objectContaining({
+          role: 'target',
+          schemaId: 'target-schema-1',
+          message: 'Schema not found',
+        }),
+      ]);
+    });
+
+    it('captures RESOURCE_NOT_FOUND schema errors as non-blocking warnings', async () => {
+      const notFoundError = Object.assign(new Error("Schema with id 'missing-target' not found"), {
+        code: 'RESOURCE_NOT_FOUND',
+        statusCode: 404,
+      });
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') return Promise.reject(notFoundError);
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      expect(result.current.schemasLoaded).toBe(false);
+      expect(result.current.sourceSchemaName).toBe('Source Schema');
+      expect(result.current.targetSchemaName).toBeNull();
+      expect(result.current.schemaLoadWarnings).toContainEqual(
+        expect.objectContaining({
+          role: 'target',
+          schemaId: 'target-schema-1',
+          code: 'RESOURCE_NOT_FOUND',
+          statusCode: 404,
+          message: "Schema with id 'missing-target' not found",
+        }),
+      );
     });
 
     it('retry re-triggers load after failure', async () => {
@@ -693,7 +740,7 @@ describe('useMappingEditor', () => {
   });
 
   describe('Rule actions', () => {
-    it('addRule appends a rule with default type', async () => {
+    it('addRule appends a rule with target-schema type when available', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -705,7 +752,7 @@ describe('useMappingEditor', () => {
 
       act(() => {
         result.current.actions.addRule({
-          target: 'New.Field',
+          target: 'A.C',
           expression: 'static("val")',
           description: 'test desc',
         });
@@ -713,11 +760,31 @@ describe('useMappingEditor', () => {
 
       expect(result.current.rules).toHaveLength(3);
       expect(result.current.rules[2]).toEqual({
-        target: 'New.Field',
-        type: 'string',
+        target: 'A.C',
+        type: 'number',
         expression: 'static("val")',
         description: 'test desc',
       });
+    });
+
+    it('updateRuleByTarget appends with target-schema type when patch type is omitted', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateRuleByTarget('A.C', {
+          expression: 'cast(source("y"), "number")',
+        });
+      });
+
+      const appended = result.current.rules.find((r) => r.target === 'A.C');
+      expect(appended?.type).toBe('number');
     });
 
     it('updateRule modifies rule at index', async () => {
@@ -817,7 +884,7 @@ describe('useMappingEditor', () => {
       expect(result.current.rules[2]).toEqual(result.current.rules[0]);
     });
 
-    it('pasteRules appends pasted rules', async () => {
+    it('pasteRules normalizes pasted rule type to target-schema type', async () => {
       const adapter = createMockAdapter();
       const { result } = renderHook(() => useMappingEditor('mapping-1'), {
         wrapper: createWrapper(adapter),
@@ -829,12 +896,12 @@ describe('useMappingEditor', () => {
 
       act(() => {
         result.current.actions.pasteRules([
-          { target: 'Pasted.Field', type: 'string', expression: 'static("p")' },
+          { target: 'A.C', type: 'string', expression: 'cast(source("y"), "number")' },
         ]);
       });
 
       expect(result.current.rules).toHaveLength(3);
-      expect(result.current.rules[2].target).toBe('Pasted.Field');
+      expect(result.current.rules[2]).toMatchObject({ target: 'A.C', type: 'number' });
     });
   });
 
@@ -1597,8 +1664,12 @@ describe('useMappingEditor', () => {
       await waitFor(() => expect(result.current.loadState).toBe('loaded'));
 
       act(() => {
-        result.current.actions.updateDraft('A.D', 'cast(source("y"), "number")');
+        result.current.actions.updateRuleByTarget('A.D', {
+          type: 'string',
+          expression: 'cast(source("y"), "number")',
+        });
       });
+      act(() => { result.current.actions.setSaveBlocked(false); });
 
       await act(async () => { result.current.actions.save(); });
       await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
@@ -1609,6 +1680,265 @@ describe('useMappingEditor', () => {
         expect.objectContaining({
           rules: expect.arrayContaining([
             expect.objectContaining({ target: 'A.D', type: 'number' }),
+          ]),
+        }),
+      );
+    });
+
+    it('normalizes save payload type when target path casing differs from schema path', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') {
+            return Promise.resolve({
+              ...MOCK_TARGET_SCHEMA,
+              content: {
+                financial: {
+                  totalAmount: 148.47,
+                },
+              },
+            } satisfies SchemaDetail);
+          }
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+        getMapping: vi.fn().mockResolvedValue({
+          ...MOCK_CONFIG,
+          rules: [
+            {
+              target: 'financial.totalAmount',
+              type: 'string',
+              expression: 'source("payment.total")',
+            },
+          ],
+        } satisfies MappingConfig),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.rules[0]).toMatchObject({
+        target: 'financial.totalAmount',
+        type: 'number',
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('financial.totalAmount', 'source("payment.total2")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          rules: expect.arrayContaining([
+            expect.objectContaining({
+              target: 'financial.totalAmount',
+              expression: 'source("payment.total2")',
+              type: 'number',
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('normalizes save payload type when target schema content is serialized json string', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') {
+            return Promise.resolve({
+              ...MOCK_TARGET_SCHEMA,
+              metadata: {
+                ...MOCK_TARGET_SCHEMA.metadata,
+                format: 'json-schema',
+              },
+              content: JSON.stringify({
+                type: 'object',
+                properties: {
+                  financial: {
+                    type: 'object',
+                    properties: {
+                      totalAmount: { type: 'number' },
+                    },
+                  },
+                },
+              }),
+            } satisfies SchemaDetail);
+          }
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+        getMapping: vi.fn().mockResolvedValue({
+          ...MOCK_CONFIG,
+          rules: [
+            {
+              target: 'financial.totalAmount',
+              type: 'string',
+              expression: 'source("payment.total")',
+            },
+          ],
+        } satisfies MappingConfig),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.rules[0]).toMatchObject({
+        target: 'financial.totalAmount',
+        type: 'number',
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('financial.totalAmount', 'cast(source("payment.total"), "number")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          rules: expect.arrayContaining([
+            expect.objectContaining({
+              target: 'financial.totalAmount',
+              expression: 'cast(source("payment.total"), "number")',
+              type: 'number',
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('normalizes save payload type when target schema content is serialized sample payload string', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') {
+            return Promise.resolve({
+              ...MOCK_TARGET_SCHEMA,
+              metadata: {
+                ...MOCK_TARGET_SCHEMA.metadata,
+                format: 'json-schema',
+              },
+              content: JSON.stringify({
+                financial: {
+                  totalAmount: 148.47,
+                },
+              }),
+            } satisfies SchemaDetail);
+          }
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+        getMapping: vi.fn().mockResolvedValue({
+          ...MOCK_CONFIG,
+          rules: [
+            {
+              target: 'financial.totalAmount',
+              type: 'string',
+              expression: 'source("payment.total")',
+            },
+          ],
+        } satisfies MappingConfig),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.rules[0]).toMatchObject({
+        target: 'financial.totalAmount',
+        type: 'number',
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('financial.totalAmount', 'cast(source("payment.total"), "number")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          rules: expect.arrayContaining([
+            expect.objectContaining({
+              target: 'financial.totalAmount',
+              expression: 'cast(source("payment.total"), "number")',
+              type: 'number',
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('resolves nested parsed target schema node type for save payload normalization', async () => {
+      const adapter = createMockAdapter({
+        getSchema: vi.fn().mockImplementation((id: string) => {
+          if (id === 'source-schema-1') return Promise.resolve(MOCK_SOURCE_SCHEMA);
+          if (id === 'target-schema-1') {
+            return Promise.resolve({
+              ...MOCK_TARGET_SCHEMA,
+              content: {
+                type: 'object',
+                properties: {
+                  financial: {
+                    type: 'object',
+                    properties: {
+                      totalAmount: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            } satisfies SchemaDetail);
+          }
+          return Promise.reject(new Error(`Schema ${id} not found`));
+        }),
+        getMapping: vi.fn().mockResolvedValue({
+          ...MOCK_CONFIG,
+          rules: [
+            {
+              target: 'financial.totalAmount',
+              type: 'string',
+              expression: 'source("payment.total")',
+            },
+          ],
+        } satisfies MappingConfig),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => expect(result.current.loadState).toBe('loaded'));
+
+      expect(result.current.rules[0]).toMatchObject({
+        target: 'financial.totalAmount',
+        type: 'number',
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('financial.totalAmount', 'cast(source("payment.total"), "number")');
+      });
+
+      await act(async () => { result.current.actions.save(); });
+      await waitFor(() => expect(result.current.saveStatus).toBe('saved'));
+
+      expect(adapter.saveMapping).toHaveBeenCalledWith(
+        'mapping-1',
+        expect.objectContaining({
+          rules: expect.arrayContaining([
+            expect.objectContaining({
+              target: 'financial.totalAmount',
+              type: 'number',
+            }),
           ]),
         }),
       );

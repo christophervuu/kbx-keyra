@@ -103,6 +103,12 @@ describe('MappingRow', () => {
     expect(screen.getByTestId('coverage-cell')).toHaveClass('text-center');
   });
 
+  it('renders 0-100 coverage values without double scaling', () => {
+    renderRow({ ...MAPPING, coverage: 100 });
+    expect(screen.getByText('100%')).toBeInTheDocument();
+    expect(screen.queryByText('10000%')).not.toBeInTheDocument();
+  });
+
   it('renders "—" when ruleCount is 0 and coverage is 0', () => {
     renderRow({ ...MAPPING, ruleCount: 0, coverage: 0 });
     expect(screen.getByText('—')).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { usePreviewSetters } from '../context/preview-context';
 
@@ -19,6 +19,52 @@ const EXECUTION_TIMEOUT_MS = 2000;
 
 type ParseSuccess = { readonly ok: true; readonly data: unknown };
 type ParseFailure = { readonly ok: false; readonly error: string };
+
+interface PreviewContextOptions {
+  readonly contextId: string | null;
+  readonly targetOutputFormat: string;
+  readonly enrichmentIdentity: string;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
+}
+
+function normalizeEnrichmentIdentity(raw: string | null | undefined): string {
+  if (raw == null) {
+    return '{}';
+  }
+
+  const parsed = tryParseJson(raw);
+  if (!parsed.ok) {
+    return `invalid:${raw.trim()}`;
+  }
+
+  if (typeof parsed.data !== 'object' || parsed.data === null || Array.isArray(parsed.data)) {
+    return `invalid-shape:${raw.trim()}`;
+  }
+
+  return stableStringify(parsed.data);
+}
+
+function computePreviewContextKey(options: PreviewContextOptions): string {
+  const { contextId, targetOutputFormat, enrichmentIdentity } = options;
+  return stableStringify({
+    contextId,
+    targetOutputFormat,
+    enrichmentIdentity,
+  });
+}
 
 function tryParseJson(raw: string): ParseSuccess | ParseFailure {
   try {
@@ -49,6 +95,18 @@ export interface UsePreviewExecutionParams {
   externalSourcesRaw?: string | null;
   /** Required enrichment aliases that must exist in externalSources payload. */
   requiredEnrichmentAliases?: readonly string[];
+  /**
+   * Execution lifecycle mode.
+   * - `always` (default): existing behavior for Test Lab and preview surfaces.
+   * - `output-controlled`: no auto-run while Output is inactive; changes mark dirty.
+   */
+  executionMode?: ExecutionMode;
+  /** Whether Output view is currently active (used when executionMode='output-controlled'). */
+  isOutputActive?: boolean;
+  /** Context identifier (sample or input-set id) for stale-retention isolation. */
+  previewContextId?: string | null;
+  /** Target output format identity (for context isolation; defaults to json). */
+  targetOutputFormat?: string;
 }
 
 export interface UsePreviewExecutionResult {
@@ -68,6 +126,15 @@ export interface UsePreviewExecutionResult {
 
 interface ExecuteOptions {
   readonly fromAutoRun?: boolean;
+}
+
+type ExecutionMode = 'always' | 'output-controlled';
+
+function isPromiseLike<T>(value: unknown): value is Promise<T> {
+  return typeof value === 'object'
+    && value !== null
+    && 'then' in value
+    && typeof (value as { then?: unknown }).then === 'function';
 }
 
 // ---------------------------------------------------------------------------
@@ -99,12 +166,37 @@ export function usePreviewExecution({
   sourceDataRaw,
   externalSourcesRaw = null,
   requiredEnrichmentAliases = [],
+  executionMode = 'always',
+  isOutputActive = true,
+  previewContextId = null,
+  targetOutputFormat = 'json',
 }: UsePreviewExecutionParams): UsePreviewExecutionResult {
   const [state, setState] = useState<PreviewExecutionState>({ status: 'idle' });
+  const [stateContextKey, setStateContextKey] = useState<string | null>(null);
   const [autoRun, setAutoRun] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(false);
 
   const { setSourceData, setIsExecuting, setLastResult } = usePreviewSetters();
+  const latestRunIdRef = useRef(0);
+  const outputDirtyRef = useRef(false);
+  const retainedSuccessByContextRef = useRef<Record<string, ExecutionResult>>({});
+  const lastContextErrorResultRef = useRef<Record<string, string>>({});
+  const lastObservedInputsRef = useRef({
+    config,
+    sourceSchemaDetail,
+    targetSchemaDetail,
+    sourceDataRaw,
+    externalSourcesRaw,
+    requiredEnrichmentAliases,
+    traceEnabled,
+    currentContextKey: '',
+  });
+
+  const currentContextKey = useMemo(() => computePreviewContextKey({
+    contextId: previewContextId,
+    targetOutputFormat,
+    enrichmentIdentity: normalizeEnrichmentIdentity(externalSourcesRaw),
+  }), [previewContextId, targetOutputFormat, externalSourcesRaw]);
 
   // -------------------------------------------------------------------------
   // Sync valid sourceData into PreviewContext whenever sourceDataRaw changes
@@ -135,6 +227,9 @@ export function usePreviewExecution({
     sourceDataRaw,
     externalSourcesRaw,
     requiredEnrichmentAliases,
+    executionMode,
+    isOutputActive,
+    currentContextKey,
     traceEnabled,
     setSourceData,
     setIsExecuting,
@@ -148,6 +243,9 @@ export function usePreviewExecution({
       sourceDataRaw,
       externalSourcesRaw,
       requiredEnrichmentAliases,
+      executionMode,
+      isOutputActive,
+      currentContextKey,
       traceEnabled,
       setSourceData,
       setIsExecuting,
@@ -160,6 +258,9 @@ export function usePreviewExecution({
     sourceDataRaw,
     externalSourcesRaw,
     requiredEnrichmentAliases,
+    executionMode,
+    isOutputActive,
+    currentContextKey,
     traceEnabled,
     setSourceData,
     setIsExecuting,
@@ -175,10 +276,17 @@ export function usePreviewExecution({
       sourceDataRaw: rawData,
       externalSourcesRaw: rawExternalSources,
       requiredEnrichmentAliases: requiredAliases,
+      executionMode: mode,
+      isOutputActive: outputActive,
+      currentContextKey: contextKey,
       traceEnabled: trace,
       setIsExecuting: setExec,
       setLastResult: setResult,
     } = latestParams.current;
+
+    if (fromAutoRun && mode === 'output-controlled' && !outputActive) {
+      return;
+    }
 
     // Guard: all inputs must be present
     if (cfg === null || srcSchema === null || tgtSchema === null) {
@@ -250,30 +358,116 @@ export function usePreviewExecution({
     setExec(true);
 
     const start = Date.now();
+    const runId = ++latestRunIdRef.current;
+
+    const commitIfCurrent = (commit: () => void) => {
+      if (runId !== latestRunIdRef.current) {
+        return;
+      }
+      commit();
+    };
+
+    const finalizeIfCurrent = () => {
+      if (runId !== latestRunIdRef.current) {
+        return;
+      }
+      setExec(false);
+    };
+
+    const applyResult = (result: ExecutionResult) => {
+      const elapsed = Date.now() - start;
+
+      if (elapsed > EXECUTION_TIMEOUT_MS) {
+        commitIfCurrent(() => {
+          setStateContextKey(contextKey);
+          const nextRetained = { ...retainedSuccessByContextRef.current };
+          nextRetained[contextKey] = result;
+          retainedSuccessByContextRef.current = nextRetained;
+
+          const nextErrors = { ...lastContextErrorResultRef.current };
+          delete nextErrors[contextKey];
+          lastContextErrorResultRef.current = nextErrors;
+          setState({ status: 'timeout' });
+          setResult(null);
+        });
+        return;
+      }
+
+      commitIfCurrent(() => {
+        setStateContextKey(contextKey);
+        const nextRetained = { ...retainedSuccessByContextRef.current };
+        nextRetained[contextKey] = result;
+        retainedSuccessByContextRef.current = nextRetained;
+
+        const nextErrors = { ...lastContextErrorResultRef.current };
+        delete nextErrors[contextKey];
+        lastContextErrorResultRef.current = nextErrors;
+        setState({ status: 'success', result });
+        setResult(result);
+      });
+    };
+
+    const applyError = (err: unknown) => {
+      commitIfCurrent(() => {
+        const message = err instanceof Error ? err.message : 'Execution failed — internal error';
+        const retained = retainedSuccessByContextRef.current[contextKey] ?? null;
+        const nextErrors = { ...lastContextErrorResultRef.current };
+        nextErrors[contextKey] = message;
+        lastContextErrorResultRef.current = nextErrors;
+
+        if (retained !== null) {
+          setStateContextKey(contextKey);
+          setState({
+            status: 'success',
+            result: {
+              ...retained,
+              diagnostics: [
+                ...(retained.diagnostics ?? []),
+                {
+                  code: 'W_INLINE_OUTPUT_STALE',
+                  severity: 'warning',
+                  message: `Showing previous output for this context because the latest run failed: ${message}`,
+                },
+              ],
+            },
+          });
+          setResult(retained);
+          return;
+        }
+
+        setStateContextKey(contextKey);
+        setState({
+          status: 'error',
+          error: message,
+        });
+        setResult(null);
+      });
+    };
 
     try {
-      const result: ExecutionResult = executeMapping(cfg, parsed.data, srcSchema.content, tgtSchema.content, {
+      const outcome = executeMapping(cfg, parsed.data, srcSchema.content, tgtSchema.content, {
         ...(trace ? { trace: true } : {}),
         externalSources,
       });
 
-      const elapsed = Date.now() - start;
-
-      if (elapsed > EXECUTION_TIMEOUT_MS) {
-        setState({ status: 'timeout' });
-        setResult(null);
+      if (isPromiseLike<ExecutionResult>(outcome)) {
+        void outcome
+          .then((result) => {
+            applyResult(result);
+          })
+          .catch((err: unknown) => {
+            applyError(err);
+          })
+          .finally(() => {
+            finalizeIfCurrent();
+          });
       } else {
-        setState({ status: 'success', result });
-        setResult(result);
+        applyResult(outcome as ExecutionResult);
+        finalizeIfCurrent();
       }
     } catch (err) {
-      setState({
-        status: 'error',
-        error: err instanceof Error ? err.message : 'Execution failed — internal error',
-      });
-      setResult(null);
-    } finally {
-      setExec(false);
+      applyError(err);
+      finalizeIfCurrent();
     }
   }, []); // stable ref pattern — deps accessed via latestParams.current
 
@@ -284,8 +478,49 @@ export function usePreviewExecution({
   const autoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const previousObserved = lastObservedInputsRef.current;
+    const currentObserved = {
+      config,
+      sourceSchemaDetail,
+      targetSchemaDetail,
+      sourceDataRaw,
+      externalSourcesRaw,
+      requiredEnrichmentAliases,
+      traceEnabled,
+      currentContextKey,
+    };
+    const outputInputsChanged =
+      previousObserved.config !== currentObserved.config
+      || previousObserved.sourceSchemaDetail !== currentObserved.sourceSchemaDetail
+      || previousObserved.targetSchemaDetail !== currentObserved.targetSchemaDetail
+      || previousObserved.sourceDataRaw !== currentObserved.sourceDataRaw
+      || previousObserved.externalSourcesRaw !== currentObserved.externalSourcesRaw
+      || previousObserved.requiredEnrichmentAliases !== currentObserved.requiredEnrichmentAliases
+      || previousObserved.traceEnabled !== currentObserved.traceEnabled
+      || previousObserved.currentContextKey !== currentObserved.currentContextKey;
+    lastObservedInputsRef.current = currentObserved;
+
     if (!autoRun) {
       return;
+    }
+
+    if (executionMode === 'output-controlled') {
+      if (!isOutputActive) {
+        if (outputInputsChanged) {
+          outputDirtyRef.current = true;
+        }
+        if (autoRunTimerRef.current !== null) {
+          clearTimeout(autoRunTimerRef.current);
+          autoRunTimerRef.current = null;
+        }
+        return;
+      }
+
+      if (outputDirtyRef.current) {
+        outputDirtyRef.current = false;
+        executeNow({ fromAutoRun: true });
+        return;
+      }
     }
 
     if (autoRunTimerRef.current !== null) {
@@ -303,10 +538,20 @@ export function usePreviewExecution({
         autoRunTimerRef.current = null;
       }
     };
-    // Intentionally omitting executeNow from deps — it is stable and accessed
-    // via the ref pattern. This effect should only fire when data inputs change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRun, config?.rules, sourceDataRaw, externalSourcesRaw]);
+  }, [
+    autoRun,
+    executionMode,
+    isOutputActive,
+    executeNow,
+    config,
+    sourceSchemaDetail,
+    targetSchemaDetail,
+    sourceDataRaw,
+    externalSourcesRaw,
+    requiredEnrichmentAliases,
+    traceEnabled,
+    currentContextKey,
+  ]);
 
   // -------------------------------------------------------------------------
   // Manual run
@@ -316,5 +561,12 @@ export function usePreviewExecution({
     executeNow();
   }, [executeNow]);
 
-  return { state, run, autoRun, setAutoRun, traceEnabled, setTraceEnabled };
+  const visibleState = useMemo<PreviewExecutionState>(() => {
+    if (stateContextKey !== null && stateContextKey !== currentContextKey) {
+      return { status: 'idle' };
+    }
+    return state;
+  }, [currentContextKey, state, stateContextKey]);
+
+  return { state: visibleState, run, autoRun, setAutoRun, traceEnabled, setTraceEnabled };
 }

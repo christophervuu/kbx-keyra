@@ -678,6 +678,10 @@ ui/
           smart-builder-action-resolver.test.ts  FS-094 resolver tests for enabled-first ordering, numeric/array disabled reasons, and availability behavior across mixed input contexts
           smart-builder-dsl-coverage.ts   FS-094 DSL coverage accounting utility: classifies DSL functions as user-facing/input-type/advanced-only/intentionally-unsupported and validates action catalog registration integrity
           smart-builder-dsl-coverage.test.ts  FS-094 coverage tests for complete classification output, source-access input-type mapping, and zero unregistered action-function references
+          output-node-resolver.ts       FS-099 output-node resolver utility: deterministic output activation resolution order (metadata owning rule -> normalized exact rule -> longest ancestor rule -> schema fallback -> unresolvable) with runtime-path array-index normalization and side-effect-free results
+          output-node-resolver.test.ts  FS-099 resolver unit tests for metadata precedence, array-index normalization, ancestor fallback, unconfigured schema-field fallback, and true unresolvable outcomes
+          output-render-limits.ts       FS-099 inline output limit policy constants + render-mode selector (`interactive`/`limited`/`fallback`) using soft/hard node+byte thresholds with threshold-inclusive mode transitions
+          output-render-limits.test.ts  FS-099 boundary tests for output render-mode selection at below/at hard+soft node/size thresholds
           chain-summary.ts             FS-039 T-07 pure summary text renderers: summarizeSource (field/static/none), summarizeStep (transform/condition/valueMap), summarizeChain (last step or source); truncation at ~80 chars; operator labels; predicate/clause/branch summaries
           chain-summary.test.ts        FS-039 T-07 unit tests for summarizeSource, summarizeStep (all step types), summarizeChain; truncation; operator labels; unary operators; multi-clause conditions
           pipeline-expression-generator.ts  FS-023 pure state→DSL generator for unified expression builder

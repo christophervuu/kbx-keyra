@@ -54,6 +54,29 @@ function getEnvValue(key: string): string | undefined {
 
 const PROJECTS_TABLE = getEnvValue('PROJECTS_TABLE');
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
+const KEYRA_DEBUG_PROJECT_SCHEMA_UNLINK = getEnvValue('KEYRA_DEBUG_PROJECT_SCHEMA_UNLINK');
+
+function isProjectUnlinkDebugEnabled(): boolean {
+  if (!KEYRA_DEBUG_PROJECT_SCHEMA_UNLINK) {
+    return false;
+  }
+
+  const normalized = KEYRA_DEBUG_PROJECT_SCHEMA_UNLINK.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function projectUnlinkDebugLog(message: string, payload?: unknown): void {
+  if (!isProjectUnlinkDebugEnabled()) {
+    return;
+  }
+
+  if (payload === undefined) {
+    console.info(`[project-unlink-debug] ${message}`);
+    return;
+  }
+
+  console.info(`[project-unlink-debug] ${message}`, payload);
+}
 
 function getProjectsTableOrThrow(): string {
   const table = PROJECTS_TABLE?.trim();
@@ -186,6 +209,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         }));
 
       if (dependentMappings.length > 0) {
+        projectUnlinkDebugLog('unlink blocked by dependent mappings', {
+          projectId,
+          removedLinkedSchemaIds,
+          dependentMappings,
+        });
         return errorResponse(
           ERROR_CODES.CONFLICT,
           'Cannot unlink schema while mappings in this project still reference it',
@@ -224,7 +252,14 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     return jsonResponse(200, toProjectMetadata(updated));
-  } catch {
+  } catch (error) {
+    const details = error as { message?: unknown; name?: unknown; code?: unknown };
+    projectUnlinkDebugLog('update-project internal failure', {
+      projectId,
+      errorName: typeof details.name === 'string' ? details.name : null,
+      errorCode: typeof details.code === 'string' ? details.code : null,
+      errorMessage: typeof details.message === 'string' ? details.message : 'unknown error',
+    });
     const err = internalError();
     return errorResponse(err.code, err.message, err.statusCode, err.retryable);
   }

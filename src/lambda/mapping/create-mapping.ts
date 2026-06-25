@@ -30,6 +30,39 @@ interface MappingRule {
   readonly type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'null' | 'any';
   readonly expression: string;
   readonly description?: string;
+  readonly valueTableRef?: MappingRuleValueTableRef;
+  readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
+}
+
+type ValueTablePrimitiveValue = string | number | boolean;
+
+interface MappingRuleResolvedEntry {
+  readonly in: ValueTablePrimitiveValue;
+  readonly out: ValueTablePrimitiveValue;
+  readonly rowId: string;
+}
+
+interface MappingRuleProjectValueTableRef {
+  readonly scope: 'project';
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly inputType: 'string' | 'number' | 'boolean';
+  readonly outputType: 'string' | 'number' | 'boolean';
+  readonly resolvedEntries: readonly MappingRuleResolvedEntry[];
+}
+
+interface MappingRuleInlineValueTableRef {
+  readonly scope: 'inline';
+}
+
+type MappingRuleValueTableRef = MappingRuleProjectValueTableRef | MappingRuleInlineValueTableRef;
+
+interface MappingRuleNoMatchBehavior {
+  readonly mode: 'return_null' | 'return_input' | 'fallback_value';
+  readonly fallbackValue?: ValueTablePrimitiveValue;
 }
 
 interface MappingConfigOptions {
@@ -291,6 +324,8 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
     type: (rule.type === 'null' || rule.type === 'any' ? 'string' : rule.type) as EngineMappingRule['type'],
     expression: rule.expression,
     ...(rule.description ? { description: rule.description } : {}),
+    ...(rule.valueTableRef ? { valueTableRef: rule.valueTableRef } : {}),
+    ...(rule.noMatchBehavior ? { noMatchBehavior: rule.noMatchBehavior } : {}),
   }));
 
   return {

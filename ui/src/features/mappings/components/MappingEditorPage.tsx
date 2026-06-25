@@ -52,6 +52,8 @@ export interface MappingEditorPageProps {
   sourceContent?: ReactNode;
   /** Content for the Target Worklist panel (center column, primary — never collapses) */
   targetWorklistContent?: ReactNode;
+  /** Optional content for the Output panel view within Target Mapping Fields. */
+  targetOutputContent?: ReactNode;
   /** Content for the Builder/Editor panel (right column) */
   builderContent?: ReactNode;
   /** Content for the full-width bottom area (Preview / Diagnostics / Testing) */
@@ -128,6 +130,12 @@ export interface MappingEditorPageProps {
   onHideBuilderPanel?: () => void;
   /** Condensed target-worklist columns for focused row-editing state. */
   targetPanelCondensed?: boolean;
+  /** Active panel sub-view within Target Mapping Fields card. */
+  activePanelView?: 'fields' | 'output';
+  /** Fires when panel sub-view is changed by segmented control. */
+  onActivePanelViewChange?: (view: 'fields' | 'output') => void;
+  /** Hide segmented control when panel sub-view switching is not applicable. */
+  showPanelViewToggle?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +189,7 @@ export function MappingEditorPage({
   targetSchemaName = null,
   sourceContent,
   targetWorklistContent,
+  targetOutputContent,
   builderContent,
   bottomContent,
   onHistoryToggle,
@@ -216,6 +225,9 @@ export function MappingEditorPage({
   onHideSourcePanel,
   onHideBuilderPanel,
   targetPanelCondensed = false,
+  activePanelView = 'fields',
+  onActivePanelViewChange,
+  showPanelViewToggle = false,
 }: MappingEditorPageProps) {
   // FS-092: in-page bottom preview section is intentionally removed from Mapping Editor.
   // Keep prop for backward compatibility with existing call sites.
@@ -297,12 +309,97 @@ export function MappingEditorPage({
               ].join(' ')}
               data-testid="mapping-fields-card"
             >
-              <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Target Mapping Fields
+              <div className="border-b border-slate-800 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Target Mapping Fields
+                  </span>
+
+                  {showPanelViewToggle ? (
+                    <div
+                      role="tablist"
+                      aria-label="Target panel view"
+                      data-testid="target-panel-view-toggle"
+                      className="inline-flex items-center rounded border border-slate-700 bg-slate-900 p-0.5"
+                    >
+                      {(['fields', 'output'] as const).map((view) => {
+                        const isSelected = activePanelView === view;
+                        const label = view === 'fields' ? 'Fields' : 'Output';
+
+                        return (
+                          <button
+                            key={view}
+                            type="button"
+                            role="tab"
+                            id={`target-panel-tab-${view}`}
+                            aria-controls={`target-panel-view-${view}`}
+                            aria-selected={isSelected}
+                            tabIndex={isSelected ? 0 : -1}
+                            data-testid={`target-panel-tab-${view}`}
+                            onClick={() => onActivePanelViewChange?.(view)}
+                            onKeyDown={(event) => {
+                              if (!onActivePanelViewChange) return;
+                              if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                                event.preventDefault();
+                                onActivePanelViewChange(view === 'fields' ? 'output' : 'fields');
+                                return;
+                              }
+                              if (event.key === 'Home') {
+                                event.preventDefault();
+                                onActivePanelViewChange('fields');
+                                return;
+                              }
+                              if (event.key === 'End') {
+                                event.preventDefault();
+                                onActivePanelViewChange('output');
+                              }
+                            }}
+                            className={[
+                              'rounded px-2 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                              isSelected
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100',
+                            ].join(' ')}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="min-h-0 flex-1 overflow-auto" data-testid="target-worklist">
-                {targetWorklistContent ?? (
-                  <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+                {showPanelViewToggle ? (
+                  <>
+                    <div
+                      id="target-panel-view-fields"
+                      role="tabpanel"
+                      aria-labelledby="target-panel-tab-fields"
+                      data-testid="target-panel-view-fields"
+                      className={activePanelView === 'fields' ? 'h-full' : 'hidden h-full'}
+                    >
+                      {targetWorklistContent ?? (
+                        <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+                      )}
+                    </div>
+
+                    <div
+                      id="target-panel-view-output"
+                      role="tabpanel"
+                      aria-labelledby="target-panel-tab-output"
+                      data-testid="target-panel-view-output"
+                      className={activePanelView === 'output' ? 'h-full' : 'hidden h-full'}
+                    >
+                      {targetOutputContent ?? (
+                        <PanelPlaceholder name="Output" />
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  targetWorklistContent ?? (
+                    <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+                  )
                 )}
               </div>
             </section>
@@ -361,7 +458,8 @@ export function MappingEditorPage({
                 <div
                   data-testid="builder-panel"
                   data-automap-mode={isAutoMapMode ? 'true' : undefined}
-                  className="min-h-0 flex-1 overflow-auto"
+                  tabIndex={-1}
+                  className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
                 >
                   {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
                 </div>

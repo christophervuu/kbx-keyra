@@ -329,4 +329,36 @@ describe('useVersionHistory', () => {
 
     expect(result.current.selectedDiff).toBeNull();
   });
+
+  it('handles sparse version payloads without throwing and returns stable fallbacks', async () => {
+    const sparseVersion = {
+      version: 4,
+      savedAt: '2024-01-04T00:00:00.000Z',
+      savedBy: 'You',
+      ruleCount: 0,
+      config: undefined,
+    } as unknown as MappingVersionEntry;
+
+    const adapter = createMockAdapter({
+      listMappingVersions: vi.fn().mockResolvedValue([sparseVersion]),
+    });
+
+    const { result } = renderHook(() => useVersionHistory('mapping-1', CURRENT_CONFIG), {
+      wrapper: createWrapper(adapter),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.versions).toHaveLength(1);
+    expect(result.current.versions[0].summary).toBe('Initial version — 0 rules');
+
+    act(() => {
+      result.current.selectVersion(4);
+    });
+
+    expect(result.current.selectedDiff).toBeNull();
+    expect(result.current.getRestoreConfig(4)).toBeNull();
+  });
 });

@@ -223,6 +223,63 @@ describe('create-mapping handler', () => {
     expect(validateMock.mock.calls[0]?.[2]).toEqual({ type: 'object' });
   });
 
+  it('passes project valueTableRef metadata through validation config', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      rules: [
+        {
+          target: 'transaction.status',
+          type: 'string',
+          expression: 'valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), "")',
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'table-1',
+            tableKey: 'exercise-1-table',
+            revision: 1,
+            inputSideKey: 'side-a',
+            outputSideKey: 'side-b',
+            inputType: 'string',
+            outputType: 'string',
+            resolvedEntries: [
+              { in: 'confirmed', out: 'OPEN', rowId: 'row-1' },
+            ],
+          },
+          noMatchBehavior: {
+            mode: 'fallback_value',
+            fallbackValue: '',
+          },
+        },
+      ],
+    });
+    sharedMocks.getItem.mockResolvedValue({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject.mockResolvedValue('{"type":"object"}');
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}' });
+
+    expect(result.statusCode).toBe(201);
+    const engineConfig = validateMock.mock.calls[0]?.[0] as {
+      rules: Array<{
+        valueTableRef?: { tableKey?: string; revision?: number; resolvedEntries?: unknown[] };
+        noMatchBehavior?: { mode?: string; fallbackValue?: string };
+      }>;
+    };
+    expect(engineConfig.rules[0]?.valueTableRef).toEqual(expect.objectContaining({
+      tableKey: 'exercise-1-table',
+      revision: 1,
+    }));
+    expect(engineConfig.rules[0]?.valueTableRef?.resolvedEntries).toEqual([
+      { in: 'confirmed', out: 'OPEN', rowId: 'row-1' },
+    ]);
+    expect(engineConfig.rules[0]?.noMatchBehavior).toEqual({
+      mode: 'fallback_value',
+      fallbackValue: '',
+    });
+  });
+
   it('missing projectId returns 400', async () => {
     sharedMocks.requireFields.mockReturnValue({
       ok: false,

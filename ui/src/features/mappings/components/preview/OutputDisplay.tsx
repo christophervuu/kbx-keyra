@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+
+import { JsonOutputView } from './JsonOutputView';
+import { resolveOutputRenderMode } from '../../lib/output-render-limits';
+import { buildRenderableOutput } from '../../lib/renderable-output';
+
 import type { PreviewExecutionState } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +27,7 @@ type JsonToken =
 function tokenizeJson(json: string): JsonToken[] {
   const tokens: JsonToken[] = [];
   const pattern =
-    /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b)|(\bnull\b)|([\[\]{},:])|(\s+)/g;
+    /("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b)|(\bnull\b)|([[\]{},:])|(\s+)/g;
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(json)) !== null) {
@@ -67,182 +73,6 @@ function tokenColor(kind: JsonToken['kind']): string {
 }
 
 // ---------------------------------------------------------------------------
-// Recursive JSON renderer with path tracking
-// ---------------------------------------------------------------------------
-
-interface JsonNodeProps {
-  value: unknown;
-  /** Dot-separated path to this node, e.g. "Order.Header.DocumentType" */
-  path: string;
-  indent: number;
-  /** Whether this is the last item in an array/object (controls trailing comma). */
-  isLast: boolean;
-  highlightPath: string | null | undefined;
-  onPathClick: ((path: string) => void) | undefined;
-  /** Ref callback — called with the element when this node is the highlighted one. */
-  onHighlightRef: (el: HTMLSpanElement | null) => void;
-  /** True when an ancestor already rendered the highlight wrapper. */
-  parentHighlighted?: boolean;
-}
-
-const INDENT_SIZE = 2;
-
-function indentStr(level: number): string {
-  return ' '.repeat(level * INDENT_SIZE);
-}
-
-/** Render a scalar value (string, number, boolean, null) as a colored span. */
-function ScalarValue({ value }: { value: unknown }) {
-  if (value === null) {
-    return <span className="text-gray-400">null</span>;
-  }
-  if (typeof value === 'string') {
-    return <span className="text-green-400">{JSON.stringify(value)}</span>;
-  }
-  if (typeof value === 'number') {
-    return <span className="text-amber-400">{String(value)}</span>;
-  }
-  if (typeof value === 'boolean') {
-    return <span className="text-purple-400">{String(value)}</span>;
-  }
-  return <span className="text-zinc-400">{String(value)}</span>;
-}
-
-function JsonNode({
-  value,
-  path,
-  indent,
-  isLast,
-  highlightPath,
-  onPathClick,
-  onHighlightRef,
-  parentHighlighted = false,
-}: JsonNodeProps) {
-  const isHighlighted = highlightPath != null && highlightPath !== '' && path === highlightPath;
-  const trailing = isLast ? '' : ',';
-
-  // Object
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    const entries = Object.entries(value as Record<string, unknown>);
-    return (
-      <>
-        <span className="text-zinc-400">{'{'}</span>
-        {'\n'}
-        {entries.map(([k, v], i) => {
-          const childPath = path === '' ? k : `${path}.${k}`;
-          const childIsLast = i === entries.length - 1;
-          const childHighlighted =
-            highlightPath != null && highlightPath !== '' && childPath === highlightPath;
-
-          const keyEl = onPathClick ? (
-            <button
-              type="button"
-              onClick={() => onPathClick(childPath)}
-              className="text-blue-400 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-              data-testid={`output-key-${childPath}`}
-              aria-label={`Select path ${childPath}`}
-            >
-              {JSON.stringify(k)}:
-            </button>
-          ) : (
-            <span className="text-blue-400" data-testid={`output-key-${childPath}`}>
-              {JSON.stringify(k)}:
-            </span>
-          );
-
-          return (
-            <span
-              key={k}
-              ref={childHighlighted ? onHighlightRef : undefined}
-              className={[
-                'block',
-                childHighlighted
-                  ? 'rounded bg-blue-500/20 ring-1 ring-blue-500/40'
-                  : '',
-              ].join(' ')}
-              data-testid={childHighlighted ? `output-highlighted` : undefined}
-            >
-              {indentStr(indent + 1)}
-              {keyEl}
-              {' '}
-              <JsonNode
-                value={v}
-                path={childPath}
-                indent={indent + 1}
-                isLast={childIsLast}
-                highlightPath={highlightPath}
-                onPathClick={onPathClick}
-                onHighlightRef={onHighlightRef}
-                parentHighlighted={childHighlighted}
-              />
-              {childIsLast ? '' : ','}
-              {'\n'}
-            </span>
-          );
-        })}
-        {indentStr(indent)}
-        <span className="text-zinc-400">{'}'}</span>
-        {trailing}
-      </>
-    );
-  }
-
-  // Array
-  if (Array.isArray(value)) {
-    return (
-      <>
-        <span className="text-zinc-400">{'['}</span>
-        {'\n'}
-        {value.map((item, i) => {
-          const childPath = `${path}[${i}]`;
-          const childIsLast = i === value.length - 1;
-          return (
-            <span key={i} className="block">
-              {indentStr(indent + 1)}
-              <JsonNode
-                value={item}
-                path={childPath}
-                indent={indent + 1}
-                isLast={childIsLast}
-                highlightPath={highlightPath}
-                onPathClick={onPathClick}
-                onHighlightRef={onHighlightRef}
-              />
-              {childIsLast ? '' : ','}
-              {'\n'}
-            </span>
-          );
-        })}
-        {indentStr(indent)}
-        <span className="text-zinc-400">{']'}</span>
-        {trailing}
-      </>
-    );
-  }
-
-  // Scalar — path-level highlight wraps the scalar when this node itself is highlighted
-  if (isHighlighted && !parentHighlighted) {
-    return (
-      <span
-        ref={onHighlightRef}
-        className="rounded bg-blue-500/20 ring-1 ring-blue-500/40"
-        data-testid="output-highlighted"
-      >
-        <ScalarValue value={value} />
-        {trailing}
-      </span>
-    );
-  }
-
-  return (
-    <>
-      <ScalarValue value={value} />
-      {trailing}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -252,6 +82,8 @@ export interface OutputDisplayProps {
   highlightPath?: string | null;
   /** When provided, clicking a key fires this callback with the key's path. */
   onPathClick?: (path: string) => void;
+  /** Optional keyboard handler for output path key activation parity. */
+  onPathKeyDown?: (path: string, event: KeyboardEvent<HTMLButtonElement>) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,13 +93,14 @@ export interface OutputDisplayProps {
 /**
  * Output tab content for the Preview Panel.
  *
- * Renders formatted, syntax-colored JSON for successful execution results.
- * Supports:
- * - Path-based highlighting via `highlightPath` prop (FS-036)
- * - Click-to-select keys via `onPathClick` prop (FS-036)
- * - Auto-scroll to highlighted element when `highlightPath` changes
+   * Renders output states and copy interaction in a shared wrapper.
+   * Delegates JSON tree rendering/search/highlight interactions to JsonOutputView.
+   * Supports:
+   * - Path-based highlighting via `highlightPath` prop (FS-036)
+   * - Click-to-select keys via `onPathClick` prop (FS-036)
+   * - Auto-scroll to highlighted element when `highlightPath` changes
  */
-export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDisplayProps) {
+export function OutputDisplay({ state, highlightPath, onPathClick, onPathKeyDown }: OutputDisplayProps) {
   const highlightRef = useRef<HTMLSpanElement | null>(null);
   type CopyState = 'idle' | 'copied' | 'failed';
   const [copyState, setCopyState] = useState<CopyState>('idle');
@@ -324,8 +157,9 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
   }
 
   // status === 'success'
-  const { output } = state.result;
-  const outputText = JSON.stringify(output, null, 2);
+  const renderableOutput = buildRenderableOutput(state.result.output);
+  const { serializedText: outputText } = renderableOutput;
+  const renderMode = resolveOutputRenderMode(renderableOutput);
 
   function handleCopy() {
     navigator.clipboard.writeText(outputText).then(
@@ -346,7 +180,7 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
   // For non-object/non-array output, fall back to the flat tokenizer (preserves
   // existing behavior for primitive top-level values).
   const isStructured =
-    output !== null && typeof output === 'object';
+    renderableOutput.value !== null && typeof renderableOutput.value === 'object';
 
   if (!isStructured) {
     const jsonString = outputText;
@@ -381,6 +215,60 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
     );
   }
 
+  if (renderMode === 'fallback') {
+    return (
+      <div className="h-full overflow-auto p-3" data-testid="output-success">
+        <div className="mb-2 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={handleCopy}
+            data-testid="output-copy-button"
+            aria-label="Copy output payload"
+            className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+          >
+            {copyLabel}
+          </button>
+        </div>
+        <div
+          className="rounded border border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-200"
+          data-testid="output-fallback-mode"
+          role="status"
+        >
+          Output is too large for full inline rendering. Copy the full payload or open Test Lab for deeper inspection.
+        </div>
+      </div>
+    );
+  }
+
+  if (renderMode === 'limited') {
+    const previewText = outputText.length > 12000 ? `${outputText.slice(0, 12000)}\n…` : outputText;
+    return (
+      <div className="h-full overflow-auto p-3" data-testid="output-success">
+        <div className="mb-2 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={handleCopy}
+            data-testid="output-copy-button"
+            aria-label="Copy output payload"
+            className="text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+          >
+            {copyLabel}
+          </button>
+        </div>
+        <div
+          className="mb-2 rounded border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-300"
+          data-testid="output-limited-mode"
+          role="status"
+        >
+          Output is large. Showing a reduced inline preview to keep the editor responsive.
+        </div>
+        <pre className="whitespace-pre font-mono text-xs" aria-label="Execution output">
+          {previewText}
+        </pre>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-auto p-3" data-testid="output-success">
       <div className="mb-2 flex items-center justify-end">
@@ -394,18 +282,13 @@ export function OutputDisplay({ state, highlightPath, onPathClick }: OutputDispl
           {copyLabel}
         </button>
       </div>
-      <pre className="whitespace-pre font-mono text-xs" aria-label="Execution output">
-        <JsonNode
-          value={output}
-          path=""
-          indent={0}
-          isLast={true}
-          highlightPath={highlightPath}
-          onPathClick={onPathClick}
-          onHighlightRef={handleHighlightRef}
-        />
-        {'\n'}
-      </pre>
+      <JsonOutputView
+        renderableOutput={renderableOutput}
+        highlightPath={highlightPath}
+        onPathClick={onPathClick}
+        onPathKeyDown={onPathKeyDown}
+        onHighlightRef={handleHighlightRef}
+      />
     </div>
   );
 }

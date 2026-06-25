@@ -4,6 +4,7 @@ export { DiffDisplay } from './DiffDisplay';
 export type { DiffDisplayProps } from './DiffDisplay';
 export { OutputDisplay } from './OutputDisplay';
 export type { OutputDisplayProps } from './OutputDisplay';
+export { JsonOutputView } from './JsonOutputView';
 export { PreviewPanel } from './PreviewPanel';
 export type { PreviewPanelProps } from './PreviewPanel';
 export { SourceDataInput } from './SourceDataInput';

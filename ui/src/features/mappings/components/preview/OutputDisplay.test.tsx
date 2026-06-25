@@ -1,10 +1,16 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import type { ExecutionResult } from '@keyra/engine';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
+import type { ComponentProps } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { OutputDisplay } from './OutputDisplay';
+
+import {
+  INLINE_OUTPUT_NODE_LIMIT_HARD,
+  INLINE_OUTPUT_NODE_LIMIT_SOFT,
+} from '@/features/mappings/lib';
 import type { PreviewExecutionState } from '@/lib/types/domain';
-import type { ExecutionResult } from '@keyra/engine';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,7 +27,7 @@ function makeSuccessResult(output: unknown): ExecutionResult {
 
 function renderState(
   state: PreviewExecutionState,
-  extra?: Partial<React.ComponentProps<typeof OutputDisplay>>,
+  extra?: Partial<ComponentProps<typeof OutputDisplay>>,
 ) {
   return render(createElement(OutputDisplay, { state, ...extra }));
 }
@@ -83,6 +89,8 @@ describe('OutputDisplay', () => {
     // String value colored green
     const strSpan = screen.getByText('"Alice"');
     expect(strSpan.className).toContain('text-green-400');
+
+    expect(screen.getByTestId('output-json-view')).toBeInTheDocument();
   });
 
   it('success: renders number tokens in amber', () => {
@@ -166,6 +174,26 @@ describe('OutputDisplay', () => {
     fireEvent.click(screen.getByTestId('output-copy-button'));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(JSON.stringify({ name: 'Alice' }, null, 2));
+    });
+  });
+
+  it('copy uses full serialized payload (not highlighted/visible subset)', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderState(
+      {
+        status: 'success',
+        result: makeSuccessResult({ Order: { Status: 'Active', Amount: 99 } }),
+      },
+      { highlightPath: 'Order.Status' },
+    );
+
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        JSON.stringify({ Order: { Status: 'Active', Amount: 99 } }, null, 2),
+      );
     });
   });
 
@@ -314,5 +342,80 @@ describe('OutputDisplay', () => {
     );
 
     expect(screen.getByLabelText('Select path name')).toBeInTheDocument();
+  });
+
+  it('search no-results in JSON renderer is explicit', () => {
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ name: 'Alice' }),
+    });
+
+    fireEvent.change(screen.getByTestId('output-search-input'), {
+      target: { value: 'does-not-exist' },
+    });
+
+    expect(screen.getByTestId('output-search-no-results')).toHaveTextContent('No matching output nodes');
+  });
+
+  it('renders limited mode when output is at soft thresholds', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const bigArray = Array.from({ length: INLINE_OUTPUT_NODE_LIMIT_SOFT }, (_, i) => ({ i }));
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ rows: bigArray }),
+    });
+
+    expect(screen.getByTestId('output-limited-mode')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+
+    await waitFor(() => {
+      const copied = writeText.mock.calls[0]?.[0] as string;
+      expect(copied.length).toBeGreaterThan(0);
+      expect(copied).toContain('"rows"');
+    });
+  });
+
+  it('renders fallback mode at hard thresholds and copy still uses full payload', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const hugeArray = Array.from({ length: INLINE_OUTPUT_NODE_LIMIT_HARD }, (_, i) => ({ value: i }));
+    renderState({
+      status: 'success',
+      result: makeSuccessResult({ rows: hugeArray }),
+    });
+
+    expect(screen.getByTestId('output-fallback-mode')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+
+    await waitFor(() => {
+      const copied = writeText.mock.calls[0]?.[0] as string;
+      expect(copied).toContain('"rows"');
+      expect(copied).toContain(`"value": ${INLINE_OUTPUT_NODE_LIMIT_HARD - 1}`);
+    });
+  });
+
+  it('keeps complete copy semantics in limited/fallback modes', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const limitedArray = Array.from({ length: INLINE_OUTPUT_NODE_LIMIT_SOFT }, (_, i) => ({ i }));
+    renderState({ status: 'success', result: makeSuccessResult({ rows: limitedArray }) });
+
+    fireEvent.click(screen.getByTestId('output-copy-button'));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalled();
+    });
+
+    const fallbackArray = Array.from({ length: INLINE_OUTPUT_NODE_LIMIT_HARD }, (_, i) => ({ value: i }));
+    renderState({ status: 'success', result: makeSuccessResult({ rows: fallbackArray }) });
+
+    fireEvent.click(screen.getAllByTestId('output-copy-button')[1]!);
+    await waitFor(() => {
+      const copied = writeText.mock.calls.at(-1)?.[0] as string;
+      expect(copied).toContain(`"value": ${INLINE_OUTPUT_NODE_LIMIT_HARD - 1}`);
+    });
   });
 });

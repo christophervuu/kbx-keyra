@@ -38,7 +38,42 @@ interface MappingRule {
   readonly type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'null' | 'any';
   readonly expression: string;
   readonly description?: string;
+  readonly valueTableRef?: MappingRuleValueTableRef;
+  readonly noMatchBehavior?: MappingRuleNoMatchBehavior;
 }
+
+type ValueTablePrimitiveValue = string | number | boolean;
+
+interface MappingRuleResolvedEntry {
+  readonly in: ValueTablePrimitiveValue;
+  readonly out: ValueTablePrimitiveValue;
+  readonly rowId: string;
+}
+
+interface MappingRuleProjectValueTableRef {
+  readonly scope: 'project';
+  readonly valueTableId: string;
+  readonly tableKey: string;
+  readonly revision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly inputType: 'string' | 'number' | 'boolean';
+  readonly outputType: 'string' | 'number' | 'boolean';
+  readonly resolvedEntries: readonly MappingRuleResolvedEntry[];
+}
+
+interface MappingRuleInlineValueTableRef {
+  readonly scope: 'inline';
+}
+
+type MappingRuleValueTableRef = MappingRuleProjectValueTableRef | MappingRuleInlineValueTableRef;
+
+interface MappingRuleNoMatchBehavior {
+  readonly mode: 'return_null' | 'return_input' | 'fallback_value';
+  readonly fallbackValue?: ValueTablePrimitiveValue;
+}
+
+type MappingRuleType = MappingRule['type'];
 
 interface MappingConfigOptions {
   readonly unmappedTargets?: 'omit' | 'null' | 'error';
@@ -223,6 +258,29 @@ const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
 const MAPPING_REVISIONS_TABLE = getEnvValue('MAPPING_REVISIONS_TABLE');
 const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
+const KEYRA_DEBUG_MAPPING_STATUS = getEnvValue('KEYRA_DEBUG_MAPPING_STATUS');
+
+function isMappingStatusDebugEnabled(): boolean {
+  if (!KEYRA_DEBUG_MAPPING_STATUS) {
+    return false;
+  }
+
+  const normalized = KEYRA_DEBUG_MAPPING_STATUS.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function mappingStatusDebugLog(message: string, payload?: unknown): void {
+  if (!isMappingStatusDebugEnabled()) {
+    return;
+  }
+
+  if (payload === undefined) {
+    console.info(`[mapping-status-debug] ${message}`);
+    return;
+  }
+
+  console.info(`[mapping-status-debug] ${message}`, payload);
+}
 
 function getMappingsTableOrThrow(): string {
   const table = MAPPINGS_TABLE?.trim();
@@ -265,6 +323,190 @@ function buildSchemaContentS3Key(schemaId: string, format: SchemaMetadata['forma
   return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeSchemaType(type: unknown): MappingRuleType | null {
+  if (type === 'integer' || type === 'number') return 'number';
+  if (type === 'string' || type === 'boolean' || type === 'object' || type === 'array' || type === 'null' || type === 'any') {
+    return type;
+  }
+  return null;
+}
+
+function collectTargetTypesFromJsonSchema(
+  schema: unknown,
+  pathPrefix: string,
+  output: Map<string, MappingRuleType>,
+): void {
+  if (!isRecord(schema)) return;
+  const properties = schema.properties;
+  if (!isRecord(properties)) return;
+
+  for (const [field, child] of Object.entries(properties)) {
+    const path = pathPrefix ? `${pathPrefix}.${field}` : field;
+    if (!isRecord(child)) continue;
+
+    const normalized = normalizeSchemaType(child.type);
+    if (normalized) {
+      output.set(path, normalized);
+    }
+
+    collectTargetTypesFromJsonSchema(child, path, output);
+  }
+}
+
+function inferTypeFromSampleValue(value: unknown): MappingRuleType {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (typeof value === 'string') return 'string';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'object') return 'object';
+  return 'any';
+}
+
+function collectTargetTypesFromSamplePayload(
+  value: unknown,
+  pathPrefix: string,
+  output: Map<string, MappingRuleType>,
+): void {
+  if (!isRecord(value)) return;
+
+  for (const [field, child] of Object.entries(value)) {
+    const path = pathPrefix ? `${pathPrefix}.${field}` : field;
+    output.set(path, inferTypeFromSampleValue(child));
+    collectTargetTypesFromSamplePayload(child, path, output);
+  }
+}
+
+function buildTargetTypeByPath(targetSchema: unknown): ReadonlyMap<string, MappingRuleType> {
+  const map = new Map<string, MappingRuleType>();
+  if (!isRecord(targetSchema)) return map;
+
+  const hasJsonSchemaShape = typeof targetSchema.type === 'string' && isRecord(targetSchema.properties);
+  if (hasJsonSchemaShape) {
+    collectTargetTypesFromJsonSchema(targetSchema, '', map);
+    return map;
+  }
+
+  collectTargetTypesFromSamplePayload(targetSchema, '', map);
+  return map;
+}
+
+function toJsonSchemaFromSamplePayload(value: unknown): unknown {
+  if (value === null) {
+    return { type: 'null' };
+  }
+
+  if (Array.isArray(value)) {
+    const first = value.length > 0 ? value[0] : null;
+    return {
+      type: 'array',
+      items: toJsonSchemaFromSamplePayload(first),
+    };
+  }
+
+  if (!isRecord(value)) {
+    if (typeof value === 'string') return { type: 'string' };
+    if (typeof value === 'number') return { type: 'number' };
+    if (typeof value === 'boolean') return { type: 'boolean' };
+    return { type: 'any' };
+  }
+
+  const properties: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    properties[key] = toJsonSchemaFromSamplePayload(child);
+  }
+
+  return {
+    type: 'object',
+    properties,
+  };
+}
+
+function normalizeSchemaForValidation(schema: unknown): unknown {
+  if (!isRecord(schema)) {
+    return schema;
+  }
+
+  if (typeof schema.type === 'string') {
+    return schema;
+  }
+
+  if (isRecord(schema.properties)) {
+    return schema;
+  }
+
+  return toJsonSchemaFromSamplePayload(schema);
+}
+
+function canonicalizeTargetPath(path: string): string {
+  return path
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.toLowerCase())
+    .join('.');
+}
+
+function buildCanonicalTargetTypeByPath(
+  targetTypeByPath: ReadonlyMap<string, MappingRuleType>,
+): ReadonlyMap<string, MappingRuleType> {
+  const map = new Map<string, MappingRuleType>();
+
+  for (const [path, type] of targetTypeByPath.entries()) {
+    const canonicalPath = canonicalizeTargetPath(path);
+    if (!canonicalPath || map.has(canonicalPath)) {
+      continue;
+    }
+
+    map.set(canonicalPath, type);
+  }
+
+  return map;
+}
+
+function normalizeRulesByTargetSchema(
+  rules: readonly MappingRule[],
+  targetSchema: unknown | null,
+): readonly MappingRule[] {
+  if (!targetSchema) return rules;
+
+  const targetTypeByPath = buildTargetTypeByPath(targetSchema);
+  const canonicalTargetTypeByPath = buildCanonicalTargetTypeByPath(targetTypeByPath);
+  let changed = false;
+
+  const normalized = rules.map((rule) => {
+    const exactTargetType = targetTypeByPath.get(rule.target);
+    const canonicalTargetType = canonicalTargetTypeByPath.get(canonicalizeTargetPath(rule.target));
+    const targetType = exactTargetType ?? canonicalTargetType;
+
+    if (rule.target === 'financial.totalAmount' || rule.target === 'financial.TotalAmount') {
+      console.info('update-mapping type-normalization trace', {
+        target: rule.target,
+        incomingType: rule.type,
+        exactTargetType: exactTargetType ?? null,
+        canonicalTargetType: canonicalTargetType ?? null,
+        resolvedTargetType: targetType ?? null,
+      });
+    }
+
+    if (!targetType || rule.type === targetType) {
+      return rule;
+    }
+
+    changed = true;
+    return {
+      ...rule,
+      type: targetType,
+    };
+  });
+
+  return changed ? normalized : rules;
+}
+
 async function loadTargetSchemaContent(schemaId: string | undefined): Promise<unknown | null> {
   if (!schemaId) {
     return null;
@@ -295,7 +537,15 @@ async function loadTargetSchemaContent(schemaId: string | undefined): Promise<un
     }
 
     return JSON.parse(rawSchema) as unknown;
-  } catch {
+  } catch (error) {
+    const details = error as { message?: unknown; name?: unknown; code?: unknown };
+    mappingStatusDebugLog('failed to load target schema content', {
+      schemaId,
+      schemasTable,
+      errorName: typeof details.name === 'string' ? details.name : null,
+      errorCode: typeof details.code === 'string' ? details.code : null,
+      errorMessage: typeof details.message === 'string' ? details.message : 'unknown error',
+    });
     return null;
   }
 }
@@ -318,6 +568,8 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
     type: (rule.type === 'null' || rule.type === 'any' ? 'string' : rule.type) as EngineMappingRule['type'],
     expression: rule.expression,
     ...(rule.description ? { description: rule.description } : {}),
+    ...(rule.valueTableRef ? { valueTableRef: rule.valueTableRef } : {}),
+    ...(rule.noMatchBehavior ? { noMatchBehavior: rule.noMatchBehavior } : {}),
   }));
 
   return {
@@ -339,12 +591,43 @@ function toEngineConfig(config: MappingConfig): EngineMappingConfig {
 async function deriveStatusAndCoverage(config: MappingConfig): Promise<{ status: MappingMetadata['status']; coverage: number; ruleCount: number }> {
   const ruleCount = config.rules.length;
   if (ruleCount === 0) {
+    mappingStatusDebugLog('status derivation: zero rules -> draft', {
+      mappingId: config.id ?? null,
+      targetSchemaId: config.targetSchemaRef?.schemaId ?? null,
+    });
     return { status: 'draft', coverage: 0, ruleCount };
   }
 
   const targetSchema = await loadTargetSchemaContent(config.targetSchemaRef?.schemaId);
-  const result = validate(toEngineConfig(config), null, targetSchema);
+  const normalizedTargetSchema = normalizeSchemaForValidation(targetSchema);
+  const result = validate(toEngineConfig(config), null, normalizedTargetSchema);
   const hasErrors = result.diagnostics.some((diagnostic) => diagnostic.severity === 'error');
+  const errorCount = result.diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length;
+  const warningCount = result.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length;
+  const firstError = result.diagnostics.find((diagnostic) => diagnostic.severity === 'error');
+  mappingStatusDebugLog('status derivation summary', {
+    mappingId: config.id ?? null,
+    targetSchemaId: config.targetSchemaRef?.schemaId ?? null,
+    targetSchemaLoaded: targetSchema !== null,
+    ruleCount,
+    diagnostics: {
+      total: result.diagnostics.length,
+      errors: errorCount,
+      warnings: warningCount,
+    },
+    derivedStatus: hasErrors ? 'has-errors' : 'ready',
+    coverage: result.coverage?.percentage ?? 0,
+  });
+  if (firstError) {
+    mappingStatusDebugLog('status derivation first error', {
+      mappingId: config.id ?? null,
+      code: firstError.code,
+      message: firstError.message,
+      targetPath: firstError.targetPath ?? null,
+      ruleIndex: firstError.ruleIndex ?? null,
+      expression: firstError.expression ?? null,
+    });
+  }
 
   return {
     status: hasErrors ? 'has-errors' : 'ready',
@@ -391,6 +674,17 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const currentRevision = getCurrentRevision(existing);
+    mappingStatusDebugLog('update request received', {
+      mappingId,
+      expectedRevision,
+      currentRevision,
+      existingStatus: existing.status,
+      existingRuleCount: existing.ruleCount,
+      existingCoverage: existing.coverage,
+      existingConfigHash: existing.configHash ?? null,
+      existingSourceSchemaId: existing.sourceSchemaId ?? null,
+      existingTargetSchemaId: existing.targetSchemaId ?? null,
+    });
     if (expectedRevision !== currentRevision) {
       const err = conflict(`Revision mismatch: expected ${currentRevision}, got ${expectedRevision}. Reload and retry.`);
       return errorResponse(err.code, err.message, err.statusCode, err.retryable);
@@ -413,6 +707,10 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       : derivedEnrichmentSources;
     const externalSources = deriveCompatibilityExternals(enrichmentSources, legacyExternalAliases);
 
+    const targetSchema = await loadTargetSchemaContent((body?.targetSchemaRef as SchemaRef | undefined)?.schemaId ?? existing.targetSchemaId);
+    const incomingRules = Array.isArray(body?.rules) ? (body.rules as MappingRule[]) : [];
+    const normalizedRules = normalizeRulesByTargetSchema(incomingRules, targetSchema);
+
     const config: MappingConfig = {
       id: mappingId,
       projectId: typeof body?.projectId === 'string' ? body.projectId : existing.projectId,
@@ -427,7 +725,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         ...inputConfig,
         externalSources,
       },
-      rules: Array.isArray(body?.rules) ? (body.rules as MappingRule[]) : [],
+      rules: normalizedRules,
     };
 
     const configHash = await computeConfigHash({ ...config, version: 0 } as PersistenceMappingConfig);
@@ -445,7 +743,64 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     const latestRevision = latestRevisionEntries[0] ?? null;
+    mappingStatusDebugLog('computed update hash', {
+      mappingId,
+      configHash,
+      latestRevisionHash: latestRevision?.configHash ?? null,
+      latestRevisionNumber: latestRevision?.revision ?? null,
+      normalizedRuleCount: normalizedRules.length,
+      sourceSchemaId: config.sourceSchemaRef?.schemaId ?? existing.sourceSchemaId ?? null,
+      targetSchemaId: config.targetSchemaRef?.schemaId ?? existing.targetSchemaId ?? null,
+    });
     if (latestRevision?.configHash === configHash) {
+      const derivation = await deriveStatusAndCoverage(config);
+
+      const shouldRefreshDerivedMetadata =
+        existing.status !== derivation.status
+        || existing.ruleCount !== derivation.ruleCount
+        || existing.coverage !== derivation.coverage
+        || existing.configHash !== configHash;
+
+      if (shouldRefreshDerivedMetadata) {
+        mappingStatusDebugLog('no-change save refreshing derived metadata', {
+          mappingId,
+          previousStatus: existing.status,
+          nextStatus: derivation.status,
+          previousRuleCount: existing.ruleCount,
+          nextRuleCount: derivation.ruleCount,
+          previousCoverage: existing.coverage,
+          nextCoverage: derivation.coverage,
+        });
+        await updateItem({
+          TableName: getMappingsTableOrThrow(),
+          Key: { mappingId },
+          UpdateExpression:
+            'SET #status = :status, #ruleCount = :ruleCount, #coverage = :coverage, #configHash = :configHash',
+          ExpressionAttributeNames: {
+            '#status': 'status',
+            '#ruleCount': 'ruleCount',
+            '#coverage': 'coverage',
+            '#configHash': 'configHash',
+          },
+          ExpressionAttributeValues: {
+            ':status': derivation.status,
+            ':ruleCount': derivation.ruleCount,
+            ':coverage': derivation.coverage,
+            ':configHash': configHash,
+          },
+          ReturnValues: 'ALL_NEW',
+        });
+      }
+
+      if (!shouldRefreshDerivedMetadata) {
+        mappingStatusDebugLog('no-change save kept existing derived metadata', {
+          mappingId,
+          status: existing.status,
+          ruleCount: existing.ruleCount,
+          coverage: existing.coverage,
+        });
+      }
+
       return jsonResponse(200, {
         mappingId,
         revision: currentRevision,
@@ -454,6 +809,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const derivation = await deriveStatusAndCoverage(config);
+    mappingStatusDebugLog('persisting changed mapping', {
+      mappingId,
+      nextRevision,
+      derivedStatus: derivation.status,
+      derivedRuleCount: derivation.ruleCount,
+      derivedCoverage: derivation.coverage,
+      sourceSchemaId: config.sourceSchemaRef?.schemaId ?? existing.sourceSchemaId ?? null,
+      targetSchemaId: config.targetSchemaRef?.schemaId ?? existing.targetSchemaId ?? null,
+    });
     const updatedAt = new Date().toISOString();
 
     const revisionConfigS3Key = toRevisionS3Key(mappingId, nextRevision);

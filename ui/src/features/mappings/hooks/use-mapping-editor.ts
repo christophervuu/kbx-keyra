@@ -193,6 +193,15 @@ export interface UseMappingEditorResult {
   parsedTargetSchema: ParsedSchema | null;
   /** Whether both schemas were loaded successfully (for validation) */
   schemasLoaded: boolean;
+  /** Non-blocking schema load warnings (e.g. missing/deleted schema refs). */
+  schemaLoadWarnings: readonly {
+    role: 'source' | 'target' | 'enrichment';
+    schemaId: string;
+    alias?: string;
+    code?: string;
+    statusCode?: number;
+    message: string;
+  }[];
 
   /** Current save status for EditorTopBar */
   saveStatus: SaveStatus;
@@ -285,6 +294,24 @@ function moveItem<T>(array: readonly T[], from: number, to: number): T[] {
   return result;
 }
 
+function isRuleTypeDebugEnabled(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('keyra:debug:rule-type') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function debugRuleTypeLog(message: string, payload?: unknown): void {
+  if (!isRuleTypeDebugEnabled()) return;
+  if (payload === undefined) {
+    console.info(`[rule-type-debug] ${message}`);
+    return;
+  }
+  console.info(`[rule-type-debug] ${message}`, payload);
+}
+
 /**
  * Try parsing a schema's content into a ParsedSchema for tree display.
  * Returns null if parsing fails (graceful degradation per AE-10).
@@ -343,6 +370,74 @@ function collectJsonSchemaTypes(
   }
 }
 
+function inferTypeFromSampleValue(value: unknown): MappingRule['type'] {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (typeof value === 'string') return 'string';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'object') return 'object';
+  return 'any';
+}
+
+function collectSamplePayloadTypes(
+  payload: unknown,
+  pathPrefix: string,
+  map: Map<string, MappingRule['type']>,
+): void {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return;
+  }
+
+  for (const [field, value] of Object.entries(payload as Record<string, unknown>)) {
+    const path = pathPrefix ? `${pathPrefix}.${field}` : field;
+    map.set(path, inferTypeFromSampleValue(value));
+    collectSamplePayloadTypes(value, path, map);
+  }
+}
+
+function parseJsonContentIfString(content: unknown): unknown {
+  if (typeof content !== 'string') {
+    return content;
+  }
+
+  try {
+    return JSON.parse(content) as unknown;
+  } catch {
+    return content;
+  }
+}
+
+function getErrorInfo(error: unknown): { message: string; code?: string; statusCode?: number } {
+  const fallback = { message: 'Schema load failed' };
+
+  if (error instanceof Error) {
+    const details = error as Error & { code?: unknown; statusCode?: unknown };
+    return {
+      message: error.message,
+      ...(typeof details.code === 'string' ? { code: details.code } : {}),
+      ...(typeof details.statusCode === 'number' ? { statusCode: details.statusCode } : {}),
+    };
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const details = error as { message?: unknown; code?: unknown; statusCode?: unknown };
+    return {
+      message: typeof details.message === 'string' && details.message.trim().length > 0
+        ? details.message
+        : fallback.message,
+      ...(typeof details.code === 'string' ? { code: details.code } : {}),
+      ...(typeof details.statusCode === 'number' ? { statusCode: details.statusCode } : {}),
+    };
+  }
+
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return { message: error };
+  }
+
+  return fallback;
+}
+
 function normalizeSchemaNodeType(type: string | null): MappingRule['type'] {
   if (type === 'integer') return 'number';
   if (
@@ -359,30 +454,80 @@ function normalizeSchemaNodeType(type: string | null): MappingRule['type'] {
   return 'string';
 }
 
+function collectParsedTargetNodeTypes(
+  nodes: readonly ParsedSchema['nodes'][number][],
+  map: Map<string, MappingRule['type']>,
+): void {
+  for (const node of nodes) {
+    map.set(node.path, normalizeSchemaNodeType(node.type));
+    if (node.children.length > 0) {
+      collectParsedTargetNodeTypes(node.children, map);
+    }
+  }
+}
+
 function buildTargetTypeByPathFromSchema(
   parsedTargetSchema: ParsedSchema | null,
   targetSchema: SchemaDetail | null,
 ): ReadonlyMap<string, MappingRule['type']> {
   const map = new Map<string, MappingRule['type']>();
+  const targetContent = parseJsonContentIfString(targetSchema?.content);
 
-  for (const node of parsedTargetSchema?.nodes ?? []) {
-    map.set(node.path, normalizeSchemaNodeType(node.type));
-  }
+  collectParsedTargetNodeTypes(parsedTargetSchema?.nodes ?? [], map);
 
   if (targetSchema?.metadata.format === 'json-schema') {
-    collectJsonSchemaTypes(targetSchema.content, '', map);
+    collectJsonSchemaTypes(targetContent, '', map);
+  }
+
+  if (map.size === 0) {
+    collectSamplePayloadTypes(targetContent, '', map);
   }
 
   return map;
+}
+
+function canonicalizeTargetPath(path: string): string {
+  return path
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.toLowerCase())
+    .join('.');
+}
+
+function buildCanonicalTargetTypeByPath(
+  targetTypeByPath: ReadonlyMap<string, MappingRule['type']>,
+): ReadonlyMap<string, MappingRule['type']> {
+  const map = new Map<string, MappingRule['type']>();
+
+  for (const [path, type] of targetTypeByPath.entries()) {
+    const canonicalPath = canonicalizeTargetPath(path);
+    if (!canonicalPath || map.has(canonicalPath)) {
+      continue;
+    }
+
+    map.set(canonicalPath, type);
+  }
+
+  return map;
+}
+
+function resolveTargetType(
+  targetPath: string,
+  targetTypeByPath: ReadonlyMap<string, MappingRule['type']>,
+  canonicalTargetTypeByPath: ReadonlyMap<string, MappingRule['type']>,
+): MappingRule['type'] | undefined {
+  return targetTypeByPath.get(targetPath) ?? canonicalTargetTypeByPath.get(canonicalizeTargetPath(targetPath));
 }
 
 function normalizeRuleTypesByTargetSchema(
   rules: readonly MappingRule[],
   targetTypeByPath: ReadonlyMap<string, MappingRule['type']>,
 ): readonly MappingRule[] {
+  const canonicalTargetTypeByPath = buildCanonicalTargetTypeByPath(targetTypeByPath);
   let changed = false;
   const normalized = rules.map((rule) => {
-    const targetType = targetTypeByPath.get(rule.target);
+    const targetType = resolveTargetType(rule.target, targetTypeByPath, canonicalTargetTypeByPath);
     if (!targetType || rule.type === targetType) return rule;
     changed = true;
     return {
@@ -436,6 +581,8 @@ function mergeDraftsIntoRules(
   // Start with a mutable copy of saved rules
   let result: MappingRule[] = [...savedRules];
 
+  const canonicalTargetTypeByPath = buildCanonicalTargetTypeByPath(targetTypeByPath ?? new Map());
+
   for (const [targetPath, expression] of draftRules) {
     if (expression === '') {
       // Empty expression = delete this rule
@@ -449,7 +596,7 @@ function mergeDraftsIntoRules(
         // Append new rule
         result.push({
           target: targetPath,
-          type: targetTypeByPath?.get(targetPath) ?? 'string',
+          type: resolveTargetType(targetPath, targetTypeByPath ?? new Map(), canonicalTargetTypeByPath) ?? 'string',
           expression,
         });
       }
@@ -523,6 +670,7 @@ export function useMappingEditor(
   const [sourceSchema, setSourceSchema] = useState<SchemaDetail | null>(null);
   const [targetSchema, setTargetSchema] = useState<SchemaDetail | null>(null);
   const [enrichmentSchemasByAlias, setEnrichmentSchemasByAlias] = useState<Record<string, SchemaDetail | null>>({});
+  const [schemaLoadWarnings, setSchemaLoadWarnings] = useState<UseMappingEditorResult['schemaLoadWarnings']>([]);
 
   // Local editing state
   const [rules, setRules] = useState<readonly MappingRule[]>([]);
@@ -569,6 +717,11 @@ export function useMappingEditor(
 
     try {
       const mappingConfig = await adapter.getMapping(mappingId);
+      debugRuleTypeLog('mapping config schema refs snapshot', {
+        sourceSchemaRef: mappingConfig.sourceSchemaRef ?? null,
+        targetSchemaRef: mappingConfig.targetSchemaRef ?? null,
+        enrichmentSources: mappingConfig.enrichmentSources ?? [],
+      });
 
       if (!mountedRef.current) return;
 
@@ -611,12 +764,51 @@ export function useMappingEditor(
 
       if (!mountedRef.current) return;
 
+      const nextSchemaLoadWarnings: UseMappingEditorResult['schemaLoadWarnings'] = [];
+
       const resolvedSourceSchema = sourceResult.status === 'fulfilled'
         ? sourceResult.value
         : null;
       const resolvedTargetSchema = targetResult.status === 'fulfilled'
         ? targetResult.value
         : null;
+      if (sourceResult.status === 'rejected' && mappingConfig.sourceSchemaRef) {
+        const info = getErrorInfo(sourceResult.reason);
+        nextSchemaLoadWarnings.push({
+          role: 'source',
+          schemaId: mappingConfig.sourceSchemaRef.schemaId,
+          code: info.code,
+          statusCode: info.statusCode,
+          message: info.message,
+        });
+        debugRuleTypeLog('source schema load failed', {
+          schemaId: mappingConfig.sourceSchemaRef.schemaId,
+          ...info,
+        });
+      }
+      if (targetResult.status === 'rejected' && mappingConfig.targetSchemaRef) {
+        const info = getErrorInfo(targetResult.reason);
+        nextSchemaLoadWarnings.push({
+          role: 'target',
+          schemaId: mappingConfig.targetSchemaRef.schemaId,
+          code: info.code,
+          statusCode: info.statusCode,
+          message: info.message,
+        });
+        debugRuleTypeLog('target schema load failed', {
+          schemaId: mappingConfig.targetSchemaRef.schemaId,
+          ...info,
+        });
+      }
+      debugRuleTypeLog('loaded target schema detail', {
+        schemaId: resolvedTargetSchema?.metadata.schemaId,
+        format: resolvedTargetSchema?.metadata.format,
+        contentType: typeof resolvedTargetSchema?.content,
+        contentPreview:
+          typeof resolvedTargetSchema?.content === 'string'
+            ? resolvedTargetSchema.content.slice(0, 140)
+            : undefined,
+      });
       const normalizedRules = normalizeRuleTypesByTargetSchema(
         mappingConfig.rules,
         buildTargetTypeByPathFromSchema(
@@ -641,6 +833,7 @@ export function useMappingEditor(
       // Clear any stale drafts on reload
       setDraftRules(new Map());
       setEnrichmentSchemasByAlias({});
+      setSchemaLoadWarnings(nextSchemaLoadWarnings);
 
       setSourceSchema(resolvedSourceSchema);
       setTargetSchema(resolvedTargetSchema);
@@ -650,12 +843,26 @@ export function useMappingEditor(
       const enrichmentSchemaPromises = enrichmentDefs
         .filter((entry) => typeof entry.schemaId === 'string' && entry.schemaId.trim().length > 0)
         .map(async (entry) => {
-          const schema = await adapter.getSchema(entry.schemaId!);
-          return { alias: entry.alias, schema };
+          try {
+            const schema = await adapter.getSchema(entry.schemaId!);
+            return {
+              alias: entry.alias,
+              schemaId: entry.schemaId!,
+              status: 'fulfilled' as const,
+              schema,
+            };
+          } catch (error) {
+            return {
+              alias: entry.alias,
+              schemaId: entry.schemaId!,
+              status: 'rejected' as const,
+              error,
+            };
+          }
         });
 
       if (enrichmentSchemaPromises.length > 0) {
-        const enrichmentResults = await Promise.allSettled(enrichmentSchemaPromises);
+        const enrichmentResults = await Promise.all(enrichmentSchemaPromises);
         if (!mountedRef.current) return;
 
         const next: Record<string, SchemaDetail | null> = {};
@@ -664,10 +871,26 @@ export function useMappingEditor(
         }
         for (const result of enrichmentResults) {
           if (result.status === 'fulfilled') {
-            next[result.value.alias] = result.value.schema;
+            next[result.alias] = result.schema;
+          } else {
+            const info = getErrorInfo(result.error);
+            nextSchemaLoadWarnings.push({
+              role: 'enrichment',
+              alias: result.alias,
+              schemaId: result.schemaId,
+              code: info.code,
+              statusCode: info.statusCode,
+              message: info.message,
+            });
+            debugRuleTypeLog('enrichment schema load failed', {
+              alias: result.alias,
+              schemaId: result.schemaId,
+              ...info,
+            });
           }
         }
         setEnrichmentSchemasByAlias(next);
+        setSchemaLoadWarnings([...nextSchemaLoadWarnings]);
       }
 
       setLoadState('loaded');
@@ -675,6 +898,7 @@ export function useMappingEditor(
       if (!mountedRef.current) return;
       setLoadState('error');
       setLoadError(err instanceof Error ? err.message : 'Failed to load mapping');
+      setSchemaLoadWarnings([]);
     }
   }, [adapter, mappingId]);
 
@@ -704,6 +928,25 @@ export function useMappingEditor(
   const targetTypeByPath = useMemo<ReadonlyMap<string, MappingRule['type']>>(() => {
     return buildTargetTypeByPathFromSchema(parsedTargetSchema, targetSchema);
   }, [parsedTargetSchema, targetSchema]);
+
+  useEffect(() => {
+    debugRuleTypeLog('resolved target type map snapshot', {
+      mapSize: targetTypeByPath.size,
+      financialTotalAmount: targetTypeByPath.get('financial.totalAmount') ?? null,
+      financialTotalAmountCanonical: targetTypeByPath.get('financial.TotalAmount') ?? null,
+    });
+  }, [targetTypeByPath]);
+
+  const canonicalTargetTypeByPath = useMemo<ReadonlyMap<string, MappingRule['type']>>(() => {
+    return buildCanonicalTargetTypeByPath(targetTypeByPath);
+  }, [targetTypeByPath]);
+
+  const resolveSchemaTargetType = useCallback(
+    (targetPath: string): MappingRule['type'] | undefined => {
+      return resolveTargetType(targetPath, targetTypeByPath, canonicalTargetTypeByPath);
+    },
+    [targetTypeByPath, canonicalTargetTypeByPath],
+  );
 
   const enrichmentInputSchemas = useMemo(() => {
     if (config === null) return [] as { alias: string; parsedSchema: ParsedSchema | null }[];
@@ -869,19 +1112,34 @@ export function useMappingEditor(
     const mergedRules = draftRules.size > 0
       ? mergeDraftsIntoRules(rules, draftRules, targetTypeByPath)
       : [...rules];
+    const normalizedMergedRules = normalizeRuleTypesByTargetSchema(mergedRules, targetTypeByPath);
 
     const updatedConfig: MappingConfig = {
       ...config,
       // Backend expects expectedRevision to be the current persisted revision.
       // Version/currentRevision are advanced only after a successful save response.
       version: currentRevision,
-      rules: mergedRules,
+      rules: normalizedMergedRules,
       config: configOptions,
     };
 
+    debugRuleTypeLog('save payload normalized rules preview', {
+      mappingId,
+      version: updatedConfig.version,
+      targetTypeByPathSize: targetTypeByPath.size,
+      totalRules: updatedConfig.rules.length,
+      financialTotalAmountRule:
+        updatedConfig.rules.find((rule) => rule.target === 'financial.totalAmount') ?? null,
+      firstFiveRules: updatedConfig.rules.slice(0, 5).map((rule) => ({
+        target: rule.target,
+        type: rule.type,
+        expression: rule.expression,
+      })),
+    });
+
     // Optimistically reflect the pending save immediately.
     setConfig(updatedConfig);
-    setRules(mergedRules);
+    setRules(normalizedMergedRules);
 
     try {
       const saveResult = await adapter.saveMapping(mappingId, updatedConfig);
@@ -896,7 +1154,7 @@ export function useMappingEditor(
       setConfig(persistedConfig);
       setCurrentRevision(finalRevision);
       setVersion(finalRevision);
-      setLastSavedRules(mergedRules);
+      setLastSavedRules(normalizedMergedRules);
       setLastSavedConfigOptions(configOptions);
       setSaveState('saved');
       // Clear all drafts — they've been committed to saved rules
@@ -1019,14 +1277,14 @@ export function useMappingEditor(
   const addRule = useCallback((rule: Pick<MappingRule, 'target' | 'expression' | 'description'>) => {
     const newRule: MappingRule = {
       target: rule.target,
-      type: 'string', // Default type for new rules in Phase 0
+      type: resolveSchemaTargetType(rule.target) ?? 'string',
       expression: rule.expression,
       description: rule.description,
     };
     setRules((prev) => [...prev, newRule]);
     // Reset save state if it was 'saved' or 'error'
     setSaveState('idle');
-  }, []);
+  }, [resolveSchemaTargetType]);
 
   const updateRule = useCallback(
     (index: number, rule: Pick<MappingRule, 'target' | 'expression' | 'description'>) => {
@@ -1061,7 +1319,9 @@ export function useMappingEditor(
 
       const appended: MappingRule = {
         target: targetPath,
-        type: patch.type ?? 'string',
+        type: patch.type
+          ?? resolveSchemaTargetType(targetPath)
+          ?? 'string',
         expression: patch.expression ?? '',
         description: patch.description,
         ...(patch.valueTableRef ? { valueTableRef: patch.valueTableRef } : {}),
@@ -1070,7 +1330,7 @@ export function useMappingEditor(
       return [...prev, appended];
     });
     setSaveState('idle');
-  }, []);
+  }, [resolveSchemaTargetType]);
 
   const deleteRule = useCallback((index: number) => {
     setRules((prev) => prev.filter((_, i) => i !== index));
@@ -1105,14 +1365,16 @@ export function useMappingEditor(
     (pasted: Array<Pick<MappingRule, 'target' | 'type' | 'expression' | 'description'>>) => {
       const newRules: MappingRule[] = pasted.map((r) => ({
         target: r.target,
-        type: r.type ?? 'string',
+        type: resolveSchemaTargetType(r.target)
+          ?? r.type
+          ?? 'string',
         expression: r.expression,
         description: r.description,
       }));
       setRules((prev) => [...prev, ...newRules]);
       setSaveState('idle');
     },
-    [],
+    [resolveSchemaTargetType],
   );
 
   const updateConfig = useCallback((partial: Partial<MappingConfigOptions>) => {
@@ -1133,6 +1395,7 @@ export function useMappingEditor(
       id: config.id,
       projectId: config.projectId,
       version: newVersion,
+      rules: normalizeRuleTypesByTargetSchema(restoreConfig.rules, targetTypeByPath),
     };
 
     try {
@@ -1174,7 +1437,7 @@ export function useMappingEditor(
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, adapter, mappingId, draftKey]);
+  }, [config, version, adapter, mappingId, draftKey, targetTypeByPath]);
 
   const retry = useCallback(() => {
     void loadData();
@@ -1397,6 +1660,7 @@ export function useMappingEditor(
     enrichmentInputSchemas,
     parsedTargetSchema,
     schemasLoaded,
+    schemaLoadWarnings,
     saveStatus,
     hasUnsavedChanges,
     canSave: hasUnsavedChanges && !isSaveBlocked,

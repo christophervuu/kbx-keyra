@@ -322,3 +322,13 @@ export {
   resolveFieldTestValue,
 } from './source-field-display';
 export type { TypeBadge } from './source-field-display';
+export { buildRenderableOutput } from './renderable-output';
+export { resolveOutputNodeSelection } from './output-node-resolver';
+export {
+  INLINE_OUTPUT_NODE_LIMIT_SOFT,
+  INLINE_OUTPUT_SIZE_BYTES_SOFT,
+  INLINE_OUTPUT_NODE_LIMIT_HARD,
+  INLINE_OUTPUT_SIZE_BYTES_HARD,
+  resolveOutputRenderMode,
+} from './output-render-limits';
+export type { OutputRenderMode } from './output-render-limits';

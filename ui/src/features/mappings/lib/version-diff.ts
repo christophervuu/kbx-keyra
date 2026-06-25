@@ -85,9 +85,39 @@ function addConstantsDiffs(
   }
 }
 
-export function computeVersionDiff(oldConfig: MappingConfig, newConfig: MappingConfig): VersionDiff {
-  const oldGrouped = groupRulesByTarget(oldConfig.rules);
-  const newGrouped = groupRulesByTarget(newConfig.rules);
+const DEFAULT_VERSION_DIFF_CONFIG: MappingConfig = {
+  name: 'Unknown version',
+  version: 0,
+  engineVersion: 'unknown',
+  config: {},
+  rules: [],
+};
+
+function normalizeConfig(config: MappingConfig | null | undefined): MappingConfig {
+  if (!config || typeof config !== 'object') {
+    return DEFAULT_VERSION_DIFF_CONFIG;
+  }
+
+  return {
+    ...DEFAULT_VERSION_DIFF_CONFIG,
+    ...config,
+    config:
+      config.config && typeof config.config === 'object'
+        ? config.config
+        : DEFAULT_VERSION_DIFF_CONFIG.config,
+    rules: Array.isArray(config.rules) ? config.rules : DEFAULT_VERSION_DIFF_CONFIG.rules,
+  };
+}
+
+export function computeVersionDiff(
+  oldConfig: MappingConfig | null | undefined,
+  newConfig: MappingConfig | null | undefined,
+): VersionDiff {
+  const normalizedOldConfig = normalizeConfig(oldConfig);
+  const normalizedNewConfig = normalizeConfig(newConfig);
+
+  const oldGrouped = groupRulesByTarget(normalizedOldConfig.rules);
+  const newGrouped = groupRulesByTarget(normalizedNewConfig.rules);
 
   const allTargets = [...new Set([...oldGrouped.keys(), ...newGrouped.keys()])].sort();
   const ruleDiffs: RuleDiff[] = [];
@@ -142,8 +172,8 @@ export function computeVersionDiff(oldConfig: MappingConfig, newConfig: MappingC
   }
 
   const configDiffs: ConfigDiff[] = [];
-  const oldOptions = oldConfig.config;
-  const newOptions = newConfig.config;
+  const oldOptions = normalizedOldConfig.config;
+  const newOptions = normalizedNewConfig.config;
 
   if (oldOptions.unmappedTargets !== newOptions.unmappedTargets) {
     configDiffs.push({

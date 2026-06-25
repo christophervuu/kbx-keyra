@@ -22,6 +22,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const adapter = useAdapter();
   const navigate = useNavigate();
   const [showLinkedSchemasDialog, setShowLinkedSchemasDialog] = useState(false);
+  const [unlinkingSchemaId, setUnlinkingSchemaId] = useState<string | null>(null);
   const [valueTableSummary, setValueTableSummary] = useState<{
     projectId: string;
     activeCount: number | null;
@@ -42,6 +43,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     duplicateMappingAction,
     deleteProjectAction,
     duplicateProjectAction,
+    removeSchema,
     retry,
     schemasReferencingMapping,
   } = useProjectOverview(projectId);
@@ -158,6 +160,15 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     setShowLinkedSchemasDialog(false);
   }
 
+  async function handleUnlinkSchema(schemaId: string) {
+    setUnlinkingSchemaId(schemaId);
+    try {
+      await removeSchema(schemaId);
+    } finally {
+      setUnlinkingSchemaId(null);
+    }
+  }
+
   const usageBySchemaId = schemas.reduce<Record<string, number>>((acc, schema) => {
     acc[schema.schemaId] = schemasReferencingMapping(schema.schemaId).length;
     return acc;
@@ -200,6 +211,8 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
         onClose={handleCloseLinkedSchemas}
         schemas={schemas}
         usageBySchemaId={usageBySchemaId}
+        onUnlinkSchema={handleUnlinkSchema}
+        unlinkingSchemaId={unlinkingSchemaId}
         dialogId="linked-schemas-dialog"
       />
     </div>

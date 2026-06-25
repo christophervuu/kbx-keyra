@@ -180,6 +180,147 @@ describe('update-mapping handler', () => {
     expect(validateMock.mock.calls[0]?.[2]).toEqual({ type: 'object' });
   });
 
+  it('normalizes sample-shaped target schema content to json-schema before validation', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      config: {},
+      rules: [{ target: 'financial.totalAmount', type: 'number', expression: 'cast(source("payment.total"), "number")' }],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 1,
+        revision: 1,
+        status: 'has-errors',
+        ruleCount: 0,
+        coverage: 0,
+        configS3Key: 'mappings/map-1/config.json',
+        createdAt: '2026-05-15T00:00:00.000Z',
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', format: 'json-schema' })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject
+      .mockResolvedValueOnce(JSON.stringify({
+        financial: {
+          totalAmount: 148.47,
+        },
+      }))
+      .mockResolvedValueOnce(JSON.stringify({
+        financial: {
+          totalAmount: 148.47,
+        },
+      }));
+    validateMock.mockReturnValue({ diagnostics: [], coverage: { percentage: 100 } });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(validateMock).toHaveBeenCalledTimes(1);
+    expect(validateMock.mock.calls[0]?.[2]).toEqual({
+      type: 'object',
+      properties: {
+        financial: {
+          type: 'object',
+          properties: {
+            totalAmount: { type: 'number' },
+          },
+        },
+      },
+    });
+  });
+
+  it('normalizes incoming rule types against inferred target payload shape before persistence', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      config: {},
+      rules: [
+        { target: 'financial.totalAmount', type: 'string', expression: 'cast(source("payment.total"), "number")' },
+      ],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 1,
+        revision: 1,
+        status: 'draft',
+        ruleCount: 0,
+        coverage: 0,
+        configS3Key: 'mappings/map-1/config.json',
+        createdAt: '2026-05-15T00:00:00.000Z',
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({
+      financial: {
+        totalAmount: 148.47,
+      },
+    }));
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"target":"financial.totalAmount","type":"number"'),
+    }));
+  });
+
+  it('normalizes rule type when target path casing differs from schema payload casing', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      config: {},
+      rules: [
+        { target: 'financial.TotalAmount', type: 'string', expression: 'cast(source("payment.total"), "number")' },
+      ],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 1,
+        revision: 1,
+        status: 'draft',
+        ruleCount: 0,
+        coverage: 0,
+        configS3Key: 'mappings/map-1/config.json',
+        createdAt: '2026-05-15T00:00:00.000Z',
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({
+      financial: {
+        totalAmount: 148.47,
+      },
+    }));
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(sharedMocks.putObject).toHaveBeenCalledWith(expect.objectContaining({
+      Body: expect.stringContaining('"target":"financial.TotalAmount","type":"number"'),
+    }));
+  });
+
   it('missing mapping returns 404', async () => {
     sharedMocks.getItem.mockResolvedValueOnce(null);
 
@@ -227,6 +368,59 @@ describe('update-mapping handler', () => {
     expect(sharedMocks.putObject).not.toHaveBeenCalled();
   });
 
+  it('unchanged config hash refreshes stale derived status metadata', async () => {
+    sharedMocks.getItem.mockResolvedValueOnce({
+      mappingId: 'map-1',
+      projectId: 'proj-1',
+      name: 'Invoice Map',
+      version: 1,
+      revision: 1,
+      status: 'has-errors',
+      ruleCount: 99,
+      coverage: 0,
+      configHash: 'old-hash',
+      configS3Key: 'mappings/map-1/config.json',
+      createdAt: '2026-05-15T00:00:00.000Z',
+      updatedAt: '2026-05-15T00:00:00.000Z',
+    });
+    sharedMocks.query.mockResolvedValueOnce([
+      {
+        mappingId: 'map-1',
+        revision: 1,
+        configHash: '0'.repeat(64),
+      },
+    ]);
+    validateMock.mockReturnValue({
+      diagnostics: [
+        {
+          code: 'KEYRA-W002',
+          severity: 'warning',
+          message: 'Source path resolved to null at runtime',
+        },
+      ],
+      coverage: { percentage: 100 },
+    });
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    const parsed = JSON.parse(result.body) as { noChange: boolean; revision: number };
+    expect(parsed.noChange).toBe(true);
+    expect(parsed.revision).toBe(1);
+    expect(sharedMocks.putObject).not.toHaveBeenCalled();
+
+    expect(sharedMocks.updateItem).toHaveBeenCalledWith(expect.objectContaining({
+      TableName: 'Mappings',
+      Key: { mappingId: 'map-1' },
+      ExpressionAttributeValues: expect.objectContaining({
+        ':status': 'ready',
+        ':ruleCount': 1,
+        ':coverage': 100,
+      }),
+    }));
+  });
+
   it('persists enrichmentSources and compatibility externalSources on update', async () => {
     sharedMocks.parseBody.mockReturnValue({
       projectId: 'proj-1',
@@ -269,5 +463,79 @@ describe('update-mapping handler', () => {
     const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
 
     expect(result.statusCode).toBe(400);
+  });
+
+  it('passes project valueTableRef metadata through validation config to avoid false KEYRA-E062', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      projectId: 'proj-1',
+      name: 'Invoice Map Updated',
+      expectedRevision: 1,
+      engineVersion: '1.0.0',
+      targetSchemaRef: { schemaId: 'schema-1', type: 'local' },
+      config: {},
+      rules: [
+        {
+          target: 'transaction.status',
+          type: 'string',
+          expression: 'valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), "")',
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'table-1',
+            tableKey: 'exercise-1-table',
+            revision: 1,
+            inputSideKey: 'side-a',
+            outputSideKey: 'side-b',
+            inputType: 'string',
+            outputType: 'string',
+            resolvedEntries: [
+              { in: 'confirmed', out: 'OPEN', rowId: 'row-1' },
+            ],
+          },
+          noMatchBehavior: {
+            mode: 'fallback_value',
+            fallbackValue: '',
+          },
+        },
+      ],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({
+        mappingId: 'map-1',
+        projectId: 'proj-1',
+        name: 'Invoice Map',
+        version: 1,
+        revision: 1,
+        status: 'has-errors',
+        ruleCount: 0,
+        coverage: 0,
+        configS3Key: 'mappings/map-1/config.json',
+        createdAt: '2026-05-15T00:00:00.000Z',
+        updatedAt: '2026-05-15T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({ schemaId: 'schema-1', format: 'json-schema' });
+    sharedMocks.getObject.mockResolvedValueOnce('{"type":"object"}');
+
+    const { handler } = await importHandler();
+    const result = await handler({ body: '{}', pathParameters: { id: 'map-1' } });
+
+    expect(result.statusCode).toBe(200);
+    expect(validateMock).toHaveBeenCalledTimes(1);
+    const engineConfig = validateMock.mock.calls[0]?.[0] as {
+      rules: Array<{
+        valueTableRef?: { tableKey?: string; revision?: number; resolvedEntries?: unknown[] };
+        noMatchBehavior?: { mode?: string; fallbackValue?: string };
+      }>;
+    };
+    expect(engineConfig.rules[0]?.valueTableRef).toEqual(expect.objectContaining({
+      tableKey: 'exercise-1-table',
+      revision: 1,
+    }));
+    expect(engineConfig.rules[0]?.valueTableRef?.resolvedEntries).toEqual([
+      { in: 'confirmed', out: 'OPEN', rowId: 'row-1' },
+    ]);
+    expect(engineConfig.rules[0]?.noMatchBehavior).toEqual({
+      mode: 'fallback_value',
+      fallbackValue: '',
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { TargetWorklist } from './TargetWorklist';
@@ -218,6 +218,55 @@ describe('TargetWorklist', () => {
     // Expand the name node
     fireEvent.click(screen.getByTestId('expand-toggle-name'));
     expect(screen.getByTestId('coverage-text')).toHaveTextContent('1/2');
+  });
+
+  it('shows Fully mapped coverage label for container while retaining separate error status', () => {
+    const rules = [makeRule('name.first'), makeRule('name.last')];
+    const validation = makeValidation([
+      { code: 'E001', severity: 'error', message: 'child error', targetPath: 'name.first' },
+    ]);
+
+    render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={NESTED_NODES}
+        rules={rules}
+        validationResult={validation}
+      />,
+    );
+
+    const parentRow = screen.getByTestId('target-field-row-name');
+    expect(within(parentRow).getByTestId('mapping-type')).toHaveTextContent('Fully mapped');
+    expect(within(parentRow).queryByText('Not configured')).not.toBeInTheDocument();
+    expect(within(parentRow).getByTestId('status-icon-error')).toBeInTheDocument();
+  });
+
+  it('shows Partially mapped label for container with some mapped descendants', () => {
+    const rules = [makeRule('name.first')];
+
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={NESTED_NODES} rules={rules} />);
+
+    const parentRow = screen.getByTestId('target-field-row-name');
+    expect(within(parentRow).getByTestId('mapping-type')).toHaveTextContent('Partially mapped');
+  });
+
+  it('shows No child mappings label for container with no mapped descendants', () => {
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={NESTED_NODES} rules={[]} />);
+
+    const parentRow = screen.getByTestId('target-field-row-name');
+    expect(within(parentRow).getByTestId('mapping-type')).toHaveTextContent('No child mappings');
+    expect(within(parentRow).queryByText('Not configured')).not.toBeInTheDocument();
+  });
+
+  it('shows neutral zero-descendant label for containers with no mappable descendants', () => {
+    const inner = makeNode('wrapper.inner', 'inner', 'object', 1, false, []);
+    const wrapper = makeNode('wrapper', 'wrapper', 'object', 0, false, [inner]);
+    const nodes = [wrapper, inner];
+
+    render(<TargetWorklist {...DEFAULT_PROPS} nodes={nodes} rules={[]} />);
+
+    const parentRow = screen.getByTestId('target-field-row-wrapper');
+    expect(within(parentRow).getByTestId('mapping-type')).toHaveTextContent('No mappable descendants');
   });
 
   it('reconstructs flattened target object hierarchy and reveals child rows on expand', () => {

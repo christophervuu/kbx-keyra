@@ -100,13 +100,13 @@ ui/src/
         tree-to-json-schema.ts Tree reconstruction + field counting utilities
         parsers/              parseJsonSchema/parseXsd/parseInferredSchema implementations
 
-    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023, FS-094, FS-097, FS-098)
+    mappings/                 Mapping Editor feature module (FS-010, FS-011, FS-020, FS-021, FS-022, FS-023, FS-094, FS-097, FS-098, FS-099)
       index.ts                Feature barrel (components + hooks + utilities)
       types.ts                Feature-shared mappings types: TargetFilter/TargetSort/EditorView, linked debug selection, and comparison mode config (`COMPARISON_MODES`)
       components/
         MappingEditorPage.tsx Three-column editor shell with draggable resize handles, persistent pixel widths, source expand strip, and bottom collapse/resize behavior (FS-022)
         SourceSchemaPanel.tsx Left column input browser: grouped Primary Source + Enrichment Input aliases, searchable schema tree, click-to-stage + drag-to-insert input selection; emits staged field metadata contract (`path`, `kind`, `alias?`, `valueType?`, `sampleValue?`, `expression`) for smart-slot routing
-        TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics)
+        TargetWorklist.tsx    Right column (target view): target schema tree + toolbar controls (sort dropdown, Target/Rules view toggle), internal search + 4 filter chips (Unmapped/Warnings/Required/Arrays, AND semantics), and FS-099 container coverage labels derived from descendant mapping coverage independent of validation severity
         BuilderEmptyState.tsx Center panel: no-selection guidance + CTAs
         ScalarFieldBuilder.tsx Center panel scalar authoring shell. FS-098 is the canonical Smart Builder contract for default scalar guided authoring: Inputs tray as availability palette, explicit Build Output recipe ownership, Refine Result post-steps, and Advanced DSL fallback for non-lossless decomposition while preserving draft-only-until-save semantics (`updateDraft/revertDraft/getDraftExpression`).
         SmartBuilderPanel.tsx FS-098 canonical guided scalar surface: Target context → Inputs → Build Output → Refine Result → Details/Footer, explicit recipe/value usage model, IF/THEN/OTHERWISE conditional editor, slot-aware source routing, deterministic deep-array handoff to Array Builder actions, and Advanced DSL fallback banner for unsupported/non-lossless expressions.
@@ -193,7 +193,7 @@ ui/src/
         use-array-builder-state.ts FS-043 array builder state orchestration hook (hydration/decomposition, mode transitions, draft output, nested context, validation)
         use-drag-source.ts         HTML5 drag state for a single source field
         use-drop-zone.ts           HTML5 drop zone state (isDragOver + handlers)
-        use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04)
+        use-preview-execution.ts   Preview execution lifecycle hook (FS-012 T-04) with FS-099 output-controlled lifecycle support (no hidden execution while Fields is active, dirty-run on Output reopen), monotonic stale-write protection, preview-context isolation, and partial-output precedence
         use-resizable-layout.ts    Resizable layout state hook (source/target widths, bottom height, collapse state, drag handle props, localStorage persistence)
         use-test-cases.ts          Test case CRUD hook keyed by mappingId (FS-012 T-05, FS-034 T-01): save/load/delete/rename/duplicate/update; localStorage key keyra:testcases:{id}
         use-test-run-results.ts    Test run result persistence hook keyed by mappingId (FS-034 T-02, FS-035 T-05): recordResult/clearResult/clearAll; sessionStorage key keyra:test-results:{id}; results stored as Record<string, TestRunResult> for O(1) lookup; cleared on tab/window close
@@ -207,7 +207,7 @@ ui/src/
         use-auto-map-workspace.ts  FS-048 Auto-Map workspace lifecycle hook: section-triggered generation + persistence hydration, lifecycle transitions (suggested/accepted/edited/dismissed/stale), refresh merge strategy, filtering, and bulk actions
         use-suggestion-preview.ts  FS-048 lazy per-expression preview hook for workspace cards (debounced evaluateExpression with source-data dependency)
       context/
-        preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03)
+        preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03); FS-099 preview-context identity threads sample/input-set, target output format, and enrichment identity for stale isolation semantics
       lib/
         infer-rule-type.ts    Expression outer-function -> display label mapping
         dsl-tokenizer.ts      DSL tokenizer for syntax highlighting overlays
@@ -904,6 +904,57 @@ FS-092 UI interaction contracts:
 - **Auto-map scope semantics:** auto-map requests include deterministic visible scope (`visibleTargetPaths`), and top-bar copy makes scope explicit (`Scope: N visible fields`).
 - **Suggestion lifecycle surface:** suggestion states (`suggested`, `accepted`, `edited`, `dismissed`, `stale`) are visible in grid/details surfaces; accepted mappings are not silently overwritten.
 - **Array progressive disclosure:** child-field rendering thresholds are explicit: `<=25` inline, `26–75` filtered/prioritized workspace, `>75` summary-first + strong Array Builder CTA, with optional `View all child fields`.
+
+### FS-099 inline Output contract addendum (Rev 3)
+
+FS-099 extends the authoring route with a target-panel segmented switch (`Fields | Output`) while preserving FS-092 route boundaries (authoring remains separate from Test Lab and Deployment).
+
+Canonical scope + format authority:
+- FS-099 is **JSON-inline-output only**.
+- XML inline rendering is explicitly deferred until a canonical shared object→XML serializer/adapter contract exists in a follow-up spec.
+- Target schema metadata remains authoritative for output format; user display preferences do not override payload format.
+
+Output execution lifecycle contract:
+- `activePanelView: 'fields' | 'output'` defaults to `fields`.
+- While Output is active, output-affecting changes run debounced preview execution.
+- While Fields is active, output-affecting changes mark Output dirty only; no hidden execution is allowed.
+- Reopening Output after dirty changes triggers one immediate run for latest state.
+- In-flight completion writes are run-id guarded so out-of-order stale completions cannot replace newer results.
+
+Preview-context identity + stale isolation:
+- FS-099 preview context is defined by:
+  - `sampleOrInputSetId`
+  - `targetOutputFormat`
+  - `enrichmentInputIdentity`
+- Prior output may be retained as stale only when failure occurs in the same preview context.
+- If context changes and execution fails before a new success, prior-context output must not be presented as current output for the new context.
+
+Renderable output + renderer split:
+- `OutputDisplay` is the shared orchestration wrapper.
+- `JsonOutputView` is the FS-099 format-specific renderer.
+- JSON branch uses discriminated runtime payload shape (`format: 'json'`) with canonical fields:
+  - `value`
+  - `serializedText`
+  - `pathIndex`
+  - `nodeCount`
+  - `serializedSizeBytes`
+- Limited/fallback modes are threshold-driven, but copy always uses complete canonical `serializedText`.
+
+Output-node activation resolver order:
+1. Path-index metadata owning-rule mapping.
+2. Normalized runtime-path exact rule target match (array-index normalization).
+3. Longest ancestor owning rule target.
+4. Target-schema fallback for unconfigured field (open Builder in unconfigured state).
+5. `No editable target found` only when neither schema field nor rule can be resolved.
+
+Coverage-label vs validation-status separation:
+- Container labels in `TargetWorklist` are derived from descendant mapping coverage only (`Fully mapped`, `Partially mapped`, `No child mappings`, neutral zero-descendant label).
+- Validation warning/error indicators remain separate status signals and can coexist with `Fully mapped`.
+- Coverage derivation reuses canonical `use-target-status` logic (no duplicate counting model).
+
+Test Lab responsibility boundary:
+- Inline Output supports inspect-and-correct workflows but does not replace Test Lab.
+- Output fallback/handoff wording must not imply exact-state reproduction in Test Lab; Test Lab may load saved/default context.
 
 Legacy note:
 

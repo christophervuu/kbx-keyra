@@ -45,6 +45,12 @@ function getDeploymentDisplay(
   return 'Not deployed';
 }
 
+function formatCoveragePercent(coverage: number): string {
+  // Backend canonical coverage is 0-100. Keep compatibility with legacy 0-1 values.
+  const normalizedCoverage = coverage <= 1 ? coverage * 100 : coverage;
+  return `${Math.round(normalizedCoverage)}%`;
+}
+
 
 // ---------------------------------------------------------------------------
 // Props
@@ -89,7 +95,7 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
   const coverageDisplay =
     mapping.ruleCount === 0 && mapping.coverage === 0
       ? '—'
-      : `${Math.round(mapping.coverage * 100)}%`;
+      : formatCoveragePercent(mapping.coverage);
 
   const deploymentDisplay = getDeploymentDisplay(mapping.devDeploy, mapping.qaDeploy, mapping.prodDeploy);
   const canDeploy = mapping.status === 'ready';

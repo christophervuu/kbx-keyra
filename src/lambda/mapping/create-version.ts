@@ -294,6 +294,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     return jsonResponse(201, item);
   } catch (error) {
+    console.error('save-version failed', {
+      mappingId,
+      error: error instanceof Error
+        ? { name: error.name, message: error.message, stack: error.stack }
+        : error,
+    });
     const maybe = error as { code?: string; message?: string; statusCode?: number; retryable?: boolean };
     const knownCodes = Object.values(ERROR_CODES) as string[];
     if (maybe.code && knownCodes.includes(maybe.code) && maybe.message && typeof maybe.statusCode === 'number') {

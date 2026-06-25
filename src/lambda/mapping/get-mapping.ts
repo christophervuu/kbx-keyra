@@ -48,6 +48,8 @@ interface MappingConfig {
   readonly rules: readonly unknown[];
 }
 
+type SchemaRef = NonNullable<MappingConfig['sourceSchemaRef']>;
+
 interface MappingEnrichmentSource {
   readonly alias: string;
   readonly schemaId?: string;
@@ -118,7 +120,33 @@ function normalizeCanonicalEnrichmentSources(value: unknown): readonly MappingEn
   return normalized;
 }
 
-function normalizeConfig(payload: MappingConfig): MappingConfig {
+function normalizeSchemaRef(
+  ref: MappingConfig['sourceSchemaRef'] | undefined,
+  metadataSchemaId: string | undefined,
+): MappingConfig['sourceSchemaRef'] | undefined {
+  const normalizedMetadataSchemaId = typeof metadataSchemaId === 'string' ? metadataSchemaId.trim() : '';
+  if (!normalizedMetadataSchemaId) {
+    return ref;
+  }
+
+  if (!ref) {
+    return {
+      schemaId: normalizedMetadataSchemaId,
+      type: 'local',
+    } satisfies SchemaRef;
+  }
+
+  if (ref.schemaId === normalizedMetadataSchemaId) {
+    return ref;
+  }
+
+  return {
+    ...ref,
+    schemaId: normalizedMetadataSchemaId,
+  } satisfies SchemaRef;
+}
+
+function normalizeConfig(payload: MappingConfig, metadata?: MappingMetadata): MappingConfig {
   const legacyExternalAliases = normalizeLegacyExternalAliases(payload.config?.externalSources);
   const canonical = normalizeCanonicalEnrichmentSources(payload.enrichmentSources);
   const enrichmentSources = canonical.length > 0
@@ -131,6 +159,8 @@ function normalizeConfig(payload: MappingConfig): MappingConfig {
 
   return {
     ...payload,
+    sourceSchemaRef: normalizeSchemaRef(payload.sourceSchemaRef, metadata?.sourceSchemaId),
+    targetSchemaRef: normalizeSchemaRef(payload.targetSchemaRef, metadata?.targetSchemaId),
     enrichmentSources,
     config: {
       ...(payload.config ?? {}),
@@ -146,6 +176,29 @@ function getEnvValue(key: string): string | undefined {
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
 const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
+const KEYRA_DEBUG_MAPPING_STATUS = getEnvValue('KEYRA_DEBUG_MAPPING_STATUS');
+
+function isMappingStatusDebugEnabled(): boolean {
+  if (!KEYRA_DEBUG_MAPPING_STATUS) {
+    return false;
+  }
+
+  const normalized = KEYRA_DEBUG_MAPPING_STATUS.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function mappingStatusDebugLog(message: string, payload?: unknown): void {
+  if (!isMappingStatusDebugEnabled()) {
+    return;
+  }
+
+  if (payload === undefined) {
+    console.info(`[mapping-status-debug] ${message}`);
+    return;
+  }
+
+  console.info(`[mapping-status-debug] ${message}`, payload);
+}
 
 function getMappingsTableOrThrow(): string {
   const table = MAPPINGS_TABLE?.trim();
@@ -188,7 +241,19 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
 
     const parsed = JSON.parse(content) as MappingConfig;
-    return jsonResponse(200, normalizeConfig(parsed));
+    const normalized = normalizeConfig(parsed, metadata);
+    mappingStatusDebugLog('get-mapping response summary', {
+      mappingId,
+      metadataStatus: metadata.status,
+      metadataRuleCount: metadata.ruleCount,
+      metadataCoverage: metadata.coverage,
+      metadataSourceSchemaId: metadata.sourceSchemaId ?? null,
+      metadataTargetSchemaId: metadata.targetSchemaId ?? null,
+      normalizedSourceSchemaRef: normalized.sourceSchemaRef?.schemaId ?? null,
+      normalizedTargetSchemaRef: normalized.targetSchemaRef?.schemaId ?? null,
+      ruleCount: normalized.rules.length,
+    });
+    return jsonResponse(200, normalized);
   } catch (error) {
     if (error instanceof S3ServiceError && error.appError.code === ERROR_CODES.RESOURCE_NOT_FOUND) {
       const appError = contentUnavailable(

@@ -37,6 +37,8 @@ interface LinkedSchemasDialogProps {
   onClose: () => void;
   schemas: SchemaCardData[];
   usageBySchemaId: Record<string, number>;
+  onUnlinkSchema?: (schemaId: string) => Promise<void> | void;
+  unlinkingSchemaId?: string | null;
   labelledById?: string;
   descriptionId?: string;
   dialogId?: string;
@@ -47,6 +49,8 @@ export function LinkedSchemasDialog({
   onClose,
   schemas,
   usageBySchemaId,
+  onUnlinkSchema,
+  unlinkingSchemaId = null,
   labelledById = 'linked-schemas-dialog-title',
   descriptionId = 'linked-schemas-dialog-description',
   dialogId,
@@ -141,6 +145,8 @@ export function LinkedSchemasDialog({
             <ul className="space-y-3" data-testid="linked-schemas-list">
               {schemas.map((schema) => {
                 const usageCount = usageBySchemaId[schema.schemaId] ?? 0;
+                const isUsed = usageCount > 0;
+                const isUnlinking = unlinkingSchemaId === schema.schemaId;
                 return (
                   <li
                     key={schema.schemaId}
@@ -149,6 +155,20 @@ export function LinkedSchemasDialog({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <p className="truncate text-sm font-medium text-slate-100">{schema.name}</p>
+                      {onUnlinkSchema && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            void onUnlinkSchema(schema.schemaId);
+                          }}
+                          disabled={isUsed || isUnlinking}
+                          title={isUsed ? 'Schema is still used by mappings' : undefined}
+                          data-testid={`linked-schema-unlink-${schema.schemaId}`}
+                        >
+                          {isUnlinking ? 'Unlinking…' : 'Unlink'}
+                        </Button>
+                      )}
                     </div>
                     <p className="mt-1 text-xs text-slate-400">
                       {normalizeOriginLabel(schema.origin)} · {normalizeFormatLabel(schema.format, schema.isInferred)} ·{' '}

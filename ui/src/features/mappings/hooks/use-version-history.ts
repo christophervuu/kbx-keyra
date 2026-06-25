@@ -49,7 +49,7 @@ function computeSummary(
   entry: MappingVersionEntry,
   prevEntry: MappingVersionEntry | undefined,
 ): string {
-  if (!prevEntry) {
+  if (!prevEntry || !prevEntry.config || !entry.config) {
     return `Initial version — ${entry.ruleCount} rules`;
   }
   const diff = computeVersionDiff(prevEntry.config, entry.config);
@@ -134,7 +134,7 @@ export function useVersionHistory(
   const selectedDiff = useMemo<VersionDiff | null>(() => {
     if (selectedVersion === null || !currentConfig) return null;
     const entry = rawVersions.find((v) => v.version === selectedVersion);
-    if (!entry) return null;
+    if (!entry || !entry.config) return null;
     return computeVersionDiff(entry.config, currentConfig);
   }, [selectedVersion, currentConfig, rawVersions]);
 

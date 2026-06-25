@@ -37,6 +37,29 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
+const KEYRA_DEBUG_MAPPING_STATUS = getEnvValue('KEYRA_DEBUG_MAPPING_STATUS');
+
+function isMappingStatusDebugEnabled(): boolean {
+  if (!KEYRA_DEBUG_MAPPING_STATUS) {
+    return false;
+  }
+
+  const normalized = KEYRA_DEBUG_MAPPING_STATUS.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function mappingStatusDebugLog(message: string, payload?: unknown): void {
+  if (!isMappingStatusDebugEnabled()) {
+    return;
+  }
+
+  if (payload === undefined) {
+    console.info(`[mapping-status-debug] ${message}`);
+    return;
+  }
+
+  console.info(`[mapping-status-debug] ${message}`, payload);
+}
 
 function getMappingsTableOrThrow(): string {
   const table = MAPPINGS_TABLE?.trim();
@@ -64,6 +87,26 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ExpressionAttributeValues: {
         ':projectId': projectId,
       },
+    });
+
+    mappingStatusDebugLog('list-mappings response summary', {
+      projectId,
+      total: mappings.length,
+      statusCounts: mappings.reduce(
+        (counts, mapping) => {
+          counts[mapping.status] += 1;
+          return counts;
+        },
+        { draft: 0, ready: 0, 'has-errors': 0 } as Record<MappingMetadata['status'], number>,
+      ),
+      sample: mappings.slice(0, 5).map((mapping) => ({
+        mappingId: mapping.mappingId,
+        status: mapping.status,
+        ruleCount: mapping.ruleCount,
+        coverage: mapping.coverage,
+        sourceSchemaId: mapping.sourceSchemaId ?? null,
+        targetSchemaId: mapping.targetSchemaId ?? null,
+      })),
     });
 
     return jsonResponse(200, mappings);

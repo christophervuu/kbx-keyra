@@ -604,9 +604,20 @@ describe('ProjectOverviewPage — layout checks', () => {
     expect(screen.queryByRole('button', { name: /add schema/i })).not.toBeInTheDocument();
   });
 
-  it('linked schemas dialog is read-only (no unlink or add schema actions)', async () => {
+  it('linked schemas dialog enables unlink for unused schemas and disables it for used schemas', async () => {
     const user = userEvent.setup();
-    renderPage(adapter);
+    const adapterWithUnusedSchema = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        linkedSchemaIds: ['schema-1', 'schema-2'],
+        schemaRefs: [
+          { schemaId: 'schema-1', type: 'published' },
+          { schemaId: 'schema-2', type: 'published' },
+        ],
+        mappings: [MAPPING_META],
+      }),
+    });
+    renderPage(adapterWithUnusedSchema);
 
     await waitFor(() => {
       expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
@@ -614,9 +625,40 @@ describe('ProjectOverviewPage — layout checks', () => {
 
     await user.click(screen.getByTestId('linked-schemas-trigger'));
 
-    expect(screen.queryByTestId('linked-schema-unlink-schema-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('linked-schema-unlink-schema-1')).toBeDisabled();
+    expect(screen.getByTestId('linked-schema-unlink-schema-2')).toBeEnabled();
     expect(screen.queryByTestId('linked-schemas-add-schema')).not.toBeInTheDocument();
     expect(screen.queryByTestId('schema-upload-dialog')).not.toBeInTheDocument();
+  });
+
+  it('unlinks an unused linked schema from the project', async () => {
+    const user = userEvent.setup();
+    const unlinkAdapter = createMockAdapter({
+      getProject: vi.fn().mockResolvedValue({
+        ...PROJECT_DETAIL,
+        linkedSchemaIds: ['schema-1', 'schema-2'],
+        schemaRefs: [
+          { schemaId: 'schema-1', type: 'published' },
+          { schemaId: 'schema-2', type: 'published' },
+        ],
+        mappings: [MAPPING_META],
+      }),
+      updateProject: vi.fn().mockResolvedValue(PROJECT_DETAIL),
+    });
+
+    renderPage(unlinkAdapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-schemas-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('linked-schemas-trigger'));
+    await user.click(screen.getByTestId('linked-schema-unlink-schema-2'));
+
+    await waitFor(() => {
+      expect(unlinkAdapter.updateProject).toHaveBeenCalledWith('proj-1', { linkedSchemaIds: ['schema-1'] });
+    });
+    expect(screen.queryByTestId('linked-schema-row-schema-2')).not.toBeInTheDocument();
   });
 
   it('AE-02: header shows compact summary line and hides tag UI', async () => {

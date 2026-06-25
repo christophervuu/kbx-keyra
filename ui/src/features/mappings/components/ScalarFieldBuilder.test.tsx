@@ -1013,6 +1013,32 @@ describe('ScalarFieldBuilder', () => {
       });
       expect(screen.queryByTestId('clear-mapping-btn')).not.toBeInTheDocument();
     });
+
+    it('renders mode switch action inside overflow menu for Smart Builder', () => {
+      renderBuilder({
+        preferSmartBuilder: true,
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      expect(screen.getByTestId('mode-menu-toggle')).toHaveTextContent('Switch to Editor');
+    });
+
+    it('switches to editor from overflow menu in Smart Builder mode', () => {
+      renderBuilder({
+        preferSmartBuilder: true,
+        currentStatus: 'mapped',
+        currentExpression: 'source("firstName")',
+        onClearMapping: vi.fn(),
+      });
+
+      fireEvent.click(screen.getByTestId('header-overflow-trigger'));
+      fireEvent.click(screen.getByTestId('mode-menu-toggle'));
+
+      expect(screen.getByTestId('expression-editor-slot')).toBeInTheDocument();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1518,7 +1544,7 @@ describe('ScalarFieldBuilder', () => {
       },
     });
 
-    expect(screen.getByTestId('mode-toggle-builder')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     expect(screen.queryByTestId('raw-dsl-editor')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('smart-value-map-table-select'), { target: { value: 'vt-2' } });
@@ -1574,7 +1600,7 @@ describe('ScalarFieldBuilder', () => {
       />,
     );
 
-    expect(screen.getByTestId('mode-toggle-builder')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     expect(screen.getByTestId('smart-value-map-config')).toBeInTheDocument();
     expect(screen.queryByTestId('raw-dsl-editor')).not.toBeInTheDocument();
   });
@@ -1593,7 +1619,7 @@ describe('ScalarFieldBuilder', () => {
       revertDraft,
     });
 
-    expect(screen.getByTestId('mode-toggle-builder')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('expression-builder-slot')).toBeInTheDocument();
     expect(screen.queryByTestId('smart-builder-complex-banner')).not.toBeInTheDocument();
   });
 

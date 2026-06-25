@@ -87,6 +87,18 @@ const SIMPLE_SOURCE_SCHEMA: SchemaDetail = {
     origin: 'local',
     status: 'ready',
     source: { type: 'upload' },
+    samplePayloads: [
+      {
+        sampleId: 'sample-1',
+        schemaId: 'source-schema-1',
+        name: 'Sample 1',
+        dataFormat: 'json',
+        contentRef: 'samples/sample-1.json',
+        usedForInference: true,
+        source: 'added_sample',
+        createdAt: '2024-01-01T00:00:00Z',
+      },
+    ],
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
   },
@@ -616,6 +628,41 @@ describe('MappingEditor AI Validation integration', () => {
     expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 2');
   });
 
+  it('preserves selected target and sample selector context across Fields -> Output -> Fields switches', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-orderId'));
+    expect(screen.getByTestId('target-field-row-orderId')).toHaveAttribute('aria-selected', 'true');
+
+    expect(screen.getByTestId('sample-picker-trigger')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+    expect(screen.getByTestId('target-panel-tab-output')).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-fields'));
+    expect(screen.getByTestId('target-panel-tab-fields')).toHaveAttribute('aria-selected', 'true');
+
+    // Selection and sample selector should remain intact after toggling
+    expect(screen.getByTestId('target-field-row-orderId')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('sample-picker-trigger')).toBeInTheDocument();
+  });
+
   it('does not persist session-only staged tray rows after full editor reopen', async () => {
     const baseMapping: MappingConfig = {
       ...MOCK_CONFIG,
@@ -661,4 +708,212 @@ describe('MappingEditor AI Validation integration', () => {
     expect(screen.getByTestId('smart-input-tray-count')).toHaveTextContent('Inputs 0');
     expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
   });
+
+  it('keyboard activation on output node opens builder with Output view still active', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [
+          { target: 'orderId', type: 'string', expression: 'source("orderId")' },
+        ],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+      getSchemaSamplePayload: vi.fn().mockResolvedValue({
+        raw: JSON.stringify({ orderId: 'ORD-100' }),
+        parsed: { orderId: 'ORD-100' },
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-sample-1'));
+
+    const outputKey = await screen.findByTestId('output-key-orderId');
+    fireEvent.keyDown(outputKey, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('target-field-row-orderId')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    expect(screen.getByTestId('target-panel-tab-output')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('builder-panel')).toHaveFocus();
+  });
+
+  it('pointer activation and keyboard activation produce equivalent output-node open behavior', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [
+          { target: 'orderId', type: 'string', expression: 'source("orderId")' },
+        ],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+      getSchemaSamplePayload: vi.fn().mockResolvedValue({
+        raw: JSON.stringify({ orderId: 'ORD-100' }),
+        parsed: { orderId: 'ORD-100' },
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-sample-1'));
+
+    const outputKey = await screen.findByTestId('output-key-orderId');
+
+    fireEvent.click(outputKey);
+    await waitFor(() => {
+      expect(screen.getByTestId('target-field-row-orderId')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-fields'));
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+
+    fireEvent.keyDown(outputKey, { key: ' ' });
+    await waitFor(() => {
+      expect(screen.getByTestId('target-field-row-orderId')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    expect(screen.getByTestId('target-panel-tab-output')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows actionable missing-sample state in Output view when no sample is selected', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-none'));
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+
+    expect(screen.getByTestId('output-missing-sample-state')).toHaveTextContent('Select a sample to preview output.');
+  });
+
+  it('shows context-safe output error state and does not display stale output from prior sample', async () => {
+    const sourceSchemaWithTwoSamples: SchemaDetail = {
+      ...SIMPLE_SOURCE_SCHEMA,
+      metadata: {
+        ...SIMPLE_SOURCE_SCHEMA.metadata,
+        samplePayloads: [
+          {
+            sampleId: 'sample-1',
+            schemaId: 'source-schema-1',
+            name: 'Sample 1',
+            dataFormat: 'json',
+            contentRef: 'samples/sample-1.json',
+            usedForInference: true,
+            source: 'added_sample',
+            createdAt: '2024-01-01T00:00:00Z',
+          },
+          {
+            sampleId: 'sample-2',
+            schemaId: 'source-schema-1',
+            name: 'Sample 2',
+            dataFormat: 'json',
+            contentRef: 'samples/sample-2.json',
+            usedForInference: false,
+            source: 'added_sample',
+            createdAt: '2024-01-02T00:00:00Z',
+          },
+        ],
+      },
+    };
+
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [
+          { target: 'orderId', type: 'string', expression: 'source("orderId")' },
+        ],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(sourceSchemaWithTwoSamples);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+      getSchemaSamplePayload: vi.fn().mockImplementation((_schemaId: string, sampleId: string) => {
+        if (sampleId === 'sample-1') {
+          return Promise.resolve({
+            raw: JSON.stringify({ orderId: 'ORD-100' }),
+            parsed: { orderId: 'ORD-100' },
+          });
+        }
+        return Promise.reject(new Error('Failed to load selected sample payload.'));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-sample-1'));
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('output-key-orderId')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-sample-2'));
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('output-key-orderId')).not.toBeInTheDocument();
+      expect(screen.getByTestId('output-context-error-state')).toBeInTheDocument();
+    });
+  });
+
+  it('renders explicit Test Lab handoff wording for Output context differences', async () => {
+    const adapter = createMockAdapter();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-panel-tab-output'));
+    expect(screen.getByTestId('output-test-lab-handoff-note')).toHaveTextContent(
+      'Open Test Lab. It may load saved or default context instead of this exact Output state.',
+    );
+  });
+
 });

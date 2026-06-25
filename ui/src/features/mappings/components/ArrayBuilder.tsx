@@ -188,53 +188,19 @@ function MappingStatusIcon({ status }: { status: TargetFieldStatus }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Builder/Editor mode toggle — matches ScalarFieldBuilder's ModeToggle exactly.
- */
-function ModeToggle({
-  mode,
-  onSwitch,
-}: {
-  mode: 'builder' | 'editor';
-  onSwitch: (m: 'builder' | 'editor') => void;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label="Expression mode"
-      className="inline-flex overflow-hidden rounded border border-slate-700"
-    >
-      {(['builder', 'editor'] as const).map((m) => (
-        <button
-          key={m}
-          type="button"
-          aria-pressed={mode === m}
-          data-testid={`mode-toggle-${m}`}
-          onClick={() => { onSwitch(m); }}
-          className={[
-            'px-2.5 py-1 text-xs font-medium capitalize transition-colors',
-            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500',
-            mode === m
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200',
-          ].join(' ')}
-        >
-          {m === 'builder' ? 'Builder' : 'Editor'}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
  * Header overflow menu (⋮) — matches ScalarFieldBuilder's HeaderOverflowMenu pattern.
  * Contains "Remove mapping" action.
  */
 function HeaderOverflowMenu({
   targetPath,
   onRemoveMapping,
+  mode,
+  onSwitchMode,
 }: {
   targetPath: string;
-  onRemoveMapping: () => void;
+  onRemoveMapping?: () => void;
+  mode: 'builder' | 'editor';
+  onSwitchMode: (m: 'builder' | 'editor') => void;
 }) {
   const [open, setOpen] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -285,21 +251,36 @@ function HeaderOverflowMenu({
           <button
             type="button"
             role="menuitem"
-            data-testid="remove-mapping-btn"
-            aria-label={`Remove saved mapping for ${targetPath}`}
+            data-testid="mode-menu-toggle"
+            aria-label={mode === 'builder' ? 'Switch to Editor mode' : 'Switch to Builder mode'}
             onClick={() => {
+              onSwitchMode(mode === 'builder' ? 'editor' : 'builder');
               setOpen(false);
-              setConfirmingRemove(true);
             }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-slate-800 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-red-500"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-200 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500"
           >
-            Remove mapping
+            {mode === 'builder' ? 'Switch to Editor' : 'Switch to Builder'}
           </button>
+          {onRemoveMapping && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="remove-mapping-btn"
+              aria-label={`Remove saved mapping for ${targetPath}`}
+              onClick={() => {
+                setOpen(false);
+                setConfirmingRemove(true);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-slate-800 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-red-500"
+            >
+              Remove mapping
+            </button>
+          )}
         </div>
       )}
 
       {/* Remove mapping confirmation dialog */}
-      {confirmingRemove && (
+      {confirmingRemove && onRemoveMapping && (
         <div
           role="alertdialog"
           aria-modal="true"
@@ -1119,16 +1100,25 @@ export function ArrayBuilder({
             {selectedTargetPath}
           </span>
 
-          {/* FS-051 T-01: Builder/Editor mode toggle */}
-          <ModeToggle mode={builderEditorMode} onSwitch={handleModeToggle} />
+          <button
+            type="button"
+            data-testid="mode-toggle-undo"
+            onClick={handleDiscard}
+            aria-label={`Undo changes for ${selectedTargetPath}`}
+            disabled={!isDirty}
+            className="flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Undo2 size={12} aria-hidden="true" />
+            Undo
+          </button>
 
           {/* FS-051 T-01: Overflow menu */}
-          {onClearMapping !== undefined && (
-            <HeaderOverflowMenu
-              targetPath={selectedTargetPath}
-              onRemoveMapping={() => { onClearMapping(selectedTargetPath); }}
-            />
-          )}
+          <HeaderOverflowMenu
+            targetPath={selectedTargetPath}
+            onRemoveMapping={onClearMapping ? () => { onClearMapping(selectedTargetPath); } : undefined}
+            mode={builderEditorMode}
+            onSwitchMode={handleModeToggle}
+          />
         </div>
 
         <div className="mt-1 flex items-center gap-3">

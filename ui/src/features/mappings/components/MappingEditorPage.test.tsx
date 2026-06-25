@@ -448,4 +448,55 @@ describe('MappingEditorPage', () => {
     expect(builderCard.className).toContain('w-[36%]');
     expect(builderCard.className).toContain('min-w-[420px]');
   });
+
+  it('renders Fields | Output segmented tabs when enabled with correct selected semantics', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        showPanelViewToggle={true}
+        activePanelView="fields"
+      />,
+    );
+
+    expect(screen.getByTestId('target-panel-view-toggle')).toBeInTheDocument();
+    expect(screen.getByTestId('target-panel-tab-fields')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('target-panel-tab-output')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('supports keyboard navigation for segmented tabs', () => {
+    const onActivePanelViewChange = vi.fn();
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        showPanelViewToggle={true}
+        activePanelView="fields"
+        onActivePanelViewChange={onActivePanelViewChange}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('target-panel-tab-fields'), { key: 'ArrowRight' });
+    expect(onActivePanelViewChange).toHaveBeenCalledWith('output');
+
+    fireEvent.keyDown(screen.getByTestId('target-panel-tab-fields'), { key: 'End' });
+    expect(onActivePanelViewChange).toHaveBeenCalledWith('output');
+
+    fireEvent.keyDown(screen.getByTestId('target-panel-tab-output'), { key: 'Home' });
+    expect(onActivePanelViewChange).toHaveBeenCalledWith('fields');
+  });
+
+  it('keeps fields/output panels mounted and toggles visibility by activePanelView', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        showPanelViewToggle={true}
+        activePanelView="output"
+      />,
+    );
+
+    expect(screen.getByTestId('target-panel-view-fields').className).toContain('hidden');
+    expect(screen.getByTestId('target-panel-view-output').className).not.toContain('hidden');
+  });
 });

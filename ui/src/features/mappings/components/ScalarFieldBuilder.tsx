@@ -487,9 +487,13 @@ function ScalarEntryModeSelector({
 function HeaderOverflowMenu({
   targetPath,
   onRemoveMapping,
+  mode,
+  onSwitchMode,
 }: {
   targetPath: string;
-  onRemoveMapping: () => void;
+  onRemoveMapping?: () => void;
+  mode: 'builder' | 'editor';
+  onSwitchMode: (nextMode: 'builder' | 'editor') => void;
 }) {
   const [open, setOpen] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -540,21 +544,36 @@ function HeaderOverflowMenu({
           <button
             type="button"
             role="menuitem"
-            data-testid="remove-mapping-btn"
-            aria-label={`Remove saved mapping for ${targetPath}`}
+            data-testid="mode-menu-toggle"
+            aria-label={mode === 'builder' ? 'Switch to Editor mode' : 'Switch to Builder mode'}
             onClick={() => {
+              onSwitchMode(mode === 'builder' ? 'editor' : 'builder');
               setOpen(false);
-              setConfirmingRemove(true);
             }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-slate-800 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-red-500"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-200 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500"
           >
-            Remove mapping
+            {mode === 'builder' ? 'Switch to Editor' : 'Switch to Builder'}
           </button>
+          {onRemoveMapping && (
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="remove-mapping-btn"
+              aria-label={`Remove saved mapping for ${targetPath}`}
+              onClick={() => {
+                setOpen(false);
+                setConfirmingRemove(true);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-slate-800 hover:text-red-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-red-500"
+            >
+              Remove mapping
+            </button>
+          )}
         </div>
       )}
 
       {/* Remove mapping confirmation dialog */}
-      {confirmingRemove && (
+      {confirmingRemove && onRemoveMapping && (
         <div
           role="alertdialog"
           aria-modal="true"
@@ -684,6 +703,10 @@ export function ScalarFieldBuilder({
 
   // FS-040 T-04: Reset draft confirmation state
   const [confirmingReset, setConfirmingReset] = useState(false);
+
+  const hasSmartUndoHistory = (smartHydrationOverride?.kind === 'guided'
+    ? smartHydrationOverride.draft.undoHistory?.length
+    : 0) ?? 0;
 
   useEffect(() => {
     chainStateRef.current = chainState;
@@ -1257,16 +1280,34 @@ export function ScalarFieldBuilder({
             )}
           </div>
 
-          {/* Builder | Editor toggle */}
-          <ModeToggle mode={mode} onSwitch={setMode} />
+          {/* Undo button moved from SmartBuilder panel to header slot */}
+          {preferSmartBuilder && hasSmartUndoHistory > 0 && (
+            <button
+              type="button"
+              data-testid="smart-undo-change"
+              className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+              onClick={() => onSmartApplyAction?.('base.undo')}
+              aria-label="Undo last Smart Builder change"
+            >
+              Undo
+            </button>
+          )}
 
-          {/* ⋮ Overflow menu — only when destructive actions are applicable */}
-          {currentStatus === 'mapped' && onClearMapping && (
+          {!preferSmartBuilder && <ModeToggle mode={mode} onSwitch={setMode} />}
+
+          {/* ⋮ Overflow menu — mode switch in Smart Builder + optional remove mapping */}
+          {(preferSmartBuilder || (currentStatus === 'mapped' && onClearMapping)) && (
             <HeaderOverflowMenu
               targetPath={selectedTargetPath}
-              onRemoveMapping={() => { onClearMapping(selectedTargetPath); }}
+              onRemoveMapping={
+                currentStatus === 'mapped' && onClearMapping
+                  ? () => { onClearMapping(selectedTargetPath); }
+                  : undefined
+              }
+              mode={mode}
+              onSwitchMode={setMode}
             />
-          )}
+            )}
         </div>
 
         <div
@@ -1534,6 +1575,7 @@ export function ScalarFieldBuilder({
               onValueMapAdoptLatestRevision={onValueMapAdoptLatestRevision}
               sourceSampleData={effectiveSourceSampleData}
               enrichmentSampleData={enrichmentSampleData}
+              showUndoButton={false}
             />
           </div>
         )}

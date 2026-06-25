@@ -5,6 +5,7 @@ import {
   buildSampleOutputByTargetPath,
   applySmartActionToDraft,
   applyStagedInputToSmartDraft,
+  hydrateUnknownPrimaryInputTypes,
   normalizeLegacySmartSlotId,
   removeInputFromSmartDraftWithUsageCleanup,
   resolveBuilderTargetPath,
@@ -818,6 +819,66 @@ describe('applyStagedInputToSmartDraft', () => {
 
     expect(second.draft.inputs).toHaveLength(1);
     expect(second.expression).toBe('source("firstName")');
+  });
+});
+
+describe('hydrateUnknownPrimaryInputTypes', () => {
+  it('upgrades unknown primary input type from source path map', () => {
+    const baseDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'financial.totalAmount',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'payment.total',
+          path: 'payment.total',
+          valueType: 'unknown' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'input-1' },
+      expression: 'source("payment.total")',
+      validation: { status: 'valid' as const },
+    };
+
+    const next = hydrateUnknownPrimaryInputTypes(baseDraft, {
+      'payment.total': 'string',
+    });
+
+    expect(next.inputs[0]?.valueType).toBe('string');
+  });
+
+  it('does not mutate non-primary unknown inputs', () => {
+    const baseDraft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'financial.totalAmount',
+        targetType: 'number',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'expression' as const,
+          label: 'Expression input',
+          rawExpression: 'source("payment.total")',
+          valueType: 'unknown' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'input-1' },
+      expression: 'source("payment.total")',
+      validation: { status: 'valid' as const },
+    };
+
+    const next = hydrateUnknownPrimaryInputTypes(baseDraft, {
+      'payment.total': 'string',
+    });
+
+    expect(next.inputs[0]?.valueType).toBe('unknown');
   });
 });
 

@@ -194,6 +194,19 @@ describe('computeVersionDiff', () => {
     const diff = computeVersionDiff(oldConfig, newConfig);
     expect(diff.configDiffs.length).toBeGreaterThan(0);
   });
+
+  it('does not throw when old/new config payloads are sparse or undefined', () => {
+    const malformedOld = { config: {} } as MappingConfig;
+    const malformedNew = { rules: [] } as MappingConfig;
+
+    expect(() => computeVersionDiff(malformedOld, malformedNew)).not.toThrow();
+    expect(() => computeVersionDiff(undefined, malformedNew)).not.toThrow();
+    expect(() => computeVersionDiff(malformedOld, undefined)).not.toThrow();
+
+    const diff = computeVersionDiff(undefined, undefined);
+    expect(diff.summary).toEqual({ added: 0, modified: 0, removed: 0 });
+    expect(diff.ruleDiffs).toEqual([]);
+  });
 });
 
 describe('generateChangeSummary', () => {

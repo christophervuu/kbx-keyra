@@ -383,6 +383,227 @@ describe('usePreviewExecution', () => {
     expect(mockExecuteMapping).not.toHaveBeenCalled();
   });
 
+  it('does not auto-run while output is inactive in output-controlled mode', async () => {
+    const { result } = renderHook(
+      () => usePreviewExecution({ ...defaultParams(), executionMode: 'output-controlled', isOutputActive: false }),
+      { wrapper },
+    );
+
+    act(() => { result.current.setAutoRun(true); });
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+  });
+
+  it('runs once on output reopen for latest dirty state in output-controlled mode', async () => {
+    let sourceDataRaw = '{"firstName":"Alice"}';
+    let isOutputActive = false;
+
+    const { result, rerender } = renderHook(
+      () => usePreviewExecution({
+        ...defaultParams(),
+        sourceDataRaw,
+        executionMode: 'output-controlled',
+        isOutputActive,
+      }),
+      { wrapper },
+    );
+
+    act(() => { result.current.setAutoRun(true); });
+
+    // Dirty changes while output is inactive
+    sourceDataRaw = '{"firstName":"Bob"}';
+    rerender();
+    sourceDataRaw = '{"firstName":"Charlie"}';
+    rerender();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+
+    // Reopen output -> should execute once immediately with latest dirty state
+    isOutputActive = true;
+    rerender();
+
+    expect(mockExecuteMapping).toHaveBeenCalledTimes(1);
+    expect(mockExecuteMapping).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { firstName: 'Charlie' },
+      expect.anything(),
+      expect.anything(),
+      { externalSources: { customerProfile: { id: 'c-1' } } },
+    );
+  });
+
+  it('cancels pending debounce when output becomes inactive in output-controlled mode', async () => {
+    let isOutputActive = true;
+
+    const { result, rerender } = renderHook(
+      () => usePreviewExecution({ ...defaultParams(), executionMode: 'output-controlled', isOutputActive }),
+      { wrapper },
+    );
+
+    act(() => { result.current.setAutoRun(true); });
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+
+    isOutputActive = false;
+    rerender();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mockExecuteMapping).not.toHaveBeenCalled();
+  });
+
+  it('rejects out-of-order stale completion and keeps latest run result', async () => {
+    let resolveFirst: ((value: ReturnType<typeof createMockResult>) => void) | undefined;
+    let resolveSecond: ((value: ReturnType<typeof createMockResult>) => void) | undefined;
+
+    mockExecuteMapping
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve as (value: ReturnType<typeof createMockResult>) => void;
+      }) as unknown as ReturnType<typeof executeMapping>)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveSecond = resolve as (value: ReturnType<typeof createMockResult>) => void;
+      }) as unknown as ReturnType<typeof executeMapping>);
+
+    const { result } = renderHook(() => usePreviewExecution(defaultParams()), { wrapper });
+
+    act(() => { result.current.run(); });
+    act(() => { result.current.run(); });
+
+    expect(result.current.state.status).toBe('executing');
+
+    await act(async () => {
+      resolveSecond?.({
+        output: { name: 'Second' },
+        diagnostics: [],
+        trace: undefined,
+        stats: { durationMs: 5, ruleCount: 1 },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.state).toEqual({
+      status: 'success',
+      result: {
+        output: { name: 'Second' },
+        diagnostics: [],
+        trace: undefined,
+        stats: { durationMs: 5, ruleCount: 1 },
+      },
+    });
+
+    await act(async () => {
+      resolveFirst?.({
+        output: { name: 'First (stale)' },
+        diagnostics: [],
+        trace: undefined,
+        stats: { durationMs: 5, ruleCount: 1 },
+      });
+      await Promise.resolve();
+    });
+
+    // Older completion must not overwrite latest success
+    expect(result.current.state).toEqual({
+      status: 'success',
+      result: {
+        output: { name: 'Second' },
+        diagnostics: [],
+        trace: undefined,
+        stats: { durationMs: 5, ruleCount: 1 },
+      },
+    });
+  });
+
+  it('retains prior output as stale only when failure occurs in same preview context', () => {
+    mockExecuteMapping
+      .mockReturnValueOnce(createMockResult() as ReturnType<typeof executeMapping>)
+      .mockImplementationOnce(() => {
+        throw new Error('latest run failed');
+      });
+
+    const { result } = renderHook(
+      () => usePreviewExecution({ ...defaultParams(), previewContextId: 'sample-a', targetOutputFormat: 'json' }),
+      { wrapper },
+    );
+
+    act(() => { result.current.run(); });
+    expect(result.current.state.status).toBe('success');
+
+    act(() => { result.current.run(); });
+
+    expect(result.current.state.status).toBe('success');
+    if (result.current.state.status === 'success') {
+      expect(result.current.state.result.output).toEqual({ name: 'Alice' });
+      expect(result.current.state.result.diagnostics.some((d) => d.code === 'W_INLINE_OUTPUT_STALE')).toBe(true);
+    }
+  });
+
+  it('does not present stale output as current when preview context changes before failure', () => {
+    let previewContextId = 'sample-a';
+
+    mockExecuteMapping
+      .mockReturnValueOnce(createMockResult() as ReturnType<typeof executeMapping>)
+      .mockImplementationOnce(() => {
+        throw new Error('sample b failed');
+      });
+
+    const { result, rerender } = renderHook(
+      () => usePreviewExecution({ ...defaultParams(), previewContextId, targetOutputFormat: 'json' }),
+      { wrapper },
+    );
+
+    act(() => { result.current.run(); });
+    expect(result.current.state.status).toBe('success');
+
+    previewContextId = 'sample-b';
+    rerender();
+
+    expect(result.current.state).toEqual({ status: 'idle' });
+
+    act(() => { result.current.run(); });
+    expect(result.current.state).toEqual({ status: 'error', error: 'sample b failed' });
+  });
+
+  it('uses latest partial output as current output instead of older success', () => {
+    mockExecuteMapping
+      .mockReturnValueOnce({
+        output: { full: { name: 'Alice', city: 'Seattle' } },
+        diagnostics: [],
+        trace: undefined,
+        stats: { durationMs: 5, ruleCount: 1 },
+      } as ReturnType<typeof executeMapping>)
+      .mockReturnValueOnce({
+        output: { full: { name: 'Alice' } },
+        diagnostics: [{ code: 'E999', severity: 'error', message: 'partial output' }],
+        trace: undefined,
+        stats: { durationMs: 5, ruleCount: 1 },
+      } as ReturnType<typeof executeMapping>);
+
+    const { result } = renderHook(() => usePreviewExecution(defaultParams()), { wrapper });
+
+    act(() => { result.current.run(); });
+    expect(result.current.state.status).toBe('success');
+
+    act(() => { result.current.run(); });
+
+    expect(result.current.state.status).toBe('success');
+    if (result.current.state.status === 'success') {
+      expect(result.current.state.result.output).toEqual({ full: { name: 'Alice' } });
+      expect(result.current.state.result.diagnostics.some((d) => d.code === 'E999')).toBe(true);
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Timeout guard
   // -------------------------------------------------------------------------

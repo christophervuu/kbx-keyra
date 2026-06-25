@@ -175,6 +175,7 @@ interface SmartBuilderPanelProps {
   readonly onValueMapAdoptLatestRevision?: () => void;
   readonly sourceSampleData?: unknown;
   readonly enrichmentSampleData?: Readonly<Record<string, unknown>>;
+  readonly showUndoButton?: boolean;
 }
 
 export function SmartBuilderPanel({
@@ -209,6 +210,7 @@ export function SmartBuilderPanel({
   onValueMapAdoptLatestRevision,
   sourceSampleData = null,
   enrichmentSampleData = {},
+  showUndoButton = true,
 }: SmartBuilderPanelProps) {
   const conditionSlotButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const previousFocusedSlotIdRef = useRef<string | null>(null);
@@ -1577,7 +1579,7 @@ export function SmartBuilderPanel({
 
       <div className="min-h-0 flex-1 space-y-2.5 px-3 py-3">
         <div>
-          {(hydration.draft.undoHistory?.length ?? 0) > 0 && (
+          {showUndoButton && (hydration.draft.undoHistory?.length ?? 0) > 0 && (
             <div className="mb-2 flex justify-end">
               <button
                 type="button"

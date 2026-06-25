@@ -310,6 +310,21 @@ function inferInputTypeLabel(expression: string | null): string {
   return inferRuleType(expression);
 }
 
+function inferContainerCoverageLabel(
+  coverage: { mapped: number; total: number } | undefined,
+): string {
+  if (!coverage || coverage.total <= 0) {
+    return 'No mappable descendants';
+  }
+  if (coverage.mapped === 0) {
+    return 'No child mappings';
+  }
+  if (coverage.mapped >= coverage.total) {
+    return 'Fully mapped';
+  }
+  return 'Partially mapped';
+}
+
 function prioritizeArrayChildren(
   children: readonly SchemaTreeNode[],
   statusMap: Map<string, string>,
@@ -405,19 +420,23 @@ function renderNode({
 
   const matchingRule = rulesByTarget.get(node.path);
   const isArrayNode = node.type === 'array';
+  const isContainer = node.childCount > 0;
+  const coverage = coverageMap.get(node.path);
+  const coverageValue = coverage ? { mapped: coverage.mapped, total: coverage.total } : undefined;
   const arrayItemCount = isArrayNode ? (sampleArrayItemCountByTargetPath?.[node.path] ?? null) : null;
   const sourceSummary = isArrayNode
     ? inferArraySourceSummary(matchingRule?.expression ?? null)
     : inferSourceSummary(matchingRule?.expression ?? null);
-  const mappingTypeLabel = isArrayNode
+  const methodLabel = isArrayNode
     ? inferArrayMethodLabel(matchingRule?.expression ?? null)
     : inferInputTypeLabel(matchingRule?.expression ?? null);
+  const mappingTypeLabel = isContainer
+    ? inferContainerCoverageLabel(coverageValue)
+    : methodLabel;
   const notesPreview = suggestionNotes ?? matchingRule?.description ?? null;
   const sampleOutputPreview = sampleOutputByTargetPath?.[node.path] ?? null;
-  const isExpandable = node.childCount > 0;
+  const isExpandable = isContainer;
   const isExpanded = expandedPaths.has(node.path);
-  const coverage = coverageMap.get(node.path);
-  const coverageValue = coverage ? { mapped: coverage.mapped, total: coverage.total } : undefined;
 
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -436,7 +455,6 @@ function renderNode({
   }
 
   // Filter by active tab (leaf nodes only — container nodes pass through if any child matches)
-  const isContainer = node.childCount > 0;
   if (!isContainer && !nodeMatchesFilterTab({
     node,
     activeFilterTab,
@@ -505,7 +523,7 @@ function renderNode({
         >
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
             <span>{modeDescription}</span>
-            <span>Method: {mappingTypeLabel}</span>
+            <span>Method: {methodLabel}</span>
             <span>Source list: {sourceSummary}</span>
             <span>Items: {arrayItemCount ?? '—'}</span>
           </div>
