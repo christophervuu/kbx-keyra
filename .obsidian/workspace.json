@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "forge/active/FS-100/tasks/T-01.md",
+                "file": "forge/completed/FS-081/tasks/T-03.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "T-01"
+              "title": "T-03"
             }
           }
         ]
@@ -180,42 +180,43 @@
       "bases:Create new base": false
     }
   },
-  "active": "6f9518702ec634e2",
+  "active": "524501cf2aa1bd9f",
   "lastOpenFiles": [
-    "forge/active/FS-100/tasks/T-12.md",
-    "forge/active/FS-100/tasks/T-13.md",
-    "forge/active/FS-100/tasks/T-14.md",
-    "forge/active/FS-100/tasks/T-11.md",
-    "forge/active/FS-100/tasks/T-10.md",
-    "forge/active/FS-100/tasks/T-09.md",
-    "forge/active/FS-100/tasks/T-08.md",
+    "forge/completed/FS-081/tasks/T-02.md",
+    "forge/completed/T-04.md",
+    "forge/completed/FS-100/tasks/T-01.md",
+    "forge/completed/FS-100/tasks/T-12.md",
+    "forge/completed/FS-100/tasks/T-13.md",
+    "forge/completed/FS-100/tasks/T-14.md",
+    "forge/completed/FS-100/tasks/T-11.md",
+    "forge/completed/FS-100/tasks/T-10.md",
+    "forge/completed/FS-100/tasks/T-09.md",
+    "forge/completed/FS-100/tasks/T-08.md",
     "ui/src/features/deployments/hooks/use-deployment-page.test.tsx",
     "ui/src/features/deployments/hooks/use-deployment-page.test.ts",
     "ui/src/features/deployments/components/DeploymentPage.test.tsx",
     "ui/src/features/deployments/components/DeploymentPage.tsx",
-    "forge/active/FS-100/tasks/T-07.md",
-    "forge/active/FS-100/tasks/T-06.md",
-    "forge/active/FS-100/tasks/T-05.md",
-    "forge/active/FS-100/tasks/T-04.md",
-    "forge/active/FS-100/tasks/T-03.md",
-    "forge/active/FS-100/tasks/T-02.md",
-    "forge/active/FS-100/tasks/T-01.md",
+    "forge/completed/FS-100/tasks/T-07.md",
+    "forge/completed/FS-100/tasks/T-06.md",
+    "forge/completed/FS-100/tasks/T-05.md",
+    "forge/completed/FS-100/tasks/T-04.md",
+    "forge/completed/FS-100/tasks/T-03.md",
+    "forge/completed/FS-100/tasks/T-02.md",
     "tests/lambda/deployment/fixtures/fs100-ae12-runtime-lifecycle.ts",
     "tests/lambda/deployment/fixtures",
-    "forge/active/FS-100/artifacts/T-10-root-cause.md",
-    "forge/active/FS-100/artifacts",
+    "forge/completed/FS-100/artifacts/T-10-root-cause.md",
+    "forge/completed/FS-100/artifacts",
     "src/lambda/deployment/get-deployment-context.ts",
     "node_modules/@smithy/core/transport.d.ts",
     "node_modules/@smithy/core/dist-types/submodules/transport/toEndpointV1.d.ts",
     "node_modules/@aws-sdk/client-lambda/README.md",
-    "forge/active/FS-100/spec.md",
-    "forge/active/FS-099/tasks/T-12.md",
-    "forge/active/FS-099/tasks/T-11.md",
-    "forge/active/FS-099/tasks/T-10.md",
-    "forge/active/FS-099/tasks/T-09.md",
-    "forge/active/FS-099/tasks/T-08.md",
-    "forge/active/FS-099/tasks/T-07.md",
-    "forge/active/FS-099/tasks/T-06.md",
-    "forge/active/FS-099/tasks/T-04.md"
+    "forge/completed/FS-100/spec.md",
+    "forge/completed/FS-099/tasks/T-12.md",
+    "forge/completed/FS-099/tasks/T-11.md",
+    "forge/completed/FS-099/tasks/T-10.md",
+    "forge/completed/FS-099/tasks/T-09.md",
+    "forge/completed/FS-099/tasks/T-08.md",
+    "forge/completed/FS-099/tasks/T-07.md",
+    "forge/completed/FS-099/tasks/T-06.md"
   ]
 }
