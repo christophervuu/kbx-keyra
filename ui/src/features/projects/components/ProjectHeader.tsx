@@ -1,4 +1,4 @@
-import { Copy, Download, MoreHorizontal, Plus, Settings, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, Copy, Download, MoreHorizontal, Plus, Settings, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -43,6 +43,8 @@ export interface ProjectHeaderProps {
   linkedSchemasControlsId?: string;
   onDuplicateProject: () => Promise<void>;
   onDeleteProject: () => Promise<void>;
+  onImportMappings?: () => Promise<void>;
+  isImportingMappings?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +57,8 @@ interface OverflowMenuProps {
   schemaCount: number;
   onDuplicateProject: () => Promise<void>;
   onDeleteProject: () => Promise<void>;
+  onImportMappings?: () => Promise<void>;
+  isImportingMappings?: boolean;
 }
 
 function OverflowMenu({
@@ -63,6 +67,8 @@ function OverflowMenu({
   schemaCount,
   onDuplicateProject,
   onDeleteProject,
+  onImportMappings,
+  isImportingMappings = false,
 }: OverflowMenuProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -202,6 +208,21 @@ function OverflowMenu({
             </button>
           </div>
 
+          {onImportMappings ? (
+            <button
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100 focus-visible:bg-slate-800 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+              disabled={isImportingMappings}
+              onClick={() => {
+                setOpen(false);
+                void onImportMappings();
+              }}
+            >
+              <ArrowDownToLine size={14} aria-hidden="true" />
+              {isImportingMappings ? 'Importing mappings…' : 'Import mappings'}
+            </button>
+          ) : null}
+
           {/* Separator */}
           <div className="my-1 border-t border-slate-700" role="separator" />
 
@@ -259,6 +280,8 @@ export function ProjectHeader({
   linkedSchemasControlsId,
   onDuplicateProject,
   onDeleteProject,
+  onImportMappings,
+  isImportingMappings,
 }: ProjectHeaderProps) {
   const navigate = useNavigate();
   const showValueTableMetric =
@@ -299,6 +322,8 @@ export function ProjectHeader({
             schemaCount={schemaCount}
             onDuplicateProject={onDuplicateProject}
             onDeleteProject={onDeleteProject}
+            onImportMappings={onImportMappings}
+            isImportingMappings={isImportingMappings}
           />
         </div>
       </div>

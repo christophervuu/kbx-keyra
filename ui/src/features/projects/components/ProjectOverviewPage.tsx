@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { LinkedSchemasDialog } from './LinkedSchemasDialog';
@@ -12,6 +12,7 @@ import { useProjectOverview } from '../hooks/use-project-overview';
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
 import { useAdapter } from '@/lib/api';
+import type { MappingImportSummary } from '@/lib/api/types';
 import { PATHS } from '@/routes/paths';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,8 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const [showLinkedSchemasDialog, setShowLinkedSchemasDialog] = useState(false);
   const [unlinkingSchemaId, setUnlinkingSchemaId] = useState<string | null>(null);
+  const [isImportingMappings, setIsImportingMappings] = useState(false);
+  const [mappingImportSummary, setMappingImportSummary] = useState<MappingImportSummary | null>(null);
   const [valueTableSummary, setValueTableSummary] = useState<{
     projectId: string;
     activeCount: number | null;
@@ -96,6 +99,11 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const activeValueTableCount =
     valueTableSummary.projectId === projectId ? valueTableSummary.activeCount : null;
 
+  const canImportMappings = useMemo(
+    () => typeof adapter.importLocalMappings === 'function',
+    [adapter],
+  );
+
   // -------------------------------------------------------------------------
   // Loading
   // -------------------------------------------------------------------------
@@ -141,6 +149,23 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   async function handleDeleteProject() {
     await deleteProjectAction();
     navigate(PATHS.HOME);
+  }
+
+  async function handleImportMappings() {
+    if (!adapter.importLocalMappings) {
+      return;
+    }
+
+    setIsImportingMappings(true);
+    try {
+      const summary = await adapter.importLocalMappings(projectId);
+      setMappingImportSummary(summary);
+      if (summary.imported > 0) {
+        retry();
+      }
+    } finally {
+      setIsImportingMappings(false);
+    }
   }
 
   async function handleDuplicateProject() {
@@ -192,7 +217,30 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           linkedSchemasControlsId="linked-schemas-dialog"
           onDuplicateProject={handleDuplicateProject}
           onDeleteProject={handleDeleteProject}
+          onImportMappings={canImportMappings ? handleImportMappings : undefined}
+          isImportingMappings={isImportingMappings}
         />
+
+        {mappingImportSummary ? (
+          <div
+            data-testid="mapping-import-summary"
+            className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+          >
+            Imported {mappingImportSummary.imported}, skipped {mappingImportSummary.skipped}, failed {mappingImportSummary.failed}
+            {mappingImportSummary.issues.length > 0 ? (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-slate-300">View import details</summary>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-400">
+                  {mappingImportSummary.issues.map((issue, index) => (
+                    <li key={`${issue.code}:${issue.localMappingId ?? issue.remoteMappingId ?? index}`}>
+                      [{issue.code}] {issue.mappingName ? `${issue.mappingName}: ` : ''}{issue.message}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Section 2 — full-width mappings content */}
         <div className="min-w-0 space-y-4" data-testid="project-overview-main-column">

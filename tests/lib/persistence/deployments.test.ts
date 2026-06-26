@@ -411,6 +411,76 @@ describe('persistence deployments', () => {
     expect(putCommand.input.Item.activeSnapshotId).toBe('snapshot-1');
   });
 
+  it('upsertActiveSnapshot enforces conditional update when expectedCurrentSnapshotId is provided', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({});
+
+    await mod.upsertActiveSnapshot({
+      mappingId: 'mapping-1',
+      activeSnapshotId: 'snapshot-2',
+      snapshotHash: 'hash-2',
+      activatedBy: 'control-plane',
+      sourceType: 'version',
+      sourceNumber: 6,
+      expectedCurrentSnapshotId: 'snapshot-1',
+    });
+
+    const putCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: {
+        ConditionExpression?: string;
+        ExpressionAttributeValues?: Record<string, unknown>;
+      };
+    };
+    expect(putCommand.input.ConditionExpression).toBe('activeSnapshotId = :expectedSnapshotId');
+    expect(putCommand.input.ExpressionAttributeValues).toEqual({
+      ':expectedSnapshotId': 'snapshot-1',
+    });
+  });
+
+  it('upsertActiveSnapshot enforces create-only condition when expectedCurrentSnapshotId is null', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockResolvedValueOnce({});
+
+    await mod.upsertActiveSnapshot({
+      mappingId: 'mapping-1',
+      activeSnapshotId: 'snapshot-1',
+      snapshotHash: 'hash-1',
+      activatedBy: 'control-plane',
+      sourceType: 'version',
+      sourceNumber: 6,
+      expectedCurrentSnapshotId: null,
+    });
+
+    const putCommand = dynamoSendMock.mock.calls[0]?.[0] as {
+      input: {
+        ConditionExpression?: string;
+      };
+    };
+    expect(putCommand.input.ConditionExpression).toBe('attribute_not_exists(mappingId)');
+  });
+
+  it('upsertActiveSnapshot throws ActiveSnapshotConflictError on conditional check failure', async () => {
+    const mod = await importModule();
+
+    dynamoSendMock.mockRejectedValueOnce({ name: 'ConditionalCheckFailedException' });
+
+    await expect(
+      mod.upsertActiveSnapshot({
+        mappingId: 'mapping-1',
+        activeSnapshotId: 'snapshot-2',
+        snapshotHash: 'hash-2',
+        activatedBy: 'control-plane',
+        sourceType: 'version',
+        sourceNumber: 6,
+        expectedCurrentSnapshotId: 'snapshot-1',
+      }),
+    ).rejects.toMatchObject({
+      name: 'ActiveSnapshotConflictError',
+    });
+  });
+
   it('getActiveSnapshot returns runtime pointer or null', async () => {
     const mod = await importModule();
 

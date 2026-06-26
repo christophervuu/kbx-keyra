@@ -88,10 +88,13 @@ export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
               Status
             </th>
             <th scope="col" className="px-4 py-3 font-medium text-slate-400">
+              SANDBOX
+            </th>
+            <th scope="col" className="px-4 py-3 font-medium text-slate-400">
               DEV
             </th>
             <th scope="col" className="px-4 py-3 font-medium text-slate-400">
-              QA
+              PREPROD
             </th>
             <th scope="col" className="px-4 py-3 font-medium text-slate-400">
               PROD
@@ -104,8 +107,9 @@ export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
         <tbody className="divide-y divide-slate-800">
           {projects.map((project) => {
             const allNotDeployed =
+              project.sandboxDeploy === 'not-deployed' &&
               project.devDeploy === 'not-deployed' &&
-              project.qaDeploy === 'not-deployed' &&
+              project.preprodDeploy === 'not-deployed' &&
               project.prodDeploy === 'not-deployed';
 
             return (
@@ -133,16 +137,19 @@ export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
                 <WorstStatusBadge status={project.worstStatus} />
               </td>
               {allNotDeployed ? (
-                <td colSpan={3} className="px-4 py-3 text-xs text-slate-500" data-testid={`deploy-condensed-${project.projectId}`}>
+                <td colSpan={4} className="px-4 py-3 text-xs text-slate-500" data-testid={`deploy-condensed-${project.projectId}`}>
                   Not deployed
                 </td>
               ) : (
                 <>
                   <td className="px-4 py-3">
+                    <StatusBadge status={project.sandboxDeploy} />
+                  </td>
+                  <td className="px-4 py-3">
                     <StatusBadge status={project.devDeploy} />
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={project.qaDeploy} />
+                    <StatusBadge status={project.preprodDeploy} />
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={project.prodDeploy} />

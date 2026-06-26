@@ -14,8 +14,9 @@ const MAPPING: MappingRowData = {
   ruleCount: 5,
   coverage: 0.85,
   status: 'ready',
+  sandboxDeploy: 'not-deployed',
   devDeploy: 'not-deployed',
-  qaDeploy: 'not-deployed',
+  preprodDeploy: 'not-deployed',
   prodDeploy: 'not-deployed',
   updatedAt: '2026-04-01T00:00:00Z',
 };
@@ -150,24 +151,42 @@ describe('MappingRow', () => {
   });
 
   it('normalizes stale to "Changed since deploy" in deployment column', () => {
-    renderRow({ ...MAPPING, devDeploy: 'deployed', qaDeploy: 'not-deployed', prodDeploy: 'not-deployed' });
+    renderRow({ ...MAPPING, devDeploy: 'deployed', preprodDeploy: 'not-deployed', prodDeploy: 'not-deployed' });
     expect(screen.getByText('DEV deployed')).toBeInTheDocument();
   });
 
   it('shows "Changed since deploy" instead of stale', () => {
-    renderRow({ ...MAPPING, devDeploy: 'stale', qaDeploy: 'not-deployed', prodDeploy: 'deployed' });
+    renderRow({ ...MAPPING, sandboxDeploy: 'stale', preprodDeploy: 'not-deployed', prodDeploy: 'deployed' });
     expect(screen.getByText('Changed since deploy')).toBeInTheDocument();
     expect(screen.queryByText(/stale/i)).not.toBeInTheDocument();
   });
 
   it('shows Deploying when any env is deploying', () => {
-    renderRow({ ...MAPPING, devDeploy: 'deploying' });
+    renderRow({ ...MAPPING, sandboxDeploy: 'deploying' });
     expect(screen.getByText('Deploying')).toBeInTheDocument();
   });
 
-  it('shows highest deployed env preference (PROD > QA > DEV)', () => {
-    renderRow({ ...MAPPING, devDeploy: 'deployed', qaDeploy: 'deployed', prodDeploy: 'deployed' });
+  it('shows highest deployed env preference (PROD > PREPROD > DEV > SANDBOX)', () => {
+    renderRow({
+      ...MAPPING,
+      sandboxDeploy: 'deployed',
+      devDeploy: 'deployed',
+      preprodDeploy: 'deployed',
+      prodDeploy: 'deployed',
+    });
     expect(screen.getByText('PROD deployed')).toBeInTheDocument();
+  });
+
+  it('normalizes legacy QA semantics to PREPROD display tier', () => {
+    renderRow({
+      ...MAPPING,
+      sandboxDeploy: 'not-deployed',
+      devDeploy: 'not-deployed',
+      preprodDeploy: 'deployed',
+      prodDeploy: 'not-deployed',
+    });
+    expect(screen.getByText('PREPROD deployed')).toBeInTheDocument();
+    expect(screen.queryByText('QA deployed')).not.toBeInTheDocument();
   });
 
   it('ready mappings show icon actions and no Open/More text buttons', () => {

@@ -35,8 +35,9 @@ export interface MappingRowData {
   readonly ruleCount: number;
   readonly coverage: number;
   readonly status: string;
+  readonly sandboxDeploy: DeployStatus;
   readonly devDeploy: DeployStatus;
-  readonly qaDeploy: DeployStatus;
+  readonly preprodDeploy: DeployStatus;
   readonly prodDeploy: DeployStatus;
   readonly updatedAt: string;
 }

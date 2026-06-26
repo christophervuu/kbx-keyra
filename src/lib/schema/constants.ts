@@ -35,7 +35,7 @@ const RETRIEVAL_CAPS_BY_STAGE: Record<string, RetrievalCaps> = {
     topK: 12,
     contextExpansionCap: 24,
   },
-  QA: {
+  PREPROD: {
     lexicalCap: 150,
     rerankCap: 100,
     topK: 15,
@@ -106,7 +106,14 @@ function resolveStage(): string {
     return 'DEV';
   }
 
-  return raw.toUpperCase();
+  const normalized = raw.toUpperCase();
+
+  // Legacy compatibility: treat QA stage as PREPROD for retrieval caps.
+  if (normalized === 'QA') {
+    return 'PREPROD';
+  }
+
+  return normalized;
 }
 
 /**

@@ -233,7 +233,16 @@ function applyUnmappedTargets(
 }
 
 function applyNullSubtrees(config: MappingConfig, output: Record<string, unknown>): void {
-  for (const path of config.config.nullSubtrees) {
+  const nullSubtreesCandidate = (config as { config?: { nullSubtrees?: unknown } }).config?.nullSubtrees;
+  if (!Array.isArray(nullSubtreesCandidate)) {
+    return;
+  }
+
+  for (const path of nullSubtreesCandidate) {
+    if (typeof path !== 'string' || path.trim().length === 0) {
+      continue;
+    }
+
     setAtPath(output, path, null);
   }
 }

@@ -10,9 +10,10 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { create as createDeployment, getCurrent } from '../../lib/persistence/deployments.js';
+import { create as createDeployment, getCurrent, listHistory as listDeploymentHistory } from '../../lib/persistence/deployments.js';
 import {
   create as createDeploymentOrchestration,
+  get as getDeploymentOrchestration,
   updateStatus as updateDeploymentOrchestrationStatus,
 } from '../../lib/persistence/deployment-orchestrations.js';
 import { getConfig as getVersionConfig } from '../../lib/persistence/mapping-versions.js';
@@ -43,6 +44,11 @@ interface OrchestrationContext {
   readonly requestId: string;
 }
 
+interface ReplayResult {
+  readonly replayed: true;
+  readonly response: APIGatewayProxyResult;
+}
+
 function mapRelayStatusCodeToHttp(statusCode: number): number {
   if (statusCode >= 400 && statusCode < 600) {
     return statusCode;
@@ -63,6 +69,62 @@ function getMappingsTableOrThrow(): string {
   }
 
   return table;
+}
+
+function parseIdempotencyKey(event: APIGatewayProxyEvent): string | null {
+  const headers = event.headers;
+  if (!headers) {
+    return null;
+  }
+
+  const key = headers['x-idempotency-key'] ?? headers['X-Idempotency-Key'];
+  if (typeof key !== 'string' || key.trim() === '') {
+    return null;
+  }
+
+  return key.trim();
+}
+
+function buildDeterministicOrchestrationId(input: {
+  mappingId: string;
+  fromEnvironment: DeploymentEnvironment;
+  toEnvironment: DeploymentEnvironment;
+  idempotencyKey: string;
+}): string {
+  return ['promote', input.mappingId, input.fromEnvironment, input.toEnvironment, input.idempotencyKey].join(':');
+}
+
+function isConditionalCheckFailed(error: unknown): boolean {
+  const typed = error as { name?: string; Code?: string } | null | undefined;
+  return typed?.name === 'ConditionalCheckFailedException' || typed?.Code === 'ConditionalCheckFailedException';
+}
+
+function mapErrorCodeToStatusCode(errorCode: string | undefined): number {
+  switch (errorCode) {
+    case ERROR_CODES.VALIDATION_ERROR:
+    case ERROR_CODES.PROMOTION_REQUIRES_VERSION:
+      return 400;
+    case ERROR_CODES.SOURCE_NOT_FOUND:
+      return 404;
+    case ERROR_CODES.CONFLICT:
+      return 409;
+    case ERROR_CODES.PAYLOAD_TOO_LARGE:
+    case ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE:
+      return 413;
+    case ERROR_CODES.SERVICE_UNAVAILABLE:
+      return 503;
+    case ERROR_CODES.TIMEOUT:
+      return 504;
+    default:
+      return 500;
+  }
+}
+
+function isSequentialPromotionPath(fromEnvironment: DeploymentEnvironment, toEnvironment: DeploymentEnvironment): boolean {
+  return (
+    (fromEnvironment === 'DEV' && toEnvironment === 'PREPROD')
+    || (fromEnvironment === 'PREPROD' && toEnvironment === 'PROD')
+  );
 }
 
 function isEnvironment(value: unknown): value is DeploymentEnvironment {
@@ -89,9 +151,20 @@ async function createOrchestrationContext(input: {
   fromEnvironment: DeploymentEnvironment;
   toEnvironment: DeploymentEnvironment;
   artifactId: string;
+  idempotencyKey?: string | null;
 }): Promise<OrchestrationContext> {
   const requestId = generateRequestId();
+  const orchestrationId = input.idempotencyKey
+    ? buildDeterministicOrchestrationId({
+        mappingId: input.mappingId,
+        fromEnvironment: input.fromEnvironment,
+        toEnvironment: input.toEnvironment,
+        idempotencyKey: input.idempotencyKey,
+      })
+    : undefined;
+
   const orchestration = await createDeploymentOrchestration({
+    ...(orchestrationId ? { orchestrationId } : {}),
     mappingId: input.mappingId,
     operationType: 'promote',
     targetEnvironment: input.toEnvironment,
@@ -115,7 +188,119 @@ async function createOrchestrationContext(input: {
   };
 }
 
+async function buildReplayResponse(input: {
+  mappingId: string;
+  fromEnvironment: DeploymentEnvironment;
+  toEnvironment: DeploymentEnvironment;
+  orchestration: {
+    orchestrationId: string;
+    status: string;
+    requestId: string;
+    artifactId?: string;
+    lastErrorCode?: string;
+    lastErrorMessage?: string;
+  };
+}): Promise<APIGatewayProxyResult> {
+  const status = input.orchestration.status;
+
+  if (status === 'succeeded') {
+    const history = await listDeploymentHistory(input.mappingId, input.toEnvironment, 25);
+    const matching = history.find(
+      (item) => item.artifactId === input.orchestration.artifactId && item.promotedFrom === input.fromEnvironment,
+    );
+
+    if (matching) {
+      return jsonResponse(
+        200,
+        {
+          ...matching,
+          orchestrationId: input.orchestration.orchestrationId,
+          replayed: true,
+        },
+        input.orchestration.requestId,
+      );
+    }
+
+    return jsonResponse(
+      200,
+      {
+        orchestrationId: input.orchestration.orchestrationId,
+        status,
+        replayed: true,
+      },
+      input.orchestration.requestId,
+    );
+  }
+
+  if (status === 'failed' || status === 'timed_out') {
+    const errorCode = input.orchestration.lastErrorCode ?? ERROR_CODES.INTERNAL_ERROR;
+    return errorResponse(
+      errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+      input.orchestration.lastErrorMessage ?? 'Previous idempotent promotion attempt failed.',
+      mapErrorCodeToStatusCode(input.orchestration.lastErrorCode),
+      errorCode === ERROR_CODES.TIMEOUT || errorCode === ERROR_CODES.SERVICE_UNAVAILABLE,
+      input.orchestration.requestId,
+      {
+        orchestrationId: input.orchestration.orchestrationId,
+        status,
+        replayed: true,
+      },
+    );
+  }
+
+  return jsonResponse(
+    202,
+    {
+      orchestrationId: input.orchestration.orchestrationId,
+      status,
+      replayed: true,
+    },
+    input.orchestration.requestId,
+  );
+}
+
+async function createOrchestrationOrReplay(input: {
+  mappingId: string;
+  fromEnvironment: DeploymentEnvironment;
+  toEnvironment: DeploymentEnvironment;
+  artifactId: string;
+  idempotencyKey?: string | null;
+}): Promise<OrchestrationContext | ReplayResult> {
+  try {
+    return await createOrchestrationContext(input);
+  } catch (error) {
+    if (!input.idempotencyKey || !isConditionalCheckFailed(error)) {
+      throw error;
+    }
+
+    const orchestrationId = buildDeterministicOrchestrationId({
+      mappingId: input.mappingId,
+      fromEnvironment: input.fromEnvironment,
+      toEnvironment: input.toEnvironment,
+      idempotencyKey: input.idempotencyKey,
+    });
+
+    const existing = await getDeploymentOrchestration(orchestrationId);
+    if (!existing) {
+      throw error;
+    }
+
+    const response = await buildReplayResponse({
+      mappingId: input.mappingId,
+      fromEnvironment: input.fromEnvironment,
+      toEnvironment: input.toEnvironment,
+      orchestration: existing,
+    });
+
+    return {
+      replayed: true,
+      response,
+    };
+  }
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const idempotencyKey = parseIdempotencyKey(event);
   const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
     return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: mappingId', 400, false);
@@ -126,6 +311,15 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return errorResponse(
       ERROR_CODES.VALIDATION_ERROR,
       'Invalid promotion request body. Expected { fromEnvironment: DEV|PREPROD|PROD, toEnvironment: DEV|PREPROD|PROD }',
+      400,
+      false,
+    );
+  }
+
+  if (!isSequentialPromotionPath(request.fromEnvironment, request.toEnvironment)) {
+    return errorResponse(
+      ERROR_CODES.VALIDATION_ERROR,
+      'Invalid promotion path. Supported sequential paths are DEV->PREPROD and PREPROD->PROD.',
       400,
       false,
     );
@@ -209,12 +403,17 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       sourceConfigHash: artifactHash,
     };
 
-    const orchestration = await createOrchestrationContext({
+    const orchestration = await createOrchestrationOrReplay({
       mappingId,
       fromEnvironment: request.fromEnvironment,
       toEnvironment: request.toEnvironment,
       artifactId,
+      idempotencyKey,
     });
+
+    if ('replayed' in orchestration) {
+      return orchestration.response;
+    }
 
     const payloadCheck = assertArtifactPayloadWithinLimit(promoteArtifact);
     if (!payloadCheck.ok) {

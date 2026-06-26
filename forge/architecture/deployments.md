@@ -236,6 +236,7 @@ All control-plane deployment routes remain under `/mappings/:mappingId/`.
 | `POST` | `/mappings/:mappingId/rollback` | Control plane | Orchestrate rollback request in selected runtime environment |
 | `GET` | `/mappings/:mappingId/deployments` | Control plane | Return deployment history view |
 | `GET` | `/mappings/:mappingId/deployments/current` | Control plane | Return current pointers for DEV/PREPROD/PROD |
+| `GET` | `/mappings/:mappingId/deploy-context` | Control plane | Return aggregate deployment bootstrap payload (mapping/project metadata + per-environment status) for SANDBOX-first deployment UI |
 
 Runtime-plane internal endpoints (not public product API):
 - Deploy ingestion endpoint (artifact push + validation + activation)
@@ -497,3 +498,24 @@ Runtime execute invariant:
 - Runtime execute continues resolving active local snapshot only.
 - Runtime execute must not fetch project value-table storage (DynamoDB/S3/project APIs).
 - Missing project `resolvedEntries` in snapshot payload is treated as deterministic snapshot integrity failure.
+
+## 21) FS-100 runtime execute compatibility addendum
+
+FS-100 finalizes runtime execute request/response compatibility behavior without implicit shape detection.
+
+Request contract compatibility:
+
+- Canonical request supports `mappingId`, `sourceData`, optional `enrichmentInputs`, optional `executionContext`, and explicit `responseMode` (`legacy | canonical`).
+- Legacy caller compatibility is retained via `externalSources` alias mapping to canonical enrichment inputs.
+- `responseMode` must be explicit when canonical shape is required; unsupported values are rejected with deterministic validation error semantics.
+
+Response contract compatibility:
+
+- `responseMode='canonical'` returns canonical runtime response shape with metadata/provenance fields.
+- Default runtime response remains explicit legacy wrapper including `compatibility.mode='legacy'` + embedded canonical payload.
+- No implicit runtime response-shape auto-detection is allowed.
+
+UI/bootstrap implications:
+
+- Deployment UI bootstrap contract is aggregate `GET /mappings/:mappingId/deploy-context`.
+- Deployment history/current endpoints remain separate runtime/read models; deploy-context is authoritative page bootstrap surface for the canonical four-stage pipeline UX.

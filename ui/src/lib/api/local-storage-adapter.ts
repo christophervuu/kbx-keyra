@@ -1,5 +1,6 @@
 import { getSeededCdmSchemaDetail, listSeededCdmMetadataFixtures } from './cdm-fixtures';
-import type { ApiAdapter } from './types';
+import { importLocalMappingsToBackend } from './local-mapping-import';
+import type { ApiAdapter, MappingImportSummary } from './types';
 import type {
   CurrentDeployment,
   CurrentDeployments,
@@ -33,6 +34,7 @@ import type {
   DeploymentRecord as LegacyDeploymentRecord,
   DeployStatus,
   Environment,
+  RuntimeEnvironment,
   ExplainRuleInput,
   ExplainRuleResult,
   GitHubFile,
@@ -543,7 +545,7 @@ export class LocalStorageAdapter implements ApiAdapter {
   ): { DEV: CurrentDeployment | null; PREPROD: CurrentDeployment | null; PROD: CurrentDeployment | null } {
     const deployments = this.readDeployments(mappingId);
 
-    const latestFor = (environment: Environment): CurrentDeployment | null => {
+    const latestFor = (environment: RuntimeEnvironment): CurrentDeployment | null => {
       const entry = deployments
         .filter((item) => item.environment === environment)
         .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt))[0];
@@ -561,11 +563,11 @@ export class LocalStorageAdapter implements ApiAdapter {
   private async appendDeployment(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: RuntimeEnvironment;
       sourceType: DeploymentSourceType;
       sourceNumber: number;
       deployedBy: string;
-      promotedFrom?: Environment;
+      promotedFrom?: RuntimeEnvironment;
       rollbackOf?: string;
     },
   ): Promise<DeploymentRecord> {
@@ -1377,6 +1379,10 @@ export class LocalStorageAdapter implements ApiAdapter {
     return metadata;
   }
 
+  async importLocalMappings(projectId: string): Promise<MappingImportSummary> {
+    return importLocalMappingsToBackend(this, projectId);
+  }
+
   // Projects
   private normalizeProject(project: Project): Project {
     const schemaRefs = project.schemaRefs ?? [];
@@ -1511,6 +1517,19 @@ export class LocalStorageAdapter implements ApiAdapter {
     throw this.notFound('Template', id);
   }
 
+  private assertRuntimeMutationEnvironment(environment: Environment): asserts environment is RuntimeEnvironment {
+    if (environment === 'DEV' || environment === 'PREPROD' || environment === 'PROD') {
+      return;
+    }
+
+    throw {
+      message: 'Invalid deployment environment. Expected DEV|PREPROD|PROD.',
+      code: 'VALIDATION_ERROR',
+      statusCode: 400,
+      retryable: false,
+    };
+  }
+
   // Deployment
   async getDeploymentContext(mappingId: string): Promise<DeploymentContext> {
     const mappings = this.readArray<StoredMapping>(STORAGE_KEYS.mappings);
@@ -1523,7 +1542,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       (item) => item.mappingId === mappingId,
     );
 
-    const environments = (['DEV', 'QA', 'PROD'] as const).map((env) => {
+    const environments = (['DEV', 'PREPROD', 'PROD'] as const).map((env) => {
       const latest = deployments
         .filter((item) => item.environment === env)
         .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt))[0];
@@ -1642,12 +1661,14 @@ export class LocalStorageAdapter implements ApiAdapter {
   async deployMapping(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: RuntimeEnvironment;
       sourceType: DeploymentSourceType;
       sourceNumber: number;
     },
   ): Promise<DeploymentRecord> {
     await this.getMapping(mappingId);
+
+    this.assertRuntimeMutationEnvironment(input.environment);
 
     if (input.sourceType === 'revision' && input.environment !== 'DEV') {
       throw {
@@ -1675,11 +1696,14 @@ export class LocalStorageAdapter implements ApiAdapter {
   async promoteDeployment(
     mappingId: string,
     input: {
-      fromEnvironment: Environment;
-      toEnvironment: Environment;
+      fromEnvironment: RuntimeEnvironment;
+      toEnvironment: RuntimeEnvironment;
     },
   ): Promise<DeploymentRecord> {
     await this.getMapping(mappingId);
+
+    this.assertRuntimeMutationEnvironment(input.fromEnvironment);
+    this.assertRuntimeMutationEnvironment(input.toEnvironment);
 
     const source = this.readDeployments(mappingId)
       .filter((item) => item.environment === input.fromEnvironment)
@@ -1710,11 +1734,13 @@ export class LocalStorageAdapter implements ApiAdapter {
   async rollbackDeployment(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: RuntimeEnvironment;
       deploymentSK: string;
     },
   ): Promise<DeploymentRecord> {
     await this.getMapping(mappingId);
+
+    this.assertRuntimeMutationEnvironment(input.environment);
 
     const target = this.readDeployments(mappingId).find(
       (item) => item.environment === input.environment && item.environmentDeployedAt === input.deploymentSK,
@@ -1736,13 +1762,15 @@ export class LocalStorageAdapter implements ApiAdapter {
   async listDeployments(
     mappingId: string,
     options?: {
-      environment?: Environment;
+      environment?: RuntimeEnvironment | 'QA';
     },
   ): Promise<DeploymentRecord[]> {
     await this.getMapping(mappingId);
 
+    const normalizedFilterEnvironment = options?.environment === 'QA' ? 'PREPROD' : options?.environment;
+
     const deployments = this.readDeployments(mappingId)
-      .filter((item) => (options?.environment ? item.environment === options.environment : true))
+      .filter((item) => (normalizedFilterEnvironment ? item.environment === normalizedFilterEnvironment : true))
       .sort((a, b) => b.deployedAt.localeCompare(a.deployedAt));
 
     return deployments;

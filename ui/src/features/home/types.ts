@@ -31,8 +31,9 @@ export interface ProjectListItem {
   readonly schemaCount?: number;
   readonly updatedAt: string;
   readonly worstStatus: ProjectWorstStatus;
+  readonly sandboxDeploy: DeployStatus;
   readonly devDeploy: DeployStatus;
-  readonly qaDeploy: DeployStatus;
+  readonly preprodDeploy: DeployStatus;
   readonly prodDeploy: DeployStatus;
 }
 

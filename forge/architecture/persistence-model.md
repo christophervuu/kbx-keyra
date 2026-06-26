@@ -140,7 +140,7 @@ FS-091 retrieval control decisions:
 - Canonical serving mode is `RAG_RETRIEVER=dynamodb`.
 - Environment default caps are:
   - DEV: `lexicalCap=120`, `rerankCap=80`, `topK=12`, `contextExpansionCap=24`
-  - QA: `lexicalCap=150`, `rerankCap=100`, `topK=15`, `contextExpansionCap=30`
+  - PREPROD: `lexicalCap=150`, `rerankCap=100`, `topK=15`, `contextExpansionCap=30`
   - PROD: `lexicalCap=180`, `rerankCap=120`, `topK=18`, `contextExpansionCap=36`
 - Guardrail relationship: `rerankCap <= lexicalCap`, `topK << rerankCap`, bounded context expansion.
 - Tuning scope decision (FS-091 Rev 2): global defaults with environment-level overrides only (no per-project/per-schema tuning presets).
@@ -477,6 +477,22 @@ Determinism and snapshot compatibility:
 
 - Mapping revisions/versions continue to snapshot full config in S3; embedded project `valueTableRef.resolvedEntries` are part of those immutable snapshots.
 - This preserves offline/browser determinism and downstream deployment/runtime no-table-fetch behavior.
+
+## FS-100 deployment/runtime compatibility addendum
+
+FS-100 clarifies persistence compatibility boundaries for canonical deployment/runtime environments and runtime execute determinism.
+
+Canonical environment persistence policy:
+
+- Canonical progression and write-target vocabulary is `SANDBOX -> DEV -> PREPROD -> PROD`.
+- Historical deployment records may retain `QA` at-rest for audit fidelity.
+- Read/domain layers normalize `QA -> PREPROD`; new canonical writes must not introduce `QA`.
+
+Runtime execute persistence invariant:
+
+- Runtime execution must resolve from active snapshot artifacts and embedded mapping payload data only.
+- Runtime execute must not require live project value-table storage reads at execution time.
+- Missing embedded resolved value-table entries in snapshot/mapping payload is treated as deterministic snapshot integrity failure.
 
 ## 6) Draft / Revision / Version Model
 

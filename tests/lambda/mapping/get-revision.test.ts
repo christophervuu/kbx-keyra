@@ -60,4 +60,12 @@ describe('get-revision handler', () => {
     expect(parsed.revision).toBe(2);
     expect(parsed.config.name).toBe('v2');
   });
+
+  it('returns validation error when revision path param is missing', async () => {
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body).error.code).toBe('VALIDATION_ERROR');
+  });
 });

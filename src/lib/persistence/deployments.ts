@@ -26,6 +26,13 @@ export class DeploymentArtifactIntegrityError extends Error {
   }
 }
 
+export class ActiveSnapshotConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ActiveSnapshotConflictError';
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -39,13 +46,9 @@ async function putRuntimeHistoryEvent(item: DeploymentHistoryItem): Promise<void
   );
 }
 
-async function putRuntimeActiveSnapshot(item: ActiveSnapshotItem): Promise<void> {
-  await dynamoClient.send(
-    new PutCommand({
-      TableName: RUNTIME_TABLE_NAMES.activeSnapshots,
-      Item: item,
-    }),
-  );
+function isConditionalCheckFailed(error: unknown): boolean {
+  const typed = error as { name?: string; Code?: string } | null | undefined;
+  return typed?.name === 'ConditionalCheckFailedException' || typed?.Code === 'ConditionalCheckFailedException';
 }
 
 function toDeploymentCurrentItem(item: DeploymentItem): DeploymentCurrentItem {
@@ -257,7 +260,39 @@ export async function upsertActiveSnapshot(input: UpsertActiveSnapshotInput): Pr
     ...(input.schemaBundleRef ? { schemaBundleRef: input.schemaBundleRef } : {}),
   };
 
-  await putRuntimeActiveSnapshot(item);
+  const commandInput: {
+    TableName: string;
+    Item: ActiveSnapshotItem;
+    ConditionExpression?: string;
+    ExpressionAttributeValues?: Record<string, unknown>;
+  } = {
+    TableName: RUNTIME_TABLE_NAMES.activeSnapshots,
+    Item: item,
+  };
+
+  if (Object.hasOwn(input, 'expectedCurrentSnapshotId')) {
+    if (input.expectedCurrentSnapshotId === null) {
+      commandInput.ConditionExpression = 'attribute_not_exists(mappingId)';
+    } else if (typeof input.expectedCurrentSnapshotId === 'string' && input.expectedCurrentSnapshotId.trim() !== '') {
+      commandInput.ConditionExpression = 'activeSnapshotId = :expectedSnapshotId';
+      commandInput.ExpressionAttributeValues = {
+        ':expectedSnapshotId': input.expectedCurrentSnapshotId,
+      };
+    }
+  }
+
+  try {
+    await dynamoClient.send(new PutCommand(commandInput));
+  } catch (error) {
+    if (isConditionalCheckFailed(error)) {
+      throw new ActiveSnapshotConflictError(
+        `Active snapshot conditional update failed for mapping '${input.mappingId}'`,
+      );
+    }
+
+    throw error;
+  }
+
   return item;
 }
 

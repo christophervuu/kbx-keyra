@@ -15,8 +15,13 @@ import {
 
 interface RuntimeExecuteRequest {
   readonly mappingId: string;
-  readonly sourceData: Readonly<Record<string, unknown>>;
-  readonly externalSources: Readonly<Record<string, unknown>>;
+  readonly sourceData: unknown;
+  readonly enrichmentInputs: Readonly<Record<string, unknown>>;
+  readonly executionContext: {
+    readonly correlationId?: string;
+    readonly trace: boolean;
+  };
+  readonly responseMode: 'legacy' | 'canonical';
 }
 
 interface RuntimeSnapshotPayload {
@@ -48,22 +53,72 @@ function parseExecuteRequest(body: Record<string, unknown> | null): RuntimeExecu
   }
 
   const mappingId = body.mappingId;
+  if (!isNonEmptyString(mappingId) || !Object.hasOwn(body, 'sourceData')) {
+    return null;
+  }
+
   const sourceData = body.sourceData;
+  const enrichmentInputsCandidate = body.enrichmentInputs;
   const externalSourcesCandidate = body.externalSources;
+  const executionContextCandidate = body.executionContext;
+  const responseModeCandidate = body.responseMode;
 
-  const externalSources =
-    externalSourcesCandidate && typeof externalSourcesCandidate === 'object' && !Array.isArray(externalSourcesCandidate)
-      ? (externalSourcesCandidate as Readonly<Record<string, unknown>>)
-      : {};
+  if (enrichmentInputsCandidate !== undefined && (!enrichmentInputsCandidate || typeof enrichmentInputsCandidate !== 'object' || Array.isArray(enrichmentInputsCandidate))) {
+    return null;
+  }
 
-  if (!isNonEmptyString(mappingId) || !sourceData || typeof sourceData !== 'object' || Array.isArray(sourceData)) {
+  if (externalSourcesCandidate !== undefined && (!externalSourcesCandidate || typeof externalSourcesCandidate !== 'object' || Array.isArray(externalSourcesCandidate))) {
+    return null;
+  }
+
+  if (executionContextCandidate !== undefined && (!executionContextCandidate || typeof executionContextCandidate !== 'object' || Array.isArray(executionContextCandidate))) {
+    return null;
+  }
+
+  const enrichmentInputs = {
+    ...(
+      externalSourcesCandidate && typeof externalSourcesCandidate === 'object' && !Array.isArray(externalSourcesCandidate)
+        ? (externalSourcesCandidate as Readonly<Record<string, unknown>>)
+        : {}
+    ),
+    ...(
+      enrichmentInputsCandidate && typeof enrichmentInputsCandidate === 'object' && !Array.isArray(enrichmentInputsCandidate)
+        ? (enrichmentInputsCandidate as Readonly<Record<string, unknown>>)
+        : {}
+    ),
+  };
+
+  const executionContextRecord = executionContextCandidate as Record<string, unknown> | undefined;
+  const correlationIdRaw = executionContextRecord?.correlationId;
+  const traceRaw = executionContextRecord?.trace;
+
+  if (correlationIdRaw !== undefined && !isNonEmptyString(correlationIdRaw)) {
+    return null;
+  }
+
+  if (traceRaw !== undefined && typeof traceRaw !== 'boolean') {
+    return null;
+  }
+
+  if (responseModeCandidate !== undefined && responseModeCandidate !== 'legacy' && responseModeCandidate !== 'canonical') {
     return null;
   }
 
   return {
     mappingId,
-    sourceData: sourceData as Readonly<Record<string, unknown>>,
-    externalSources,
+    sourceData,
+    enrichmentInputs,
+    executionContext: {
+      ...(isNonEmptyString(correlationIdRaw) ? { correlationId: correlationIdRaw.trim() } : {}),
+      trace: traceRaw === true,
+    },
+    responseMode: responseModeCandidate === 'canonical' ? 'canonical' : 'legacy',
+  };
+}
+
+function runtimeTaxonomyDetails(code: string): { runtimeErrorCode: string } {
+  return {
+    runtimeErrorCode: code,
   };
 }
 
@@ -212,6 +267,42 @@ function logExecute(fields: {
   );
 }
 
+function serializeError(error: unknown): { name: string; message: string; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(typeof error.stack === 'string' ? { stack: error.stack } : {}),
+    };
+  }
+
+  return {
+    name: 'UnknownError',
+    message: typeof error === 'string' ? error : 'Unknown error',
+  };
+}
+
+function logExecuteError(fields: {
+  requestId: string;
+  mappingId: string;
+  snapshotId?: string;
+  phase: string;
+  error: unknown;
+  durationMs: number;
+}): void {
+  console.error(
+    JSON.stringify({
+      eventType: 'execute-error',
+      requestId: fields.requestId,
+      mappingId: fields.mappingId,
+      ...(fields.snapshotId ? { snapshotId: fields.snapshotId } : {}),
+      phase: fields.phase,
+      durationMs: fields.durationMs,
+      ...serializeError(fields.error),
+    }),
+  );
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const startedAt = Date.now();
   const requestId = generateRequestId();
@@ -227,7 +318,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     return errorResponse(
       ERROR_CODES.VALIDATION_ERROR,
-      'Invalid runtime execute request body. Expected { mappingId, sourceData }',
+      'Invalid runtime execute request body. Expected { mappingId, sourceData, enrichmentInputs?, executionContext?, responseMode? }',
       400,
       false,
       requestId,
@@ -250,6 +341,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         404,
         false,
         requestId,
+        runtimeTaxonomyDetails('MappingNotDeployed'),
       );
     }
 
@@ -275,6 +367,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         500,
         false,
         requestId,
+        runtimeTaxonomyDetails('SnapshotInvalid'),
       );
     }
 
@@ -285,12 +378,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         500,
         false,
         requestId,
+        runtimeTaxonomyDetails('ArtifactCorrupt'),
       );
     }
 
     const missingRequiredAliases = findMissingRequiredEnrichments(
       config as RuntimeMappingConfig,
-      request.externalSources,
+      request.enrichmentInputs,
     );
 
     if (missingRequiredAliases.length > 0) {
@@ -302,11 +396,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         400,
         false,
         requestId,
+        runtimeTaxonomyDetails('MissingEnrichmentInput'),
       );
     }
 
     const result = execute(config, request.sourceData, null, null, {
-      externalSources: request.externalSources,
+      trace: request.executionContext.trace,
+      externalSources: request.enrichmentInputs,
     });
 
     logExecute({
@@ -317,22 +413,55 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       durationMs: Date.now() - startedAt,
     });
 
+    const canonicalResponse = {
+      outputFormat: 'json' as const,
+      output: (result.output ?? {}) as Readonly<Record<string, unknown>>,
+      diagnostics: result.diagnostics,
+      metadata: {
+        mappingId: request.mappingId,
+        snapshotId: active.activeSnapshotId,
+        snapshotHash: active.snapshotHash,
+        sourceType: active.sourceType,
+        sourceNumber: active.sourceNumber,
+        engineVersion: (config as { engineVersion?: unknown }).engineVersion ?? null,
+        executedAt: new Date().toISOString(),
+        correlationId: request.executionContext.correlationId ?? null,
+        traceEnabled: request.executionContext.trace,
+        stats: result.stats,
+      },
+    };
+
+    if (request.responseMode === 'canonical') {
+      return jsonResponse(200, canonicalResponse, requestId);
+    }
+
     return jsonResponse(
       200,
       {
         mappingId: request.mappingId,
         snapshotId: active.activeSnapshotId,
-        output: (result.output ?? {}) as Readonly<Record<string, unknown>>,
-        diagnostics: result.diagnostics,
-        stats: result.stats,
+        output: canonicalResponse.output,
+        diagnostics: canonicalResponse.diagnostics,
+        stats: canonicalResponse.metadata.stats,
+        compatibility: {
+          mode: 'legacy',
+          canonical: canonicalResponse,
+        },
       },
       requestId,
     );
-  } catch {
+  } catch (error) {
     logExecute({
       requestId,
       mappingId: request.mappingId,
       outcome: 'error',
+      durationMs: Date.now() - startedAt,
+    });
+    logExecuteError({
+      requestId,
+      mappingId: request.mappingId,
+      phase: 'execute-runtime-snapshot',
+      error,
       durationMs: Date.now() - startedAt,
     });
 

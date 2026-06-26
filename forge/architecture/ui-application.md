@@ -584,6 +584,35 @@ Adapter/UI data-layer compatibility boundary:
 - Compatibility `config.externalSources` remains supported for legacy continuity and engine reference checks.
 - If both are present, UI and adapters treat `enrichmentSources` as canonical and `config.externalSources` as derived/compatibility data.
 
+### FS-100 deployment/runtime UI contract addendum
+
+FS-100 finalizes deployment-surface and runtime-contract compatibility behavior for UI consumers.
+
+Deployment page bootstrap + layout contract:
+
+- Canonical deployment page bootstrap is `GET /mappings/:mappingId/deploy-context`.
+- Deployment page is SANDBOX-first and renders canonical four-stage pipeline ordering:
+  - `SANDBOX -> DEV -> PREPROD -> PROD`
+- Deploy/promote/rollback actions remain explicit user-confirmed mutations; no implicit deployment side effects from page load.
+
+Deployment error rendering contract:
+
+- Deployment-facing failures render BA-friendly summary text.
+- Technical details (including request lineage/id and normalized backend details payload) are available via explicit expansion.
+- UI error rendering must remain compatible with canonical backend envelope shape and additive `details` payload fields.
+
+Environment compatibility boundary in UI surfaces:
+
+- Canonical user-facing deployment labels use `PREPROD` (not `QA`).
+- Historical `QA` records are normalized to `PREPROD` in derived status/history display surfaces.
+- New UI mutation requests must not emit `QA` as target environment.
+
+Runtime execute compatibility boundary for UI integrations:
+
+- Runtime execute callers that need canonical response shape must send explicit `responseMode` and handle validation errors for unsupported modes.
+- Legacy compatibility (`externalSources`) remains supported through adapter/request normalization paths.
+- UI must not rely on implicit runtime response-shape detection.
+
 ### FS-096 project value-table UI contract addendum
 
 FS-096 adds reusable project-level value tables while preserving deterministic/offline execution and explicit adoption semantics.
@@ -2786,7 +2815,7 @@ FS-086 supersedes the FS-085 right-rail default for `/projects/:projectId` and d
 
 `MappingRow` uses a single compact deployment column and normalized wording:
 
-- display precedence: any `deploying` -> `Deploying`; any `stale` -> `Changed since deploy`; else highest deployed env (`PROD` > `QA` > `DEV`); otherwise `Not deployed`
+- display precedence: any `deploying` -> `Deploying`; any `stale` -> `Changed since deploy`; else highest deployed env (`PROD` > `PREPROD` > `DEV` > `SANDBOX`); otherwise `Not deployed`
 - raw `stale` wording is not shown in primary UI copy
 
 Row actions are status-based and navigation-only:

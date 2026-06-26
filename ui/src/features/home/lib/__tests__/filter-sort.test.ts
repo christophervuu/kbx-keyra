@@ -15,8 +15,9 @@ function makeProject(overrides: Partial<ProjectListItem> = {}): ProjectListItem 
     mappingCount: 2,
     updatedAt: '2026-04-01T00:00:00Z',
     worstStatus: 'ready',
+    sandboxDeploy: 'not-deployed',
     devDeploy: 'not-deployed',
-    qaDeploy: 'not-deployed',
+    preprodDeploy: 'not-deployed',
     prodDeploy: 'not-deployed',
     ...overrides,
   };

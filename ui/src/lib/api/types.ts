@@ -13,6 +13,7 @@ import type {
   DeploymentDiff,
   DeploymentRecord as LegacyDeploymentRecord,
   Environment,
+  RuntimeEnvironment,
   ExplainRuleInput,
   ExplainRuleResult,
   CdmBulkSyncResult,
@@ -113,6 +114,32 @@ export interface CurrentDeployments {
   readonly QA: EnvironmentDeploymentSummary;
 }
 
+export type DeploymentMutationEnvironment = RuntimeEnvironment;
+
+export type DeploymentReadEnvironment = RuntimeEnvironment | 'QA';
+
+export type MappingImportIssueCode =
+  | 'PROJECT_MISMATCH'
+  | 'INVALID_RECORD'
+  | 'INVALID_RULE'
+  | 'ALREADY_IMPORTED'
+  | 'IMPORT_FAILED';
+
+export interface MappingImportIssue {
+  readonly localMappingId?: string;
+  readonly remoteMappingId?: string;
+  readonly mappingName?: string;
+  readonly code: MappingImportIssueCode;
+  readonly message: string;
+}
+
+export interface MappingImportSummary {
+  readonly imported: number;
+  readonly skipped: number;
+  readonly failed: number;
+  readonly issues: readonly MappingImportIssue[];
+}
+
 export interface ApiAdapter {
   // Schemas
   listSchemas(): Promise<SchemaMetadata[]>;
@@ -133,6 +160,7 @@ export interface ApiAdapter {
   saveMapping(id: string, config: MappingConfig): Promise<MappingSaveResult>;
   deleteMapping(id: string): Promise<void>;
   duplicateMapping(id: string, newName: string): Promise<MappingMetadata>;
+  importLocalMappings?(projectId: string): Promise<MappingImportSummary>;
 
   // Version History
   listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]>;
@@ -175,7 +203,7 @@ export interface ApiAdapter {
   deployMapping(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: DeploymentMutationEnvironment;
       sourceType: DeploymentSourceType;
       sourceNumber: number;
     },
@@ -183,21 +211,21 @@ export interface ApiAdapter {
   promoteDeployment(
     mappingId: string,
     input: {
-      fromEnvironment: Environment;
-      toEnvironment: Environment;
+      fromEnvironment: DeploymentMutationEnvironment;
+      toEnvironment: DeploymentMutationEnvironment;
     },
   ): Promise<DeploymentRecord>;
   rollbackDeployment(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: DeploymentMutationEnvironment;
       deploymentSK: string;
     },
   ): Promise<DeploymentRecord>;
   listDeployments(
     mappingId: string,
     options?: {
-      environment?: Environment;
+      environment?: DeploymentReadEnvironment;
     },
   ): Promise<DeploymentRecord[]>;
   getCurrentDeployments(mappingId: string): Promise<CurrentDeployments>;

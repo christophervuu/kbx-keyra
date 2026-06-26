@@ -379,3 +379,39 @@ No destructive migration is required in MVP for old `QA` deployment records.
 - persistence may retain historical `QA` values
 - domain/view layer handles `QA -> PREPROD` normalization
 - infrastructure must not enforce backfill requirements as a deployment prerequisite
+
+---
+
+## 15) FS-100 deployment/runtime infrastructure alignment addendum
+
+FS-100 finalizes infrastructure-facing contracts for the deployment/runtime vertical slice.
+
+### 15.1 Canonical environment model
+
+- Canonical environment progression is `SANDBOX -> DEV -> PREPROD -> PROD`.
+- `SANDBOX` remains control-plane context; runtime environments remain `DEV|PREPROD|PROD`.
+- Legacy `QA` values are compatibility-only historical data and must not be reintroduced as new runtime target writes.
+
+### 15.2 Deployment bootstrap route wiring posture
+
+Infrastructure route wiring must include deployment-page aggregate bootstrap support:
+
+- `GET /mappings/:mappingId/deploy-context`
+
+This route is canonical for SANDBOX-first deployment UI bootstrap and must be treated as first-class alongside deploy/promote/rollback/history/current deployment routes.
+
+### 15.3 Runtime invocation path posture
+
+For server-side preview/runtime execution in control plane:
+
+- Canonical invocation path is direct Lambda invoke to environment runtime execute function (environment-to-function ARN mapping).
+- API Gateway runtime HTTP surface remains optional and non-authoritative for AWS-internal invocation.
+- Least-privilege invoke-role boundaries must scope control-plane preview invocation to approved runtime execute targets only.
+
+### 15.4 Error/CORS normalization infrastructure guidance
+
+Gateway and integration configuration must preserve normalized response behavior for deployment-facing APIs:
+
+- CORS headers present on successful and error responses.
+- Error envelopes and request lineage headers (`x-request-id`) preserved through integration paths.
+- Infrastructure defaults must avoid response-template drift that drops canonical error metadata in 4xx/5xx paths.

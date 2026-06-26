@@ -6,7 +6,18 @@ export type ISODateString = string;
 
 export type RuntimeEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 
-export type Environment = RuntimeEnvironment | 'QA' | 'SANDBOX';
+/**
+ * Canonical environment model for new contracts and mutations.
+ */
+export type CanonicalEnvironment = 'SANDBOX' | RuntimeEnvironment;
+
+/**
+ * Legacy compatibility alias for persisted historical deployment records.
+ * New mutation contracts must reject QA and use PREPROD.
+ */
+export type LegacyEnvironmentAlias = 'QA';
+
+export type Environment = CanonicalEnvironment | LegacyEnvironmentAlias;
 
 export type DeployStatus = 'deployed' | 'stale' | 'not-deployed' | 'deploying';
 

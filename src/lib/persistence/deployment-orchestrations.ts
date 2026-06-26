@@ -18,9 +18,10 @@ function createOrchestrationId(): string {
 
 export async function create(input: CreateDeploymentOrchestrationInput): Promise<DeploymentOrchestrationItem> {
   const requestedAt = nowIso();
+  const orchestrationId = input.orchestrationId ?? createOrchestrationId();
 
   const item: DeploymentOrchestrationItem = {
-    orchestrationId: createOrchestrationId(),
+    orchestrationId,
     mappingId: input.mappingId,
     operationType: input.operationType,
     targetEnvironment: input.targetEnvironment,
@@ -37,6 +38,11 @@ export async function create(input: CreateDeploymentOrchestrationInput): Promise
     new PutCommand({
       TableName: TABLE_NAMES.deploymentOrchestrations,
       Item: item,
+      ...(input.orchestrationId
+        ? {
+            ConditionExpression: 'attribute_not_exists(orchestrationId)',
+          }
+        : {}),
     }),
   );
 

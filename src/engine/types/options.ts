@@ -12,8 +12,9 @@ export type UnmappedTargetStrategy = 'null' | 'omit' | 'error';
 export type TraceVerbosity = 'functions' | 'all';
 
 export enum Environment {
+  SANDBOX = 'SANDBOX',
   DEV = 'DEV',
-  QA = 'QA',
+  PREPROD = 'PREPROD',
   PROD = 'PROD',
 }
 

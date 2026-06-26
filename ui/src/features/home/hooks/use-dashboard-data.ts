@@ -38,7 +38,7 @@ export function deriveWorstStatus(mappings: MappingMetadata[]): ProjectWorstStat
  */
 function worstEnvDeployStatus(
   deploymentsList: Array<CurrentDeployments | null>,
-  env: 'DEV' | 'QA' | 'PROD',
+  env: 'DEV' | 'PREPROD' | 'PROD',
 ): 'deployed' | 'stale' | 'not-deployed' {
   let hasCurrent = false;
   for (const dep of deploymentsList) {
@@ -63,8 +63,9 @@ function buildProjectListItem(
     schemaCount,
     updatedAt: project.updatedAt,
     worstStatus: deriveWorstStatus(mappings),
+    sandboxDeploy: worstEnvDeployStatus(deploymentsList, 'DEV'),
     devDeploy: worstEnvDeployStatus(deploymentsList, 'DEV'),
-    qaDeploy: worstEnvDeployStatus(deploymentsList, 'QA'),
+    preprodDeploy: worstEnvDeployStatus(deploymentsList, 'PREPROD'),
     prodDeploy: worstEnvDeployStatus(deploymentsList, 'PROD'),
   };
 }

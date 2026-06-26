@@ -116,7 +116,8 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getDeploymentDiff: vi.fn(),
     getCurrentDeployments: vi.fn().mockResolvedValue({
       DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
-      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
+      QA: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
       PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
     }),
     listCdmSchemas: vi.fn(),
@@ -157,6 +158,12 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     suggestExpression: vi.fn(),
     smartFix: vi.fn(),
     previewMapping: vi.fn(),
+    importLocalMappings: vi.fn().mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      failed: 0,
+      issues: [],
+    }),
     ...overrides,
   } as unknown as ApiAdapter;
 }
@@ -712,6 +719,7 @@ describe('ProjectOverviewPage — layout checks', () => {
     expect(within(menu).getByText('Project Settings')).toBeInTheDocument();
     expect(within(menu).getByText('Duplicate Project')).toBeInTheDocument();
     expect(within(menu).getByText('Export Project')).toBeInTheDocument();
+    expect(within(menu).getByText('Import mappings')).toBeInTheDocument();
     expect(within(menu).getByText('Delete Project')).toBeInTheDocument();
   });
 
@@ -743,6 +751,40 @@ describe('ProjectOverviewPage — layout checks', () => {
     // Click outside
     await user.click(document.body);
     expect(screen.queryByTestId('project-overflow-menu')).not.toBeInTheDocument();
+  });
+
+  it('imports local mappings via explicit overflow action and shows summary', async () => {
+    const user = userEvent.setup();
+    const importLocalMappings = vi.fn().mockResolvedValue({
+      imported: 2,
+      skipped: 1,
+      failed: 1,
+      issues: [
+        {
+          code: 'INVALID_RULE',
+          localMappingId: 'broken-1',
+          mappingName: 'Broken Mapping',
+          message: 'Local mapping contains invalid rule shape (requires target/type/expression).',
+        },
+      ],
+    });
+
+    const adapter = createMockAdapter({ importLocalMappings });
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-overflow-menu-trigger')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('project-overflow-menu-trigger'));
+    await user.click(screen.getByRole('menuitem', { name: 'Import mappings' }));
+
+    await waitFor(() => {
+      expect(importLocalMappings).toHaveBeenCalledWith('proj-1');
+    });
+
+    expect(screen.getByTestId('mapping-import-summary')).toHaveTextContent('Imported 2, skipped 1, failed 1');
+    expect(screen.getByText(/\[INVALID_RULE\] Broken Mapping:/)).toBeInTheDocument();
   });
 
   it('AE-06: mappings section is rendered and schema management section is absent by default', async () => {

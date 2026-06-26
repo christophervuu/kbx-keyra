@@ -79,6 +79,7 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     promote: vi.fn(),
     rollback: vi.fn(),
     getDeploymentDiff: vi.fn(),
+    getCurrentDeployments: vi.fn().mockResolvedValue(null),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),
     syncCdmSchema: vi.fn(),
@@ -260,7 +261,7 @@ describe('useDashboardData', () => {
     expect(result.current.projects[0].mappingCount).toBe(0);
   });
 
-  it('sets all deploy badges to not-deployed', async () => {
+  it('sets SANDBOX/DEV/PREPROD/PROD deploy badges to not-deployed', async () => {
     const project = makeProjectMeta();
 
     const adapter = createMockAdapter({
@@ -276,8 +277,9 @@ describe('useDashboardData', () => {
     await waitFor(() => expect(result.current.loadState).toBe('loaded'));
 
     const p = result.current.projects[0];
+    expect(p.sandboxDeploy).toBe('not-deployed');
     expect(p.devDeploy).toBe('not-deployed');
-    expect(p.qaDeploy).toBe('not-deployed');
+    expect(p.preprodDeploy).toBe('not-deployed');
     expect(p.prodDeploy).toBe('not-deployed');
   });
 

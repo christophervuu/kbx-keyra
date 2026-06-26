@@ -7,6 +7,7 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues:
+      - sandbox
       - dev
       - preprod
       - prod
@@ -106,10 +107,29 @@ Parameters:
     Default: ''
     Description: Optional Step Functions ARN for auto-map large workload handoff.
 
+  RuntimeAccountIdDev:
+    Type: String
+    Default: ''
+    Description: Optional runtime account id override for DEV runtime execute invoke target.
+
+  RuntimeAccountIdPreprod:
+    Type: String
+    Default: ''
+    Description: Optional runtime account id override for PREPROD runtime execute invoke target.
+
+  RuntimeAccountIdProd:
+    Type: String
+    Default: ''
+    Description: Optional runtime account id override for PROD runtime execute invoke target.
+
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
+  IsSandboxRuntime: !Equals [!Ref EnvironmentName, sandbox]
   HasArtifactsBucketName: !Not [!Equals [!Ref ArtifactsBucketName, '']]
   HasGitHubTokenSecretArn: !Not [!Equals [!Ref GitHubTokenSecretArn, '']]
+  HasRuntimeAccountIdDev: !Not [!Equals [!Ref RuntimeAccountIdDev, '']]
+  HasRuntimeAccountIdPreprod: !Not [!Equals [!Ref RuntimeAccountIdPreprod, '']]
+  HasRuntimeAccountIdProd: !Not [!Equals [!Ref RuntimeAccountIdProd, '']]
 
 Globals:
   Function:
@@ -1165,6 +1185,58 @@ Resources:
             Path: /mappings/{mappingId}/versions
             Method: post
 
+  ListRevisionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listrevisions
+      CodeUri: .
+      Handler: src/lambda/mapping/list-revisions.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingRevisionsTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/revisions
+            Method: get
+
+  GetRevisionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getrevision
+      CodeUri: .
+      Handler: src/lambda/mapping/get-revision.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/revisions/{revision}
+            Method: get
+
   PreviewMappingFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -1180,15 +1252,21 @@ Resources:
       CodeUri: .
       Handler: src/lambda/mapping/preview-mapping.handler
       MemorySize: 512
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref MappingsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref DeploymentCurrentTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref DeploymentOrchestrationsTable
-        - S3ReadPolicy:
-            BucketName: !Ref StorageBucket
+      Role: !GetAtt KeyRaRuntimeInvokeRole.Arn
+      Environment:
+        Variables:
+          RUNTIME_EXECUTE_FUNCTION_ARN_DEV: !If
+            - HasRuntimeAccountIdDev
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdDev}:function:dev-${ServiceName}-execute'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:dev-${ServiceName}-execute'
+          RUNTIME_EXECUTE_FUNCTION_ARN_PREPROD: !If
+            - HasRuntimeAccountIdPreprod
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdPreprod}:function:preprod-${ServiceName}-execute'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:preprod-${ServiceName}-execute'
+          RUNTIME_EXECUTE_FUNCTION_ARN_PROD: !If
+            - HasRuntimeAccountIdProd
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdProd}:function:prod-${ServiceName}-execute'
+            - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:prod-${ServiceName}-execute'
       Events:
         ApiEvent:
           Type: Api
@@ -1218,6 +1296,8 @@ Resources:
             TableName: !Ref MappingRevisionsTable
         - DynamoDBReadPolicy:
             TableName: !Ref MappingVersionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentsTable
         - DynamoDBCrudPolicy:
@@ -1255,6 +1335,8 @@ Resources:
             TableName: !Ref MappingRevisionsTable
         - DynamoDBReadPolicy:
             TableName: !Ref MappingVersionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SchemaMetadataTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DeploymentsTable
         - DynamoDBCrudPolicy:
@@ -1360,6 +1442,35 @@ Resources:
           Properties:
             RestApiId: !Ref KeyraApi
             Path: /mappings/{mappingId}/deployments/current
+            Method: get
+
+  GetDeploymentContextFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getdeploymentcontext
+      CodeUri: .
+      Handler: src/lambda/deployment/get-deployment-context.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProjectsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref DeploymentCurrentTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/deploy-context
             Method: get
 
   ExplainRuleFunction:
@@ -2136,6 +2247,134 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
+  KeyRaDeploymentWriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-${ServiceName}-deployment-writer'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: RuntimeDeploymentWriterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RuntimeActiveSnapshotsWrite
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt RuntimeActiveSnapshotsTable.Arn
+              - Sid: RuntimeDeploymentHistoryWrite
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource: !GetAtt RuntimeDeploymentHistoryTable.Arn
+              - Sid: RuntimeArtifactsObjectWrite
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${RuntimeArtifactsBucket.Arn}/*'
+              - Sid: RuntimeArtifactsBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt RuntimeArtifactsBucket.Arn
+
+  KeyRaRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-${ServiceName}-runtime'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: RuntimeReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RuntimeActiveSnapshotsRead
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !GetAtt RuntimeActiveSnapshotsTable.Arn
+              - Sid: RuntimeDeploymentHistoryRead
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !GetAtt RuntimeDeploymentHistoryTable.Arn
+              - Sid: RuntimeArtifactsObjectRead
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${RuntimeArtifactsBucket.Arn}/*'
+
+  KeyRaRuntimeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-${ServiceName}-runtime-invoke'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: RuntimeExecuteInvokeOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InvokeRuntimeExecute
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt RuntimeExecuteFunction.Arn
+                  - !If
+                    - HasRuntimeAccountIdDev
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdDev}:function:dev-${ServiceName}-execute'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:dev-${ServiceName}-execute'
+                  - !If
+                    - HasRuntimeAccountIdPreprod
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdPreprod}:function:preprod-${ServiceName}-execute'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:preprod-${ServiceName}-execute'
+                  - !If
+                    - HasRuntimeAccountIdProd
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${RuntimeAccountIdProd}:function:prod-${ServiceName}-execute'
+                    - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:prod-${ServiceName}-execute'
+
   RuntimeDeployHandlerFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -2150,6 +2389,7 @@ Resources:
       FunctionName: !Sub '${EnvironmentName}-${ServiceName}-deploy'
       CodeUri: .
       Handler: src/lambda/deployment/runtime-deploy.handler
+      Role: !GetAtt KeyRaDeploymentWriterRole.Arn
       Environment:
         Variables:
           ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
@@ -2159,13 +2399,6 @@ Resources:
           SCHEMAS_PREFIX: !Ref SchemasPrefix
           ENVIRONMENT_NAME: !Ref EnvironmentName
           LOG_LEVEL: INFO
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RuntimeActiveSnapshotsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RuntimeDeploymentHistoryTable
-        - S3CrudPolicy:
-            BucketName: !Ref RuntimeArtifactsBucket
       Events:
         InternalDeploy:
           Type: HttpApi
@@ -2189,6 +2422,7 @@ Resources:
       CodeUri: .
       Handler: src/lambda/runtime/execute.handler
       MemorySize: 512
+      Role: !GetAtt KeyRaRuntimeRole.Arn
       Environment:
         Variables:
           ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
@@ -2198,13 +2432,6 @@ Resources:
           SCHEMAS_PREFIX: !Ref SchemasPrefix
           ENVIRONMENT_NAME: !Ref EnvironmentName
           LOG_LEVEL: INFO
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref RuntimeActiveSnapshotsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref RuntimeDeploymentHistoryTable
-        - S3ReadPolicy:
-            BucketName: !Ref RuntimeArtifactsBucket
       Events:
         InternalExecute:
           Type: HttpApi
@@ -2227,6 +2454,7 @@ Resources:
       FunctionName: !Sub '${EnvironmentName}-${ServiceName}-status'
       CodeUri: .
       Handler: src/lambda/runtime/status.handler
+      Role: !GetAtt KeyRaRuntimeRole.Arn
       Environment:
         Variables:
           ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
@@ -2236,13 +2464,6 @@ Resources:
           SCHEMAS_PREFIX: !Ref SchemasPrefix
           ENVIRONMENT_NAME: !Ref EnvironmentName
           LOG_LEVEL: INFO
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref RuntimeActiveSnapshotsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref RuntimeDeploymentHistoryTable
-        - S3ReadPolicy:
-            BucketName: !Ref RuntimeArtifactsBucket
       Events:
         InternalHealth:
           Type: HttpApi
@@ -2271,6 +2492,7 @@ Resources:
       FunctionName: !Sub '${EnvironmentName}-${ServiceName}-rollback'
       CodeUri: .
       Handler: src/lambda/deployment/runtime-rollback.handler
+      Role: !GetAtt KeyRaDeploymentWriterRole.Arn
       Environment:
         Variables:
           ACTIVE_SNAPSHOTS_TABLE: !Ref RuntimeActiveSnapshotsTable
@@ -2280,13 +2502,6 @@ Resources:
           SCHEMAS_PREFIX: !Ref SchemasPrefix
           ENVIRONMENT_NAME: !Ref EnvironmentName
           LOG_LEVEL: INFO
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref RuntimeDeploymentHistoryTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RuntimeActiveSnapshotsTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RuntimeDeploymentHistoryTable
       Events:
         InternalRollback:
           Type: HttpApi
@@ -2405,3 +2620,15 @@ Outputs:
   StatusFunctionArn:
     Description: Runtime status/health function ARN.
     Value: !GetAtt RuntimeStatusFunction.Arn
+
+  KeyRaDeploymentWriterRoleArn:
+    Description: Runtime deployment-writer role ARN.
+    Value: !GetAtt KeyRaDeploymentWriterRole.Arn
+
+  KeyRaRuntimeRoleArn:
+    Description: Runtime read/execute role ARN.
+    Value: !GetAtt KeyRaRuntimeRole.Arn
+
+  KeyRaRuntimeInvokeRoleArn:
+    Description: Runtime invoke-only role ARN for Step Functions/preview callers.
+    Value: !GetAtt KeyRaRuntimeInvokeRole.Arn

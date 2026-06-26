@@ -1,4 +1,4 @@
-export type RuntimeEnvironmentKey = 'DEV' | 'PREPROD' | 'PROD';
+export type RuntimeEnvironmentKey = 'SANDBOX' | 'DEV' | 'PREPROD' | 'PROD';
 
 export interface RuntimeEnvironmentRetryPolicy {
   readonly maxAttempts: number;
@@ -39,7 +39,8 @@ export class DeploymentEnvironmentConfigError extends Error {
   }
 }
 
-const ENV_KEYS: readonly RuntimeEnvironmentKey[] = ['DEV', 'PREPROD', 'PROD'];
+const ENV_KEYS: readonly RuntimeEnvironmentKey[] = ['SANDBOX', 'DEV', 'PREPROD', 'PROD'];
+const DEFAULT_PROMOTION_SEQUENCE: readonly RuntimeEnvironmentKey[] = ['SANDBOX', 'DEV', 'PREPROD', 'PROD'];
 
 const DEFAULT_RETRY_POLICY: RuntimeEnvironmentRetryPolicy = {
   maxAttempts: 3,
@@ -112,11 +113,11 @@ function normalizePath(value: string | undefined, fallback: string, fieldName: s
 }
 
 function validateEnvironmentKey(value: unknown, fieldName: string): RuntimeEnvironmentKey {
-  if (value === 'DEV' || value === 'PREPROD' || value === 'PROD') {
+  if (value === 'SANDBOX' || value === 'DEV' || value === 'PREPROD' || value === 'PROD') {
     return value;
   }
 
-  throw new DeploymentEnvironmentConfigError(`${fieldName} must be one of DEV|PREPROD|PROD.`);
+  throw new DeploymentEnvironmentConfigError(`${fieldName} must be one of SANDBOX|DEV|PREPROD|PROD.`);
 }
 
 function normalizeRuntimeEnvironmentConfig(
@@ -156,12 +157,9 @@ function normalizeRuntimeEnvironmentConfig(
   };
 }
 
-function ensureAllRuntimeEnvironmentsPresent(settings: DeploymentEnvironmentSettings): void {
-  for (const key of ENV_KEYS) {
-    const exists = settings.deploymentEnvironments.some((item) => item.key === key);
-    if (!exists) {
-      throw new DeploymentEnvironmentConfigError(`Missing runtime environment configuration for '${key}'.`);
-    }
+function ensureAtLeastOneRuntimeEnvironmentConfigured(settings: DeploymentEnvironmentSettings): void {
+  if (settings.deploymentEnvironments.length === 0) {
+    throw new DeploymentEnvironmentConfigError('At least one runtime environment configuration must be provided.');
   }
 }
 
@@ -189,14 +187,14 @@ function normalizeSettings(input: {
   const settings: DeploymentEnvironmentSettings = {
     deploymentEnvironments: input.deploymentEnvironments.map((env) => normalizeRuntimeEnvironmentConfig(env)),
     promotionPolicy: {
-      sequence: input.promotionPolicy?.sequence ?? ENV_KEYS,
+      sequence: input.promotionPolicy?.sequence ?? DEFAULT_PROMOTION_SEQUENCE,
       allowSkip: input.promotionPolicy?.allowSkip ?? false,
     },
     source: input.source,
   };
 
   ensureNoDuplicateEnvironmentKeys(settings);
-  ensureAllRuntimeEnvironmentsPresent(settings);
+  ensureAtLeastOneRuntimeEnvironmentConfigured(settings);
 
   return settings;
 }
@@ -237,8 +235,8 @@ export function parseDeploymentEnvironmentSettingsFromEnv(
     return parseDeploymentEnvironmentSettingsJson(settingsJson);
   }
 
-  const hasAnyBaseUrl = ENV_KEYS.some((key) => Boolean(readEnv(env, `RUNTIME_API_BASE_URL_${key}`)));
-  if (!hasAnyBaseUrl) {
+  const configuredKeys = ENV_KEYS.filter((key) => Boolean(readEnv(env, `RUNTIME_API_BASE_URL_${key}`)));
+  if (configuredKeys.length === 0) {
     return null;
   }
 
@@ -258,14 +256,13 @@ export function parseDeploymentEnvironmentSettingsFromEnv(
     DEFAULT_RETRY_POLICY.maxDelayMs,
   );
 
-  const deploymentEnvironments = ENV_KEYS.map((key): Omit<RuntimeEnvironmentConfig, 'retryPolicy'> & {
+  const deploymentEnvironments = configuredKeys.map((key): Omit<RuntimeEnvironmentConfig, 'retryPolicy'> & {
     retryPolicy?: Partial<RuntimeEnvironmentRetryPolicy>;
   } => {
     const runtimeApiBaseUrl = readEnv(env, `RUNTIME_API_BASE_URL_${key}`);
     if (!runtimeApiBaseUrl) {
       throw new DeploymentEnvironmentConfigError(
-        `Missing required environment variable: RUNTIME_API_BASE_URL_${key}. ` +
-          'Provide all runtime environment base URLs when using env fallback config.',
+        `Missing required environment variable: RUNTIME_API_BASE_URL_${key}.`,
       );
     }
 
@@ -296,7 +293,7 @@ export function parseDeploymentEnvironmentSettingsFromEnv(
   return normalizeSettings({
     deploymentEnvironments,
     promotionPolicy: {
-      sequence: ENV_KEYS,
+      sequence: DEFAULT_PROMOTION_SEQUENCE,
       allowSkip: false,
     },
     source: 'env-fallback',

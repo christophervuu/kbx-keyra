@@ -54,6 +54,8 @@ async function importStatusHandler() {
 describe('runtime execute/status handlers', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     sharedMocks.parseBody.mockReset().mockReturnValue({ mappingId: 'map-1', sourceData: { amount: 12 } });
     sharedMocks.parsePathParam.mockReset().mockImplementation((event, name: string) => event.pathParameters?.[name] ?? null);
@@ -70,7 +72,7 @@ describe('runtime execute/status handlers', () => {
       }),
     );
     sharedMocks.jsonResponse.mockReset().mockImplementation((statusCode, body) => ({ statusCode, body: JSON.stringify(body) }));
-    sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable, requestId) => ({
+    sharedMocks.errorResponse.mockReset().mockImplementation((code, message, statusCode, retryable, requestId, details) => ({
       statusCode,
       body: JSON.stringify({
         error: {
@@ -79,6 +81,7 @@ describe('runtime execute/status handlers', () => {
           statusCode,
           retryable,
           ...(requestId ? { requestId } : {}),
+          ...(details !== undefined ? { details } : {}),
         },
       }),
     }));
@@ -120,7 +123,7 @@ describe('runtime execute/status handlers', () => {
       { amount: 12 },
       null,
       null,
-      { externalSources: {} },
+      { externalSources: {}, trace: false },
     );
   });
 
@@ -140,8 +143,71 @@ describe('runtime execute/status handlers', () => {
       { amount: 12 },
       null,
       null,
-      { externalSources: { customerProfile: { customerId: 'c-1' } } },
+      { externalSources: { customerProfile: { customerId: 'c-1' } }, trace: false },
     );
+  });
+
+  it('accepts canonical enrichmentInputs alias and executionContext trace in execute options', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      mappingId: 'map-1',
+      sourceData: { amount: 12 },
+      enrichmentInputs: { customerProfile: { customerId: 'c-1' } },
+      executionContext: { correlationId: 'corr-1', trace: true },
+      responseMode: 'canonical',
+    });
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(200);
+    expect(engineMocks.execute).toHaveBeenCalledWith(
+      expect.any(Object),
+      { amount: 12 },
+      null,
+      null,
+      { externalSources: { customerProfile: { customerId: 'c-1' } }, trace: true },
+    );
+
+    const parsed = JSON.parse(result.body) as {
+      outputFormat: string;
+      metadata: { correlationId: string | null; traceEnabled: boolean };
+    };
+    expect(parsed.outputFormat).toBe('json');
+    expect(parsed.metadata.correlationId).toBe('corr-1');
+    expect(parsed.metadata.traceEnabled).toBe(true);
+  });
+
+  it('returns explicit legacy compatibility wrapper by default', async () => {
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(200);
+    const parsed = JSON.parse(result.body) as {
+      mappingId: string;
+      snapshotId: string;
+      compatibility?: { mode: string; canonical: { outputFormat: string; metadata: { mappingId: string } } };
+    };
+    expect(parsed.mappingId).toBe('map-1');
+    expect(parsed.snapshotId).toBe('snapshot-1');
+    expect(parsed.compatibility).toBeDefined();
+    expect(parsed.compatibility?.mode).toBe('legacy');
+    expect(parsed.compatibility?.canonical.outputFormat).toBe('json');
+    expect(parsed.compatibility?.canonical.metadata.mappingId).toBe('map-1');
+  });
+
+  it('rejects unsupported responseMode values to enforce explicit compatibility behavior', async () => {
+    sharedMocks.parseBody.mockReturnValue({
+      mappingId: 'map-1',
+      sourceData: { amount: 12 },
+      responseMode: 'auto',
+    });
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body).error.code).toBe('VALIDATION_ERROR');
+    expect(engineMocks.execute).not.toHaveBeenCalled();
   });
 
   it('fails preflight when required enrichment payload is missing', async () => {
@@ -166,6 +232,7 @@ describe('runtime execute/status handlers', () => {
     expect(parsed.error.code).toBe('VALIDATION_ERROR');
     expect(parsed.error.message).toContain('Missing required enrichment payload');
     expect(parsed.error.message).toContain('customerProfile');
+    expect((parsed.error as { details?: { runtimeErrorCode?: string } }).details?.runtimeErrorCode).toBe('MissingEnrichmentInput');
     expect(engineMocks.execute).not.toHaveBeenCalled();
   });
 
@@ -177,6 +244,7 @@ describe('runtime execute/status handlers', () => {
 
     expect(result.statusCode).toBe(404);
     expect(JSON.parse(result.body).error.code).toBe('SOURCE_NOT_FOUND');
+    expect(JSON.parse(result.body).error.details.runtimeErrorCode).toBe('MappingNotDeployed');
     expect(sharedMocks.getObject).not.toHaveBeenCalled();
     expect(engineMocks.execute).not.toHaveBeenCalled();
   });
@@ -215,6 +283,7 @@ describe('runtime execute/status handlers', () => {
     const parsed = JSON.parse(result.body) as { error: { code: string; message: string } };
     expect(parsed.error.code).toBe('SNAPSHOT_INTEGRITY_ERROR');
     expect(parsed.error.message).toContain('missing resolved project value-table entries');
+    expect((parsed.error as { details?: { runtimeErrorCode?: string } }).details?.runtimeErrorCode).toBe('ArtifactCorrupt');
     expect(engineMocks.execute).not.toHaveBeenCalled();
   });
 
@@ -251,6 +320,22 @@ describe('runtime execute/status handlers', () => {
 
     expect(result.statusCode).toBe(200);
     expect(valueTablesMocks.resolveReference).not.toHaveBeenCalled();
+  });
+
+  it('logs structured execute error details on unexpected runtime failure', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error');
+    engineMocks.execute.mockImplementationOnce(() => {
+      throw new Error('engine exploded');
+    });
+
+    const { handler } = await importExecuteHandler();
+    const result = await handler({ body: '{}', pathParameters: {} });
+
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body).error.code).toBe('INTERNAL_ERROR');
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('"eventType":"execute-error"'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('"phase":"execute-runtime-snapshot"'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('"message":"engine exploded"'));
   });
 
   it('returns status not-deployed shape when pointer is missing', async () => {

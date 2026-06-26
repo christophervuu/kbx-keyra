@@ -9,11 +9,18 @@ import {
   type APIGatewayProxyResult,
 } from '../shared/index.js';
 import {
+  ActiveSnapshotConflictError,
   appendDeploymentHistory,
+  getActiveSnapshot,
   listDeploymentHistory,
   upsertActiveSnapshot,
 } from '../../lib/persistence/deployments.js';
-import { putRuntimeSnapshot, RuntimeSnapshotHashMismatchError } from '../../lib/persistence/s3/deployment-snapshot.js';
+import {
+  putRuntimeSnapshot,
+  RuntimeSnapshotHashMismatchError,
+  RuntimeSnapshotUnreadableError,
+  verifyRuntimeSnapshotReadHash,
+} from '../../lib/persistence/s3/deployment-snapshot.js';
 import type { DeploymentSourceType } from '../../lib/persistence/types.js';
 
 interface RuntimeDeployRequest {
@@ -32,6 +39,17 @@ interface RuntimeRollbackRequest {
   readonly requestedBy?: string;
 }
 
+interface RuntimeDeployArtifactEnvelope {
+  readonly artifactId?: unknown;
+  readonly snapshotId?: unknown;
+  readonly artifactHash?: unknown;
+  readonly snapshotHash?: unknown;
+  readonly mappingId?: unknown;
+  readonly sourceType?: unknown;
+  readonly sourceNumber?: unknown;
+  readonly mappingConfig?: unknown;
+}
+
 function logRuntime(fields: {
   readonly eventType: 'deploy' | 'rollback';
   readonly requestId: string;
@@ -41,6 +59,43 @@ function logRuntime(fields: {
   readonly durationMs: number;
 }): void {
   console.info(JSON.stringify(fields));
+}
+
+function serializeError(error: unknown): { name: string; message: string; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(typeof error.stack === 'string' ? { stack: error.stack } : {}),
+    };
+  }
+
+  return {
+    name: 'UnknownError',
+    message: typeof error === 'string' ? error : 'Unknown error',
+  };
+}
+
+function logRuntimeError(fields: {
+  readonly eventType: 'deploy' | 'rollback';
+  readonly requestId: string;
+  readonly mappingId: string;
+  readonly snapshotId?: string;
+  readonly phase: string;
+  readonly error: unknown;
+  readonly durationMs: number;
+}): void {
+  console.error(
+    JSON.stringify({
+      eventType: `${fields.eventType}-error`,
+      requestId: fields.requestId,
+      mappingId: fields.mappingId,
+      ...(fields.snapshotId ? { snapshotId: fields.snapshotId } : {}),
+      phase: fields.phase,
+      durationMs: fields.durationMs,
+      ...serializeError(fields.error),
+    }),
+  );
 }
 
 function isSourceType(value: unknown): value is DeploymentSourceType {
@@ -56,12 +111,30 @@ function parseDeployRequest(body: Record<string, unknown> | null): RuntimeDeploy
     return null;
   }
 
-  const mappingId = body.mappingId;
-  const snapshotId = body.snapshotId;
-  const snapshotHash = body.snapshotHash;
-  const sourceType = body.sourceType;
-  const sourceNumber = body.sourceNumber;
-  const requestedBy = body.requestedBy;
+  const envelopeArtifact = body.artifact;
+  const artifact = envelopeArtifact && typeof envelopeArtifact === 'object' && !Array.isArray(envelopeArtifact)
+    ? (envelopeArtifact as RuntimeDeployArtifactEnvelope)
+    : null;
+
+  const mappingId = artifact?.mappingId ?? body.mappingId;
+  const snapshotId = artifact?.snapshotId ?? artifact?.artifactId ?? body.snapshotId;
+  const snapshotHash = artifact?.snapshotHash ?? artifact?.artifactHash ?? body.snapshotHash;
+  const sourceType = artifact?.sourceType ?? body.sourceType;
+  const sourceNumber = artifact?.sourceNumber ?? body.sourceNumber;
+
+  const requestedBy =
+    body.requestedBy
+    ?? (
+      body.controlPlaneMetadata
+      && typeof body.controlPlaneMetadata === 'object'
+      && !Array.isArray(body.controlPlaneMetadata)
+        ? (body.controlPlaneMetadata as { triggeredBy?: unknown }).triggeredBy
+        : undefined
+    );
+
+  const snapshotPayload = Object.hasOwn(body, 'snapshotPayload')
+    ? body.snapshotPayload
+    : (artifact ? artifact : undefined);
 
   if (!isNonEmptyString(mappingId) || !isNonEmptyString(snapshotId) || !isNonEmptyString(snapshotHash)) {
     return null;
@@ -82,7 +155,7 @@ function parseDeployRequest(body: Record<string, unknown> | null): RuntimeDeploy
     sourceType,
     sourceNumber,
     ...(requestedBy ? { requestedBy } : {}),
-    ...(Object.hasOwn(body, 'snapshotPayload') ? { snapshotPayload: body.snapshotPayload } : {}),
+    ...(snapshotPayload !== undefined ? { snapshotPayload } : {}),
   };
 }
 
@@ -111,17 +184,44 @@ function parseRollbackRequest(body: Record<string, unknown> | null): RuntimeRoll
 }
 
 function hasDeployShape(body: Record<string, unknown> | null): boolean {
-  return Boolean(body && Object.hasOwn(body, 'sourceType') && Object.hasOwn(body, 'sourceNumber') && Object.hasOwn(body, 'snapshotHash'));
+  if (!body) {
+    return false;
+  }
+
+  if (Object.hasOwn(body, 'artifact')) {
+    return true;
+  }
+
+  return Boolean(Object.hasOwn(body, 'sourceType') && Object.hasOwn(body, 'sourceNumber') && Object.hasOwn(body, 'snapshotHash'));
 }
 
 async function handleDeploy(request: RuntimeDeployRequest, requestId: string): Promise<APIGatewayProxyResult> {
   const startedAt = Date.now();
   try {
+    const currentActiveSnapshot = await getActiveSnapshot(request.mappingId);
+
     const snapshotWrite = await putRuntimeSnapshot({
       mappingId: request.mappingId,
       snapshotId: request.snapshotId,
       payload: request.snapshotPayload ?? request,
       contentHash: request.snapshotHash,
+    });
+
+    await verifyRuntimeSnapshotReadHash({
+      mappingId: request.mappingId,
+      snapshotId: request.snapshotId,
+      expectedContentHash: request.snapshotHash,
+    });
+
+    await appendDeploymentHistory({
+      mappingId: request.mappingId,
+      eventType: 'deploy',
+      snapshotId: request.snapshotId,
+      snapshotHash: request.snapshotHash,
+      requestedBy: request.requestedBy ?? 'control-plane',
+      sourceType: request.sourceType,
+      sourceNumber: request.sourceNumber,
+      requestId,
     });
 
     const active = await upsertActiveSnapshot({
@@ -131,17 +231,9 @@ async function handleDeploy(request: RuntimeDeployRequest, requestId: string): P
       activatedBy: request.requestedBy ?? 'control-plane',
       sourceType: request.sourceType,
       sourceNumber: request.sourceNumber,
-    });
-
-    const history = await appendDeploymentHistory({
-      mappingId: request.mappingId,
-      eventType: 'deploy',
-      snapshotId: request.snapshotId,
-      snapshotHash: request.snapshotHash,
-      requestedBy: request.requestedBy ?? 'control-plane',
-      sourceType: request.sourceType,
-      sourceNumber: request.sourceNumber,
-      requestId,
+      ...(currentActiveSnapshot
+        ? { expectedCurrentSnapshotId: currentActiveSnapshot.activeSnapshotId }
+        : { expectedCurrentSnapshotId: null }),
     });
 
     logRuntime({
@@ -160,7 +252,6 @@ async function handleDeploy(request: RuntimeDeployRequest, requestId: string): P
         snapshotId: request.snapshotId,
         writeStatus: snapshotWrite.status,
         activeSnapshot: active,
-        historyEvent: history,
       },
       requestId,
     );
@@ -184,12 +275,59 @@ async function handleDeploy(request: RuntimeDeployRequest, requestId: string): P
       );
     }
 
+    if (error instanceof RuntimeSnapshotUnreadableError) {
+      logRuntime({
+        eventType: 'deploy',
+        requestId,
+        mappingId: request.mappingId,
+        snapshotId: request.snapshotId,
+        outcome: 'integrity-error',
+        durationMs: Date.now() - startedAt,
+      });
+
+      return errorResponse(
+        ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
+        error.message,
+        500,
+        false,
+        requestId,
+      );
+    }
+
+    if (error instanceof ActiveSnapshotConflictError) {
+      logRuntime({
+        eventType: 'deploy',
+        requestId,
+        mappingId: request.mappingId,
+        snapshotId: request.snapshotId,
+        outcome: 'error',
+        durationMs: Date.now() - startedAt,
+      });
+
+      return errorResponse(
+        ERROR_CODES.CONFLICT,
+        error.message,
+        409,
+        false,
+        requestId,
+      );
+    }
+
     logRuntime({
       eventType: 'deploy',
       requestId,
       mappingId: request.mappingId,
       snapshotId: request.snapshotId,
       outcome: 'error',
+      durationMs: Date.now() - startedAt,
+    });
+    logRuntimeError({
+      eventType: 'deploy',
+      requestId,
+      mappingId: request.mappingId,
+      snapshotId: request.snapshotId,
+      phase: 'handle-deploy',
+      error,
       durationMs: Date.now() - startedAt,
     });
 
@@ -263,13 +401,22 @@ async function handleRollback(request: RuntimeRollbackRequest, requestId: string
       },
       requestId,
     );
-  } catch {
+  } catch (error) {
     logRuntime({
       eventType: 'rollback',
       requestId,
       mappingId: request.mappingId,
       snapshotId: request.snapshotId,
       outcome: 'error',
+      durationMs: Date.now() - startedAt,
+    });
+    logRuntimeError({
+      eventType: 'rollback',
+      requestId,
+      mappingId: request.mappingId,
+      snapshotId: request.snapshotId,
+      phase: 'handle-rollback',
+      error,
       durationMs: Date.now() - startedAt,
     });
 

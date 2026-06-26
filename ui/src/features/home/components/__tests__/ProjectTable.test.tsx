@@ -17,8 +17,9 @@ function makeProject(overrides: Partial<ProjectListItem> = {}): ProjectListItem 
     mappingCount: 4,
     updatedAt: '2026-04-30T00:00:00Z',
     worstStatus: 'has-errors',
+    sandboxDeploy: 'not-deployed',
     devDeploy: 'not-deployed',
-    qaDeploy: 'not-deployed',
+    preprodDeploy: 'not-deployed',
     prodDeploy: 'not-deployed',
     ...overrides,
   };
@@ -29,14 +30,15 @@ function makeProject(overrides: Partial<ProjectListItem> = {}): ProjectListItem 
 // ---------------------------------------------------------------------------
 
 describe('ProjectTable', () => {
-  it('renders all 8 column headers', () => {
+  it('renders all deployment environment headers in canonical order', () => {
     render(<ProjectTable projects={[]} onProjectClick={vi.fn()} />);
     expect(screen.getByText('Name')).toBeInTheDocument();
     expect(screen.getByText('Description')).toBeInTheDocument();
     expect(screen.getByText('Mappings')).toBeInTheDocument();
     expect(screen.getByText('Status')).toBeInTheDocument();
+    expect(screen.getByText('SANDBOX')).toBeInTheDocument();
     expect(screen.getByText('DEV')).toBeInTheDocument();
-    expect(screen.getByText('QA')).toBeInTheDocument();
+    expect(screen.getByText('PREPROD')).toBeInTheDocument();
     expect(screen.getByText('PROD')).toBeInTheDocument();
     expect(screen.getByText('Last Modified')).toBeInTheDocument();
   });
@@ -87,17 +89,24 @@ describe('ProjectTable', () => {
     expect(screen.getByText('Not deployed')).toBeInTheDocument();
   });
 
-  it('renders individual DEV/QA/PROD StatusBadge cells when any deploy status is non-default', () => {
+  it('renders individual SANDBOX/DEV/PREPROD/PROD StatusBadge cells when any deploy status is non-default', () => {
     render(
       <ProjectTable
-        projects={[makeProject({ devDeploy: 'deployed', qaDeploy: 'not-deployed', prodDeploy: 'not-deployed' })]}
+        projects={[
+          makeProject({
+            sandboxDeploy: 'deployed',
+            devDeploy: 'not-deployed',
+            preprodDeploy: 'not-deployed',
+            prodDeploy: 'not-deployed',
+          }),
+        ]}
         onProjectClick={vi.fn()}
       />,
     );
     expect(screen.queryByTestId('deploy-condensed-p-1')).not.toBeInTheDocument();
-    // Individual StatusBadge cells render — "Not deployed" appears twice (QA + PROD)
+    // Individual StatusBadge cells render — "Not deployed" appears 3 times (DEV + PREPROD + PROD)
     const notDeployedBadges = screen.getAllByText('Not deployed');
-    expect(notDeployedBadges.length).toBeGreaterThanOrEqual(2);
+    expect(notDeployedBadges.length).toBeGreaterThanOrEqual(3);
   });
 
   it('calls onProjectClick with project ID when row is clicked', () => {

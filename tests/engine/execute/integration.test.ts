@@ -209,6 +209,55 @@ describe('execute integration', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  it('treats missing or non-array nullSubtrees as empty for runtime compatibility', () => {
+    const configWithoutNullSubtrees = createConfig({
+      config: {
+        unmappedTargets: 'omit',
+        constants: {},
+        externalSources: [],
+      } as unknown as MappingConfig['config'],
+      rules: [
+        {
+          target: 'Order.Type',
+          type: 'string',
+          expression: 'static("PO")',
+        },
+      ],
+    });
+
+    const configWithInvalidNullSubtrees = createConfig({
+      config: {
+        unmappedTargets: 'omit',
+        nullSubtrees: null,
+        constants: {},
+        externalSources: [],
+      } as unknown as MappingConfig['config'],
+      rules: [
+        {
+          target: 'Order.Type',
+          type: 'string',
+          expression: 'static("PO")',
+        },
+      ],
+    });
+
+    const missingResult = execute(configWithoutNullSubtrees, {}, {}, {});
+    const invalidResult = execute(configWithInvalidNullSubtrees, {}, {}, {});
+
+    expect(missingResult.output).toEqual({
+      Order: {
+        Type: 'PO',
+      },
+    });
+    expect(invalidResult.output).toEqual({
+      Order: {
+        Type: 'PO',
+      },
+    });
+    expect(missingResult.diagnostics).toEqual([]);
+    expect(invalidResult.diagnostics).toEqual([]);
+  });
+
   it('AE-10: trace mode records entries per rule and includes failed rules', () => {
     const config = createConfig({
       rules: [

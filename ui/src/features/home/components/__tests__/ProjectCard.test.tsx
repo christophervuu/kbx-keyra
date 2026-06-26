@@ -18,8 +18,9 @@ function makeProject(overrides: Partial<ProjectListItem> = {}): ProjectListItem 
     schemaCount: 2,
     updatedAt: '2026-04-30T00:00:00Z',
     worstStatus: 'has-errors',
+    sandboxDeploy: 'not-deployed',
     devDeploy: 'not-deployed',
-    qaDeploy: 'not-deployed',
+    preprodDeploy: 'not-deployed',
     prodDeploy: 'not-deployed',
     ...overrides,
   };
@@ -80,15 +81,16 @@ describe('ProjectCard', () => {
     expect(screen.getByRole('button', { name: /open alpha project/i })).toBeInTheDocument();
   });
 
-  it('renders DEV/QA/PROD environment labels when any deploy status is non-default', () => {
+  it('renders SANDBOX/DEV/PREPROD/PROD environment labels when any deploy status is non-default', () => {
     render(
       <ProjectCard
-        project={makeProject({ devDeploy: 'deployed', qaDeploy: 'not-deployed', prodDeploy: 'not-deployed' })}
+        project={makeProject({ sandboxDeploy: 'deployed', devDeploy: 'not-deployed', preprodDeploy: 'not-deployed', prodDeploy: 'not-deployed' })}
         onClick={vi.fn()}
       />,
     );
+    expect(screen.getByText('SANDBOX')).toBeInTheDocument();
     expect(screen.getByText('DEV')).toBeInTheDocument();
-    expect(screen.getByText('QA')).toBeInTheDocument();
+    expect(screen.getByText('PREPROD')).toBeInTheDocument();
     expect(screen.getByText('PROD')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open alpha project/i })).not.toBeInTheDocument();
   });

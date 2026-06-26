@@ -24,24 +24,26 @@ function MappingStatusBadge({ status }: { status: string }) {
 }
 
 function getDeploymentDisplay(
+  sandboxDeploy: DeployStatus,
   devDeploy: DeployStatus,
-  qaDeploy: DeployStatus,
+  preprodDeploy: DeployStatus,
   prodDeploy: DeployStatus,
 ): string {
-  // Deterministic precedence (T-03):
+  // Deterministic precedence (T-03/T-09):
   // 1) deploying in any env
   // 2) stale in any env (normalized copy: Changed since deploy)
-  // 3) highest deployed env by PROD > QA > DEV
+  // 3) highest deployed env by PROD > PREPROD > DEV > SANDBOX
   // 4) not deployed
-  if (devDeploy === 'deploying' || qaDeploy === 'deploying' || prodDeploy === 'deploying') {
+  if (sandboxDeploy === 'deploying' || devDeploy === 'deploying' || preprodDeploy === 'deploying' || prodDeploy === 'deploying') {
     return 'Deploying';
   }
-  if (devDeploy === 'stale' || qaDeploy === 'stale' || prodDeploy === 'stale') {
+  if (sandboxDeploy === 'stale' || devDeploy === 'stale' || preprodDeploy === 'stale' || prodDeploy === 'stale') {
     return 'Changed since deploy';
   }
   if (prodDeploy === 'deployed') return 'PROD deployed';
-  if (qaDeploy === 'deployed') return 'QA deployed';
+  if (preprodDeploy === 'deployed') return 'PREPROD deployed';
   if (devDeploy === 'deployed') return 'DEV deployed';
+  if (sandboxDeploy === 'deployed') return 'SANDBOX deployed';
   return 'Not deployed';
 }
 
@@ -97,7 +99,12 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
       ? '—'
       : formatCoveragePercent(mapping.coverage);
 
-  const deploymentDisplay = getDeploymentDisplay(mapping.devDeploy, mapping.qaDeploy, mapping.prodDeploy);
+  const deploymentDisplay = getDeploymentDisplay(
+    mapping.sandboxDeploy,
+    mapping.devDeploy,
+    mapping.preprodDeploy,
+    mapping.prodDeploy,
+  );
   const canDeploy = mapping.status === 'ready';
 
   function handleRowClick(event: MouseEvent<HTMLTableRowElement>) {

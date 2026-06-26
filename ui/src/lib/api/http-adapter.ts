@@ -1,11 +1,15 @@
 import { FeatureNotEnabledError } from './errors';
 import { httpRequest } from './http-client';
+import { importLocalMappingsToBackend } from './local-mapping-import';
 import { LocalStorageAdapter } from './local-storage-adapter';
 import type {
   CurrentDeployment,
   CurrentDeployments,
+  DeploymentMutationEnvironment,
+  DeploymentReadEnvironment,
   DeploymentRecord,
   DeploymentSourceType,
+  MappingImportSummary,
 } from './types';
 
 import type {
@@ -256,6 +260,10 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
+  override async importLocalMappings(projectId: string): Promise<MappingImportSummary> {
+    return importLocalMappingsToBackend(this, projectId);
+  }
+
   override async listMappingVersions(mappingId: string): Promise<MappingVersionEntry[]> {
     return httpRequest<MappingVersionEntry[]>({
       baseUrl: this.apiUrl,
@@ -387,8 +395,11 @@ export class HttpAdapter extends LocalStorageAdapter {
   }
 
   override async getDeploymentContext(mappingId: string): Promise<DeploymentContext> {
-    void mappingId;
-    throw this.featureNotEnabled('getDeploymentContext');
+    return httpRequest<DeploymentContext>({
+      baseUrl: this.apiUrl,
+      path: `/mappings/${encodeURIComponent(mappingId)}/deploy-context`,
+      method: 'GET',
+    });
   }
 
   override async deploy(mappingId: string, environment: Environment): Promise<LegacyDeploymentRecord> {
@@ -433,7 +444,7 @@ export class HttpAdapter extends LocalStorageAdapter {
   override async deployMapping(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: DeploymentMutationEnvironment;
       sourceType: DeploymentSourceType;
       sourceNumber: number;
     },
@@ -449,8 +460,8 @@ export class HttpAdapter extends LocalStorageAdapter {
   override async promoteDeployment(
     mappingId: string,
     input: {
-      fromEnvironment: Environment;
-      toEnvironment: Environment;
+      fromEnvironment: DeploymentMutationEnvironment;
+      toEnvironment: DeploymentMutationEnvironment;
     },
   ): Promise<DeploymentRecord> {
     return httpRequest<DeploymentRecord>({
@@ -464,7 +475,7 @@ export class HttpAdapter extends LocalStorageAdapter {
   override async rollbackDeployment(
     mappingId: string,
     input: {
-      environment: Environment;
+      environment: DeploymentMutationEnvironment;
       deploymentSK: string;
     },
   ): Promise<DeploymentRecord> {
@@ -479,7 +490,7 @@ export class HttpAdapter extends LocalStorageAdapter {
   override async listDeployments(
     mappingId: string,
     options?: {
-      environment?: Environment;
+      environment?: DeploymentReadEnvironment;
     },
   ): Promise<DeploymentRecord[]> {
     const environmentQuery = options?.environment

@@ -190,7 +190,7 @@ describe('lib/schema types and constants', () => {
     expect(getInlineFieldThreshold()).toBe(500);
   });
 
-  it('returns stage-based retrieval caps for dev/qa/prod', () => {
+  it('returns stage-based retrieval caps for dev/preprod/prod and normalizes legacy qa', () => {
     const env = getTestEnvStore();
 
     env.STAGE = 'dev';
@@ -199,6 +199,14 @@ describe('lib/schema types and constants', () => {
       rerankCap: 80,
       topK: 12,
       contextExpansionCap: 24,
+    });
+
+    env.STAGE = 'preprod';
+    expect(getRetrievalCaps()).toEqual({
+      lexicalCap: 150,
+      rerankCap: 100,
+      topK: 15,
+      contextExpansionCap: 30,
     });
 
     env.STAGE = 'qa';

@@ -1,5 +1,8 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+
+import { computeConfigHash } from '../hash.js';
 
 import { s3Client } from '../clients.js';
 import { BUCKET_NAME, RUNTIME_BUCKET_NAME, SNAPSHOTS_PREFIX, deploymentSnapshotKey, runtimeSnapshotKey } from '../config.js';
@@ -42,10 +45,23 @@ interface RuntimeSnapshotWriteResult {
   readonly status: 'created' | 'idempotent';
 }
 
+export interface RuntimeSnapshotReadResult {
+  readonly key: string;
+  readonly body: string;
+  readonly payload: unknown;
+}
+
 export class RuntimeSnapshotHashMismatchError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RuntimeSnapshotHashMismatchError';
+  }
+}
+
+export class RuntimeSnapshotUnreadableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeSnapshotUnreadableError';
   }
 }
 
@@ -74,6 +90,104 @@ async function headRuntimeObject(key: string): Promise<{ eTag?: string } | null>
 
 function normalizeETag(etag: string | undefined): string | undefined {
   return etag?.replaceAll('"', '').trim();
+}
+
+async function readBodyToString(body: unknown): Promise<string> {
+  if (typeof body === 'string') {
+    return body;
+  }
+
+  if (body && typeof body === 'object') {
+    const candidate = body as {
+      transformToString?: () => Promise<string>;
+      toString?: () => string;
+      [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array>;
+    };
+
+    if (typeof candidate.transformToString === 'function') {
+      return candidate.transformToString();
+    }
+
+    if (typeof candidate[Symbol.asyncIterator] === 'function') {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of candidate as AsyncIterable<Uint8Array>) {
+        chunks.push(chunk);
+      }
+      return new TextDecoder().decode(concatUint8Arrays(chunks));
+    }
+
+    if (typeof candidate.toString === 'function') {
+      return candidate.toString();
+    }
+  }
+
+  return '';
+}
+
+function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged;
+}
+
+export async function getRuntimeSnapshot(mappingId: string, snapshotId: string): Promise<RuntimeSnapshotReadResult> {
+  const key = runtimeSnapshotKey(mappingId, snapshotId, SNAPSHOTS_PREFIX);
+
+  const response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: RUNTIME_BUCKET_NAME,
+      Key: key,
+    }),
+  );
+
+  const body = await readBodyToString(response.Body);
+  const payload = JSON.parse(body) as unknown;
+
+  return {
+    key,
+    body,
+    payload,
+  };
+}
+
+function getPayloadConfig(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (Object.hasOwn(record, 'mappingConfig')) {
+    return record.mappingConfig;
+  }
+
+  if (Object.hasOwn(record, 'config')) {
+    return record.config;
+  }
+
+  return payload;
+}
+
+export async function verifyRuntimeSnapshotReadHash(input: {
+  readonly mappingId: string;
+  readonly snapshotId: string;
+  readonly expectedContentHash: string;
+}): Promise<RuntimeSnapshotReadResult> {
+  const readResult = await getRuntimeSnapshot(input.mappingId, input.snapshotId);
+  const config = getPayloadConfig(readResult.payload) as MappingConfig;
+  const computedHash = await computeConfigHash(config);
+
+  if (computedHash !== input.expectedContentHash) {
+    throw new RuntimeSnapshotUnreadableError(
+      `Runtime snapshot hash verification failed for ${input.mappingId}/${input.snapshotId}: expected=${input.expectedContentHash} computed=${computedHash}`,
+    );
+  }
+
+  return readResult;
 }
 
 export async function putRuntimeSnapshot(input: PutRuntimeSnapshotInput): Promise<RuntimeSnapshotWriteResult> {
@@ -113,4 +227,6 @@ export async function putRuntimeSnapshot(input: PutRuntimeSnapshotInput): Promis
 export const deploymentSnapshot = {
   put,
   putRuntimeSnapshot,
+  getRuntimeSnapshot,
+  verifyRuntimeSnapshotReadHash,
 };

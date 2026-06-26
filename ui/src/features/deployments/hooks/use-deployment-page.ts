@@ -8,13 +8,22 @@ import type {
   DeploymentSourceType,
 } from '@/lib/api/types';
 import { toAppError } from '@/lib/state/app-error';
-import type { Environment, MappingRevision, MappingVersion } from '@/lib/types';
+import type { Environment, MappingVersion } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type DeployTarget = Environment;
+
+export interface DeploymentUiErrorDetails {
+  readonly message: string;
+  readonly requestId?: string;
+  readonly code?: string;
+  readonly statusCode?: number;
+  readonly retryable: boolean;
+  readonly details?: unknown;
+}
 
 export interface DeployInput {
   environment: Environment;
@@ -28,8 +37,6 @@ export interface UseDeploymentPageResult {
   /** Set the active environment */
   setEnvironment: (env: DeployTarget) => void;
 
-  /** Revision list — sorted descending */
-  revisions: readonly MappingRevision[];
   /** Version list — sorted descending */
   versions: readonly MappingVersion[];
   /** Current deployments per environment, or null while loading */
@@ -40,12 +47,12 @@ export interface UseDeploymentPageResult {
   /** True while history is loading */
   isHistoryLoading: boolean;
   /** History load error, or null */
-  historyError: string | null;
+  historyError: DeploymentUiErrorDetails | null;
 
   /** True while initial data is loading */
   isLoading: boolean;
   /** Error message, or null */
-  error: string | null;
+  error: DeploymentUiErrorDetails | null;
 
   /** Whether a deploy/promote/rollback action is in progress */
   isDeploying: boolean;
@@ -60,6 +67,8 @@ export interface UseDeploymentPageResult {
     | {
       kind: 'error';
       message: string;
+      requestId?: string;
+      technicalDetails?: DeploymentUiErrorDetails;
       cdmBlockIssues?: readonly CdmDeployBlockUiIssue[];
       orchestration?: DeploymentActionOrchestrationDetails;
       artifact?: DeploymentActionArtifactDetails;
@@ -164,6 +173,26 @@ interface CdmDeployBlockDetails {
   readonly issues?: unknown;
 }
 
+function formatErrorMessage(error: unknown, fallback: string): string {
+  const appError = toAppError(error);
+  return appError.message || fallback;
+}
+
+function toDeploymentUiError(error: unknown, fallback: string): DeploymentUiErrorDetails {
+  const appError = toAppError(error);
+
+  return {
+    message: appError.message || fallback,
+    ...(typeof appError.requestId === 'string' && appError.requestId.trim() !== ''
+      ? { requestId: appError.requestId }
+      : {}),
+    ...(typeof appError.code === 'string' && appError.code.trim() !== '' ? { code: appError.code } : {}),
+    ...(typeof appError.statusCode === 'number' ? { statusCode: appError.statusCode } : {}),
+    retryable: appError.retryable,
+    ...(appError.details !== undefined ? { details: appError.details } : {}),
+  };
+}
+
 function isReferenceRole(value: unknown): value is CdmDeployBlockUiIssue['referenceRole'] {
   return value === 'source' || value === 'target';
 }
@@ -240,15 +269,14 @@ function parseCdmDeployBlockIssues(error: unknown): readonly CdmDeployBlockUiIss
 export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const adapter = useAdapter();
 
-  const [environment, setEnvironmentState] = useState<DeployTarget>('DEV');
-  const [revisions, setRevisions] = useState<readonly MappingRevision[]>([]);
+  const [environment, setEnvironmentState] = useState<DeployTarget>('SANDBOX');
   const [versions, setVersions] = useState<readonly MappingVersion[]>([]);
   const [currentDeployments, setCurrentDeployments] = useState<CurrentDeployments | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<readonly DeploymentRecord[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<DeploymentUiErrorDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DeploymentUiErrorDetails | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployFeedback, setDeployFeedback] = useState<UseDeploymentPageResult['deployFeedback']>(null);
 
@@ -263,7 +291,8 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
       setIsHistoryLoading(true);
       setHistoryError(null);
       try {
-        const records = await adapter.listDeployments(mappingId, { environment: env });
+        void env;
+        const records = await adapter.listDeployments(mappingId);
         if (!mountedRef.current) return;
         // Sort descending by deployedAt
         const sorted = [...records].sort(
@@ -272,7 +301,7 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         setDeploymentHistory(sorted);
       } catch (err) {
         if (!mountedRef.current) return;
-        setHistoryError(toAppError(err).message || 'Failed to load history');
+        setHistoryError(toDeploymentUiError(err, 'Failed to load history'));
         setDeploymentHistory([]);
       } finally {
         if (mountedRef.current) {
@@ -291,18 +320,18 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
     setIsLoading(true);
     setError(null);
     try {
-      const [revisionList, versionList, deployments] = await Promise.all([
-        adapter.listRevisions(mappingId),
+      await adapter.getDeploymentContext(mappingId);
+
+      const [versionList, deployments] = await Promise.all([
         adapter.listVersions(mappingId),
         adapter.getCurrentDeployments(mappingId),
       ]);
       if (!mountedRef.current) return;
-      setRevisions([...revisionList].sort((a, b) => b.revision - a.revision));
       setVersions([...versionList].sort((a, b) => b.version - a.version));
       setCurrentDeployments(deployments);
     } catch (err) {
       if (!mountedRef.current) return;
-      setError(toAppError(err).message || 'Failed to load deployment data');
+      setError(toDeploymentUiError(err, 'Failed to load deployment data'));
     } finally {
       if (mountedRef.current) {
         setIsLoading(false);
@@ -323,9 +352,8 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const setEnvironment = useCallback(
     (env: Environment) => {
       setEnvironmentState(env);
-      void loadHistory(env);
     },
-    [loadHistory],
+    [],
   );
 
   // Load initial history for DEV on mount
@@ -381,11 +409,14 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
       } catch (err) {
         if (!mountedRef.current) return;
         const cdmBlockIssues = parseCdmDeployBlockIssues(err);
-        const appError = toAppError(err);
+        const technicalDetails = toDeploymentUiError(err, 'Deploy failed');
+        const message = formatErrorMessage(err, 'Deploy failed');
         const details = parseOrchestrationDetails(err);
         setDeployFeedback({
           kind: 'error',
-          message: appError.message || 'Deploy failed',
+          message,
+          ...(technicalDetails.requestId ? { requestId: technicalDetails.requestId } : {}),
+          technicalDetails,
           ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
           ...details,
         });
@@ -430,11 +461,14 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
       } catch (err) {
         if (!mountedRef.current) return;
         const cdmBlockIssues = parseCdmDeployBlockIssues(err);
-        const appError = toAppError(err);
+        const technicalDetails = toDeploymentUiError(err, 'Promote failed');
+        const message = formatErrorMessage(err, 'Promote failed');
         const details = parseOrchestrationDetails(err);
         setDeployFeedback({
           kind: 'error',
-          message: appError.message || 'Promote failed',
+          message,
+          ...(technicalDetails.requestId ? { requestId: technicalDetails.requestId } : {}),
+          technicalDetails,
           ...(cdmBlockIssues ? { cdmBlockIssues } : {}),
           ...details,
         });
@@ -481,11 +515,14 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
         void loadHistory(env);
       } catch (err) {
         if (!mountedRef.current) return;
-        const appError = toAppError(err);
+        const technicalDetails = toDeploymentUiError(err, 'Rollback failed');
+        const message = formatErrorMessage(err, 'Rollback failed');
         const details = parseOrchestrationDetails(err);
         setDeployFeedback({
           kind: 'error',
-          message: appError.message || 'Rollback failed',
+          message,
+          ...(technicalDetails.requestId ? { requestId: technicalDetails.requestId } : {}),
+          technicalDetails,
           ...details,
         });
       } finally {
@@ -501,13 +538,12 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
 
   const refresh = useCallback(() => {
     void load();
-    void loadHistory(environment);
-  }, [load, loadHistory, environment]);
+    void loadHistory('DEV');
+  }, [load, loadHistory]);
 
   return {
     environment,
     setEnvironment,
-    revisions,
     versions,
     currentDeployments,
     deploymentHistory,

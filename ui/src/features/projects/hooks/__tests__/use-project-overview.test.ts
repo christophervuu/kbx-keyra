@@ -83,8 +83,9 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     getDeploymentDiff: vi.fn(),
     getCurrentDeployments: vi.fn().mockResolvedValue({
       DEV: { environment: 'DEV', deployment: null, status: 'not-deployed' },
-      QA: { environment: 'QA', deployment: null, status: 'not-deployed' },
+      PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
       PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+      QA: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
     }),
     listCdmSchemas: vi.fn(),
     linkCdmSchema: vi.fn(),

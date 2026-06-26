@@ -49,4 +49,13 @@ describe('list-revisions handler', () => {
     const parsed = JSON.parse(result.body) as Array<{ revision: number }>;
     expect(parsed.map((entry) => entry.revision)).toEqual([5, 3]);
   });
+
+  it('returns validation error when mappingId path param is missing', async () => {
+    sharedMocks.parsePathParam.mockReturnValueOnce(null).mockReturnValueOnce(null);
+    const { handler } = await importHandler();
+    const result = await handler({ body: null, pathParameters: {} });
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body).error.code).toBe('VALIDATION_ERROR');
+  });
 });

@@ -1301,3 +1301,56 @@ For legacy records:
 - raw persisted value `QA` may remain at-rest for audit fidelity
 - API/domain presentation normalizes `QA -> PREPROD` for runtime behavior/UI consistency
 - optional audit/detail surfaces may disclose historical label context where needed
+
+---
+
+## 19) FS-100 Deployment Context + Runtime Execute Contract Addendum
+
+FS-100 finalizes deployment bootstrap and runtime execute compatibility contracts for the deployment/runtime vertical slice.
+
+### 19.1 Deployment bootstrap API contract
+
+Canonical deployment page bootstrap endpoint:
+
+- `GET /mappings/:mappingId/deploy-context`
+
+Contract intent:
+
+- Single aggregate payload for deployment page initialization (mapping/project metadata + four-stage status model + readiness/action context).
+- SANDBOX-first UI load path; avoids multi-request bootstrap fragility.
+- `GET /mappings/:mappingId/deployments` and `GET /mappings/:mappingId/deployments/current` remain valid read models, but `deploy-context` is the canonical page bootstrap contract.
+
+### 19.2 Canonical environment policy at API boundary
+
+- Canonical deployment/runtime policy: `SANDBOX -> DEV -> PREPROD -> PROD`.
+- Compatibility boundary: historical `QA` values are normalized to `PREPROD` on reads.
+- New write/mutation requests must not introduce `QA` as a canonical target environment.
+
+### 19.3 Runtime execute request/response compatibility contract
+
+Canonical request fields:
+
+- `mappingId`
+- `sourceData`
+- optional `enrichmentInputs`
+- optional `executionContext`
+- explicit `responseMode` (`legacy | canonical`) where canonical response shape is requested
+
+Compatibility behavior:
+
+- `externalSources` remains accepted as a legacy alias and is normalized to canonical enrichment inputs at contract boundaries.
+- Unsupported `responseMode` values are deterministic validation failures.
+
+Response behavior:
+
+- `responseMode='canonical'` returns canonical response shape with metadata/provenance fields.
+- Default runtime response remains explicit legacy wrapper including compatibility metadata (`compatibility.mode='legacy'`) and embedded canonical payload.
+- Implicit response-shape auto-detection is prohibited.
+
+### 19.4 Deployment/runtime error and CORS normalization contract
+
+For deployment-facing API paths (including deploy-context and deployment mutations):
+
+- Success and error responses (2xx/4xx/5xx) must carry valid CORS headers.
+- Error payloads must use canonical backend envelope + request lineage (`requestId` / `x-request-id`).
+- UI-consumed technical detail structures are additive and must not break canonical envelope semantics.

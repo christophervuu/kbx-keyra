@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FeatureNotEnabledError } from './errors';
 import { HttpAdapter } from './http-adapter';
 import { httpRequest } from './http-client';
+import * as localImport from './local-mapping-import';
 
 import { toAppError } from '@/lib/state/app-error';
 import type {
@@ -20,6 +21,10 @@ import type {
 
 vi.mock('./http-client', () => ({
   httpRequest: vi.fn(),
+}));
+
+vi.mock('./local-mapping-import', () => ({
+  importLocalMappingsToBackend: vi.fn(),
 }));
 
 const API_URL = 'http://localhost:3001/api';
@@ -213,6 +218,25 @@ describe('HttpAdapter (CRUD)', () => {
       method: 'POST',
       body: { name: 'Duplicated' },
     });
+  });
+
+  it('importLocalMappings delegates to explicit local import utility', async () => {
+    vi.mocked(localImport.importLocalMappingsToBackend).mockResolvedValueOnce({
+      imported: 1,
+      skipped: 0,
+      failed: 0,
+      issues: [],
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+    await expect(adapter.importLocalMappings('proj-1')).resolves.toEqual({
+      imported: 1,
+      skipped: 0,
+      failed: 0,
+      issues: [],
+    });
+
+    expect(localImport.importLocalMappingsToBackend).toHaveBeenCalledWith(adapter, 'proj-1');
   });
 
   it('listMappingVersions maps to GET /mappings/:id/versions', async () => {
@@ -726,11 +750,11 @@ describe('HttpAdapter (CRUD)', () => {
   it('promoteDeployment maps to POST /mappings/:id/promote', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce({
       mappingId: 'm-1',
-      environmentDeployedAt: 'QA#2026-06-01T00:00:00.000Z',
-      environment: 'QA',
+      environmentDeployedAt: 'PREPROD#2026-06-01T00:00:00.000Z',
+      environment: 'PREPROD',
       sourceType: 'version',
       sourceNumber: 3,
-      configS3Key: 'deployments/m-1/QA/2026-06-01T00:00:00.000Z.json',
+      configS3Key: 'deployments/m-1/PREPROD/2026-06-01T00:00:00.000Z.json',
       configHash: 'abc',
       deployedAt: '2026-06-01T00:00:00.000Z',
       deployedBy: 'system',
@@ -741,7 +765,7 @@ describe('HttpAdapter (CRUD)', () => {
 
     await adapter.promoteDeployment('m-1', {
       fromEnvironment: 'DEV',
-      toEnvironment: 'QA',
+      toEnvironment: 'PREPROD',
     });
 
     expect(httpRequest).toHaveBeenCalledWith({
@@ -750,7 +774,7 @@ describe('HttpAdapter (CRUD)', () => {
       method: 'POST',
       body: {
         fromEnvironment: 'DEV',
-        toEnvironment: 'QA',
+        toEnvironment: 'PREPROD',
       },
     });
   });
@@ -1002,10 +1026,27 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('getDeploymentContext maps to GET /mappings/:id/deploy-context', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      mappingId: 'm-1',
+      mappingName: 'Map 1',
+      projectId: 'p-1',
+      projectName: 'Project 1',
+      environments: [],
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getDeploymentContext('m-1')).resolves.toMatchObject({ mappingId: 'm-1' });
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/mappings/m-1/deploy-context',
+      method: 'GET',
+    });
+  });
+
   it.each([
     ['listTemplates', (a: HttpAdapter) => a.listTemplates()],
     ['getTemplate', (a: HttpAdapter) => a.getTemplate('t-1')],
-    ['getDeploymentContext', (a: HttpAdapter) => a.getDeploymentContext('m-1')],
     ['deploy', (a: HttpAdapter) => a.deploy('m-1', 'DEV')],
     ['promote', (a: HttpAdapter) => a.promote('m-1', 'DEV', 'PREPROD')],
     ['rollback', (a: HttpAdapter) => a.rollback('m-1', 'DEV', 1)],

@@ -10,9 +10,10 @@ import {
   type APIGatewayProxyEvent,
   type APIGatewayProxyResult,
 } from '../shared/index.js';
-import { create as createDeployment } from '../../lib/persistence/deployments.js';
+import { create as createDeployment, listHistory as listDeploymentHistory } from '../../lib/persistence/deployments.js';
 import {
   create as createDeploymentOrchestration,
+  get as getDeploymentOrchestration,
   updateStatus as updateDeploymentOrchestrationStatus,
 } from '../../lib/persistence/deployment-orchestrations.js';
 import { getConfig as getRevisionConfig } from '../../lib/persistence/mapping-revisions.js';
@@ -25,6 +26,7 @@ import {
 } from './runtime-relay.js';
 import { executeRuntimeOperationWithRetry } from './orchestration-retry.js';
 import { getRuntimeApiClient } from './runtime-api-client.js';
+import type { DeploymentOrchestrationItem } from '../../lib/persistence/types.js';
 
 type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
 type DeploymentSourceType = 'revision' | 'version';
@@ -44,6 +46,11 @@ interface MappingMetadata {
 interface OrchestrationContext {
   readonly orchestrationId: string;
   readonly requestId: string;
+}
+
+interface ReplayResult {
+  readonly replayed: true;
+  readonly response: APIGatewayProxyResult;
 }
 
 function mapRelayStatusCodeToHttp(statusCode: number): number {
@@ -66,6 +73,131 @@ function getMappingsTableOrThrow(): string {
   }
 
   return table;
+}
+
+function parseIdempotencyKey(event: APIGatewayProxyEvent): string | null {
+  const headers = event.headers;
+  if (!headers) {
+    return null;
+  }
+
+  const key = headers['x-idempotency-key'] ?? headers['X-Idempotency-Key'];
+  if (typeof key !== 'string' || key.trim() === '') {
+    return null;
+  }
+
+  return key.trim();
+}
+
+function buildDeterministicOrchestrationId(input: {
+  mappingId: string;
+  environment: DeploymentEnvironment;
+  sourceType: DeploymentSourceType;
+  sourceNumber: number;
+  idempotencyKey: string;
+}): string {
+  return [
+    'deploy',
+    input.mappingId,
+    input.environment,
+    input.sourceType,
+    String(input.sourceNumber),
+    input.idempotencyKey,
+  ].join(':');
+}
+
+function isConditionalCheckFailed(error: unknown): boolean {
+  const typed = error as { name?: string; Code?: string } | null | undefined;
+  return typed?.name === 'ConditionalCheckFailedException' || typed?.Code === 'ConditionalCheckFailedException';
+}
+
+function mapErrorCodeToStatusCode(errorCode: string | undefined): number {
+  switch (errorCode) {
+    case ERROR_CODES.VALIDATION_ERROR:
+    case ERROR_CODES.REVISION_NOT_DEPLOYABLE_TO_ENV:
+      return 400;
+    case ERROR_CODES.SOURCE_NOT_FOUND:
+      return 404;
+    case ERROR_CODES.CONFLICT:
+      return 409;
+    case ERROR_CODES.PAYLOAD_TOO_LARGE:
+    case ERROR_CODES.DEPLOY_ARTIFACT_TOO_LARGE:
+      return 413;
+    case ERROR_CODES.SERVICE_UNAVAILABLE:
+      return 503;
+    case ERROR_CODES.TIMEOUT:
+      return 504;
+    default:
+      return 500;
+  }
+}
+
+async function buildReplayResponse(input: {
+  mappingId: string;
+  environment: DeploymentEnvironment;
+  sourceType: DeploymentSourceType;
+  sourceNumber: number;
+  orchestration: DeploymentOrchestrationItem;
+}): Promise<APIGatewayProxyResult> {
+  const status = input.orchestration.status;
+
+  if (status === 'succeeded') {
+    const history = await listDeploymentHistory(input.mappingId, input.environment, 25);
+    const matching = history.find(
+      (item) =>
+        item.sourceType === input.sourceType
+        && item.sourceNumber === input.sourceNumber
+        && item.artifactId === input.orchestration.artifactId,
+    );
+
+    if (matching) {
+      return jsonResponse(
+        200,
+        {
+          ...matching,
+          orchestrationId: input.orchestration.orchestrationId,
+          replayed: true,
+        },
+        input.orchestration.requestId,
+      );
+    }
+
+    return jsonResponse(
+      200,
+      {
+        orchestrationId: input.orchestration.orchestrationId,
+        status,
+        replayed: true,
+      },
+      input.orchestration.requestId,
+    );
+  }
+
+  if (status === 'failed' || status === 'timed_out') {
+    const errorCode = input.orchestration.lastErrorCode ?? ERROR_CODES.INTERNAL_ERROR;
+    return errorResponse(
+      errorCode as (typeof ERROR_CODES)[keyof typeof ERROR_CODES],
+      input.orchestration.lastErrorMessage ?? 'Previous idempotent deployment attempt failed.',
+      mapErrorCodeToStatusCode(input.orchestration.lastErrorCode),
+      errorCode === ERROR_CODES.TIMEOUT || errorCode === ERROR_CODES.SERVICE_UNAVAILABLE,
+      input.orchestration.requestId,
+      {
+        orchestrationId: input.orchestration.orchestrationId,
+        status,
+        replayed: true,
+      },
+    );
+  }
+
+  return jsonResponse(
+    202,
+    {
+      orchestrationId: input.orchestration.orchestrationId,
+      status,
+      replayed: true,
+    },
+    input.orchestration.requestId,
+  );
 }
 
 function isEnvironment(value: unknown): value is DeploymentEnvironment {
@@ -103,10 +235,24 @@ function isRevisionDeployDisallowed(environment: DeploymentEnvironment, sourceTy
 async function createOrchestrationContext(input: {
   mappingId: string;
   environment: DeploymentEnvironment;
+  sourceType: DeploymentSourceType;
+  sourceNumber: number;
   artifactId: string;
+  idempotencyKey?: string | null;
 }): Promise<OrchestrationContext> {
   const requestId = generateRequestId();
+  const orchestrationId = input.idempotencyKey
+    ? buildDeterministicOrchestrationId({
+        mappingId: input.mappingId,
+        environment: input.environment,
+        sourceType: input.sourceType,
+        sourceNumber: input.sourceNumber,
+        idempotencyKey: input.idempotencyKey,
+      })
+    : undefined;
+
   const orchestration = await createDeploymentOrchestration({
+    ...(orchestrationId ? { orchestrationId } : {}),
     mappingId: input.mappingId,
     operationType: 'deploy',
     targetEnvironment: input.environment,
@@ -129,7 +275,52 @@ async function createOrchestrationContext(input: {
   };
 }
 
+async function createOrchestrationOrReplay(input: {
+  mappingId: string;
+  environment: DeploymentEnvironment;
+  sourceType: DeploymentSourceType;
+  sourceNumber: number;
+  artifactId: string;
+  idempotencyKey?: string | null;
+}): Promise<OrchestrationContext | ReplayResult> {
+  try {
+    const context = await createOrchestrationContext(input);
+    return context;
+  } catch (error) {
+    if (!input.idempotencyKey || !isConditionalCheckFailed(error)) {
+      throw error;
+    }
+
+    const orchestrationId = buildDeterministicOrchestrationId({
+      mappingId: input.mappingId,
+      environment: input.environment,
+      sourceType: input.sourceType,
+      sourceNumber: input.sourceNumber,
+      idempotencyKey: input.idempotencyKey,
+    });
+
+    const existing = await getDeploymentOrchestration(orchestrationId);
+    if (!existing) {
+      throw error;
+    }
+
+    const response = await buildReplayResponse({
+      mappingId: input.mappingId,
+      environment: input.environment,
+      sourceType: input.sourceType,
+      sourceNumber: input.sourceNumber,
+      orchestration: existing,
+    });
+
+    return {
+      replayed: true,
+      response,
+    };
+  }
+}
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const idempotencyKey = parseIdempotencyKey(event);
   const mappingId = parsePathParam(event, 'mappingId') ?? parsePathParam(event, 'id');
   if (!mappingId) {
     return errorResponse(ERROR_CODES.VALIDATION_ERROR, 'Missing required path parameter: mappingId', 400, false);
@@ -203,11 +394,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         config,
       });
 
-      const orchestration = await createOrchestrationContext({
+      const orchestration = await createOrchestrationOrReplay({
+        sourceType: 'revision',
+        sourceNumber: request.sourceNumber,
         mappingId,
         environment: request.environment,
         artifactId: artifact.artifactId,
+        idempotencyKey,
       });
+
+      if ('replayed' in orchestration) {
+        return orchestration.response;
+      }
 
       const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
       if (!payloadCheck.ok) {
@@ -344,11 +542,18 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       config,
     });
 
-    const orchestration = await createOrchestrationContext({
+    const orchestration = await createOrchestrationOrReplay({
+      sourceType: 'version',
+      sourceNumber: version.version,
       mappingId,
       environment: request.environment,
       artifactId: artifact.artifactId,
+      idempotencyKey,
     });
+
+    if ('replayed' in orchestration) {
+      return orchestration.response;
+    }
 
     const payloadCheck = assertArtifactPayloadWithinLimit(artifact);
     if (!payloadCheck.ok) {

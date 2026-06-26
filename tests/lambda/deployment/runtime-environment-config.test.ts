@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  DeploymentEnvironmentConfigError,
   getRuntimeEnvironmentConfig,
   loadDeploymentEnvironmentSettingsOrThrow,
   parseDeploymentEnvironmentSettingsFromEnv,
@@ -13,10 +12,21 @@ import {
 } from '../../../src/lambda/deployment/runtime-api-client.js';
 
 describe('deployment environment configuration', () => {
-  it('parses settings JSON and enforces required env keys', () => {
+  it('parses settings JSON with SANDBOX support and partial runtime environment coverage', () => {
     const settings = parseDeploymentEnvironmentSettingsJson(
       JSON.stringify({
         deploymentEnvironments: [
+          {
+            key: 'SANDBOX',
+            runtimeApiBaseUrl: 'https://sandbox.runtime.example.com',
+            label: 'Sandbox',
+            deployApiPath: '/internal/deploy',
+            rollbackApiPath: '/internal/rollback',
+            previewApiPath: '/internal/preview',
+            statusApiPath: '/internal/status/{mappingId}',
+            requestTimeoutMs: 10000,
+            retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
+          },
           {
             key: 'DEV',
             runtimeApiBaseUrl: 'https://dev.runtime.example.com',
@@ -28,50 +38,28 @@ describe('deployment environment configuration', () => {
             requestTimeoutMs: 10000,
             retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
           },
-          {
-            key: 'PREPROD',
-            runtimeApiBaseUrl: 'https://preprod.runtime.example.com',
-            label: 'Preprod',
-            deployApiPath: '/internal/deploy',
-            rollbackApiPath: '/internal/rollback',
-            previewApiPath: '/internal/preview',
-            statusApiPath: '/internal/status/{mappingId}',
-            requestTimeoutMs: 10000,
-            retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
-          },
-          {
-            key: 'PROD',
-            runtimeApiBaseUrl: 'https://prod.runtime.example.com',
-            label: 'Prod',
-            deployApiPath: '/internal/deploy',
-            rollbackApiPath: '/internal/rollback',
-            previewApiPath: '/internal/preview',
-            statusApiPath: '/internal/status/{mappingId}',
-            requestTimeoutMs: 12000,
-            retryPolicy: { maxAttempts: 5, baseDelayMs: 500, maxDelayMs: 7000 },
-          },
         ],
-        promotionPolicy: {
-          sequence: ['DEV', 'PREPROD', 'PROD'],
-          allowSkip: false,
-        },
       }),
     );
 
     expect(settings.source).toBe('env-json');
-    expect(settings.deploymentEnvironments).toHaveLength(3);
-    expect(getRuntimeEnvironmentConfig(settings, 'PREPROD').runtimeApiBaseUrl).toBe(
-      'https://preprod.runtime.example.com',
+    expect(settings.deploymentEnvironments).toHaveLength(2);
+    expect(getRuntimeEnvironmentConfig(settings, 'SANDBOX').runtimeApiBaseUrl).toBe(
+      'https://sandbox.runtime.example.com',
     );
   });
 
-  it('throws deterministic error when env fallback missing one runtime base URL', () => {
-    expect(() =>
-      parseDeploymentEnvironmentSettingsFromEnv({
-        RUNTIME_API_BASE_URL_DEV: 'https://dev.runtime.example.com',
-        RUNTIME_API_BASE_URL_PREPROD: 'https://preprod.runtime.example.com',
-      }),
-    ).toThrowError(DeploymentEnvironmentConfigError);
+  it('parses env fallback when only a subset of runtime base URLs is configured', () => {
+    const settings = parseDeploymentEnvironmentSettingsFromEnv({
+      RUNTIME_API_BASE_URL_SANDBOX: 'https://sandbox.runtime.example.com',
+      RUNTIME_API_BASE_URL_DEV: 'https://dev.runtime.example.com',
+    });
+
+    expect(settings?.source).toBe('env-fallback');
+    expect(settings?.deploymentEnvironments).toHaveLength(2);
+    expect(getRuntimeEnvironmentConfig(settings!, 'DEV').runtimeApiBaseUrl).toBe(
+      'https://dev.runtime.example.com',
+    );
   });
 
   it('loads persisted settings provider before env fallback', async () => {
@@ -79,6 +67,17 @@ describe('deployment environment configuration', () => {
       loadSettings: vi.fn().mockResolvedValue({
         source: 'persisted-settings',
         deploymentEnvironments: [
+          {
+            key: 'SANDBOX',
+            label: 'Sandbox',
+            runtimeApiBaseUrl: 'https://persisted.sandbox.example.com',
+            deployApiPath: '/internal/deploy',
+            rollbackApiPath: '/internal/rollback',
+            previewApiPath: '/internal/preview',
+            statusApiPath: '/internal/status/{mappingId}',
+            requestTimeoutMs: 10000,
+            retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
+          },
           {
             key: 'DEV',
             label: 'Dev',
@@ -90,31 +89,9 @@ describe('deployment environment configuration', () => {
             requestTimeoutMs: 10000,
             retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
           },
-          {
-            key: 'PREPROD',
-            label: 'Preprod',
-            runtimeApiBaseUrl: 'https://persisted.preprod.example.com',
-            deployApiPath: '/internal/deploy',
-            rollbackApiPath: '/internal/rollback',
-            previewApiPath: '/internal/preview',
-            statusApiPath: '/internal/status/{mappingId}',
-            requestTimeoutMs: 10000,
-            retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
-          },
-          {
-            key: 'PROD',
-            label: 'Prod',
-            runtimeApiBaseUrl: 'https://persisted.prod.example.com',
-            deployApiPath: '/internal/deploy',
-            rollbackApiPath: '/internal/rollback',
-            previewApiPath: '/internal/preview',
-            statusApiPath: '/internal/status/{mappingId}',
-            requestTimeoutMs: 10000,
-            retryPolicy: { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 5000 },
-          },
         ],
         promotionPolicy: {
-          sequence: ['DEV', 'PREPROD', 'PROD'],
+          sequence: ['SANDBOX', 'DEV', 'PREPROD', 'PROD'],
           allowSkip: false,
         },
       }),
@@ -123,9 +100,8 @@ describe('deployment environment configuration', () => {
     const settings = await loadDeploymentEnvironmentSettingsOrThrow({
       provider,
       env: {
+        RUNTIME_API_BASE_URL_SANDBOX: 'https://env.sandbox.example.com',
         RUNTIME_API_BASE_URL_DEV: 'https://env.dev.example.com',
-        RUNTIME_API_BASE_URL_PREPROD: 'https://env.preprod.example.com',
-        RUNTIME_API_BASE_URL_PROD: 'https://env.prod.example.com',
       },
     });
 

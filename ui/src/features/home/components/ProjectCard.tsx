@@ -89,8 +89,9 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
   const schemaLabel = schemaCount === 1 ? '1 schema' : `${schemaCount} schemas`;
 
   const allNotDeployed =
+    project.sandboxDeploy === 'not-deployed' &&
     project.devDeploy === 'not-deployed' &&
-    project.qaDeploy === 'not-deployed' &&
+    project.preprodDeploy === 'not-deployed' &&
     project.prodDeploy === 'not-deployed';
 
   const hasErrors = project.worstStatus === 'has-errors';
@@ -157,10 +158,12 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
           </button>
         ) : (
           <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-500">SANDBOX</span>
+            <StatusBadge status={project.sandboxDeploy} />
             <span className="text-[10px] text-slate-500">DEV</span>
             <StatusBadge status={project.devDeploy} />
-            <span className="text-[10px] text-slate-500">QA</span>
-            <StatusBadge status={project.qaDeploy} />
+            <span className="text-[10px] text-slate-500">PREPROD</span>
+            <StatusBadge status={project.preprodDeploy} />
             <span className="text-[10px] text-slate-500">PROD</span>
             <StatusBadge status={project.prodDeploy} />
           </div>

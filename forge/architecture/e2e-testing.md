@@ -165,3 +165,20 @@ Future evolution candidates:
 - Add optional cross-browser projects when parity scope requires it
 
 Visual regression remains deferred until design-system surfaces stabilize.
+
+---
+
+## FS-100 deployment/runtime architecture verification addendum
+
+FS-100 adds architecture-level E2E/contract verification expectations for deployment/runtime surfaces beyond baseline CRUD parity.
+
+Verification emphasis for this slice:
+
+- Deployment page bootstrap contract is aggregate `GET /mappings/:mappingId/deploy-context`.
+- Deployment UX reflects canonical four-stage ordering (`SANDBOX -> DEV -> PREPROD -> PROD`) with SANDBOX-first default behavior.
+- Deployment failure rendering includes normalized backend envelope behavior with request-lineage visibility (summary + expandable technical details).
+- Compatibility boundary is preserved: historical `QA` data may be normalized in read-model displays, but canonical surfaced environment labeling is `PREPROD`.
+
+Scope note:
+
+- These FS-100 checks are architecture/contract assertions and can be satisfied by a mix of UI integration tests and backend contract tests when full browser E2E wiring is not yet expanded for deployment flows.

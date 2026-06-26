@@ -723,6 +723,7 @@ export interface DeploymentOrchestrationItem {
 }
 
 export interface CreateDeploymentOrchestrationInput {
+  readonly orchestrationId?: string;
   readonly mappingId: string;
   readonly operationType: DeploymentOrchestrationOperationType;
   readonly targetEnvironment: DeploymentEnvironment;
@@ -780,6 +781,7 @@ export interface UpsertActiveSnapshotInput {
   readonly activatedBy: string;
   readonly sourceType: DeploymentSourceType;
   readonly sourceNumber: number;
+  readonly expectedCurrentSnapshotId?: string | null;
   readonly schemaBundleRef?: string;
 }
 

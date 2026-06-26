@@ -77,7 +77,7 @@ describe('httpRequest', () => {
     );
 
     const [, requestInit] = fetchMock.mock.calls[0];
-    expect((requestInit as RequestInit).headers).toBeUndefined();
+    expect((requestInit as globalThis.RequestInit).headers).toBeUndefined();
   });
 
   it('successful GET parses plain object JSON response', async () => {
@@ -162,7 +162,7 @@ describe('httpRequest', () => {
     });
 
     const [, requestInit] = fetchMock.mock.calls[0];
-    expect((requestInit as RequestInit).headers).toBeUndefined();
+    expect((requestInit as globalThis.RequestInit).headers).toBeUndefined();
   });
 
   it('success envelope with success=false throws extracted code/message', async () => {
@@ -324,6 +324,45 @@ describe('httpRequest', () => {
     });
     expect(error.message).toContain('CORS');
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('parses backend error envelope and preserves requestId/details for UI normalization', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: 'RESOURCE_NOT_FOUND',
+              message: 'Deploy context missing',
+              statusCode: 404,
+              retryable: false,
+              requestId: 'req-deploy-context-1',
+              details: {
+                route: '/mappings/map-1/deploy-context',
+              },
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    );
+
+    await expect(
+      httpRequest({
+        baseUrl: 'http://localhost:3001/api',
+        path: '/mappings/map-1/deploy-context',
+        method: 'GET',
+      }),
+    ).rejects.toMatchObject<HttpClientError>({
+      code: 'RESOURCE_NOT_FOUND',
+      statusCode: 404,
+      retryable: false,
+      requestId: 'req-deploy-context-1',
+      details: {
+        route: '/mappings/map-1/deploy-context',
+      },
+    });
   });
 
   it('network failure on POST throws immediately with no retry', async () => {

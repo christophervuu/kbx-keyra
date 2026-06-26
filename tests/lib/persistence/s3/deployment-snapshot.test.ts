@@ -167,4 +167,54 @@ describe('persistence s3/deployment-snapshot', () => {
       name: 'RuntimeSnapshotHashMismatchError',
     });
   });
+
+  it('verifyRuntimeSnapshotReadHash reads and validates mappingConfig hash', async () => {
+    const config = makeConfig();
+    const payload = {
+      mappingConfig: config,
+    };
+
+    s3SendMock.mockResolvedValueOnce({
+      Body: {
+        transformToString: vi.fn().mockResolvedValue(JSON.stringify(payload)),
+      },
+    });
+
+    const { computeConfigHash } = await import('../../../../src/lib/persistence/hash.js');
+    const expectedHash = await computeConfigHash(config);
+
+    const mod = await importModule();
+    const result = await mod.verifyRuntimeSnapshotReadHash({
+      mappingId: 'mapping-1',
+      snapshotId: 'snapshot-1',
+      expectedContentHash: expectedHash,
+    });
+
+    expect(result.key).toBe('runtime/snapshots/mapping-1/snapshot-1.json');
+    expect(result.payload).toEqual(payload);
+  });
+
+  it('verifyRuntimeSnapshotReadHash throws RuntimeSnapshotUnreadableError when hash mismatches', async () => {
+    s3SendMock.mockResolvedValueOnce({
+      Body: {
+        transformToString: vi.fn().mockResolvedValue(
+          JSON.stringify({
+            mappingConfig: makeConfig(),
+          }),
+        ),
+      },
+    });
+
+    const mod = await importModule();
+
+    await expect(
+      mod.verifyRuntimeSnapshotReadHash({
+        mappingId: 'mapping-1',
+        snapshotId: 'snapshot-1',
+        expectedContentHash: 'different-hash',
+      }),
+    ).rejects.toMatchObject({
+      name: 'RuntimeSnapshotUnreadableError',
+    });
+  });
 });

@@ -92,6 +92,7 @@ src/
       deploy-mapping.ts POST /mappings/:mappingId/deploy handler (revision/version deploy with environment policy enforcement)
       promote-deployment.ts POST /mappings/:mappingId/promote handler (version-backed promotion only)
       rollback-deployment.ts POST /mappings/:mappingId/rollback handler (history rollback with rollbackOf linkage)
+      get-deployment-context.ts GET /mappings/:mappingId/deploy-context handler (aggregate deployment bootstrap payload for mapping/project/environment status)
       runtime-deploy.ts Internal runtime POST /internal/deploy handler (FS-082 T-04) — validates runtime deploy payload, persists immutable runtime snapshot, updates active pointer, appends history
       runtime-rollback.ts Internal runtime POST /internal/rollback handler (FS-082 T-04) — validates snapshot presence in runtime history, repoints active pointer, appends rollback event
       list-deployments.ts GET /mappings/:mappingId/deployments handler (optional environment filter)
@@ -99,6 +100,7 @@ src/
       runtime-relay.ts Shared runtime artifact relay module for control-plane deploy/promote (artifact identity/hash construction, payload-size guard, runtime relay client abstraction) (FS-081 T-03)
       environment-config.ts Runtime environment configuration loader/validator (persisted settings canonical + env fallback), including endpoint/timeouts/retry policy schema (FS-083 T-02)
       runtime-api-client.ts Typed runtime internal API client contracts (deploy/rollback/preview/status), requestId propagation, timeout handling, and error envelope normalization (FS-083 T-02)
+      runtime-invoke-client.ts Direct runtime execute Lambda invoke client for server-side preview (environment-to-function ARN resolution, canonical response mapping, normalized invoke failures) (FS-100 T-07)
       orchestration-retry.ts Shared control-plane orchestration retry/reconciliation helper (retry/backoff/jitter, timeout status polling, and terminal status mapping) (FS-083 T-05)
       index.ts          Deployment lambda barrel exports
     runtime/          Runtime execution/status lambdas (FS-082 T-05)
@@ -224,14 +226,15 @@ ui/
           index.ts          Barrel export (DeploymentPage, useDeploymentPage, types)
           components/       Deployment UI components
             index.ts                 Components barrel
-            DeploymentPage.tsx       Full deployment page: environment selector, revision/version sections, deploy action, success/error feedback (FS-064 T-05)
-            DeploymentPage.test.tsx  Component tests: 15 tests covering DEV/QA/PROD behavior, deploy action, success/error banners, feedback dismissal (FS-064 T-05)
-            EnvironmentSelector.tsx  Tab-style DEV/QA/PROD selector with keyboard navigation (role=tablist, aria-selected) (FS-064 T-05)
-            RevisionDeploySection.tsx  Revision list with deploy buttons; buttons disabled for QA/PROD environments (FS-064 T-05)
-            VersionDeploySection.tsx   Version list with deploy buttons; buttons enabled for all environments (FS-064 T-05)
+            DeploymentPage.tsx       Canonical four-stage deployment pipeline UI (SANDBOX→DEV→PREPROD→PROD): candidate/readiness/action/history panels, promote/deploy/rollback confirmations, and normalized technical error details expansion (FS-100 T-08)
+            DeploymentPage.test.tsx  Component tests for four-stage ordering, stage-specific primary actions, readiness gating, combined-history metadata, and normalized backend error technical-details + request-id presentation (FS-100 T-08)
+            EnvironmentSelector.tsx  Legacy tab-style environment selector component (retained for compatibility during FS-100 deployment UX migration)
+            RevisionDeploySection.tsx  Legacy revision list deploy section (retained for compatibility during FS-100 deployment UX migration)
+            VersionDeploySection.tsx   Legacy version list deploy section (retained for compatibility during FS-100 deployment UX migration)
           hooks/            Deployment hooks
             index.ts                 Hooks barrel
-            use-deployment-page.ts   Data-fetching hook: loads revisions, versions, currentDeployments; drives deploy action with success/error feedback (FS-064 T-05)
+            use-deployment-page.ts   Data-fetching hook: SANDBOX-first deploy-context bootstrap, versions/current/history load, and normalized mutation error technical-details mapping (FS-100 T-08)
+            use-deployment-page.test.tsx Hook tests for SANDBOX-default bootstrap, deploy-context structured error details, and deploy mutation technical-details mapping (FS-100 T-08)
         schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
         index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
         types.ts          Feature-specific types (SchemaTreeViewProps, SchemaParseError, parser fn types, SchemaLibraryItem, SchemaLibraryFilters, SchemaLibrarySort, SyncStatus, DisplayFormat — FS-016 T-01)
@@ -733,10 +736,12 @@ ui/
       use-optimistic-mutation.test.ts Unit tests: success confirmation, rollback + error surfacing, latest-only rollback under rapid overlapping mutations (FS-059 T-06)
     lib/
       api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter + deprecated HybridAdapter + AI API client helpers
-                          types.ts              ApiAdapter contract
-                          local-storage-adapter.ts  Phase 0 localStorage implementation
-                          http-adapter.ts       FS-055/FS-065 HTTP adapter: extends LocalStorageAdapter; routes canonical backend CRUD + retained AI methods + schema query through httpRequest; deferred non-core methods throw FEATURE_NOT_ENABLED
-                          http-adapter.test.ts  FS-055 unit tests for HttpAdapter CRUD endpoint mapping, void handling, and error propagation
+                          types.ts              ApiAdapter contract (includes explicit mapping import summary/issue types)
+                          local-storage-adapter.ts  Phase 0 localStorage implementation + explicit local-mapping import entrypoint used in backend mode
+                          local-mapping-import.ts  Explicit backend-mode import/migration utility for browser-local mappings (no silent startup migration); normalizes legacy records and returns imported/skipped/failed summary with issues
+                          local-mapping-import.test.ts  Unit tests for explicit mapping import utility: successful import + idempotent rerun + invalid legacy failure reporting
+                          http-adapter.ts       FS-055/FS-065 HTTP adapter: extends LocalStorageAdapter; routes canonical backend CRUD + retained AI methods + schema query through httpRequest; deferred non-core methods throw FEATURE_NOT_ENABLED; backend mode exposes explicit local-mapping import trigger
+                          http-adapter.test.ts  FS-055 unit tests for HttpAdapter CRUD endpoint mapping, void handling, and error propagation (including explicit local import delegation)
                           errors.ts             FS-055/FS-065 API error types including FeatureNotEnabledError (`code: FEATURE_NOT_ENABLED`, `retryable: false`) with deprecated compatibility alias
                           ai-api-client.ts      FS-041/FS-042 legacy HTTP client helper functions for AI endpoints; retained for deprecated HybridAdapter bridge only during one-cycle migration freeze
                           hybrid-adapter.ts     Deprecated retained adapter: extends LocalStorageAdapter and routes explain/suggest/autoMapSection through ai-api-client; dev-only warning on instantiation; not bootstrap-selected
@@ -866,7 +871,10 @@ tests/
       preview-mapping.test.ts Server preview handler tests (runtime environment routing, local active-artifact execution, provenance metadata, not-deployed behavior) (FS-081 T-05)
     deployment/       Deployment lambda handler tests (FS-064 T-02)
       deployment-handlers.test.ts Unit tests for deploy/promote/rollback/list/current handlers and policy/error behavior
+      fixtures/
+        fs100-ae12-runtime-lifecycle.ts Deterministic AE-12 lifecycle fixture (mapping versions, payload, expected outputs)
       runtime-environment-config.test.ts Unit tests for deployment environment config parsing/validation and runtime API client contract/error normalization (FS-083 T-02)
+      runtime-invoke-client.test.ts Unit tests for direct runtime execute Lambda invoke preview contract (invoke payload, canonical metadata mapping, missing env ARN config, runtime not-deployed envelope passthrough) (FS-100 T-07)
       orchestration-retry.test.ts Unit tests for retry classifier/backoff behavior and timeout reconciliation via runtime status polling (FS-083 T-05)
     runtime/          Runtime lambda handler tests (FS-082 T-05)
       runtime-handlers.test.ts Unit tests for /internal/execute and /internal/health|status/{mappingId} behavior/contracts
@@ -895,7 +903,9 @@ tests/
           explain-rule.json Prompt fixture for explain-rule pipeline
           nl-to-rule.json   Prompt fixture for nl-to-rule pipeline
           dsl-reference.md  DSL reference fixture content
-    schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
+  infrastructure/     Infrastructure template contract tests
+    runtime-bootstrap-template.test.ts Runtime bootstrap SAM template assertions for SANDBOX support and least-privilege runtime role boundaries (FS-100 T-05)
+  schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
       types.test.ts    Type contract tests and inline threshold env parsing tests
       retriever.test.ts Runtime schema retriever mode parsing/routing/shadow non-fatal behavior tests (FS-091 T-01)
       retrieval-parity.test.ts Unit tests for parity metrics and FS-091 Jaccard/NDCG gate evaluation
@@ -925,11 +935,12 @@ tests/
       schema-nodes.test.ts SchemaNodes batch chunking/retry, partition query, contains-filter, and delete-by-schema tests
       mapping-revisions.test.ts MappingRevisions save/no-op/list/get/getConfig/prune behavior tests with mocked Dynamo+S3 clients
       mapping-versions.test.ts MappingVersions milestone create/list/get tests with mocked Dynamo client
-      deployments.test.ts Deployments persistence tests (create/getCurrent/getCurrentAll/listHistory) with mocked Dynamo+S3 snapshot helper
+      deployments.test.ts Deployments persistence tests (create/getCurrent/getCurrentAll/listHistory + runtime active-pointer conditional update semantics) with mocked Dynamo+S3 snapshot helper
+      deployment-orchestrations.test.ts Deployment orchestrations persistence tests (create + explicit orchestrationId idempotency condition)
       s3/               Persistence S3 helper tests
         schema-content.test.ts Schema content helper tests (put/get/getOriginal/delete + NoSuchKey handling)
         mapping-config.test.ts Mapping config helper tests (put/get/delete + NoSuchKey handling)
-        deployment-snapshot.test.ts Deployment snapshot helper tests (put + returned key)
+        deployment-snapshot.test.ts Deployment snapshot helper tests (put + runtime put idempotency/hash mismatch + read/hash verification)
     deployment/       Deployment shared utility tests (FS-064 T-03)
       staleness.test.ts Staleness computation tests (revision/version current+stale, not-deployed, latestVersion edge case)
   scripts/            Repository script/config policy tests

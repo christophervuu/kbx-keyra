@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalStorageAdapter } from '@/lib/api';
+import { HttpAdapter } from '@/lib/api/http-adapter';
 import { executeMapping } from '@/lib/engine';
-import type { CreateProjectInput, MappingConfig, MappingVersionEntry, SchemaRef } from '@/lib/types';
+import type { CreateProjectInput, MappingConfig, MappingVersionEntry, RuntimeEnvironment, SchemaRef } from '@/lib/types';
 
 const SOURCE_SCHEMA_REF: SchemaRef = {
   schemaId: 'source-schema',
@@ -911,6 +912,76 @@ describe('LocalStorageAdapter', () => {
     expect(limited[0].id).toBe('2');
   });
 
+  it('imports local mappings explicitly in backend mode and returns summary', async () => {
+    const storage = createStorageMock();
+    vi.stubGlobal('localStorage', storage);
+
+    storage.setItem('keyra:mappings', JSON.stringify([
+      {
+        metadata: {
+          mappingId: 'local-import-1',
+          projectId: 'project-1',
+          name: 'Imported Mapping',
+        },
+        config: {
+          id: 'local-import-1',
+          projectId: 'project-1',
+          name: 'Imported Mapping',
+          version: 4,
+          engineVersion: '2.0.0',
+          config: {},
+          rules: [
+            { target: 'A', type: 'string', expression: 'source("a")' },
+          ],
+        },
+      },
+    ]));
+
+    const adapter = new HttpAdapter('http://localhost:3001/api');
+
+    const createMappingSpy = vi.spyOn(adapter, 'createMapping').mockResolvedValue({
+      mappingId: 'remote-import-1',
+      projectId: 'project-1',
+      name: 'Imported Mapping',
+      version: 1,
+      status: 'draft',
+      ruleCount: 1,
+      coverage: 0,
+      updatedAt: '2026-06-25T00:00:00.000Z',
+    });
+
+    vi.spyOn(adapter, 'getMapping')
+      .mockRejectedValueOnce({ code: 'NOT_FOUND', statusCode: 404, message: 'missing' })
+      .mockRejectedValueOnce({ code: 'NOT_FOUND', statusCode: 404, message: 'missing' })
+      .mockResolvedValueOnce({
+        id: 'remote-import-1',
+        projectId: 'project-1',
+        name: 'Imported Mapping',
+        version: 1,
+        engineVersion: '2.0.0',
+        config: {},
+        rules: [],
+      });
+
+    vi.spyOn(adapter, 'saveMapping').mockResolvedValue({ revision: 2, noChange: false });
+    vi.spyOn(adapter, 'listVersions').mockResolvedValue([]);
+    vi.spyOn(adapter, 'createVersion').mockResolvedValue({
+      version: 1,
+      revisionNumber: 2,
+      createdAt: '2026-06-25T00:00:00.000Z',
+      createdBy: 'system',
+    });
+
+    const summary = await adapter.importLocalMappings('project-1');
+
+    expect(summary).toEqual({ imported: 1, skipped: 0, failed: 0, issues: [] });
+    expect(createMappingSpy).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      name: 'Imported Mapping',
+      rules: [expect.objectContaining({ expression: 'source("a")' })],
+    }));
+  });
+
   it('saveMappingVersion stores an entry retrievable by getMappingVersion', async () => {
     const adapter = new LocalStorageAdapter();
     const entry = makeMappingVersionEntry('mapping-1', 1);
@@ -1180,11 +1251,11 @@ describe('LocalStorageAdapter', () => {
 
     await expect(
       adapter.deployMapping(created.mappingId, {
-        environment: 'QA',
+        environment: 'QA' as unknown as RuntimeEnvironment,
         sourceType: 'revision',
         sourceNumber: 1,
       }),
-    ).rejects.toMatchObject({ code: 'REVISION_NOT_DEPLOYABLE_TO_ENV' });
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
 
     const deployed = await adapter.deployMapping(created.mappingId, {
       environment: 'DEV',
@@ -1231,7 +1302,19 @@ describe('LocalStorageAdapter', () => {
       await expect(
         adapter.promoteDeployment(created.mappingId, {
           fromEnvironment: 'DEV',
-          toEnvironment: 'QA',
+          toEnvironment: 'QA' as unknown as RuntimeEnvironment,
+        }),
+      ).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid deployment environment. Expected DEV|PREPROD|PROD.',
+        statusCode: 400,
+        retryable: false,
+      });
+
+      await expect(
+        adapter.promoteDeployment(created.mappingId, {
+          fromEnvironment: 'DEV',
+          toEnvironment: 'PREPROD',
         }),
       ).rejects.toMatchObject({
         code: 'PROMOTION_REQUIRES_VERSION',
@@ -1249,7 +1332,7 @@ describe('LocalStorageAdapter', () => {
 
       const promoted = await adapter.promoteDeployment(created.mappingId, {
         fromEnvironment: 'DEV',
-        toEnvironment: 'QA',
+        toEnvironment: 'PREPROD',
       });
 
       expect(promoted.sourceType).toBe('version');

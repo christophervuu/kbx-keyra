@@ -26,7 +26,7 @@ import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
  */
 function toDeployStatus(
   deployments: CurrentDeployments | null,
-  env: 'DEV' | 'QA' | 'PROD',
+  env: 'DEV' | 'PREPROD' | 'PROD',
 ): DeployStatus {
   const summary = deployments?.[env];
   if (!summary) return 'not-deployed';
@@ -81,8 +81,9 @@ function buildMappingRowData(
     ruleCount: mapping.ruleCount,
     coverage: mapping.coverage,
     status: mapping.status,
+    sandboxDeploy: toDeployStatus(deployments, 'DEV'),
     devDeploy: toDeployStatus(deployments, 'DEV'),
-    qaDeploy: toDeployStatus(deployments, 'QA'),
+    preprodDeploy: toDeployStatus(deployments, 'PREPROD'),
     prodDeploy: toDeployStatus(deployments, 'PROD'),
     updatedAt: mapping.updatedAt,
   };

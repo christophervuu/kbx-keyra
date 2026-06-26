@@ -1,28 +1,46 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeploymentPage } from './DeploymentPage';
 
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
+import { HttpClientError } from '@/lib/api/http-client';
 import type { CurrentDeployments, DeploymentRecord } from '@/lib/api/types';
-import type { MappingRevision, MappingVersion } from '@/lib/types';
+import type { MappingVersion } from '@/lib/types';
+import type {
+  ActivityEntry,
+  CdmBulkSyncResult,
+  CreateProjectValueTableInput,
+  CreateProjectValueTableRevisionInput,
+  DuplicateProjectValueTableInput,
+  GitHubFile,
+  LinkCdmSchemaInput,
+  LinkPublishedSchemaInput,
+  ProjectValueTable,
+  ProjectValueTableRevision,
+  PublishSchemaInput,
+  ResolveProjectValueTableReferenceInput,
+  ResolveProjectValueTableReferenceResult,
+  SchemaMetadata,
+  SchemaSearchResult,
+  SchemaSyncResult,
+  ServerPreviewInput,
+  ServerPreviewResult,
+  ValueTableDiffPage,
+  ValueTableListOptions,
+  ValueTableUsageEntry,
+} from '@/lib/types';
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-const REVISIONS: MappingRevision[] = [
-  { revision: 3, savedAt: '2026-01-03T00:00:00Z', savedBy: 'alice', ruleCount: 6 },
-  { revision: 2, savedAt: '2026-01-02T00:00:00Z', savedBy: 'alice', ruleCount: 4 },
-  { revision: 1, savedAt: '2026-01-01T00:00:00Z', savedBy: 'alice', ruleCount: 2 },
-];
+function unimplementedAsync<T>() {
+  return vi.fn<(...args: unknown[]) => Promise<T>>().mockRejectedValue(new Error('not implemented in test'));
+}
 
 const VERSIONS: MappingVersion[] = [
-  { version: 2, revisionNumber: 3, createdAt: '2026-01-03T00:00:00Z', createdBy: 'alice' },
-  { version: 1, revisionNumber: 2, createdAt: '2026-01-02T00:00:00Z', createdBy: 'alice' },
+  { version: 4, revisionNumber: 11, createdAt: '2026-01-04T10:00:00Z', createdBy: 'alice' },
+  { version: 3, revisionNumber: 10, createdAt: '2026-01-03T10:00:00Z', createdBy: 'alice' },
 ];
 
 const CURRENT_DEPLOYMENTS: CurrentDeployments = {
@@ -31,32 +49,101 @@ const CURRENT_DEPLOYMENTS: CurrentDeployments = {
     deployment: {
       mappingId: 'map-1',
       environment: 'DEV',
-      deployedAt: '2026-01-03T00:00:00Z',
+      deployedAt: '2026-01-04T12:00:00Z',
       sourceType: 'version',
-      sourceNumber: 2,
-      artifactId: 'artifact-dev-2',
-      artifactHash: 'hash-dev-2-abcdef',
-      configHash: 'abc',
-      configS3Key: 's3://bucket/map-1/v2.json',
+      sourceNumber: 4,
+      artifactId: 'artifact-dev-4',
+      artifactHash: 'hash-dev-4-1234567890',
+      configHash: 'cfg-dev',
+      configS3Key: 's3://runtime/dev/4.json',
     },
     status: 'current',
   },
-  PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' },
-  PROD: { environment: 'PROD', deployment: null, status: 'not-deployed' },
+  PREPROD: {
+    environment: 'PREPROD',
+    deployment: {
+      mappingId: 'map-1',
+      environment: 'PREPROD',
+      deployedAt: '2026-01-03T12:00:00Z',
+      sourceType: 'version',
+      sourceNumber: 3,
+      artifactId: 'artifact-preprod-3',
+      artifactHash: 'hash-preprod-3-1234567890',
+      configHash: 'cfg-preprod',
+      configS3Key: 's3://runtime/preprod/3.json',
+    },
+    status: 'stale',
+  },
+  PROD: {
+    environment: 'PROD',
+    deployment: null,
+    status: 'not-deployed',
+  },
+  QA: {
+    environment: 'QA',
+    deployment: null,
+    status: 'not-deployed',
+  },
 };
 
+const HISTORY: DeploymentRecord[] = [
+  {
+    mappingId: 'map-1',
+    environmentDeployedAt: 'DEV#2026-01-04T12:00:00Z',
+    environment: 'DEV',
+    sourceType: 'version',
+    sourceNumber: 4,
+    artifactId: 'artifact-dev-4',
+    artifactHash: 'hash-dev-4-1234567890',
+    configS3Key: 's3://runtime/dev/4.json',
+    configHash: 'cfg-dev',
+    deployedAt: '2026-01-04T12:00:00Z',
+    deployedBy: 'alice',
+  },
+  {
+    mappingId: 'map-1',
+    environmentDeployedAt: 'DEV#2026-01-03T12:00:00Z',
+    environment: 'DEV',
+    sourceType: 'version',
+    sourceNumber: 3,
+    artifactId: 'artifact-dev-3',
+    artifactHash: 'hash-dev-3-1234567890',
+    configS3Key: 's3://runtime/dev/3.json',
+    configHash: 'cfg-dev-3',
+    deployedAt: '2026-01-03T12:00:00Z',
+    deployedBy: 'alice',
+  },
+  {
+    mappingId: 'map-1',
+    environmentDeployedAt: 'PREPROD#2026-01-03T12:00:00Z',
+    environment: 'PREPROD',
+    sourceType: 'version',
+    sourceNumber: 3,
+    artifactId: 'artifact-preprod-3',
+    artifactHash: 'hash-preprod-3-1234567890',
+    configS3Key: 's3://runtime/preprod/3.json',
+    configHash: 'cfg-preprod',
+    deployedAt: '2026-01-03T12:00:00Z',
+    deployedBy: 'alice',
+    promotedFrom: 'DEV',
+  },
+];
+
 const DEPLOY_RECORD: DeploymentRecord = {
-  mappingId: 'map-1',
-  environmentDeployedAt: '2026-01-03T01:00:00Z',
-  environment: 'DEV',
-  sourceType: 'revision',
-  sourceNumber: 3,
-  artifactId: 'artifact-dev-3',
-  artifactHash: 'hash-dev-3-fedcba',
-  configS3Key: 's3://bucket/map-1/rev3.json',
-  configHash: 'def',
-  deployedAt: '2026-01-03T01:00:00Z',
-  deployedBy: 'alice',
+  ...HISTORY[0],
+  orchestrationId: 'orc-deploy-1',
+};
+
+const PROMOTE_RECORD: DeploymentRecord = {
+  ...HISTORY[2],
+  orchestrationId: 'orc-promote-1',
+};
+
+const ROLLBACK_RECORD: DeploymentRecord = {
+  ...HISTORY[1],
+  environmentDeployedAt: 'DEV#2026-01-05T12:00:00Z',
+  rollbackOf: HISTORY[0].environmentDeployedAt,
+  orchestrationId: 'orc-rollback-1',
 };
 
 function createDeployBlockedError(issues: unknown[]): Error {
@@ -65,261 +152,327 @@ function createDeployBlockedError(issues: unknown[]): Error {
     statusCode?: number;
     retryable?: boolean;
     details?: unknown;
+    requestId?: string;
   };
   error.code = 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE';
   error.statusCode = 409;
   error.retryable = false;
+  error.requestId = 'req-deploy-blocked';
   error.details = { issues };
   return error;
 }
 
-// ---------------------------------------------------------------------------
-// Mock adapter factory
-// ---------------------------------------------------------------------------
-
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
-  return {
-    listRevisions: vi.fn().mockResolvedValue(REVISIONS),
+  const adapter: ApiAdapter = {
+    getDeploymentContext: vi.fn().mockResolvedValue({
+      mappingId: 'map-1',
+      mappingName: 'Test Mapping',
+      projectId: 'proj-1',
+      projectName: 'Test Project',
+      environments: [
+        { environment: 'DEV', status: 'deployed', deployedVersion: 4, deployedAt: '2026-01-04T12:00:00Z' },
+        { environment: 'PREPROD', status: 'stale', deployedVersion: 3, deployedAt: '2026-01-03T12:00:00Z' },
+        { environment: 'PROD', status: 'not-deployed' },
+      ],
+    }),
     listVersions: vi.fn().mockResolvedValue(VERSIONS),
+    listRevisions: vi.fn().mockResolvedValue([]),
     getCurrentDeployments: vi.fn().mockResolvedValue(CURRENT_DEPLOYMENTS),
+    listDeployments: vi.fn().mockResolvedValue(HISTORY),
     deployMapping: vi.fn().mockResolvedValue(DEPLOY_RECORD),
-    // stubs for the rest
-    listSchemas: vi.fn(),
-    getSchema: vi.fn(),
-    createSchema: vi.fn(),
-    updateSchema: vi.fn(),
-    deleteSchema: vi.fn(),
-    listMappings: vi.fn(),
-    getMapping: vi.fn(),
-    createMapping: vi.fn(),
-    updateMapping: vi.fn(),
-    saveMapping: vi.fn(),
-    deleteMapping: vi.fn(),
-    duplicateMapping: vi.fn(),
-    listMappingVersions: vi.fn(),
-    getMappingVersion: vi.fn(),
-    getVersion: vi.fn(),
-    getMappingRevision: vi.fn(),
-    listMappingRevisions: vi.fn(),
-    getRevision: vi.fn(),
-    createMappingVersion: vi.fn(),
-    createVersion: vi.fn(),
-    saveMappingVersion: vi.fn(),
-    listProjects: vi.fn(),
-    getProject: vi.fn(),
-    createProject: vi.fn(),
-    updateProject: vi.fn(),
-    deleteProject: vi.fn(),
-    listTemplates: vi.fn(),
-    getTemplate: vi.fn(),
-    getDeploymentContext: vi.fn(),
-    deploy: vi.fn(),
-    promote: vi.fn(),
-    rollback: vi.fn(),
-    getDeploymentDiff: vi.fn(),
-    promoteDeployment: vi.fn(),
-    rollbackDeployment: vi.fn(),
-    listDeployments: vi.fn(),
-    listCdmSchemas: vi.fn(),
-    linkCdmSchema: vi.fn(),
-    syncCdmSchema: vi.fn(),
-    listPublishedSchemas: vi.fn(),
-    publishSchemaToGitHub: vi.fn(),
-    linkPublishedSchema: vi.fn(),
-    autoMap: vi.fn(),
-    autoMapSection: vi.fn(),
-    suggestExpression: vi.fn(),
-    explainRule: vi.fn(),
-    smartFix: vi.fn(),
-    validateMappings: vi.fn(),
-    querySchemaNodes: vi.fn(),
-    listActivity: vi.fn(),
-    previewOnServer: vi.fn(),
+    promoteDeployment: vi.fn().mockResolvedValue(PROMOTE_RECORD),
+    rollbackDeployment: vi.fn().mockResolvedValue(ROLLBACK_RECORD),
+
+    listSchemas: unimplementedAsync(),
+    getSchema: unimplementedAsync(),
+    createSchema: unimplementedAsync(),
+    updateSchema: unimplementedAsync(),
+    markSchemaReviewed: unimplementedAsync(),
+    addSchemaSample: unimplementedAsync(),
+    deleteSchemaSample: unimplementedAsync(),
+    getSchemaSamplePayload: unimplementedAsync(),
+    deleteSchema: unimplementedAsync(),
+    listMappings: unimplementedAsync(),
+    getMapping: unimplementedAsync(),
+    createMapping: unimplementedAsync(),
+    updateMapping: unimplementedAsync(),
+    saveMapping: unimplementedAsync(),
+    deleteMapping: unimplementedAsync(),
+    duplicateMapping: unimplementedAsync(),
+    importLocalMappings: unimplementedAsync(),
+    listMappingVersions: unimplementedAsync(),
+    getMappingVersion: unimplementedAsync(),
+    getVersion: unimplementedAsync(),
+    getMappingRevision: unimplementedAsync(),
+    listMappingRevisions: unimplementedAsync(),
+    getRevision: unimplementedAsync(),
+    createMappingVersion: unimplementedAsync(),
+    createVersion: unimplementedAsync(),
+    saveMappingVersion: unimplementedAsync(),
+    listProjects: unimplementedAsync(),
+    getProject: unimplementedAsync(),
+    createProject: unimplementedAsync(),
+    updateProject: unimplementedAsync(),
+    deleteProject: unimplementedAsync(),
+    listTemplates: unimplementedAsync(),
+    getTemplate: unimplementedAsync(),
+    deploy: unimplementedAsync(),
+    promote: unimplementedAsync(),
+    rollback: unimplementedAsync(),
+    getDeploymentDiff: unimplementedAsync(),
+    listCdmSchemas: vi.fn<(path?: string) => Promise<GitHubFile[]>>(),
+    linkCdmSchema: vi.fn<(input: LinkCdmSchemaInput) => Promise<SchemaMetadata>>(),
+    syncAllCdmSchemas: vi.fn<() => Promise<CdmBulkSyncResult>>(),
+    syncCdmSchema: vi.fn<(schemaId: string, options?: { statusOnly?: boolean }) => Promise<SchemaSyncResult>>(),
+    listPublishedSchemas: vi.fn<(path?: string) => Promise<GitHubFile[]>>(),
+    publishSchemaToGitHub: vi.fn<(schemaId: string, input: PublishSchemaInput) => Promise<void>>(),
+    linkPublishedSchema: vi.fn<(input: LinkPublishedSchemaInput) => Promise<SchemaMetadata>>(),
+    autoMap: unimplementedAsync(),
+    autoMapSection: unimplementedAsync(),
+    suggestExpression: unimplementedAsync(),
+    explainRule: unimplementedAsync(),
+    smartFix: unimplementedAsync(),
+    validateMappings: unimplementedAsync(),
+    querySchemaNodes: vi.fn<(schemaId: string, query: string) => Promise<SchemaSearchResult[]>>(),
+    listActivity: vi.fn<(projectId?: string, limit?: number) => Promise<ActivityEntry[]>>(),
+    previewOnServer: vi.fn<(mappingId: string, input: ServerPreviewInput) => Promise<ServerPreviewResult>>(),
+    listProjectValueTables: vi.fn<(projectId: string, options?: ValueTableListOptions) => Promise<ProjectValueTable[]>>(),
+    getProjectValueTable: vi.fn<(valueTableId: string) => Promise<ProjectValueTable>>(),
+    getProjectValueTableRevision: vi.fn<(valueTableId: string, revision: number) => Promise<ProjectValueTableRevision>>(),
+    createProjectValueTable: vi.fn<(input: CreateProjectValueTableInput) => Promise<ProjectValueTable>>(),
+    createProjectValueTableRevision: vi.fn<(valueTableId: string, input: CreateProjectValueTableRevisionInput) => Promise<ProjectValueTableRevision>>(),
+    duplicateProjectValueTable: vi.fn<(input: DuplicateProjectValueTableInput) => Promise<ProjectValueTable>>(),
+    archiveProjectValueTable: vi.fn<(valueTableId: string) => Promise<ProjectValueTable>>(),
+    deleteProjectValueTable: vi.fn<(valueTableId: string) => Promise<void>>(),
+    listProjectValueTableUsage: vi.fn<(valueTableId: string) => Promise<ValueTableUsageEntry[]>>(),
+    getProjectValueTableRevisionDiff: vi.fn<(valueTableId: string, fromRevision: number, toRevision: number, options?: { cursor?: string; pageSize?: number }) => Promise<ValueTableDiffPage>>(),
+    exportProjectValueTableCsv: vi.fn<(valueTableId: string, revision?: number) => Promise<string>>(),
+    importProjectValueTableCsv: vi.fn<(projectId: string, csv: string, options?: { name?: string; key?: string }) => Promise<ProjectValueTableRevision>>(),
+    resolveProjectValueTableReference: vi.fn<(input: ResolveProjectValueTableReferenceInput) => Promise<ResolveProjectValueTableReferenceResult>>(),
     ...overrides,
-  } as unknown as ApiAdapter;
+  };
+
+  return adapter;
 }
 
-// ---------------------------------------------------------------------------
-// Render helper
-// ---------------------------------------------------------------------------
-
-function renderPage(adapter: ApiAdapter, mappingId = 'map-1', projectId = 'proj-1') {
+function renderPage(adapter: ApiAdapter) {
   return render(
     <AdapterProvider adapter={adapter}>
-      <MemoryRouter initialEntries={[`/projects/${projectId}/mappings/${mappingId}/deploy`]}>
+      <MemoryRouter initialEntries={['/projects/proj-1/mappings/map-1/deploy']}>
         <Routes>
           <Route
             path="/projects/:projectId/mappings/:mappingId/deploy"
-            element={
-              <DeploymentPage
-                mappingId={mappingId}
-                projectId={projectId}
-                mappingName="Test Mapping"
-              />
-            }
+            element={<DeploymentPage mappingId="map-1" projectId="proj-1" mappingName="Test Mapping" />}
           />
-          <Route
-            path="/projects/:projectId/mappings/:mappingId"
-            element={<div data-testid="editor-page">Editor</div>}
-          />
+          <Route path="/projects/:projectId/mappings/:mappingId" element={<div>Editor</div>} />
         </Routes>
       </MemoryRouter>
     </AdapterProvider>,
   );
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('DeploymentPage', () => {
+describe('DeploymentPage (FS-100 T-08)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders the page with title', async () => {
+  it('renders four environment cards in canonical order', async () => {
     renderPage(createMockAdapter());
-    // deployment-page wrapper is rendered immediately
-    expect(screen.getByTestId('deployment-page')).toBeTruthy();
-    expect(screen.getByText(/Deploy: Test Mapping/)).toBeTruthy();
+    await waitFor(() => screen.getByTestId('deployment-pipeline-cards'));
+
+    const cards = [
+      screen.getByTestId('pipeline-card-SANDBOX'),
+      screen.getByTestId('pipeline-card-DEV'),
+      screen.getByTestId('pipeline-card-PREPROD'),
+      screen.getByTestId('pipeline-card-PROD'),
+    ];
+
+    expect(cards[0]?.textContent).toContain('SANDBOX');
+    expect(cards[1]?.textContent).toContain('DEV');
+    expect(cards[2]?.textContent).toContain('Preprod');
+    expect(cards[3]?.textContent).toContain('PROD');
+    expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
   });
 
-  it('shows loading skeleton initially', () => {
-    renderPage(createMockAdapter());
-    expect(screen.getByTestId('deployment-loading')).toBeTruthy();
-  });
-
-  it('renders environment selector after load', async () => {
-    renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('environment-selector'));
-  });
-
-  it('DEV: shows both revision and version sections with active deploy buttons', async () => {
-    renderPage(createMockAdapter());
-
-    await waitFor(() => screen.getByTestId('revision-section'));
-
-    // DEV is default
-    expect(screen.getByTestId('env-tab-DEV').getAttribute('aria-selected')).toBe('true');
-
-    // Revision deploy buttons should be enabled
-    const revDeployBtn = screen.getByTestId('deploy-revision-3') as HTMLButtonElement;
-    expect(revDeployBtn.disabled).toBe(false);
-
-    // Version deploy buttons should also be enabled
-    const verDeployBtn = screen.getByTestId('deploy-version-2') as HTMLButtonElement;
-    expect(verDeployBtn.disabled).toBe(false);
-  });
-
-  it('PREPROD: revision deploy buttons are disabled', async () => {
+  it('changes primary action label by selected environment stage', async () => {
     const user = userEvent.setup();
     renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('primary-deployment-action'));
 
-    await waitFor(() => screen.getByTestId('env-tab-PREPROD'));
+    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Deploy v4 to SANDBOX');
 
-    await user.click(screen.getByTestId('env-tab-PREPROD'));
+    await user.click(screen.getByTestId('pipeline-card-PREPROD'));
+    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Promote DEV snapshot to PREPROD');
 
+    await user.click(screen.getByTestId('pipeline-card-PROD'));
+    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Promote PREPROD snapshot to PROD');
+
+    await user.click(screen.getByTestId('pipeline-card-DEV'));
+    expect(screen.getByTestId('primary-deployment-action').textContent).toContain('Promote SANDBOX snapshot to DEV');
+  });
+
+  it('supports keyboard navigation across pipeline tabs', async () => {
+    const user = userEvent.setup();
+    renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('pipeline-card-SANDBOX'));
+
+    const sandboxCard = screen.getByTestId('pipeline-card-SANDBOX');
+    sandboxCard.focus();
+    expect(sandboxCard.getAttribute('aria-selected')).toBe('true');
+
+    await user.keyboard('{ArrowRight}');
     await waitFor(() => {
-      const revDeployBtn = screen.getByTestId('deploy-revision-3') as HTMLButtonElement;
-      expect(revDeployBtn.disabled).toBe(true);
+      expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
     });
-  });
 
-  it('PROD: revision deploy buttons are disabled', async () => {
-    const user = userEvent.setup();
-    renderPage(createMockAdapter());
-
-    await waitFor(() => screen.getByTestId('env-tab-PROD'));
-
-    await user.click(screen.getByTestId('env-tab-PROD'));
-
+    await user.keyboard('{ArrowLeft}');
     await waitFor(() => {
-      const revDeployBtn = screen.getByTestId('deploy-revision-3') as HTMLButtonElement;
-      expect(revDeployBtn.disabled).toBe(true);
+      expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
     });
-  });
 
-  it('PREPROD: version deploy buttons are enabled', async () => {
-    const user = userEvent.setup();
-    renderPage(createMockAdapter());
-
-    await waitFor(() => screen.getByTestId('env-tab-PREPROD'));
-
-    await user.click(screen.getByTestId('env-tab-PREPROD'));
-
+    await user.keyboard('{ArrowDown}');
     await waitFor(() => {
-      const verDeployBtn = screen.getByTestId('deploy-version-2') as HTMLButtonElement;
-      expect(verDeployBtn.disabled).toBe(false);
+      expect(screen.getByTestId('pipeline-card-DEV').getAttribute('aria-selected')).toBe('true');
     });
+
+    await user.keyboard('{ArrowUp}');
+    await waitFor(() => {
+      expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
+    });
+
+    expect(screen.getByRole('tablist', { name: /Deployment stage selector/i })).toBeTruthy();
   });
 
-  it('deploy action calls adapter.deployMapping with correct params', async () => {
+  it('shows readiness blockers and disables invalid promote action', async () => {
+    const preprodMissing = {
+      ...CURRENT_DEPLOYMENTS,
+      PREPROD: { environment: 'PREPROD', deployment: null, status: 'not-deployed' as const },
+    };
+
     const user = userEvent.setup();
-    const adapter = createMockAdapter();
-    renderPage(adapter);
+    renderPage(createMockAdapter({ getCurrentDeployments: vi.fn().mockResolvedValue(preprodMissing) }));
+    await waitFor(() => screen.getByTestId('pipeline-card-PROD'));
 
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+    await user.click(screen.getByTestId('pipeline-card-PROD'));
 
-    await user.click(screen.getByTestId('deploy-revision-3'));
-
-    expect(adapter.deployMapping).toHaveBeenCalledWith('map-1', {
-      environment: 'DEV',
-      sourceType: 'revision',
-      sourceNumber: 3,
-    });
+    const primary = screen.getByTestId('primary-deployment-action') as HTMLButtonElement;
+    expect(primary.disabled).toBe(true);
+    expect(screen.getByTestId('readiness-blocker-message').textContent).toContain('PREPROD must have a deployed version snapshot before promotion.');
   });
 
-  it('deploy action for version calls adapter.deployMapping with version source type', async () => {
-    const user = userEvent.setup();
-    const adapter = createMockAdapter();
-    renderPage(adapter);
-
-    await waitFor(() => screen.getByTestId('deploy-version-2'));
-
-    await user.click(screen.getByTestId('deploy-version-2'));
-
-    expect(adapter.deployMapping).toHaveBeenCalledWith('map-1', {
-      environment: 'DEV',
-      sourceType: 'version',
-      sourceNumber: 2,
-    });
-  });
-
-  it('shows success banner after successful deploy', async () => {
-    const user = userEvent.setup();
+  it('keeps primary and rollback actions keyboard focusable', async () => {
     renderPage(createMockAdapter());
+    await waitFor(() => screen.getByTestId('primary-deployment-action'));
 
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+    const primary = screen.getByTestId('primary-deployment-action') as HTMLButtonElement;
+    const rollbackButton = screen.getByTestId('secondary-rollback-action') as HTMLButtonElement;
 
-    await user.click(screen.getByTestId('deploy-revision-3'));
+    primary.focus();
+    expect(document.activeElement).toBe(primary);
 
-    await waitFor(() => screen.getByTestId('deploy-success-banner'));
-
-    expect(screen.getByTestId('deploy-success-banner').textContent).toContain(
-      'deployed to DEV successfully',
-    );
+    rollbackButton.focus();
+    expect(document.activeElement).toBe(rollbackButton);
   });
 
-  it('shows error banner when deploy fails', async () => {
+  it('shows combined history metadata including promote and rollback markers', async () => {
+    const withRollback: DeploymentRecord[] = [
+      ...HISTORY,
+      {
+        ...ROLLBACK_RECORD,
+        environment: 'DEV',
+      },
+    ];
+
+    renderPage(createMockAdapter({ listDeployments: vi.fn().mockResolvedValue(withRollback) }));
+    await waitFor(() => screen.getByTestId('history-table-body'));
+
+    const body = screen.getByTestId('history-table-body').textContent ?? '';
+    expect(body).toContain('Promoted from DEV');
+    expect(body).toContain('Rollback');
+    expect(screen.getByTestId(`history-artifact-${HISTORY[0].environmentDeployedAt}`).textContent).toContain('artifact-dev-4');
+  });
+
+  it('applies combined history filters for deploy/promote/rollback rows', async () => {
+    const withRollback: DeploymentRecord[] = [
+      ...HISTORY,
+      {
+        ...ROLLBACK_RECORD,
+        environment: 'DEV',
+      },
+    ];
+
+    const user = userEvent.setup();
+    renderPage(createMockAdapter({ listDeployments: vi.fn().mockResolvedValue(withRollback) }));
+    await waitFor(() => screen.getByTestId('history-table-body'));
+
+    await user.click(screen.getByTestId('history-filter-promote'));
+    await waitFor(() => {
+      const body = screen.getByTestId('history-table-body').textContent ?? '';
+      expect(body).toContain('Promoted from DEV');
+      expect(body).not.toContain('Rollback');
+    });
+
+    await user.click(screen.getByTestId('history-filter-rollback'));
+    await waitFor(() => {
+      const body = screen.getByTestId('history-table-body').textContent ?? '';
+      expect(body).toContain('Rollback');
+      expect(body).not.toContain('Promoted from DEV');
+    });
+
+    await user.click(screen.getByTestId('history-filter-deploy'));
+    await waitFor(() => {
+      const body = screen.getByTestId('history-table-body').textContent ?? '';
+      expect(body).toContain('Deploy');
+      expect(body).not.toContain('Rollback');
+      expect(body).not.toContain('Promoted from DEV');
+    });
+
+    await user.click(screen.getByTestId('history-filter-all'));
+    await waitFor(() => {
+      const body = screen.getByTestId('history-table-body').textContent ?? '';
+      expect(body).toContain('Promoted from DEV');
+      expect(body).toContain('Rollback');
+      expect(body).toContain('Deploy');
+    });
+  });
+
+  it('shows normalized backend error with request id and expandable technical details', async () => {
     const user = userEvent.setup();
     const adapter = createMockAdapter({
-      deployMapping: vi.fn().mockRejectedValue(new Error('Deploy failed: permission denied')),
+      promoteDeployment: vi.fn().mockRejectedValue(
+        new HttpClientError('Promotion blocked by policy', {
+          code: 'DEPLOY_BLOCKED_CDM_SCHEMA_STATE',
+          statusCode: 409,
+          requestId: 'req-ui-1234',
+          retryable: false,
+          details: {
+            reason: 'guardrail',
+            issues: [{ schemaId: 'schema-1' }],
+          },
+        }),
+      ),
     });
+
     renderPage(adapter);
+    await waitFor(() => screen.getByTestId('primary-deployment-action'));
 
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+    await user.click(screen.getByTestId('pipeline-card-PREPROD'));
+    await user.click(screen.getByTestId('primary-deployment-action'));
+    await waitFor(() => screen.getByTestId('confirm-dialog'));
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
 
-    await user.click(screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('deploy-error-request-id'));
+    expect(screen.getByTestId('deploy-error-request-id').textContent).toContain('req-ui-1234');
 
-    await waitFor(() => screen.getByTestId('deploy-error-banner'));
-
-    expect(screen.getByTestId('deploy-error-banner').textContent).toContain('permission denied');
+    await user.click(screen.getByRole('button', { name: /Technical details/i }));
+    await waitFor(() => screen.getByTestId('deploy-error-technical-details-content'));
+    expect(screen.getByTestId('deploy-error-technical-details-content').textContent).toContain('DEPLOY_BLOCKED_CDM_SCHEMA_STATE');
   });
 
-  it('renders schema-specific deploy-block reasons and remediation CTAs from backend issues', async () => {
+  it('renders CDM blocker details and remediation CTA links', async () => {
     const user = userEvent.setup();
     const adapter = createMockAdapter({
-      deployMapping: vi.fn().mockRejectedValue(
+      promoteDeployment: vi.fn().mockRejectedValue(
         createDeployBlockedError([
           {
             schemaId: 'schema-source',
@@ -339,180 +492,18 @@ describe('DeploymentPage', () => {
     });
 
     renderPage(adapter);
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
+    await waitFor(() => screen.getByTestId('primary-deployment-action'));
 
-    await user.click(screen.getByTestId('deploy-revision-3'));
+    await user.click(screen.getByTestId('pipeline-card-PREPROD'));
+    await user.click(screen.getByTestId('primary-deployment-action'));
+    await waitFor(() => screen.getByTestId('confirm-dialog'));
+    await user.click(screen.getByTestId('confirm-dialog-confirm'));
 
     await waitFor(() => screen.getByTestId('cdm-block-list'));
-    expect(screen.getByTestId('cdm-block-issue-source-schema-source').textContent).toContain(
-      'Source schema: Order Source — Not synced yet',
-    );
-    expect(screen.getByTestId('cdm-block-issue-target-schema-target').textContent).toContain(
-      'Target schema: schema-target — Schema is missing',
-    );
-
     const sourceCta = screen.getByTestId('cdm-remediation-cta-source-schema-source');
-    expect(sourceCta.textContent).toContain('Open schema to re-sync');
     expect(sourceCta.getAttribute('href')).toBe('/schemas/schema-source');
 
     const targetCta = screen.getByTestId('cdm-remediation-cta-target-schema-target');
-    expect(targetCta.textContent).toContain('Open schema library to relink');
     expect(targetCta.getAttribute('href')).toBe('/schemas');
-  });
-
-  it('clears prior deploy-block messaging after successful retry', async () => {
-    const user = userEvent.setup();
-    const adapter = createMockAdapter({
-      deployMapping: vi
-        .fn()
-        .mockRejectedValueOnce(
-          createDeployBlockedError([
-            {
-              schemaId: 'schema-source',
-              referenceRole: 'source',
-              reason: 'update-failed',
-              remediationKey: 'retry-sync',
-            },
-          ]),
-        )
-        .mockResolvedValueOnce(DEPLOY_RECORD),
-    });
-
-    renderPage(adapter);
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
-
-    await user.click(screen.getByTestId('deploy-revision-3'));
-    await waitFor(() => screen.getByTestId('cdm-block-list'));
-
-    await user.click(screen.getByTestId('deploy-revision-3'));
-    await waitFor(() => screen.getByTestId('deploy-success-banner'));
-
-    expect(screen.queryByTestId('cdm-block-list')).toBeNull();
-  });
-
-  it('keeps generic error treatment for non-CDM deployment failures', async () => {
-    const user = userEvent.setup();
-    const adapter = createMockAdapter({
-      deployMapping: vi.fn().mockRejectedValue(
-        Object.assign(new Error('Conflict: duplicate deployment request'), {
-          code: 'CONFLICT',
-          statusCode: 409,
-          retryable: false,
-        }),
-      ),
-    });
-
-    renderPage(adapter);
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
-
-    await user.click(screen.getByTestId('deploy-revision-3'));
-
-    await waitFor(() => screen.getByTestId('deploy-error-banner'));
-    expect(screen.getByTestId('deploy-error-banner').textContent).toContain('duplicate deployment request');
-    expect(screen.queryByTestId('cdm-block-list')).toBeNull();
-  });
-
-  it('dismisses success banner on close', async () => {
-    const user = userEvent.setup();
-    renderPage(createMockAdapter());
-
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
-
-    await user.click(screen.getByTestId('deploy-revision-3'));
-
-    await waitFor(() => screen.getByTestId('deploy-success-banner'));
-
-    await user.click(screen.getByRole('button', { name: /Dismiss success/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('deploy-success-banner')).toBeNull();
-    });
-  });
-
-  it('shows error state when data load fails', async () => {
-    const adapter = createMockAdapter({
-      listRevisions: vi.fn().mockRejectedValue(new Error('Network error')),
-    });
-    renderPage(adapter);
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('deployment-loading')).toBeNull();
-    });
-
-    expect(screen.getByText(/Network error/)).toBeTruthy();
-  });
-
-  it('back-to-editor link is present', async () => {
-    renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('back-to-editor-link'));
-  });
-
-  it('environment selector displays Preprod label', async () => {
-    renderPage(createMockAdapter());
-    await waitFor(() => screen.getByTestId('environment-selector'));
-    expect(screen.getByTestId('env-tab-PREPROD').textContent).toBe('Preprod');
-  });
-
-  it('current deployment strip shows for active environment', async () => {
-    renderPage(createMockAdapter());
-
-    await waitFor(() => screen.getByTestId('current-deploy-strip-DEV'));
-
-    const strip = screen.getByTestId('current-deploy-strip-DEV');
-    expect(strip.textContent).toContain('v2');
-    expect(strip.textContent).toContain('Current');
-    expect(strip.textContent).toContain('artifact-dev-2');
-    expect(strip.textContent).toContain('hash-dev-2-a');
-  });
-
-  it('shows operation details with orchestration + artifact after successful deploy', async () => {
-    const user = userEvent.setup();
-    const adapter = createMockAdapter({
-      deployMapping: vi.fn().mockResolvedValue({
-        ...DEPLOY_RECORD,
-        orchestrationId: 'orc-deploy-1',
-      }),
-    });
-
-    renderPage(adapter);
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
-
-    await user.click(screen.getByTestId('deploy-revision-3'));
-    await waitFor(() => screen.getByTestId('deploy-operation-details'));
-
-    const details = screen.getByTestId('deploy-operation-details');
-    expect(details.textContent).toContain('orc-deploy-1');
-    expect(details.textContent).toContain('succeeded');
-    expect(details.textContent).toContain('artifact-dev-3');
-  });
-
-  it('shows operation details with attempt/final status from failed deploy response details', async () => {
-    const user = userEvent.setup();
-    const deployErr = Object.assign(new Error('Runtime unavailable'), {
-      code: 'SERVICE_UNAVAILABLE',
-      retryable: true,
-      details: {
-        orchestrationId: 'orc-deploy-fail-1',
-        attemptCount: 3,
-        finalStatus: 'timed_out',
-        artifactId: 'artifact-dev-timeout',
-      },
-    });
-
-    const adapter = createMockAdapter({
-      deployMapping: vi.fn().mockRejectedValue(deployErr),
-    });
-
-    renderPage(adapter);
-    await waitFor(() => screen.getByTestId('deploy-revision-3'));
-
-    await user.click(screen.getByTestId('deploy-revision-3'));
-    await waitFor(() => screen.getByTestId('deploy-operation-details'));
-
-    const details = screen.getByTestId('deploy-operation-details');
-    expect(details.textContent).toContain('orc-deploy-fail-1');
-    expect(details.textContent).toContain('timed out');
-    expect(details.textContent).toContain('Attempts: 3');
-    expect(details.textContent).toContain('artifact-dev-timeout');
   });
 });

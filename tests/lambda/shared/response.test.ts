@@ -50,4 +50,24 @@ describe('lambda shared response', () => {
       'x-request-id': parsed.error.requestId,
     });
   });
+
+  it('jsonResponse includes CORS preflight headers when provided via additional headers', () => {
+    const response = jsonResponse(
+      200,
+      { ok: true },
+      'req-options-1',
+      {
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+      },
+    );
+
+    expect(response.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+      'x-request-id': 'req-options-1',
+    });
+  });
 });
