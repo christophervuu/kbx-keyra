@@ -16,7 +16,7 @@ import {
   get as getDeploymentOrchestration,
   updateStatus as updateDeploymentOrchestrationStatus,
 } from '../../lib/persistence/deployment-orchestrations.js';
-import { getRuntimeApiClient } from './runtime-api-client.js';
+import { DeploymentEnvironmentConfigError, getRuntimeApiClient } from './runtime-api-client.js';
 import { executeRuntimeOperationWithRetry } from './orchestration-retry.js';
 
 type DeploymentEnvironment = 'DEV' | 'PREPROD' | 'PROD';
@@ -102,6 +102,100 @@ function mapErrorCodeToStatusCode(errorCode: string | undefined): number {
 
 function isEnvironment(value: unknown): value is DeploymentEnvironment {
   return value === 'DEV' || value === 'PREPROD' || value === 'PROD';
+}
+
+function mapRuntimeRollbackClientError(error: unknown): {
+  ok: false;
+  statusCode: number;
+  requestId: string;
+  errorCode: string;
+  message: string;
+  retryable: boolean;
+} {
+  if (error instanceof DeploymentEnvironmentConfigError) {
+    return {
+      ok: false,
+      statusCode: 500,
+      requestId: generateRequestId(),
+      errorCode: ERROR_CODES.VALIDATION_ERROR,
+      message: `Runtime environment configuration error: ${error.message}`,
+      retryable: false,
+    };
+  }
+
+  const errorName = (error as { name?: unknown } | null | undefined)?.name;
+  if (errorName === 'AbortError' || errorName === 'TimeoutError') {
+    return {
+      ok: false,
+      statusCode: 504,
+      requestId: generateRequestId(),
+      errorCode: ERROR_CODES.TIMEOUT,
+      message: 'Rollback timed out while contacting runtime services.',
+      retryable: true,
+    };
+  }
+
+  return {
+    ok: false,
+    statusCode: 503,
+    requestId: generateRequestId(),
+    errorCode: ERROR_CODES.SERVICE_UNAVAILABLE,
+    message: 'Runtime API request failed due to transport error.',
+    retryable: true,
+  };
+}
+
+function mapUnexpectedRollbackError(error: unknown): {
+  code: (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+  message: string;
+  statusCode: number;
+  retryable: boolean;
+} {
+  if (error instanceof DeploymentEnvironmentConfigError) {
+    return {
+      code: ERROR_CODES.VALIDATION_ERROR,
+      message: `Runtime environment configuration error: ${error.message}`,
+      statusCode: 500,
+      retryable: false,
+    };
+  }
+
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  if (typeof message === 'string' && message.startsWith('Missing required environment variable:')) {
+    return {
+      code: ERROR_CODES.VALIDATION_ERROR,
+      message,
+      statusCode: 500,
+      retryable: false,
+    };
+  }
+
+  const errorName = (error as { name?: unknown } | null | undefined)?.name;
+  if (errorName === 'ProvisionedThroughputExceededException' || errorName === 'ThrottlingException') {
+    return {
+      code: ERROR_CODES.SERVICE_UNAVAILABLE,
+      message: 'Rollback temporarily unavailable due to persistence throttling.',
+      statusCode: 503,
+      retryable: true,
+    };
+  }
+
+  if (errorName === 'AbortError' || errorName === 'TimeoutError') {
+    return {
+      code: ERROR_CODES.TIMEOUT,
+      message: 'Rollback timed out while contacting runtime or persistence services.',
+      statusCode: 504,
+      retryable: true,
+    };
+  }
+
+  const err = internalError();
+  return {
+    code: err.code,
+    message: err.message,
+    statusCode: err.statusCode,
+    retryable: err.retryable,
+  };
 }
 
 function parseRollbackRequest(body: Record<string, unknown> | null): RollbackRequest | null {
@@ -363,26 +457,30 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       targetArtifactId: targetArtifactId,
       runtimeApiClient: getRuntimeApiClient(),
       executeAttempt: async () => {
-        const runtimeResult = await getRuntimeApiClient().rollback({
-          mappingId,
-          environment: request.environment,
-          targetArtifactId: targetArtifactId,
-          reason: 'user-request',
-          requestId: orchestration.requestId,
-          orchestrationId: orchestration.orchestrationId,
-          triggeredBy: 'system',
-        });
+        try {
+          const runtimeResult = await getRuntimeApiClient().rollback({
+            mappingId,
+            environment: request.environment,
+            targetArtifactId: targetArtifactId,
+            reason: 'user-request',
+            requestId: orchestration.requestId,
+            orchestrationId: orchestration.orchestrationId,
+            triggeredBy: 'system',
+          });
 
-        if (runtimeResult.ok) {
-          return {
-            ok: true,
-            statusCode: runtimeResult.statusCode,
-            requestId: runtimeResult.requestId,
-            data: undefined,
-          };
+          if (runtimeResult.ok) {
+            return {
+              ok: true,
+              statusCode: runtimeResult.statusCode,
+              requestId: runtimeResult.requestId,
+              data: undefined,
+            };
+          }
+
+          return runtimeResult;
+        } catch (error) {
+          return mapRuntimeRollbackClientError(error);
         }
-
-        return runtimeResult;
       },
     });
 
@@ -429,8 +527,20 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ...created,
       orchestrationId: orchestration.orchestrationId,
     }, retryResult.requestId);
-  } catch {
-    const err = internalError();
-    return errorResponse(err.code, err.message, err.statusCode, err.retryable);
+  } catch (error) {
+    const mapped = mapUnexpectedRollbackError(error);
+    console.error(
+      JSON.stringify({
+        eventType: 'rollback',
+        phase: 'rollback-handler',
+        mappingId,
+        environment: request.environment,
+        deploymentSK: request.deploymentSK,
+        errorName: (error as { name?: unknown } | null | undefined)?.name,
+        errorMessage: (error as { message?: unknown } | null | undefined)?.message,
+      }),
+    );
+
+    return errorResponse(mapped.code, mapped.message, mapped.statusCode, mapped.retryable);
   }
 }

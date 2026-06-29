@@ -1,9 +1,10 @@
 // ProjectCard — Dashboard project card (FS-084 T-02)
 
 import { FileCode2, GitBranch } from 'lucide-react';
-import { StatusBadge } from '@/components/StatusBadge';
 
 import type { ProjectListItem, ProjectWorstStatus } from '../types';
+
+import { StatusBadge } from '@/components/StatusBadge';
 
 // ---------------------------------------------------------------------------
 // Date helper
@@ -159,13 +160,13 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
         ) : (
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-slate-500">SANDBOX</span>
-            <StatusBadge status={project.sandboxDeploy} />
+            <StatusBadge status={project.sandboxDeploy} showLabel={false} />
             <span className="text-[10px] text-slate-500">DEV</span>
-            <StatusBadge status={project.devDeploy} />
+            <StatusBadge status={project.devDeploy} showLabel={false} />
             <span className="text-[10px] text-slate-500">PREPROD</span>
-            <StatusBadge status={project.preprodDeploy} />
+            <StatusBadge status={project.preprodDeploy} showLabel={false} />
             <span className="text-[10px] text-slate-500">PROD</span>
-            <StatusBadge status={project.prodDeploy} />
+            <StatusBadge status={project.prodDeploy} showLabel={false} />
           </div>
         )}
       </div>

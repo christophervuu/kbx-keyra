@@ -151,6 +151,60 @@ function renderBreadcrumbsWithLabel(
   );
 }
 
+function PageWithProjectAndMappingLabels({
+  projectSegmentValue,
+  projectLabel,
+  mappingSegmentValue,
+  mappingLabel,
+}: {
+  projectSegmentValue: string;
+  projectLabel: string | undefined;
+  mappingSegmentValue: string;
+  mappingLabel: string | undefined;
+}) {
+  useBreadcrumbLabel(projectSegmentValue, projectLabel);
+  useBreadcrumbLabel(mappingSegmentValue, mappingLabel);
+  return <div data-testid="page-content" />;
+}
+
+function renderDeploymentBreadcrumbsWithLabels(params: {
+  path: string;
+  projectSegmentValue: string;
+  projectLabel: string | undefined;
+  mappingSegmentValue: string;
+  mappingLabel: string | undefined;
+}) {
+  return render(
+    <MemoryRouter initialEntries={[params.path]}>
+      <BreadcrumbProvider>
+        <Routes>
+          <Route
+            element={
+              <>
+                <Breadcrumbs />
+                <Outlet />
+              </>
+            }
+          >
+            <Route
+              path="/projects/:projectId/mappings/:mappingId/deploy"
+              element={(
+                <PageWithProjectAndMappingLabels
+                  projectSegmentValue={params.projectSegmentValue}
+                  projectLabel={params.projectLabel}
+                  mappingSegmentValue={params.mappingSegmentValue}
+                  mappingLabel={params.mappingLabel}
+                />
+              )}
+            />
+            <Route path="*" element={<div />} />
+          </Route>
+        </Routes>
+      </BreadcrumbProvider>
+    </MemoryRouter>,
+  );
+}
+
 describe('NavBar', () => {
   beforeEach(() => {
     resetSidebarPreference();
@@ -292,6 +346,22 @@ describe('Breadcrumbs', () => {
     expect(screen.getByRole('link', { name: 'map-456' })).toBeInTheDocument();
     expect(screen.getByText('Deployment')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Deployment' })).not.toBeInTheDocument();
+  });
+
+  it('uses registered project and mapping labels on mapping deployment breadcrumbs', () => {
+    renderDeploymentBreadcrumbsWithLabels({
+      path: '/projects/abc-123/mappings/map-456/deploy',
+      projectSegmentValue: 'abc-123',
+      projectLabel: 'chris-test',
+      mappingSegmentValue: 'map-456',
+      mappingLabel: 'direct-mapping',
+    });
+
+    expect(screen.getByRole('link', { name: 'chris-test' })).toHaveAttribute('href', '/projects/abc-123');
+    expect(screen.getByRole('link', { name: 'direct-mapping' })).toHaveAttribute('href', '/projects/abc-123/mappings/map-456');
+    expect(screen.queryByText('abc-123')).not.toBeInTheDocument();
+    expect(screen.queryByText('map-456')).not.toBeInTheDocument();
+    expect(screen.getByText('Deployment')).toBeInTheDocument();
   });
 
   it('renders breadcrumbs for project deployments hierarchy', () => {

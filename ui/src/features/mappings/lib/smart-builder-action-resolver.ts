@@ -260,12 +260,6 @@ export function resolveChangeLogicOptionsFromDraft(
       sortOrder: 15,
     },
     {
-      id: 'base.constant',
-      label: 'Constant',
-      enabled: true,
-      sortOrder: 18,
-    },
-    {
       id: 'text.concat',
       label: 'Combine values',
       enabled: byActionId.get('text.concat')?.availability.enabled ?? false,

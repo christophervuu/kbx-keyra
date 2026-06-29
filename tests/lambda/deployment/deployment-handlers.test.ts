@@ -23,7 +23,17 @@ const sharedMocks = vi.hoisted(() => ({
     DEPLOY_ARTIFACT_TOO_LARGE: 'DEPLOY_ARTIFACT_TOO_LARGE',
     ARTIFACT_NOT_PRESENT: 'ARTIFACT_NOT_PRESENT',
     SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+    TIMEOUT: 'TIMEOUT',
     CONFLICT: 'CONFLICT',
+  },
+}));
+
+const runtimeApiClientModuleMocks = vi.hoisted(() => ({
+  DeploymentEnvironmentConfigError: class DeploymentEnvironmentConfigError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'DeploymentEnvironmentConfigError';
+    }
   },
 }));
 
@@ -99,6 +109,7 @@ vi.mock('../../../src/lambda/deployment/runtime-relay.js', () => ({
 }));
 vi.mock('../../../src/lambda/deployment/runtime-api-client.js', () => ({
   getRuntimeApiClient: runtimeApiClientMocks.getRuntimeApiClient,
+  DeploymentEnvironmentConfigError: runtimeApiClientModuleMocks.DeploymentEnvironmentConfigError,
 }));
 vi.mock('../../../src/lambda/deployment/orchestration-retry.js', () => ({
   executeRuntimeOperationWithRetry: retryMocks.executeRuntimeOperationWithRetry,
@@ -1161,6 +1172,85 @@ describe('deployment handlers', () => {
       attemptCount: 1,
       finalStatus: 'failed',
     });
+    expect(deploymentPersistenceMocks.createRollback).not.toHaveBeenCalled();
+  });
+
+  it('rollback handler surfaces runtime environment config errors instead of INTERNAL_ERROR', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'PROD', deploymentSK: 'PROD#2026-06-01T00:00:00.000Z' });
+    deploymentPersistenceMocks.listHistory.mockResolvedValueOnce([
+      {
+        environmentDeployedAt: 'PROD#2026-06-01T00:00:00.000Z',
+        sourceType: 'version',
+        sourceNumber: 2,
+        artifactId: 'artifact-2',
+        artifactHash: 'hash-2',
+        configHash: 'cfg-2',
+        configS3Key: 'deployments/map-1/PROD/artifact-2.json',
+      },
+    ]);
+    runtimeApiClientMocks.client.rollback.mockRejectedValueOnce(
+      new runtimeApiClientModuleMocks.DeploymentEnvironmentConfigError('No runtime environment config found for \'PROD\'.'),
+    );
+
+    const { handler } = await importRollbackHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.retryable).toBe(false);
+    expect(body.error.message).toContain('Runtime environment configuration error');
+    expect(body.error.details).toEqual({
+      orchestrationId: 'orc-1',
+      environment: 'PROD',
+      targetArtifactId: 'artifact-2',
+      deploymentSK: 'PROD#2026-06-01T00:00:00.000Z',
+      attemptCount: 1,
+      finalStatus: 'failed',
+    });
+    expect(deploymentPersistenceMocks.createRollback).not.toHaveBeenCalled();
+  });
+
+  it('rollback handler surfaces missing MAPPINGS_TABLE config as validation-style 500 instead of INTERNAL_ERROR', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'PROD', deploymentSK: 'PROD#2026-06-01T00:00:00.000Z' });
+    getEnvStore().MAPPINGS_TABLE = '';
+
+    const { handler } = await importRollbackHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.retryable).toBe(false);
+    expect(body.error.message).toBe('Missing required environment variable: MAPPINGS_TABLE');
+    expect(sharedMocks.getItem).not.toHaveBeenCalled();
+  });
+
+  it('rollback handler maps runtime timeout throws to TIMEOUT response', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'PROD', deploymentSK: 'PROD#2026-06-01T00:00:00.000Z' });
+    deploymentPersistenceMocks.listHistory.mockResolvedValueOnce([
+      {
+        environmentDeployedAt: 'PROD#2026-06-01T00:00:00.000Z',
+        sourceType: 'version',
+        sourceNumber: 2,
+        artifactId: 'artifact-2',
+        artifactHash: 'hash-2',
+        configHash: 'cfg-2',
+        configS3Key: 'deployments/map-1/PROD/artifact-2.json',
+      },
+    ]);
+    runtimeApiClientMocks.client.rollback.mockRejectedValueOnce(
+      Object.assign(new Error('runtime timeout'), { name: 'TimeoutError' }),
+    );
+
+    const { handler } = await importRollbackHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(504);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('TIMEOUT');
+    expect(body.error.retryable).toBe(true);
+    expect(body.error.message).toContain('Rollback timed out');
     expect(deploymentPersistenceMocks.createRollback).not.toHaveBeenCalled();
   });
 

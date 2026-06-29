@@ -1367,6 +1367,27 @@ Resources:
       FunctionName: kbx-keyra-rollbackdeployment
       CodeUri: .
       Handler: src/lambda/deployment/rollback-deployment.handler
+      # Explicitly pin required rollback env vars to avoid runtime drift when
+      # function-level environment settings are edited outside CloudFormation.
+      Environment:
+        Variables:
+          STAGE: !Ref Stage
+          PROJECTS_TABLE: !Ref ProjectsTable
+          MAPPINGS_TABLE: !Ref MappingsTable
+          SCHEMA_METADATA_TABLE: !Ref SchemaMetadataTable
+          SCHEMA_NODES_TABLE: !Ref SchemaNodesTable
+          MAPPING_REVISIONS_TABLE: !Ref MappingRevisionsTable
+          MAPPING_VERSIONS_TABLE: !Ref MappingVersionsTable
+          VALUE_TABLES_TABLE: !Ref ValueTablesTable
+          VALUE_TABLE_REVISIONS_TABLE: !Ref ValueTableRevisionsTable
+          DEPLOYMENTS_TABLE: !Ref DeploymentsTable
+          DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
+          DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
+          STORAGE_BUCKET: !Ref StorageBucket
+          # Compatibility aliases used by existing handlers/tests.
+          SCHEMAS_TABLE: !Ref SchemaMetadataTable
+          CONTENT_BUCKET: !Ref StorageBucket
+          SCHEMA_BUCKET: !Ref StorageBucket
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref MappingsTable

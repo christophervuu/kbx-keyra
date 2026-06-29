@@ -40,4 +40,15 @@ describe('StatusBadge', () => {
 
     expect(container.firstChild).toHaveClass('inline-flex');
   });
+
+  it('renders dot-only mode without text label when showLabel is false', () => {
+    const { container } = render(<StatusBadge status="deployed" showLabel={false} />);
+
+    expect(screen.queryByText('Deployed')).not.toBeInTheDocument();
+    const root = container.firstChild as HTMLElement;
+    expect(root).toHaveAttribute('aria-label', 'Deployed');
+    expect(root).toHaveAttribute('title', 'Deployed');
+    const dot = container.querySelector('[aria-hidden="true"]');
+    expect(dot).toHaveClass('bg-green-500');
+  });
 });

@@ -2069,6 +2069,7 @@ describe('SmartBuilderPanel', () => {
     fireEvent.click(screen.getByTestId('smart-recipe-change-base'));
 
     expect(screen.queryByTestId('smart-picker-action-base.direct')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-picker-action-base.constant')).not.toBeInTheDocument();
     expect(screen.getByTestId('smart-picker-action-lookup.valueMap')).toHaveTextContent('Value Mapping');
     expect(screen.getByTestId('smart-picker-action-condition.compare')).toHaveTextContent('Conditional');
     expect(screen.getByTestId('smart-picker-action-base.calculation')).toHaveTextContent('Calculate');
@@ -2082,6 +2083,51 @@ describe('SmartBuilderPanel', () => {
     expect(screen.queryByTestId('smart-picker-action-number.add')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-number.subtract')).not.toBeInTheDocument();
     expect(screen.queryByTestId('smart-picker-action-advanced.expression')).not.toBeInTheDocument();
+  });
+
+  it('renders Choose output logic above Selected value in direct-value mode', () => {
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.fullName',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'a',
+          sourceKind: 'primary' as const,
+          label: 'firstName',
+          path: 'firstName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+        {
+          id: 'b',
+          sourceKind: 'primary' as const,
+          label: 'lastName',
+          path: 'lastName',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: { kind: 'direct' as const, inputId: 'a' },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.fullName"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-recipe-change-base'));
+
+    const picker = screen.getByTestId('smart-base-picker');
+    const selectedValue = screen.getByTestId('smart-direct-value-section');
+    const pickerPosition = picker.compareDocumentPosition(selectedValue);
+
+    expect(pickerPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows divide-by-zero warning for literal zero denominator in calculation rows', () => {

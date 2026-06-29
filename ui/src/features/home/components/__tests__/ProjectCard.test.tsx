@@ -1,9 +1,9 @@
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ProjectCard, ProjectCardGrid } from '../ProjectCard';
 import type { ProjectListItem } from '../../types';
+import { ProjectCard, ProjectCardGrid } from '../ProjectCard';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -93,6 +93,20 @@ describe('ProjectCard', () => {
     expect(screen.getByText('PREPROD')).toBeInTheDocument();
     expect(screen.getByText('PROD')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open alpha project/i })).not.toBeInTheDocument();
+  });
+
+  it('shows dot-only deploy status badges on cards (no deployed/not deployed text labels)', () => {
+    render(
+      <ProjectCard
+        project={makeProject({ sandboxDeploy: 'deployed', devDeploy: 'not-deployed', preprodDeploy: 'stale', prodDeploy: 'deploying' })}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Deployed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not deployed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stale')).not.toBeInTheDocument();
+    expect(screen.queryByText('Deploying')).not.toBeInTheDocument();
   });
 
   it('calls onClick with project ID when clicked', () => {

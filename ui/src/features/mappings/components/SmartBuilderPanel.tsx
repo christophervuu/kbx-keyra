@@ -1941,6 +1941,74 @@ export function SmartBuilderPanel({
                 )}
               </div>
             )}
+            {effectivePickerMode === 'base' && (
+              <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-base-picker">
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Choose output logic
+                  </p>
+                  {!isMethodNeedsAction && (
+                    <button
+                      type="button"
+                      className="text-[11px] text-slate-500 hover:text-slate-300"
+                      data-testid="smart-picker-close"
+                      onClick={() => setPickerMode(null)}
+                    >
+                      Close
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
+                  {basePickerActions.filter((action) => action.enabled).map((action) => (
+                    <div key={action.id}>
+                      <button
+                        type="button"
+                        data-testid={`smart-picker-action-${action.id}`}
+                        className="w-full rounded border border-slate-700 bg-slate-900/70 px-2 py-1.5 text-left text-xs text-slate-100 hover:border-slate-500"
+                        onClick={() => {
+                          const parameterDefinitions = getSmartBuilderActionParameters(action.id);
+                          if (parameterDefinitions.length > 0) {
+                            onBeginActionParameterEdit?.(action.id);
+                            setParameterEditorStepIndex(null);
+                            setParameterEditorStepScope(null);
+                            setParameterEditorValueStepTarget(null);
+                            setPickerMode(null);
+                            return;
+                          }
+
+                          onApplyAction?.(action.id);
+                          setParameterEditorStepIndex(null);
+                          setParameterEditorStepScope(null);
+                          setParameterEditorValueStepTarget(null);
+                          setPickerMode(null);
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {basePickerActions.some((action) => !action.enabled) && (
+                  <details className="mt-2" data-testid="smart-base-picker-unavailable">
+                    <summary className="cursor-pointer text-[11px] text-slate-400">Unavailable options</summary>
+                    <ul className="mt-1 space-y-1.5" data-testid="smart-base-picker-unavailable-list">
+                      {basePickerActions.filter((action) => !action.enabled).map((action) => (
+                        <li
+                          key={`unavailable-${action.id}`}
+                          className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1.5"
+                          data-testid={`smart-picker-disabled-${action.id}`}
+                        >
+                          <p className="text-xs text-slate-300">{action.label}</p>
+                          {action.reason && <p className="text-[11px] text-slate-500">{action.reason}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
             {mappingMethodId === 'base.direct' && !defaultPrimaryInput && (
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-empty-direct">Select an input to continue.</p>
             )}
@@ -2102,75 +2170,6 @@ export function SmartBuilderPanel({
             )}
             {shouldRenderMethodPreview && (
               <p className="mt-1 text-xs text-slate-400" data-testid="smart-recipe-base-preview">{composePreview}</p>
-            )}
-
-            {effectivePickerMode === 'base' && (
-              <div className="mt-3 rounded border border-slate-700 bg-slate-950/50 px-2.5 py-2" data-testid="smart-base-picker">
-                <div className="mb-1 flex items-center justify-between">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    Choose output logic
-                  </p>
-                  {!isMethodNeedsAction && (
-                    <button
-                      type="button"
-                      className="text-[11px] text-slate-500 hover:text-slate-300"
-                      data-testid="smart-picker-close"
-                      onClick={() => setPickerMode(null)}
-                    >
-                      Close
-                    </button>
-                  )}
-                </div>
-
-                <div className="mt-2 space-y-1.5" data-testid="smart-picker-enabled-actions">
-                  {basePickerActions.filter((action) => action.enabled).map((action) => (
-                    <div key={action.id}>
-                      <button
-                        type="button"
-                        data-testid={`smart-picker-action-${action.id}`}
-                        className="w-full rounded border border-slate-700 bg-slate-900/70 px-2 py-1.5 text-left text-xs text-slate-100 hover:border-slate-500"
-                        onClick={() => {
-                          const parameterDefinitions = getSmartBuilderActionParameters(action.id);
-                          if (parameterDefinitions.length > 0) {
-                            onBeginActionParameterEdit?.(action.id);
-                            setParameterEditorStepIndex(null);
-                            setParameterEditorStepScope(null);
-                            setParameterEditorValueStepTarget(null);
-                            setPickerMode(null);
-                            return;
-                          }
-
-                          onApplyAction?.(action.id);
-                          setParameterEditorStepIndex(null);
-                          setParameterEditorStepScope(null);
-                          setParameterEditorValueStepTarget(null);
-                          setPickerMode(null);
-                        }}
-                      >
-                        {action.label}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                {basePickerActions.some((action) => !action.enabled) && (
-                  <details className="mt-2" data-testid="smart-base-picker-unavailable">
-                    <summary className="cursor-pointer text-[11px] text-slate-400">Unavailable options</summary>
-                    <ul className="mt-1 space-y-1.5" data-testid="smart-base-picker-unavailable-list">
-                      {basePickerActions.filter((action) => !action.enabled).map((action) => (
-                        <li
-                          key={`unavailable-${action.id}`}
-                          className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1.5"
-                          data-testid={`smart-picker-disabled-${action.id}`}
-                        >
-                          <p className="text-xs text-slate-300">{action.label}</p>
-                          {action.reason && <p className="text-[11px] text-slate-500">{action.reason}</p>}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-              </div>
             )}
 
             {mappingMethodId === 'condition.compare' && conditionComposition && conditionComposition.clauses.length > 0 && (

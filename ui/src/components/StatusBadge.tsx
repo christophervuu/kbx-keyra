@@ -2,6 +2,7 @@ import type { DeployStatus } from '@/lib/types/domain';
 
 export interface StatusBadgeProps {
   status: DeployStatus;
+  showLabel?: boolean;
 }
 
 const statusConfig: Record<DeployStatus, { dotClass: string; label: string }> = {
@@ -11,13 +12,19 @@ const statusConfig: Record<DeployStatus, { dotClass: string; label: string }> = 
   deploying: { dotClass: 'bg-yellow-500', label: 'Deploying' },
 };
 
-export function StatusBadge({ status }: StatusBadgeProps) {
+export function StatusBadge({ status, showLabel = true }: StatusBadgeProps) {
   const config = statusConfig[status];
 
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300">
+    <span
+      className={`inline-flex items-center text-xs font-medium text-slate-300 ${
+        showLabel ? 'gap-1.5' : ''
+      }`}
+      aria-label={config.label}
+      title={config.label}
+    >
       <span className={`h-2 w-2 rounded-full ${config.dotClass}`} aria-hidden="true" />
-      {config.label}
+      {showLabel ? config.label : null}
     </span>
   );
 }

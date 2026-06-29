@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import {
   Route,
   RouterProvider,
@@ -211,11 +211,33 @@ describe('Route rendering', () => {
     expect(screen.getByTestId('editor-loading')).toBeInTheDocument();
   });
 
-  it('renders Mapping Deployment at /projects/:projectId/mappings/:mappingId/deploy', () => {
+  it('renders Mapping Deployment at /projects/:projectId/mappings/:mappingId/deploy', async () => {
+    mockAdapter.getProject = vi.fn().mockResolvedValue({
+      projectId: 'abc-123',
+      name: 'chris-test',
+      description: 'Test project',
+      slug: 'chris-test',
+      linkedSchemaIds: [],
+      schemaRefs: [],
+      tags: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      mappings: [],
+    });
+    mockAdapter.getMapping = vi.fn().mockResolvedValue({
+      name: 'direct-mapping',
+      version: 1,
+      engineVersion: '1.0.0',
+      config: {},
+      rules: [],
+    });
+
     renderWithRouter('/projects/abc-123/mappings/map-456/deploy');
 
     expect(screen.getByTestId('deployment-page')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Deploy Mapping' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Deploy: direct-mapping' })).toBeInTheDocument();
+    });
   });
 
   it('renders Schema Library at /schemas', () => {
