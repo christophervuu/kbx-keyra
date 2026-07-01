@@ -107,6 +107,23 @@ Parameters:
     Default: ''
     Description: Optional Step Functions ARN for auto-map large workload handoff.
 
+  AutoMapExecutionMode:
+    Type: String
+    Default: async
+    AllowedValues:
+      - disabled
+      - legacy
+      - async
+    Description: Auto-Map execution mode capability contract (`disabled|legacy|async`).
+
+  EnableAutoMapTablePitr:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable PITR on Auto-Map table. Set to false only for disposable local environments.
+
   RuntimeAccountIdDev:
     Type: String
     Default: ''
@@ -125,8 +142,10 @@ Parameters:
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
   IsSandboxRuntime: !Equals [!Ref EnvironmentName, sandbox]
+  EnableAutoMapTablePitrCondition: !Equals [!Ref EnableAutoMapTablePitr, 'true']
   HasArtifactsBucketName: !Not [!Equals [!Ref ArtifactsBucketName, '']]
   HasGitHubTokenSecretArn: !Not [!Equals [!Ref GitHubTokenSecretArn, '']]
+  HasAutoMapStepFunctionsArn: !Not [!Equals [!Ref AutoMapStepFunctionsArn, '']]
   HasRuntimeAccountIdDev: !Not [!Equals [!Ref RuntimeAccountIdDev, '']]
   HasRuntimeAccountIdPreprod: !Not [!Equals [!Ref RuntimeAccountIdPreprod, '']]
   HasRuntimeAccountIdProd: !Not [!Equals [!Ref RuntimeAccountIdProd, '']]
@@ -150,6 +169,8 @@ Globals:
         DEPLOYMENTS_TABLE: !Ref DeploymentsTable
         DEPLOYMENT_CURRENT_TABLE: !Ref DeploymentCurrentTable
         DEPLOYMENT_ORCHESTRATIONS_TABLE: !Ref DeploymentOrchestrationsTable
+        AUTO_MAP_TABLE: !Ref AutoMapTable
+        AUTO_MAP_EXECUTION_MODE: !Ref AutoMapExecutionMode
         STORAGE_BUCKET: !Ref StorageBucket
         # Compatibility aliases used by existing handlers/tests.
         SCHEMAS_TABLE: !Ref SchemaMetadataTable
@@ -371,6 +392,54 @@ Resources:
       KeySchema:
         - AttributeName: orchestrationId
           KeyType: HASH
+
+  AutoMapTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: integrations-keyra-auto-map
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [EnableAutoMapTablePitrCondition, true, false]
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   StorageBucket:
     Type: AWS::S3::Bucket
@@ -1677,19 +1746,30 @@ Resources:
           DSL_ASSET_KEY: !Ref DslAssetKey
           GITHUB_MODELS_ENDPOINT: !Ref GitHubModelsEndpoint
           GITHUB_TOKEN: !Ref GitHubToken
-          AUTO_MAP_STEP_FUNCTIONS_ARN: !Ref AutoMapStepFunctionsArn
+          AUTO_MAP_STEP_FUNCTIONS_ARN: !If
+            - HasAutoMapStepFunctionsArn
+            - !Ref AutoMapStepFunctionsArn
+            - !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:kbx-keyra-auto-map-orchestration'
+          AUTO_MAP_EXECUTION_MODE: !Ref AutoMapExecutionMode
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref PromptRegistryTableName
         - DynamoDBReadPolicy:
             TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AutoMapTable
         - S3ReadPolicy:
             BucketName: !Ref DslAssetBucketName
         - Statement:
             - Effect: Allow
               Action:
                 - states:StartExecution
-              Resource: '*'
+              Resource:
+                - !If
+                  - HasAutoMapStepFunctionsArn
+                  - !Ref AutoMapStepFunctionsArn
+                  - !Ref AWS::NoValue
+                - !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:kbx-keyra-auto-map-orchestration'
       Events:
         ApiEvent:
           Type: Api
@@ -1697,6 +1777,74 @@ Resources:
             RestApiId: !Ref KeyraApi
             Path: /ai/auto-map
             Method: post
+
+  AutoMapSessionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-automap-sessions
+      CodeUri: .
+      Handler: src/lambda/ai/auto-map-sessions.handler
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AutoMapTable
+      Events:
+        CapabilitiesEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/capabilities
+            Method: get
+        CreateSessionEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/sessions
+            Method: post
+        CreateRunEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/sessions/{sessionId}/runs
+            Method: post
+        GetRunStatusEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/sessions/{sessionId}/runs/{runId}
+            Method: get
+        ListSuggestionsEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/sessions/{sessionId}/suggestions
+            Method: get
+        UpdateSuggestionEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/sessions/{sessionId}/suggestions/{suggestionId}
+            Method: patch
+        BatchSuggestionActionsEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /ai/auto-map/sessions/{sessionId}/suggestions/actions
+            Method: post
+        MappingOpenSessionEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /mappings/{mappingId}/auto-map-session
+            Method: get
 
   CreateSchemaFunction:
     Type: AWS::Serverless::Function
@@ -2209,6 +2357,17 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref StorageBucket
 
+  AutoMapStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: kbx-keyra-auto-map-orchestration
+      DefinitionUri: src/lambda/ai/step-functions/auto-map-orchestration.asl.json
+      DefinitionSubstitutions:
+        AutoMapFunctionArn: !GetAtt AutoMapFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AutoMapFunction
+
   RuntimeBootstrapApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -2609,6 +2768,14 @@ Outputs:
   DeploymentCurrentTableArn:
     Description: DeploymentCurrent table ARN.
     Value: !GetAtt DeploymentCurrentTable.Arn
+
+  AutoMapTableArn:
+    Description: Auto-Map sessions/runs table ARN.
+    Value: !GetAtt AutoMapTable.Arn
+
+  AutoMapStateMachineArn:
+    Description: Auto-Map orchestration state machine ARN.
+    Value: !Ref AutoMapStateMachine
 
   RuntimeApiUrl:
     Description: Runtime bootstrap internal HttpApi URL.

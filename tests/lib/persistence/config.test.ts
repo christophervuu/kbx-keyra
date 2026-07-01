@@ -23,6 +23,7 @@ const ORIGINAL_ENV = {
   DEPLOYMENTS_TABLE: getEnvStore().DEPLOYMENTS_TABLE,
   DEPLOYMENT_CURRENT_TABLE: getEnvStore().DEPLOYMENT_CURRENT_TABLE,
   DEPLOYMENT_ORCHESTRATIONS_TABLE: getEnvStore().DEPLOYMENT_ORCHESTRATIONS_TABLE,
+  AUTO_MAP_TABLE: getEnvStore().AUTO_MAP_TABLE,
   ACTIVE_SNAPSHOTS_TABLE: getEnvStore().ACTIVE_SNAPSHOTS_TABLE,
   DEPLOYMENT_HISTORY_TABLE: getEnvStore().DEPLOYMENT_HISTORY_TABLE,
   STORAGE_BUCKET: getEnvStore().STORAGE_BUCKET,
@@ -63,6 +64,7 @@ describe('persistence config', () => {
     setEnvValue('DEPLOYMENTS_TABLE', ORIGINAL_ENV.DEPLOYMENTS_TABLE);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', ORIGINAL_ENV.DEPLOYMENT_CURRENT_TABLE);
     setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', ORIGINAL_ENV.DEPLOYMENT_ORCHESTRATIONS_TABLE);
+    setEnvValue('AUTO_MAP_TABLE', ORIGINAL_ENV.AUTO_MAP_TABLE);
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', ORIGINAL_ENV.ACTIVE_SNAPSHOTS_TABLE);
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', ORIGINAL_ENV.DEPLOYMENT_HISTORY_TABLE);
     setEnvValue('STORAGE_BUCKET', ORIGINAL_ENV.STORAGE_BUCKET);
@@ -89,6 +91,16 @@ describe('persistence config', () => {
     expect(config.runtimeSchemaPayloadKey('mapping-1', 'snapshot-1', 'source', 'schema-1')).toBe(
       'runtime/schemas/mapping-1/snapshot-1/source-schema-1.json',
     );
+
+    expect(config.autoMapSessionPk('ses-1')).toBe('SESSION#ses-1');
+    expect(config.autoMapSessionMetaSk()).toBe('META');
+    expect(config.autoMapRunSk('2026-06-26T00:00:00.000Z', 'run-1')).toBe('RUN#2026-06-26T00:00:00.000Z#run-1');
+    expect(config.autoMapWorkUnitSk('run-1', 12, 'wu-1')).toBe('WORK_UNIT#run-1#000012#wu-1');
+    expect(config.autoMapSuggestionSk(4, 17, 'sg-1')).toBe('SUGGESTION#000004#000017#sg-1');
+    expect(config.autoMapHistoryGsiPk('map-1')).toBe('MAPPING#map-1');
+    expect(config.autoMapHistoryGsiSk('2026-06-26T00:00:00.000Z', 'ses-1')).toBe('CREATED#2026-06-26T00:00:00.000Z#ses-1');
+    expect(config.autoMapOpenGsiPk('map-1')).toBe('MAPPING#map-1');
+    expect(config.autoMapOpenGsiSk('2026-06-26T00:00:00.000Z', 'ses-1')).toBe('OPEN#2026-06-26T00:00:00.000Z#ses-1');
   });
 
   it('uses defaults when table and bucket env vars are unset', async () => {
@@ -103,6 +115,7 @@ describe('persistence config', () => {
     setEnvValue('DEPLOYMENTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', undefined);
     setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', undefined);
+    setEnvValue('AUTO_MAP_TABLE', undefined);
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', undefined);
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', undefined);
     setEnvValue('STORAGE_BUCKET', undefined);
@@ -125,6 +138,7 @@ describe('persistence config', () => {
       deployments: 'keyra-deployments',
       deploymentCurrent: 'keyra-deployment-current',
       deploymentOrchestrations: 'keyra-deployment-orchestrations',
+      autoMap: 'keyra-auto-map',
     });
     expect(config.RUNTIME_TABLE_NAMES).toEqual({
       activeSnapshots: 'keyra-active-snapshots',
@@ -148,6 +162,7 @@ describe('persistence config', () => {
     setEnvValue('DEPLOYMENTS_TABLE', 'deployments-dev');
     setEnvValue('DEPLOYMENT_CURRENT_TABLE', 'deployment-current-dev');
     setEnvValue('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'deployment-orchestrations-dev');
+    setEnvValue('AUTO_MAP_TABLE', 'auto-map-dev');
     setEnvValue('ACTIVE_SNAPSHOTS_TABLE', 'active-snapshots-dev');
     setEnvValue('DEPLOYMENT_HISTORY_TABLE', 'deployment-history-dev');
     setEnvValue('STORAGE_BUCKET', 'storage-dev');
@@ -170,6 +185,7 @@ describe('persistence config', () => {
       deployments: 'deployments-dev',
       deploymentCurrent: 'deployment-current-dev',
       deploymentOrchestrations: 'deployment-orchestrations-dev',
+      autoMap: 'auto-map-dev',
     });
     expect(config.RUNTIME_TABLE_NAMES).toEqual({
       activeSnapshots: 'active-snapshots-dev',

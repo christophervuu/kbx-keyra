@@ -3,10 +3,13 @@ import { useCallback, useContext, useState, type ReactNode } from 'react';
 
 import { WorkspaceHeader } from './WorkspaceHeader';
 import { WorkspaceSuggestionCard } from './WorkspaceSuggestionCard';
+import { WorkspaceSuggestionPreview } from './WorkspaceSuggestionPreview';
 import { PreviewContext } from '../context/preview-context';
 import type { BatchAcceptResult } from '../hooks';
-import { useExpressionPreview } from '../hooks/use-expression-preview';
 import type { AutoMapWorkspaceSummary, SuggestionWorkspaceItem } from '../types';
+
+import type { AutoMapRunSummary } from '@/lib/api/types';
+import type { AutoMapRunStatus, SuggestionApplyBlockReason } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +48,8 @@ export interface AutoMapWorkspaceProps {
   onDismiss?: (targetPath: string) => void;
   /** Called when a dismissed suggestion is restored */
   onUndoDismiss?: (targetPath: string) => void;
+  /** Called when an accepted/edited suggestion is reverted to suggested */
+  onUndoAccept?: (targetPath: string) => void;
   /** Called to refresh a single stale suggestion */
   onRefreshItem?: (targetPath: string) => void;
   /** True when previous suggestions are available for restoration after an error */
@@ -77,6 +82,19 @@ export interface AutoMapWorkspaceProps {
   noSourceDataSlot?: ReactNode;
   /** Optional className for the outer container */
   className?: string;
+  /** Optional enrichment payloads keyed by alias for suggestion preview context. */
+  previewExternalSources?: Readonly<Record<string, unknown>>;
+  /** Required enrichment aliases for suggestion preview context. */
+  requiredEnrichmentAliases?: readonly string[];
+
+  // Progressive run status (FS-101 T-14)
+  runStatus?: AutoMapRunStatus | null;
+  runProgress?: AutoMapRunSummary['progress'] | null;
+  runCounts?: AutoMapRunSummary['counts'] | null;
+  runFailure?: AutoMapRunSummary['failure'] | null;
+  isPolling?: boolean;
+  pollingWarning?: string | null;
+  onRetryFailed?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,29 +109,46 @@ function allResolved(items: readonly SuggestionWorkspaceItem[]): boolean {
   );
 }
 
-function formatPreviewValue(value: unknown): string {
-  if (value === undefined) return 'undefined';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
+function deriveAcceptBlockReason(item: SuggestionWorkspaceItem): SuggestionApplyBlockReason | null {
+  if (item.validation && item.validation.valid !== true) return 'invalid';
+  if (item.status === 'stale') return 'stale';
+  if (item.status === 'dismissed') return 'dismissed';
+  if (item.status === 'accepted' || item.status === 'edited') return 'already-reviewed';
+  return null;
+}
+
+function acceptBlockedReasonToMessage(reason: SuggestionApplyBlockReason | null): string | null {
+  switch (reason) {
+    case 'invalid':
+      return 'Accept is disabled because this suggestion has blocking validation diagnostics.';
+    case 'stale':
+      return 'Accept is disabled because this suggestion is stale. Refresh it first.';
+    case 'dismissed':
+      return 'Accept is disabled because this suggestion is dismissed. Undo dismiss to review again.';
+    case 'already-reviewed':
+      return 'Accept is disabled because this suggestion is already reviewed.';
+    case 'not-ready':
+      return 'Accept is disabled because this suggestion is not ready.';
+    default:
+      return null;
   }
 }
 
 function SuggestionPreviewSlot({
+  currentExpression,
   expression,
   targetPath,
+  externalSources,
+  requiredEnrichmentAliases,
 }: {
+  currentExpression: string | null;
   expression: string;
   targetPath: string;
+  externalSources: Readonly<Record<string, unknown>>;
+  requiredEnrichmentAliases: readonly string[];
 }) {
   const previewCtx = useContext(PreviewContext);
   const sourceData = previewCtx?.sourceData ?? null;
-  const { result, error, isEvaluating } = useExpressionPreview({
-    expression,
-    sourceData,
-  });
 
   return (
     <div
@@ -121,26 +156,13 @@ function SuggestionPreviewSlot({
       data-testid={`workspace-preview-${targetPath}`}
     >
       <p className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Preview</p>
-      {sourceData === null || sourceData === undefined ? (
-        <p className="text-[11px] italic text-slate-500" data-testid={`workspace-preview-no-data-${targetPath}`}>
-          Load source data to see preview.
-        </p>
-      ) : isEvaluating ? (
-        <span
-          className="inline-block h-3 w-24 animate-pulse rounded bg-slate-700"
-          role="status"
-          aria-label="Evaluating preview"
-          data-testid={`workspace-preview-loading-${targetPath}`}
-        />
-      ) : error !== null ? (
-        <p className="text-[11px] text-red-400" data-testid={`workspace-preview-error-${targetPath}`}>
-          {error}
-        </p>
-      ) : (
-        <p className="break-all font-mono text-[11px] text-emerald-300" data-testid={`workspace-preview-value-${targetPath}`}>
-          {formatPreviewValue(result)}
-        </p>
-      )}
+      <WorkspaceSuggestionPreview
+        currentExpression={currentExpression}
+        suggestedExpression={expression}
+        sourceData={sourceData}
+        externalSources={externalSources as Record<string, unknown>}
+        requiredEnrichmentAliases={requiredEnrichmentAliases}
+      />
     </div>
   );
 }
@@ -368,6 +390,7 @@ export function AutoMapWorkspace({
   onEdit,
   onDismiss,
   onUndoDismiss,
+  onUndoAccept,
   onRefreshItem,
   previousSuggestionsAvailable,
   onRestorePrevious,
@@ -377,6 +400,15 @@ export function AutoMapWorkspace({
   confirmationSlot,
   noSourceDataSlot,
   className = '',
+  previewExternalSources = {},
+  requiredEnrichmentAliases = [],
+  runStatus = null,
+  runProgress = null,
+  runCounts = null,
+  runFailure = null,
+  isPolling = false,
+  pollingWarning = null,
+  onRetryFailed,
 }: AutoMapWorkspaceProps) {
   const resolved = status === 'success' && allResolved(items);
 
@@ -482,6 +514,13 @@ export function AutoMapWorkspace({
         onToggleExpandAll={toggleExpandAll}
         allExpanded={allExpanded}
         isRefreshing={status === 'loading'}
+        runStatus={runStatus}
+        runProgress={runProgress}
+        runCounts={runCounts}
+        runFailure={runFailure}
+        isPolling={isPolling}
+        pollingWarning={pollingWarning}
+        onRetryFailed={onRetryFailed}
       />
 
       {/* Toolbar slot (T-07) */}
@@ -531,11 +570,17 @@ export function AutoMapWorkspace({
                   onEdit={onEdit ?? (() => undefined)}
                   onDismiss={onDismiss ?? (() => undefined)}
                   onUndoDismiss={onUndoDismiss ?? (() => undefined)}
+                  onUndoAccept={onUndoAccept}
                   onRefreshItem={onRefreshItem}
+                  canAccept={deriveAcceptBlockReason(item) === null}
+                  acceptBlockedReason={acceptBlockedReasonToMessage(deriveAcceptBlockReason(item))}
                   previewSlot={
                     <SuggestionPreviewSlot
                       expression={item.suggestedExpression}
+                      currentExpression={item.existingExpressionAtGeneration}
                       targetPath={item.targetPath}
+                      externalSources={previewExternalSources}
+                      requiredEnrichmentAliases={requiredEnrichmentAliases}
                     />
                   }
                 />

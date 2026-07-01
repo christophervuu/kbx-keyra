@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -165,7 +166,15 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
   } as ApiAdapter;
 }
 
-function renderEditor(adapter: ApiAdapter) {
+function renderEditor(
+  adapter: ApiAdapter,
+  initialEntry:
+    | string
+    | {
+      pathname: string;
+      state?: Record<string, unknown>;
+    } = '/projects/project-1/mappings/mapping-1',
+) {
   const router = createMemoryRouter(
     [
       {
@@ -174,7 +183,7 @@ function renderEditor(adapter: ApiAdapter) {
       },
     ],
     {
-      initialEntries: ['/projects/project-1/mappings/mapping-1'],
+      initialEntries: [initialEntry],
       future: {
         v7_startTransition: true,
         v7_relativeSplatPath: true,
@@ -182,7 +191,7 @@ function renderEditor(adapter: ApiAdapter) {
     },
   );
 
-  return render(
+  const rendered = render(
     <AdapterProvider adapter={adapter}>
       <RouterProvider
         router={router}
@@ -192,6 +201,11 @@ function renderEditor(adapter: ApiAdapter) {
       />
     </AdapterProvider>,
   );
+
+  return {
+    router,
+    ...rendered,
+  };
 }
 
 describe('MappingEditor auto-map handoff contract', () => {
@@ -221,10 +235,105 @@ describe('MappingEditor auto-map handoff contract', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('builder-panel')).toHaveAttribute('data-automap-mode', 'true');
+      expect(screen.getByTestId('mapping-fields-card').className).toContain('w-[min(96%,1600px)]');
+      expect(screen.queryByTestId('builder-panel')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
+      expect(screen.getByTestId('automap-workspace')).toBeInTheDocument();
     });
 
     expect(screen.getByTestId('automap-reentry-pill')).toHaveTextContent('Auto-Map: 1 pending');
+  });
+
+  it('opens contextual Source + Builder details when editing a suggestion from full-width auto-map review', async () => {
+    sessionStorageMock.clear();
+
+    saveAutoMapSuggestions('mapping-1', '', [
+      {
+        targetPath: 'Order.Id',
+        suggestedExpression: 'source("orderId")',
+        explanation: 'Maps order id',
+        confidence: 'high',
+        validation: { valid: true, diagnostics: [] },
+        status: 'suggested',
+        isNew: true,
+        existingExpressionAtGeneration: null,
+      },
+    ], {
+      generatedAt: '2026-06-08T11:00:00.000Z',
+    });
+
+    const adapter = createMockAdapter();
+    renderEditor(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('automap-workspace')).toBeInTheDocument();
+      expect(screen.queryByTestId('builder-panel')).not.toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByTestId('edit-Order.Id'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('automap-workspace')).not.toBeInTheDocument();
+      expect(screen.getByTestId('source-card')).toBeInTheDocument();
+      expect(screen.getByTestId('builder-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('builder-panel')).not.toHaveAttribute('data-automap-mode', 'true');
+    });
+  });
+
+  it('consumes create-time auto-map route state and triggers root auto-map fetch once', async () => {
+    sessionStorageMock.clear();
+
+    const autoMapSection = vi.fn().mockResolvedValue({
+      suggestions: [],
+      session: {
+        sessionId: 'ams-1',
+        runId: 'run-1',
+        runStatus: 'completed',
+        executionMode: 'async',
+        queued: false,
+      },
+    });
+    const adapter = createMockAdapter({ autoMapSection });
+
+    const { router, rerender } = renderEditor(
+      adapter,
+      {
+        pathname: '/projects/project-1/mappings/mapping-1',
+        state: {
+          autoMapCreate: true,
+        },
+      },
+    );
+
+    await waitFor(() => {
+      expect(autoMapSection).toHaveBeenCalledTimes(1);
+    });
+
+    expect(autoMapSection).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      mappingId: 'mapping-1',
+      mode: 'whole',
+    }));
+
+    await waitFor(() => {
+      const locationState = router.state.location.state as Record<string, unknown> | null;
+      expect(locationState?.autoMapCreate).toBeUndefined();
+    });
+
+    rerender(
+      <AdapterProvider adapter={adapter}>
+        <RouterProvider
+          router={router}
+          future={{
+            v7_startTransition: true,
+          }}
+        />
+      </AdapterProvider>,
+    );
+
+    await waitFor(() => {
+      expect(autoMapSection).toHaveBeenCalledTimes(1);
+    });
   });
 
 });

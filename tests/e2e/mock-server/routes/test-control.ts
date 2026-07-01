@@ -25,6 +25,7 @@ export function createTestControlRouter(store: InMemoryStore): Router {
         projects: store.listProjects().length,
         mappings: payload.mappings?.length ?? 0,
         schemas: store.listSchemas().length,
+        autoMapScenarios: payload.autoMapScenarios?.length ?? 0,
       },
     });
   });

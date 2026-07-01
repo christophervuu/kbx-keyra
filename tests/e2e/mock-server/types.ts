@@ -17,4 +17,5 @@ export interface SeedPayload {
   projects?: unknown[];
   mappings?: unknown[];
   schemas?: unknown[];
+  autoMapScenarios?: unknown[];
 }

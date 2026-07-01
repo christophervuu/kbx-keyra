@@ -33,6 +33,29 @@ export interface RetrievalTelemetryPayload {
   readonly secondary_error?: string;
 }
 
+export interface AutoMapTimingTelemetryPayload {
+  readonly phase: 'create_to_editor' | 'editor_to_first_progress' | 'work_unit_to_first_visible';
+  readonly duration_ms: number;
+  readonly schema_size_segment: SchemaSizeSegment;
+  readonly mapping_id?: string;
+  readonly session_id?: string;
+  readonly run_id?: string;
+  readonly request_id?: string;
+  readonly correlation_id?: string;
+}
+
+export interface AutoMapReviewQualityTelemetryPayload {
+  readonly mapping_id: string;
+  readonly session_id?: string;
+  readonly accepted: number;
+  readonly edited: number;
+  readonly dismissed: number;
+  readonly total_reviewed: number;
+  readonly required_coverage_delta: number;
+  readonly request_id?: string;
+  readonly correlation_id?: string;
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -88,6 +111,25 @@ export function classifySchemaSizeSegment(fieldCount?: number): SchemaSizeSegmen
 export function emitRetrievalTelemetry(eventName: string, payload: RetrievalTelemetryPayload): void {
   try {
     console.info(`[ai-retrieval] ${eventName}`, payload);
+  } catch {
+    // Telemetry sink failures must remain non-fatal.
+  }
+}
+
+export function emitAutoMapTimingTelemetry(eventName: string, payload: AutoMapTimingTelemetryPayload): void {
+  try {
+    console.info(`[ai-auto-map-telemetry] ${eventName}`, payload);
+  } catch {
+    // Telemetry sink failures must remain non-fatal.
+  }
+}
+
+export function emitAutoMapReviewQualityTelemetry(
+  eventName: string,
+  payload: AutoMapReviewQualityTelemetryPayload,
+): void {
+  try {
+    console.info(`[ai-auto-map-telemetry] ${eventName}`, payload);
   } catch {
     // Telemetry sink failures must remain non-fatal.
   }

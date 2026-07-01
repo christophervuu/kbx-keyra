@@ -17,6 +17,67 @@ import type {
 
 import type { SeedPayload } from './types';
 
+export interface AutoMapMockSuggestion {
+  readonly target: string;
+  readonly expression: string;
+  readonly explanation: string;
+  readonly confidence: 'high' | 'medium' | 'low';
+  readonly reviewStatus?: 'pending' | 'accepted' | 'dismissed' | 'kept-current' | 'stale' | 'conflict';
+  readonly validation?: {
+    readonly valid: boolean;
+    readonly diagnostics: ReadonlyArray<{
+      readonly severity: 'info' | 'warning' | 'error';
+      readonly code: string;
+      readonly message: string;
+    }>;
+  };
+}
+
+export interface AutoMapMockRunStatusStep {
+  readonly status: string;
+  readonly progress?: {
+    readonly completedWorkUnits: number;
+    readonly totalWorkUnits: number;
+    readonly completedTargets: number;
+    readonly totalTargets: number;
+  };
+  readonly counts?: {
+    readonly generated: number;
+    readonly ready: number;
+    readonly warning: number;
+    readonly invalid: number;
+    readonly failedTargets: number;
+  };
+  readonly failure?: {
+    readonly code: string;
+    readonly message: string;
+    readonly retryable: boolean;
+  };
+}
+
+export interface AutoMapMockScenario {
+  readonly scenarioId: string;
+  readonly mappingId: string;
+  readonly sectionPath: string;
+  readonly visibleTargetPaths: readonly string[];
+  readonly startRun: {
+    readonly sessionId: string;
+    readonly runId: string;
+    readonly status: string;
+    readonly queued: boolean;
+  };
+  readonly runStatuses: readonly AutoMapMockRunStatusStep[];
+  readonly suggestionsByPoll: readonly AutoMapMockSuggestion[][];
+}
+
+interface AutoMapScenarioRuntime {
+  scenario: AutoMapMockScenario;
+  runStatusCursor: number;
+  suggestionCursor: number;
+  statusCallCount: number;
+  suggestionsCallCount: number;
+}
+
 interface StoredMapping {
   metadata: MappingMetadata;
   config: MappingConfig;
@@ -34,6 +95,8 @@ export class InMemoryStore {
   private readonly mappings = new Map<string, StoredMapping>();
   private readonly schemas = new Map<string, StoredSchema>();
   private readonly mappingVersions = new Map<string, MappingVersionEntry[]>();
+  private readonly autoMapScenarios = new Map<string, AutoMapScenarioRuntime>();
+  private readonly autoMapSessionByMapping = new Map<string, { sessionId: string; runId: string }>();
 
   private projectCounter = 1;
   private mappingCounter = 1;
@@ -55,6 +118,8 @@ export class InMemoryStore {
     this.mappings.clear();
     this.schemas.clear();
     this.mappingVersions.clear();
+    this.autoMapScenarios.clear();
+    this.autoMapSessionByMapping.clear();
   }
 
   seed(payload: SeedPayload): void {
@@ -87,13 +152,13 @@ export class InMemoryStore {
         name: metadata.name ?? `Schema ${schemaId}`,
         format: metadata.format ?? 'json-schema',
         fieldCount: metadata.fieldCount ?? 0,
-        origin: metadata.origin === 'cdm' || metadata.origin === 'published' || metadata.origin === 'local' ? metadata.origin : 'local',
+        origin: metadata.origin === 'cdm' || metadata.origin === 'uploaded' || metadata.origin === 'inferred' ? metadata.origin : 'uploaded',
         status: metadata.status ?? 'ready',
         scope: metadata.scope ?? 'global',
         description: metadata.description,
         updatedBy: metadata.updatedBy,
         inferred: metadata.inferred,
-        syncStatus: metadata.syncStatus ?? 'not-synced',
+        syncStatus: metadata.syncStatus ?? 'sync-failed',
         source: metadata.source ?? { type: 'upload' },
         createdAt: metadata.createdAt ?? timestamp,
         updatedAt: metadata.updatedAt ?? timestamp,
@@ -142,6 +207,296 @@ export class InMemoryStore {
         config: fullConfig,
       });
     }
+
+    for (const seededScenario of payload.autoMapScenarios ?? []) {
+      this.upsertAutoMapScenario(seededScenario);
+    }
+  }
+
+  private createDefaultAutoMapScenario(mappingId: string, sectionPath: string, visibleTargetPaths: readonly string[]): AutoMapMockScenario {
+    const target = visibleTargetPaths[0] ?? 'Order.Id';
+    return {
+      scenarioId: `scenario-${mappingId}-${sectionPath || 'root'}`,
+      mappingId,
+      sectionPath,
+      visibleTargetPaths,
+      startRun: {
+        sessionId: `ams-${mappingId}`,
+        runId: `run-${mappingId}-1`,
+        status: 'queued',
+        queued: true,
+      },
+      runStatuses: [
+        {
+          status: 'queued',
+          progress: { completedWorkUnits: 0, totalWorkUnits: 2, completedTargets: 0, totalTargets: 2 },
+          counts: { generated: 0, ready: 0, warning: 0, invalid: 0, failedTargets: 0 },
+        },
+        {
+          status: 'generating',
+          progress: { completedWorkUnits: 1, totalWorkUnits: 2, completedTargets: 1, totalTargets: 2 },
+          counts: { generated: 1, ready: 1, warning: 0, invalid: 0, failedTargets: 0 },
+        },
+        {
+          status: 'completed',
+          progress: { completedWorkUnits: 2, totalWorkUnits: 2, completedTargets: 2, totalTargets: 2 },
+          counts: { generated: 2, ready: 2, warning: 0, invalid: 0, failedTargets: 0 },
+        },
+      ],
+      suggestionsByPoll: [
+        [],
+        [
+          {
+            target,
+            expression: 'source("orderId")',
+            explanation: 'Maps order id from source payload.',
+            confidence: 'high',
+            reviewStatus: 'pending',
+            validation: { valid: true, diagnostics: [] },
+          },
+        ],
+        [
+          {
+            target,
+            expression: 'source("orderId")',
+            explanation: 'Maps order id from source payload.',
+            confidence: 'high',
+            reviewStatus: 'pending',
+            validation: { valid: true, diagnostics: [] },
+          },
+        ],
+      ],
+    };
+  }
+
+  private normalizeAutoMapScenario(input: unknown): AutoMapMockScenario | null {
+    if (!input || typeof input !== 'object') {
+      return null;
+    }
+
+    const candidate = input as {
+      scenarioId?: unknown;
+      mappingId?: unknown;
+      sectionPath?: unknown;
+      visibleTargetPaths?: unknown;
+      startRun?: unknown;
+      runStatuses?: unknown;
+      suggestionsByPoll?: unknown;
+    };
+
+    if (typeof candidate.mappingId !== 'string' || candidate.mappingId.trim() === '') {
+      return null;
+    }
+
+    const startRun = candidate.startRun as {
+      sessionId?: unknown;
+      runId?: unknown;
+      status?: unknown;
+      queued?: unknown;
+    } | undefined;
+    if (!startRun || typeof startRun.sessionId !== 'string' || typeof startRun.runId !== 'string' || typeof startRun.status !== 'string') {
+      return null;
+    }
+
+    const runStatusesRaw = Array.isArray(candidate.runStatuses) ? candidate.runStatuses : [];
+    if (runStatusesRaw.length === 0) {
+      return null;
+    }
+
+    const runStatuses: AutoMapMockRunStatusStep[] = runStatusesRaw
+      .map((step) => {
+        if (!step || typeof step !== 'object') return null;
+        const typed = step as AutoMapMockRunStatusStep;
+        if (typeof typed.status !== 'string') return null;
+        return {
+          status: typed.status,
+          ...(typed.progress ? { progress: typed.progress } : {}),
+          ...(typed.counts ? { counts: typed.counts } : {}),
+          ...(typed.failure ? { failure: typed.failure } : {}),
+        };
+      })
+      .filter((step): step is AutoMapMockRunStatusStep => step !== null);
+
+    if (runStatuses.length === 0) {
+      return null;
+    }
+
+    const suggestionsByPoll = Array.isArray(candidate.suggestionsByPoll)
+      ? candidate.suggestionsByPoll.map((entry) => (Array.isArray(entry) ? entry : []) as AutoMapMockSuggestion[])
+      : [];
+
+    return {
+      scenarioId: typeof candidate.scenarioId === 'string' && candidate.scenarioId.trim() !== ''
+        ? candidate.scenarioId
+        : `scenario-${candidate.mappingId}`,
+      mappingId: candidate.mappingId,
+      sectionPath: typeof candidate.sectionPath === 'string' ? candidate.sectionPath : '',
+      visibleTargetPaths: Array.isArray(candidate.visibleTargetPaths)
+        ? candidate.visibleTargetPaths.filter((path): path is string => typeof path === 'string')
+        : [],
+      startRun: {
+        sessionId: startRun.sessionId,
+        runId: startRun.runId,
+        status: startRun.status,
+        queued: startRun.queued !== false,
+      },
+      runStatuses,
+      suggestionsByPoll,
+    };
+  }
+
+  upsertAutoMapScenario(input: unknown): boolean {
+    const scenario = this.normalizeAutoMapScenario(input);
+    if (!scenario) {
+      return false;
+    }
+
+    this.autoMapScenarios.set(scenario.mappingId, {
+      scenario,
+      runStatusCursor: 0,
+      suggestionCursor: 0,
+      statusCallCount: 0,
+      suggestionsCallCount: 0,
+    });
+    this.autoMapSessionByMapping.set(scenario.mappingId, {
+      sessionId: scenario.startRun.sessionId,
+      runId: scenario.startRun.runId,
+    });
+    return true;
+  }
+
+  private getOrCreateAutoMapRuntime(mappingId: string, sectionPath: string, visibleTargetPaths: readonly string[]): AutoMapScenarioRuntime {
+    const existing = this.autoMapScenarios.get(mappingId);
+    if (existing) {
+      return existing;
+    }
+
+    const scenario = this.createDefaultAutoMapScenario(mappingId, sectionPath, visibleTargetPaths);
+    const runtime: AutoMapScenarioRuntime = {
+      scenario,
+      runStatusCursor: 0,
+      suggestionCursor: 0,
+      statusCallCount: 0,
+      suggestionsCallCount: 0,
+    };
+    this.autoMapScenarios.set(mappingId, runtime);
+    this.autoMapSessionByMapping.set(mappingId, {
+      sessionId: scenario.startRun.sessionId,
+      runId: scenario.startRun.runId,
+    });
+    return runtime;
+  }
+
+  getAutoMapOpenSession(mappingId: string): { sessionId: string; mappingId: string; projectId: string; status: string; baseMappingRevision: number; lastRunId: string; createdAt: string; updatedAt: string } | null {
+    const runtime = this.autoMapScenarios.get(mappingId);
+    const mapping = this.mappings.get(mappingId);
+    if (!runtime || !mapping) {
+      return null;
+    }
+
+    const step = runtime.scenario.runStatuses[Math.min(runtime.runStatusCursor, runtime.scenario.runStatuses.length - 1)];
+    const status = step?.status === 'completed' || step?.status === 'partial' || step?.status === 'failed' || step?.status === 'superseded'
+      ? 'reviewing'
+      : 'generating';
+
+    return {
+      sessionId: runtime.scenario.startRun.sessionId,
+      mappingId,
+      projectId: mapping.metadata.projectId,
+      status,
+      baseMappingRevision: 0,
+      lastRunId: runtime.scenario.startRun.runId,
+      createdAt: this.nowIso(),
+      updatedAt: this.nowIso(),
+    };
+  }
+
+  startAutoMapSession(input: { mappingId: string; sectionPath: string; visibleTargetPaths: readonly string[] }): { sessionId: string; runId: string; status: string; deduped: boolean } {
+    const runtime = this.getOrCreateAutoMapRuntime(input.mappingId, input.sectionPath, input.visibleTargetPaths);
+    runtime.runStatusCursor = 0;
+    runtime.suggestionCursor = 0;
+    this.autoMapSessionByMapping.set(input.mappingId, {
+      sessionId: runtime.scenario.startRun.sessionId,
+      runId: runtime.scenario.startRun.runId,
+    });
+
+    return {
+      sessionId: runtime.scenario.startRun.sessionId,
+      runId: runtime.scenario.startRun.runId,
+      status: runtime.scenario.startRun.status,
+      deduped: false,
+    };
+  }
+
+  startAutoMapRunBySession(sessionId: string): { sessionId: string; runId: string; status: string; deduped: boolean } | null {
+    const runtime = Array.from(this.autoMapScenarios.values()).find((entry) => entry.scenario.startRun.sessionId === sessionId);
+    if (!runtime) {
+      return null;
+    }
+
+    runtime.runStatusCursor = 0;
+    runtime.suggestionCursor = 0;
+    return {
+      sessionId: runtime.scenario.startRun.sessionId,
+      runId: runtime.scenario.startRun.runId,
+      status: runtime.scenario.startRun.status,
+      deduped: false,
+    };
+  }
+
+  getAutoMapRunStatus(sessionId: string, runId: string): AutoMapMockRunStatusStep & { sessionId: string; runId: string; scope: { mode: string } } | null {
+    const runtime = Array.from(this.autoMapScenarios.values()).find(
+      (entry) => entry.scenario.startRun.sessionId === sessionId && entry.scenario.startRun.runId === runId,
+    );
+    if (!runtime) {
+      return null;
+    }
+
+    runtime.statusCallCount += 1;
+    const currentIndex = Math.min(runtime.runStatusCursor, runtime.scenario.runStatuses.length - 1);
+    const current = runtime.scenario.runStatuses[currentIndex] ?? runtime.scenario.runStatuses[runtime.scenario.runStatuses.length - 1];
+    if (runtime.runStatusCursor < runtime.scenario.runStatuses.length - 1) {
+      runtime.runStatusCursor += 1;
+    }
+
+    return {
+      sessionId,
+      runId,
+      scope: { mode: runtime.scenario.sectionPath === '' ? 'whole' : 'section' },
+      ...current,
+    };
+  }
+
+  listAutoMapSuggestions(sessionId: string): { items: AutoMapMockSuggestion[]; total: number } | null {
+    const runtime = Array.from(this.autoMapScenarios.values()).find(
+      (entry) => entry.scenario.startRun.sessionId === sessionId,
+    );
+    if (!runtime) {
+      return null;
+    }
+
+    runtime.suggestionsCallCount += 1;
+    const currentIndex = Math.min(runtime.suggestionCursor, Math.max(runtime.scenario.suggestionsByPoll.length - 1, 0));
+    const items = runtime.scenario.suggestionsByPoll[currentIndex] ?? [];
+    if (runtime.suggestionCursor < runtime.scenario.suggestionsByPoll.length - 1) {
+      runtime.suggestionCursor += 1;
+    }
+
+    return {
+      items: [...items],
+      total: items.length,
+    };
+  }
+
+  getAutoMapMetrics(mappingId: string): { runStatusCalls: number; suggestionCalls: number } {
+    const runtime = this.autoMapScenarios.get(mappingId);
+    if (!runtime) {
+      return { runStatusCalls: 0, suggestionCalls: 0 };
+    }
+    return {
+      runStatusCalls: runtime.statusCallCount,
+      suggestionCalls: runtime.suggestionsCallCount,
+    };
   }
 
   // Projects
@@ -384,13 +739,13 @@ export class InMemoryStore {
       name: input.name,
       format: input.format,
       fieldCount: typeof input.fieldCount === 'number' ? input.fieldCount : 0,
-      origin: input.origin === 'cdm' || input.origin === 'published' || input.origin === 'local' ? input.origin : 'local',
+      origin: input.origin === 'cdm' || input.origin === 'uploaded' || input.origin === 'inferred' ? input.origin : 'uploaded',
       status: 'ready',
       scope: input.scope ?? 'global',
       description: input.description,
       updatedBy: 'e2e-mock',
       inferred: input.inferred,
-      syncStatus: input.syncStatus ?? 'not-synced',
+      syncStatus: input.syncStatus ?? 'sync-failed',
       source: input.source ?? { type: 'upload' },
       createdAt: timestamp,
       updatedAt: timestamp,

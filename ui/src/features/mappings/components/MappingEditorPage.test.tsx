@@ -228,6 +228,22 @@ describe('MappingEditorPage', () => {
     expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bottom-area')).not.toBeInTheDocument();
   });
+
+  it('uses near-full-width primary workspace in automap overview mode', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="overview"
+        isAutoMapMode={true}
+      />,
+    );
+
+    const mappingCard = screen.getByTestId('mapping-fields-card');
+    expect(mappingCard.className).toContain('w-[min(96%,1600px)]');
+    expect(screen.queryByTestId('source-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('builder-card')).not.toBeInTheDocument();
+  });
   it('does not render a global-toolbar element', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);
     expect(screen.queryByTestId('global-toolbar')).not.toBeInTheDocument();

@@ -10,6 +10,7 @@ export async function seedBackend(data: TestSeedData): Promise<void> {
       projects: data.projects,
       mappings: data.mappings,
       schemas: data.schemas,
+      autoMapScenarios: data.autoMapScenarios ?? [],
     }),
   });
 

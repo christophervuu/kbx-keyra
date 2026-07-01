@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyEvent } from '../../../src/lambda/shared/index.js';
 
 const invokeAIMock = vi.hoisted(() => vi.fn());
-const parseMock = vi.hoisted(() => vi.fn());
+const validateMock = vi.hoisted(() => vi.fn());
 const schemaRetrieverSearchMock = vi.hoisted(() => vi.fn());
 const getSchemaMetadataMock = vi.hoisted(() => vi.fn());
 const getItemMock = vi.hoisted(() => vi.fn());
+const getObjectMock = vi.hoisted(() => vi.fn());
 const sfnSendMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/lib/ai/index.js', () => {
@@ -29,15 +30,9 @@ vi.mock('../../../src/lib/ai/index.js', () => {
   };
 });
 
-vi.mock('../../../src/engine/dsl/index.js', () => {
+vi.mock('../../../src/engine/index.js', () => {
   return {
-    parse: parseMock,
-  };
-});
-
-vi.mock('../../../src/engine/registry/function-registry.js', () => {
-  return {
-    defaultRegistry: {},
+    validate: validateMock,
   };
 });
 
@@ -58,6 +53,7 @@ vi.mock('../../../src/lambda/shared/index.js', async () => {
   return {
     ...actual,
     getItem: getItemMock,
+    getObject: getObjectMock,
   };
 });
 
@@ -91,18 +87,26 @@ function createEvent(body: string | null, overrides: Partial<APIGatewayProxyEven
 describe('aiAutoMap handler', () => {
   beforeEach(() => {
     process.env.MAPPINGS_TABLE = 'KeyRa-Mappings';
+    process.env.SCHEMAS_TABLE = 'KeyRa-Schemas';
+    process.env.CONTENT_BUCKET = 'keyra-content';
     delete process.env.AUTO_MAP_CHUNK_TARGET;
     delete process.env.AUTO_MAP_MAX_CONCURRENCY;
     delete process.env.AUTO_MAP_STEP_FUNCTIONS_ARN;
     delete process.env.AUTO_MAP_STEP_FUNCTIONS_TARGET_THRESHOLD;
     delete process.env.AUTO_MAP_STEP_FUNCTIONS_CHUNK_THRESHOLD;
     invokeAIMock.mockReset();
-    parseMock.mockReset();
+    validateMock.mockReset();
     schemaRetrieverSearchMock.mockReset();
     getItemMock.mockReset();
+    getObjectMock.mockReset();
     getSchemaMetadataMock.mockReset().mockResolvedValue({ fieldCount: 320 });
     sfnSendMock.mockReset();
     vi.resetModules();
+
+    validateMock.mockReturnValue({
+      valid: true,
+      diagnostics: [],
+    });
   });
 
   it('returns 200 and enriched AI result for valid request', async () => {
@@ -125,11 +129,6 @@ describe('aiAutoMap handler', () => {
         completionTokens: 20,
         totalTokens: 30,
       },
-    });
-
-    parseMock.mockReturnValue({
-      ast: {},
-      diagnostics: [],
     });
 
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
@@ -288,8 +287,6 @@ describe('aiAutoMap handler', () => {
       model: 'openai/gpt-4.1',
     });
 
-    parseMock.mockReturnValue({ ast: {}, diagnostics: [] });
-
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
 
     const response = await handler(
@@ -419,8 +416,6 @@ describe('aiAutoMap handler', () => {
       };
     });
 
-    parseMock.mockReturnValue({ ast: {}, diagnostics: [] });
-
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
 
     const response = await handler(
@@ -518,9 +513,21 @@ describe('aiAutoMap handler', () => {
         model: 'openai/gpt-4.1',
       });
 
-    parseMock
-      .mockReturnValueOnce({ ast: {}, diagnostics: [{ severity: 'error', message: 'invalid expr' }] })
-      .mockReturnValueOnce({ ast: {}, diagnostics: [] });
+    validateMock
+      .mockReturnValueOnce({
+        valid: false,
+        diagnostics: [
+          {
+            code: 'KEYRA-E001',
+            severity: 'error',
+            message: 'invalid expr',
+          },
+        ],
+      })
+      .mockReturnValueOnce({
+        valid: true,
+        diagnostics: [],
+      });
 
     process.env.AUTO_MAP_CHUNK_TARGET = '50';
 
@@ -578,9 +585,15 @@ describe('aiAutoMap handler', () => {
       model: 'openai/gpt-4.1',
     });
 
-    parseMock.mockReturnValue({
-      ast: {},
-      diagnostics: [{ severity: 'error', message: 'Unexpected token' }],
+    validateMock.mockReturnValue({
+      valid: false,
+      diagnostics: [
+        {
+          code: 'KEYRA-E001',
+          severity: 'error',
+          message: 'Unexpected token',
+        },
+      ],
     });
 
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
@@ -620,7 +633,7 @@ describe('aiAutoMap handler', () => {
     expect(parsed.data.suggestions[0]?.validation.valid).toBe(false);
     expect(parsed.data.suggestions[0]?.validation.diagnostics).toEqual([
       {
-        code: 'PARSE_ERROR',
+        code: 'KEYRA-E001',
         severity: 'error',
         message: 'Unexpected token',
       },
@@ -659,9 +672,21 @@ describe('aiAutoMap handler', () => {
       model: 'openai/gpt-4.1',
     });
 
-    parseMock
-      .mockReturnValueOnce({ ast: {}, diagnostics: [] })
-      .mockReturnValueOnce({ ast: {}, diagnostics: [{ severity: 'error', message: 'Unexpected token' }] });
+    validateMock
+      .mockReturnValueOnce({
+        valid: true,
+        diagnostics: [],
+      })
+      .mockReturnValueOnce({
+        valid: false,
+        diagnostics: [
+          {
+            code: 'KEYRA-E001',
+            severity: 'error',
+            message: 'Unexpected token',
+          },
+        ],
+      });
 
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
 
@@ -707,7 +732,7 @@ describe('aiAutoMap handler', () => {
       valid: false,
       diagnostics: [
         {
-          code: 'PARSE_ERROR',
+          code: 'KEYRA-E001',
           severity: 'error',
           message: 'Unexpected token',
         },
@@ -718,6 +743,191 @@ describe('aiAutoMap handler', () => {
     expect(parsed.data.validationMeta.validationFailCount).toBe(1);
     expect(parsed.data.validationMeta.outcomes).toHaveLength(2);
     expect(parsed.data.validationMeta.outcomes.every((outcome) => outcome.sourceChunkRef === 'chunk-1')).toBe(true);
+  });
+
+  it('maps warning diagnostics to warning readiness while keeping accept eligibility', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'source("Invoice.DocumentType")',
+            explanation: 'candidate',
+            confidence: 'high',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+
+    validateMock.mockReturnValue({
+      valid: true,
+      diagnostics: [
+        {
+          code: 'KEYRA-W001',
+          severity: 'warning',
+          message: 'nullable source access',
+        },
+      ],
+    });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetSection: '- Order.Header.DocumentType (string)',
+          sourceContext: '- Invoice.DocumentType (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    const parsed = JSON.parse(response.body) as {
+      data: {
+        suggestions: Array<{
+          validationState: 'ready' | 'warning' | 'invalid';
+          actionEligibility: { canAccept: boolean; canBatchAccept: boolean; blockReasons: string[] };
+          validation: { valid: boolean; diagnostics: Array<{ code: string; severity: string; message: string }> };
+        }>;
+      };
+    };
+
+    expect(parsed.data.suggestions[0]?.validationState).toBe('warning');
+    expect(parsed.data.suggestions[0]?.actionEligibility).toEqual({
+      canAccept: true,
+      canBatchAccept: true,
+      blockReasons: [],
+    });
+    expect(parsed.data.suggestions[0]?.validation.valid).toBe(true);
+  });
+
+  it('validates grouped array candidates as one candidate config', async () => {
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'source("Invoice.DocumentType")',
+            explanation: 'header',
+            confidence: 'high',
+          },
+          {
+            target: 'Order.Items',
+            expression: 'map(source("Invoice.Items"), object("Id", item("Id")))',
+            explanation: 'items parent',
+            confidence: 'high',
+          },
+          {
+            target: 'Order.Items.Id',
+            expression: 'item("Id")',
+            explanation: 'items child',
+            confidence: 'high',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+
+    validateMock
+      .mockReturnValueOnce({ valid: true, diagnostics: [] })
+      .mockReturnValueOnce({ valid: true, diagnostics: [] });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          targetSection:
+            '- Order.Header.DocumentType (string)\n- Order.Items (array)\n- Order.Items.Id (string)',
+          sourceContext: '- Invoice.DocumentType (string)\n- Invoice.Items (array)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(validateMock).toHaveBeenCalledTimes(2);
+
+    const firstCallConfig = validateMock.mock.calls[0]?.[0] as { rules: Array<{ target: string }> };
+    const secondCallConfig = validateMock.mock.calls[1]?.[0] as { rules: Array<{ target: string }> };
+
+    expect(firstCallConfig.rules.map((rule) => rule.target)).toEqual(['Order.Header.DocumentType']);
+    expect(secondCallConfig.rules.map((rule) => rule.target)).toEqual(['Order.Items', 'Order.Items.Id']);
+  });
+
+  it('hydrates candidate validation from base mapping context and enrichment aliases', async () => {
+    getItemMock
+      .mockResolvedValueOnce({
+        mappingId: 'm-1',
+        sourceSchemaId: 'src-1',
+        targetSchemaId: 'tgt-1',
+        configS3Key: 'mappings/m-1/config.json',
+      })
+      .mockResolvedValueOnce({ schemaId: 'src-1', format: 'json-schema' })
+      .mockResolvedValueOnce({ schemaId: 'tgt-1', format: 'json-schema' });
+
+    getObjectMock
+      .mockResolvedValueOnce(JSON.stringify({
+        name: 'Base',
+        version: 3,
+        engineVersion: '1.0.0',
+        sourceSchemaRef: { schemaId: 'src-1', type: 'local' },
+        targetSchemaRef: { schemaId: 'tgt-1', type: 'local' },
+        enrichmentSources: [{ alias: 'taxLookup' }],
+        config: {
+          externalSources: ['legacyAlias'],
+          constants: { currency: 'USD' },
+          nullSubtrees: [],
+          unmappedTargets: 'omit',
+        },
+        rules: [],
+      }))
+      .mockResolvedValueOnce(JSON.stringify({ type: 'object', properties: {} }))
+      .mockResolvedValueOnce(JSON.stringify({ type: 'object', properties: {} }));
+
+    invokeAIMock.mockResolvedValue({
+      success: true,
+      data: {
+        rules: [
+          {
+            target: 'Order.Header.DocumentType',
+            expression: 'external("taxLookup")',
+            confidence: 'high',
+          },
+        ],
+      },
+      promptId: 'auto-map',
+      model: 'openai/gpt-4.1',
+    });
+
+    validateMock.mockReturnValue({ valid: true, diagnostics: [] });
+
+    const { handler } = await import('../../../src/lambda/ai/auto-map.js');
+
+    const response = await handler(
+      createEvent(
+        JSON.stringify({
+          mappingId: 'm-1',
+          targetSection: '- Order.Header.DocumentType (string)',
+          sourceContext: '- Invoice.DocumentType (string)',
+        }),
+      ),
+    );
+
+    expect(response.statusCode).toBe(200);
+    const validationConfig = validateMock.mock.calls[0]?.[0] as {
+      config: { externalSources: string[] };
+      sourceSchemaRef: { schemaId: string };
+      targetSchemaRef: { schemaId: string };
+    };
+
+    expect(validationConfig.sourceSchemaRef.schemaId).toBe('src-1');
+    expect(validationConfig.targetSchemaRef.schemaId).toBe('tgt-1');
+    expect(validationConfig.config.externalSources).toEqual(['taxLookup', 'legacyAlias']);
   });
 
   it('returns plain 400 body for missing targetSection as existing contract', async () => {
@@ -753,8 +963,6 @@ describe('aiAutoMap handler', () => {
       promptId: 'auto-map',
       model: 'openai/gpt-4.1',
     });
-    parseMock.mockReturnValue({ ast: {}, diagnostics: [] });
-
     const { handler } = await import('../../../src/lambda/ai/auto-map.js');
 
     const response = await handler(
@@ -972,12 +1180,25 @@ describe('aiAutoMap handler', () => {
     expect(response.statusCode).toBe(200);
 
     const parsedBody = JSON.parse(response.body) as {
-      data: { rules: Array<{ validation: { valid: boolean; diagnostics: string[] } }> };
+      data: {
+        rules: Array<{
+          validation: {
+            valid: boolean;
+            diagnostics: Array<{ code: string; severity: 'error' | 'warning' | 'info'; message: string }>;
+          };
+        }>;
+      };
     };
 
     expect(parsedBody.data.rules[0]?.validation).toEqual({
       valid: false,
-      diagnostics: ['No expression to validate'],
+      diagnostics: [
+        {
+          code: 'CANDIDATE_CONFIG_INVALID',
+          severity: 'error',
+          message: 'Missing required candidate fields: target and expression',
+        },
+      ],
     });
   });
 });

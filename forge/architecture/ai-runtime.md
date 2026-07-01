@@ -139,7 +139,8 @@ UI hook/component
 
 Canonical route mappings currently implemented in `HttpAdapter`:
 
-- `autoMap` / `autoMapSection` -> `POST /ai/auto-map`
+- `autoMap` / `autoMapSection` -> `POST /ai/auto-map` (legacy/synchronous compatibility surface)
+- Async Auto-Map review flow -> `/ai/auto-map/capabilities`, `/ai/auto-map/sessions*`, and `/mappings/:mappingId/auto-map-session`
 - `suggestExpression` -> `POST /ai/suggest-expression`
 - `explainRule` -> `POST /ai/explain-rule`
 - `smartFix` -> `POST /ai/smart-fix`
@@ -625,6 +626,37 @@ FS-075 codifies the runtime-facing verification boundary for Phase 2 acceptance:
 - No-context retrieval is a success outcome, not an error:
   - returns zero suggestions with explicit no-context reason metadata for workspace empty-state rendering
 
+### Auto-Map async session/run orchestration contract (FS-101)
+
+FS-101 extends Auto-Map from a single request/response suggestion flow to a durable async session/run lifecycle while preserving backend-owned AI invocation boundaries.
+
+Canonical runtime boundaries:
+
+- `auto-map-sessions` handler owns API contract orchestration (capabilities, session bootstrap, run start/status, suggestion pagination/decisions/actions).
+- `auto-map-run-orchestrator.ts` owns run execution semantics (work-unit lifecycle, progressive suggestion persistence, retries, terminal resolution).
+- `auto-map-work-unit-planner.ts` owns deterministic structural planning/splitting for run scopes.
+- `invokeAI()` remains the per-unit model invocation boundary; session orchestration does not introduce browser/provider shortcuts.
+
+Execution strategy contract:
+
+- Small scopes may execute in Lambda worker paths.
+- Large scopes may hand off through Step Functions orchestration.
+- UI/API contracts remain executor-agnostic (`202` = accepted async work, not completion).
+
+Session/run terminal semantics contract:
+
+- Run terminal statuses: `completed | partial | failed | superseded`.
+- `partial` is terminal and means mixed success/failure after all work units are terminal.
+- Superseded late-write protection is required: writes from superseded sessions/runs must not update current review aggregates/open-session projections.
+
+Telemetry addendum for FS-101:
+
+- Baseline runtime invocation events (`ai.invoke.start|success|failure`) remain required.
+- Auto-Map-specific timing and review-quality emissions are required at feature integration boundaries:
+  - time-to-first-meaningful-progress and time-to-first-usable-suggestion tracking
+  - review quality counters (accepted/edited/dismissed/kept-current/stale/conflict/invalid)
+- Correlation continuity (`requestId`, optional `correlationId`, run/session identifiers) is required across API envelope, runtime events, and E2E-observable behavior.
+
 Lambda handlers do not:
 - Read from DynamoDB directly
 - Call the OpenAI SDK directly
@@ -681,7 +713,7 @@ console.log(result);
 - Browser-side provider invocation is prohibited by dual policy guardrails: UI ESLint restricted imports and path-based static scanning (`scripts/check-ui-ai-guardrails.ts`).
 - AI output is **suggestion-only** — no auto-commit to mapping state.
 - Step Functions are **not used** for lightweight AI endpoints (explain-rule, suggest-expression, smart-fix).
-- Auto-Map may use Step Functions for over-budget large-schema workloads while keeping `invokeAI()` as the per-chunk execution unit.
+- Auto-Map may use Step Functions for over-budget large-schema workloads while keeping `invokeAI()` as the per-chunk execution unit; FS-101 session/run APIs remain canonical regardless of executor.
 - Backend mode UI integration must use `HttpAdapter` as the only canonical production adapter path.
 - Deprecated shortcut patterns (including HybridAdapter-style alternate routing) are non-canonical.
 

@@ -25,6 +25,11 @@ Object.defineProperty(globalThis, 'sessionStorage', {
   writable: true,
 });
 
+Object.defineProperty(document, 'visibilityState', {
+  configurable: true,
+  get: () => 'visible',
+});
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -76,6 +81,13 @@ const MOCK_RESULT: AutoMapSectionResult = {
 };
 
 const MOCK_RULES: readonly MappingRule[] = [];
+const MOCK_RULES_WITH_EXISTING: readonly MappingRule[] = [
+  {
+    target: 'Order.Id',
+    type: 'string',
+    expression: 'source.oldOrderId',
+  },
+];
 
 const MOCK_SOURCE_SCHEMA: ParsedSchema = {
   nodes: [{ path: 'source.orderId', fieldName: 'orderId', type: 'string', depth: 0, isRequired: false, isArray: false, childCount: 0, children: [], parentPath: null }],
@@ -149,6 +161,7 @@ describe('useAutoMapWorkspace', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   // -------------------------------------------------------------------------
@@ -490,7 +503,7 @@ describe('useAutoMapWorkspace', () => {
     );
   });
 
-  it('bulkAcceptAllValid skips stale and dismissed suggestions', async () => {
+  it('bulkAcceptAllValid only considers currently filtered rows (default needsReview excludes dismissed)', async () => {
     const updateDraft = vi.fn();
     const params = makeParams({ updateDraft });
     const { result } = renderHook(() => useAutoMapWorkspace(params));
@@ -509,16 +522,49 @@ describe('useAutoMapWorkspace', () => {
 
     expect(result.current.lastBatchAcceptResult).toEqual(
       expect.objectContaining({
-        attempted: 2,
+        attempted: 1,
         applied: 0,
-        skipped: 2,
+        skipped: 1,
       }),
     );
     expect(result.current.lastBatchAcceptResult?.skippedByReason.stale).toBe(1);
-    expect(result.current.lastBatchAcceptResult?.skippedByReason.dismissed).toBe(1);
+    expect(result.current.lastBatchAcceptResult?.skippedByReason.dismissed).toBe(0);
   });
 
-  it('bulkAcceptAllValid preserves ineligible item state and reports deterministic mixed skip reasons', async () => {
+  it('bulkAcceptAllValid only attempts currently filtered rows', async () => {
+    const updateDraft = vi.fn();
+    const adapterMock = makeAdapter({
+      suggestions: [SUGGESTION_A, SUGGESTION_B, SUGGESTION_INVALID],
+    });
+    const params = makeParams({
+      updateDraft,
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => { result.current.triggerAutoMap(SECTION_PATH); });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => {
+      result.current.clearFilters();
+      result.current.toggleFilter('accepted');
+    });
+
+    expect(result.current.filteredItems).toHaveLength(0);
+
+    act(() => { result.current.bulkAcceptAllValid(); });
+
+    expect(updateDraft).not.toHaveBeenCalled();
+    expect(result.current.lastBatchAcceptResult).toEqual(
+      expect.objectContaining({
+        attempted: 0,
+        applied: 0,
+        skipped: 0,
+      }),
+    );
+  });
+
+  it('bulkAcceptAllValid preserves ineligible item state and reports deterministic mixed skip reasons for filtered scope', async () => {
     const updateDraft = vi.fn();
     const adapterMock = makeAdapter({
       suggestions: [SUGGESTION_A, SUGGESTION_B, SUGGESTION_INVALID],
@@ -552,17 +598,16 @@ describe('useAutoMapWorkspace', () => {
 
     expect(result.current.lastBatchAcceptResult).toEqual(
       expect.objectContaining({
-        attempted: 3,
+        attempted: 2,
         applied: 0,
-        skipped: 3,
+        skipped: 2,
       }),
     );
-    expect(result.current.lastBatchAcceptResult?.skippedByReason['already-reviewed']).toBe(1);
+    expect(result.current.lastBatchAcceptResult?.skippedByReason['already-reviewed']).toBe(0);
     expect(result.current.lastBatchAcceptResult?.skippedByReason.stale).toBe(1);
     expect(result.current.lastBatchAcceptResult?.skippedByReason.invalid).toBe(1);
     expect(result.current.lastBatchAcceptResult?.skippedItems).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ targetPath: 'Order.Id', primaryReason: 'already-reviewed' }),
         expect.objectContaining({ targetPath: 'Order.Amount', primaryReason: 'stale' }),
         expect.objectContaining({ targetPath: 'Order.Status', primaryReason: 'invalid' }),
       ]),
@@ -647,7 +692,7 @@ describe('useAutoMapWorkspace', () => {
     expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('stale');
   });
 
-  it('editSuggestion is blocked for invalid suggestions (no draft mutation or navigation)', async () => {
+  it('editSuggestion is blocked for stale suggestions only (invalid remains editable)', async () => {
     const updateDraft = vi.fn();
     const setSelectedTargetPath = vi.fn();
     const exitWorkspace = vi.fn();
@@ -671,10 +716,176 @@ describe('useAutoMapWorkspace', () => {
       result.current.editSuggestion('Order.Status');
     });
 
-    expect(updateDraft).not.toHaveBeenCalled();
-    expect(setSelectedTargetPath).not.toHaveBeenCalled();
-    expect(exitWorkspace).not.toHaveBeenCalled();
-    expect(result.current.items.find((i) => i.targetPath === 'Order.Status')?.status).toBe('suggested');
+    expect(updateDraft).toHaveBeenCalledWith('Order.Status', 'bad.expr');
+    expect(setSelectedTargetPath).toHaveBeenCalledWith('Order.Status');
+    expect(exitWorkspace).toHaveBeenCalled();
+    expect(result.current.items.find((i) => i.targetPath === 'Order.Status')?.status).toBe('edited');
+  });
+
+  it('editSuggestion remains available for invalid suggestions and marks edited', async () => {
+    const updateDraft = vi.fn();
+    const setSelectedTargetPath = vi.fn();
+    const exitWorkspace = vi.fn();
+    const adapterMock = makeAdapter({
+      suggestions: [SUGGESTION_INVALID],
+    });
+    const params = makeParams({
+      updateDraft,
+      setSelectedTargetPath,
+      exitWorkspace,
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => {
+      result.current.editSuggestion('Order.Status');
+    });
+
+    expect(updateDraft).toHaveBeenCalledWith('Order.Status', 'bad.expr');
+    expect(setSelectedTargetPath).toHaveBeenCalledWith('Order.Status');
+    expect(exitWorkspace).toHaveBeenCalled();
+    expect(result.current.items.find((i) => i.targetPath === 'Order.Status')?.status).toBe('edited');
+  });
+
+  it('undoAccept reverts accepted suggestion to suggested and restores prior expression draft', async () => {
+    const updateDraft = vi.fn();
+    const params = makeParams({
+      updateDraft,
+      rules: MOCK_RULES_WITH_EXISTING,
+      adapter: makeAdapter({ suggestions: [SUGGESTION_A] }) as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => {
+      result.current.acceptSuggestion('Order.Id');
+    });
+    expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('accepted');
+
+    act(() => {
+      result.current.undoAccept('Order.Id');
+    });
+
+    expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('suggested');
+    expect(updateDraft).toHaveBeenLastCalledWith('Order.Id', 'source.oldOrderId');
+  });
+
+  it('rehydrates accepted unsaved suggestion only when prior expression matches current saved rule', async () => {
+    const updateDraft = vi.fn();
+    const params = makeParams({
+      updateDraft,
+      rules: MOCK_RULES_WITH_EXISTING,
+      adapter: makeAdapter({ suggestions: [SUGGESTION_A] }) as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+
+    const { result: firstRender } = renderHook(() => useAutoMapWorkspace(params));
+    act(() => {
+      firstRender.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(firstRender.current.status).toBe('success'));
+
+    act(() => {
+      firstRender.current.acceptSuggestion('Order.Id');
+    });
+
+    const { result: secondRender } = renderHook(() => useAutoMapWorkspace(params));
+    act(() => {
+      secondRender.current.triggerAutoMap(SECTION_PATH);
+    });
+
+    expect(secondRender.current.status).toBe('success');
+    expect(secondRender.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('accepted');
+    expect(secondRender.current.rehydrationConflicts).toHaveLength(0);
+    expect(updateDraft).toHaveBeenCalledWith('Order.Id', 'source.orderId');
+  });
+
+  it('marks rehydrate mismatch as conflict and does not overwrite draft', async () => {
+    const updateDraft = vi.fn();
+    const rulesAtAccept: readonly MappingRule[] = [
+      {
+        target: 'Order.Id',
+        type: 'string',
+        expression: 'source.oldOrderId',
+      },
+    ];
+    const paramsAtAccept = makeParams({
+      updateDraft,
+      rules: rulesAtAccept,
+      adapter: makeAdapter({ suggestions: [SUGGESTION_A] }) as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+
+    const { result: firstRender } = renderHook(() => useAutoMapWorkspace(paramsAtAccept));
+    act(() => {
+      firstRender.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(firstRender.current.status).toBe('success'));
+
+    act(() => {
+      firstRender.current.acceptSuggestion('Order.Id');
+    });
+
+    const rulesAtReload: readonly MappingRule[] = [
+      {
+        target: 'Order.Id',
+        type: 'string',
+        expression: 'source.changedExternally',
+      },
+    ];
+    const paramsAtReload = makeParams({
+      updateDraft,
+      rules: rulesAtReload,
+      adapter: makeAdapter({ suggestions: [SUGGESTION_A] }) as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+
+    const updateDraftCallsBeforeReload = updateDraft.mock.calls.length;
+    const { result: secondRender } = renderHook(() => useAutoMapWorkspace(paramsAtReload));
+    act(() => {
+      secondRender.current.triggerAutoMap(SECTION_PATH);
+    });
+
+    expect(secondRender.current.status).toBe('success');
+    expect(secondRender.current.items.find((i) => i.targetPath === 'Order.Id')?.status).toBe('conflict');
+    expect(secondRender.current.rehydrationConflicts).toEqual(['Order.Id']);
+    expect(updateDraft.mock.calls.length).toBe(updateDraftCallsBeforeReload);
+  });
+
+  it('marks accepted suggestion as materialized after current revision increases', async () => {
+    const params = makeParams({
+      currentRevision: 1,
+      rules: MOCK_RULES_WITH_EXISTING,
+      adapter: makeAdapter({ suggestions: [SUGGESTION_A] }) as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ revision }: { revision: number }) => useAutoMapWorkspace({ ...params, currentRevision: revision }),
+      { initialProps: { revision: 1 } },
+    );
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => {
+      result.current.acceptSuggestion('Order.Id');
+    });
+
+    expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.isMaterialized).toBe(false);
+
+    rerender({ revision: 2 });
+
+    await waitFor(() => {
+      expect(result.current.items.find((i) => i.targetPath === 'Order.Id')?.isMaterialized).toBe(true);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -869,6 +1080,43 @@ describe('useAutoMapWorkspace', () => {
     expect(result.current.filteredItems).toHaveLength(2);
   });
 
+  it('enforces exclusive primary status filters', async () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => { result.current.triggerAutoMap(SECTION_PATH); });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    expect(result.current.activeFilters.has('needsReview')).toBe(true);
+
+    act(() => { result.current.toggleFilter('accepted'); });
+    expect(result.current.activeFilters.has('accepted')).toBe(true);
+    expect(result.current.activeFilters.has('needsReview')).toBe(false);
+
+    act(() => { result.current.toggleFilter('dismissed'); });
+    expect(result.current.activeFilters.has('dismissed')).toBe(true);
+    expect(result.current.activeFilters.has('accepted')).toBe(false);
+  });
+
+  it('applies targetPath search to filteredItems and clearTargetSearch resets it', async () => {
+    const params = makeParams();
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => { result.current.triggerAutoMap(SECTION_PATH); });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+
+    act(() => { result.current.clearFilters(); });
+    act(() => { result.current.setTargetSearchQuery('Order.Id'); });
+
+    expect(result.current.targetSearchQuery).toBe('Order.Id');
+    expect(result.current.filteredItems).toHaveLength(1);
+    expect(result.current.filteredItems[0]?.targetPath).toBe('Order.Id');
+
+    act(() => { result.current.clearTargetSearch(); });
+    expect(result.current.targetSearchQuery).toBe('');
+    expect(result.current.filteredItems).toHaveLength(result.current.items.length);
+  });
+
   it('clearFilters removes all active filters', async () => {
     const params = makeParams();
     const { result } = renderHook(() => useAutoMapWorkspace(params));
@@ -1011,4 +1259,120 @@ describe('useAutoMapWorkspace', () => {
     await act(async () => { resolve(MOCK_RESULT); });
     // No assertion needed — absence of error is the test
   });
+
+  it('polls active async runs and applies unchanged-response backoff tiers', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    const adapterMock = {
+      autoMapSection: vi.fn().mockResolvedValue({
+        suggestions: [],
+        session: {
+          sessionId: 'ams_1',
+          runId: 'run_1',
+          runStatus: 'queued',
+          executionMode: 'async',
+          queued: true,
+        },
+      }),
+      getAutoMapRunStatus: vi
+        .fn()
+        .mockResolvedValue({
+          sessionId: 'ams_1',
+          runId: 'run_1',
+          status: 'generating',
+          scope: { mode: 'section', sectionPath: SECTION_PATH },
+          progress: {
+            completedWorkUnits: 0,
+            totalWorkUnits: 4,
+            completedTargets: 0,
+            totalTargets: 4,
+          },
+          counts: {
+            generated: 0,
+            ready: 0,
+            warning: 0,
+            invalid: 0,
+            failedTargets: 0,
+          },
+        }),
+      listAutoMapSuggestions: vi.fn().mockResolvedValue({
+        items: [],
+        page: { limit: 250, nextCursor: null, total: 0, offset: 0 },
+      }),
+    };
+
+    const params = makeParams({
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    await waitFor(() => expect(result.current.runStatus).toBe('generating'));
+    await waitFor(() => expect(adapterMock.getAutoMapRunStatus).toHaveBeenCalledTimes(4), { timeout: 12000 });
+
+    const delays = timeoutSpy.mock.calls
+      .map(([, delay]) => Number(delay ?? 0))
+      .filter((delay) => delay >= 1500);
+
+    const twoSecondDelays = delays.filter((delay) => delay === 2000).length;
+    expect(twoSecondDelays).toBeGreaterThanOrEqual(2);
+    expect(delays.some((delay) => delay >= 5000 && delay <= 10000)).toBe(true);
+  }, 20000);
+
+  it('keeps prior state on polling network errors and retries with warning', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+
+    const adapterMock = {
+      autoMapSection: vi.fn().mockResolvedValue({
+        suggestions: [SUGGESTION_A],
+        session: {
+          sessionId: 'ams_1',
+          runId: 'run_1',
+          runStatus: 'queued',
+          executionMode: 'async',
+          queued: true,
+        },
+      }),
+      getAutoMapRunStatus: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockResolvedValue({
+          sessionId: 'ams_1',
+          runId: 'run_1',
+          status: 'completed',
+          scope: { mode: 'section', sectionPath: SECTION_PATH },
+        }),
+      listAutoMapSuggestions: vi.fn().mockResolvedValue({
+        items: [SUGGESTION_A],
+        page: { limit: 250, nextCursor: null, total: 1, offset: 0 },
+      }),
+    };
+
+    const params = makeParams({
+      adapter: adapterMock as unknown as Parameters<typeof useAutoMapWorkspace>[0]['adapter'],
+    });
+    const { result } = renderHook(() => useAutoMapWorkspace(params));
+
+    act(() => {
+      result.current.triggerAutoMap(SECTION_PATH);
+    });
+
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.runStatus).toBe('queued');
+
+    await waitFor(() => {
+      expect(result.current.pollingWarning).toMatch(/Connection interrupted/i);
+    });
+    expect(result.current.status).toBe('success');
+    expect(result.current.items).toHaveLength(1);
+
+    await waitFor(() => expect(result.current.runStatus).toBe('completed'), { timeout: 10000 });
+    expect(result.current.pollingWarning).toBeNull();
+  }, 12000);
 });

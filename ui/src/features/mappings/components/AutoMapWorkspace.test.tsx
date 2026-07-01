@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AutoMapWorkspaceSummary, SuggestionWorkspaceItem } from '../types';
 import { AutoMapWorkspace } from './AutoMapWorkspace';
+import { WorkspaceHeader } from './WorkspaceHeader';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -234,7 +235,97 @@ describe('AutoMapWorkspace', () => {
     expect(screen.getByTestId('suggestion-card-Order.Id')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-card-Order.Amount')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-preview-Order.Id')).toBeInTheDocument();
-    expect(screen.getByTestId('workspace-preview-no-data-Order.Id')).toBeInTheDocument();
+    expect(screen.getAllByTestId('suggestion-preview-no-data')).toHaveLength(2);
+  });
+
+  it('renders progressive run status, progress, counts, and polling warning', () => {
+    const items = [makeItem('Order.Id')];
+    render(
+      <AutoMapWorkspace
+        {...DEFAULT_PROPS}
+        status="success"
+        items={items}
+        filteredItems={items}
+        summary={makeSummary({ total: 1, pending: 1 })}
+        runStatus="generating"
+        runProgress={{
+          completedWorkUnits: 1,
+          totalWorkUnits: 4,
+          completedTargets: 2,
+          totalTargets: 8,
+        }}
+        runCounts={{
+          generated: 2,
+          ready: 1,
+          warning: 0,
+          invalid: 0,
+          failedTargets: 0,
+        }}
+        isPolling={true}
+        pollingWarning="Connection interrupted while checking Auto-Map progress. Retrying…"
+      />,
+    );
+
+    expect(screen.getByTestId('workspace-run-status')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-run-status-text')).toHaveTextContent('Run status: generating · polling');
+    expect(screen.getByTestId('workspace-run-progress')).toHaveTextContent('Work units 1/4 · targets 2/8');
+    expect(screen.getByTestId('workspace-run-counts')).toHaveTextContent('Generated 2 · ready 1');
+    expect(screen.getByTestId('workspace-polling-warning')).toHaveTextContent('Connection interrupted');
+  });
+
+  it('renders retry-failed affordance for retryable terminal failures', async () => {
+    const onRetryFailed = vi.fn();
+    const items = [makeItem('Order.Id', 'accepted')];
+    render(
+      <AutoMapWorkspace
+        {...DEFAULT_PROPS}
+        status="success"
+        items={items}
+        filteredItems={items}
+        summary={makeSummary({ total: 1, accepted: 1 })}
+        runStatus="partial"
+        runFailure={{
+          code: 'RUN_PARTIAL',
+          message: 'Some targets failed',
+          retryable: true,
+        }}
+        onRetryFailed={onRetryFailed}
+      />,
+    );
+
+    const button = screen.getByTestId('workspace-run-retry-failed');
+    expect(button).toBeInTheDocument();
+    await userEvent.click(button);
+    expect(onRetryFailed).toHaveBeenCalledOnce();
+  });
+
+  it('disables one-click Accept for invalid suggestions while keeping Edit available', () => {
+    const items = [
+      {
+        ...makeItem('Order.Status'),
+        validation: {
+          valid: false,
+          diagnostics: [{ severity: 'error', code: 'E001', message: 'Invalid expression' }],
+        },
+      },
+    ];
+
+    render(
+      <AutoMapWorkspace
+        {...DEFAULT_PROPS}
+        status="success"
+        items={items}
+        filteredItems={items}
+        summary={makeSummary({ total: 1, pending: 1, invalidCount: 1 })}
+      />,
+    );
+
+    expect(screen.getByTestId('accept-Order.Status')).toBeDisabled();
+    expect(screen.getByTestId('accept-Order.Status')).toHaveAttribute(
+      'title',
+      'Accept is disabled because this suggestion has blocking validation diagnostics.',
+    );
+    expect(screen.getByTestId('edit-Order.Status')).toBeEnabled();
   });
 
   it('renders children slot instead of placeholder when provided', () => {
@@ -333,8 +424,6 @@ describe('AutoMapWorkspace', () => {
 // ---------------------------------------------------------------------------
 // Tests: WorkspaceHeader
 // ---------------------------------------------------------------------------
-
-import { WorkspaceHeader } from './WorkspaceHeader';
 
 describe('WorkspaceHeader', () => {
   const BASE_PROPS = {
@@ -469,7 +558,7 @@ describe('WorkspaceHeader', () => {
 
     expect(screen.getByTestId('workspace-batch-result')).toBeInTheDocument();
     expect(screen.getByTestId('workspace-batch-result-summary')).toHaveTextContent(
-      'Batch accept applied 2 of 4 suggestions. Skipped 2 ineligible suggestions.',
+      'Batch accept applied 2 of 4 filtered suggestions. Skipped 2 ineligible suggestions.',
     );
     expect(screen.getByTestId('workspace-batch-skip-invalid')).toHaveTextContent('invalid: 1');
     expect(screen.getByTestId('workspace-batch-skip-stale')).toHaveTextContent('stale: 1');
@@ -524,5 +613,24 @@ describe('AutoMapWorkspace interactions', () => {
     expect(onAccept).toHaveBeenCalledWith('Order.Id');
     expect(screen.getByTestId('expand-toggle-Order.Id')).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByTestId('expand-toggle-Order.Amount')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('routes undo-accept actions to onUndoAccept callback', async () => {
+    const onUndoAccept = vi.fn();
+    const items = [makeItem('Order.Id', 'accepted')];
+    render(
+      <AutoMapWorkspace
+        {...DEFAULT_PROPS}
+        status="success"
+        items={items}
+        filteredItems={items}
+        summary={makeSummary({ total: 1, accepted: 1 })}
+        onUndoAccept={onUndoAccept}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('expand-toggle-Order.Id'));
+    await userEvent.click(screen.getByTestId('undo-accept-Order.Id'));
+    expect(onUndoAccept).toHaveBeenCalledWith('Order.Id');
   });
 });

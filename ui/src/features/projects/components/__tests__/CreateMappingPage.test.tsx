@@ -158,6 +158,15 @@ const SCHEMA_DETAIL_ZERO_COUNT: SchemaDetail = {
   },
 };
 
+const SCHEMA_DETAIL_ZERO_COUNT_ONE_LEVEL: SchemaDetail = {
+  ...SCHEMA_DETAIL_ZERO_COUNT,
+  metadata: {
+    ...SCHEMA_DETAIL_ZERO_COUNT.metadata,
+    schemaId: 'schema-zero-one-level',
+    name: 'Schema Zero One Level',
+  },
+};
+
 const CREATED_MAPPING: MappingMetadata = {
   mappingId: 'new-mapping-1',
   projectId: 'proj-1',
@@ -218,6 +227,17 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     linkPublishedSchema: vi.fn(),
     autoMap: vi.fn(),
     autoMapSection: vi.fn().mockResolvedValue({ suggestions: [] }),
+    getAutoMapCapabilities: vi.fn(),
+    getAutoMapSession: vi.fn(),
+    startAutoMapSession: vi.fn().mockResolvedValue({
+      sessionId: 'ams_create_1',
+      runId: 'run_create_1',
+      status: 'queued',
+      scope: { mode: 'whole' },
+    }),
+    startAutoMapRun: vi.fn(),
+    getAutoMapRunStatus: vi.fn(),
+    listAutoMapSuggestions: vi.fn(),
     suggestExpression: vi.fn(),
     explainRule: vi.fn(),
     smartFix: vi.fn(),
@@ -753,21 +773,16 @@ describe('CreateMappingPage', () => {
     expect(__testables.normalizeAliasToCamelCase('___')).toBe('');
   });
 
-  it('auto-map mode creates mapping, triggers suggestions, and navigates to editor', async () => {
+  it('auto-map mode creates mapping, starts async session/run, and navigates to editor immediately', async () => {
     const user = userEvent.setup();
     const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
-    const autoMapSection = vi.fn().mockResolvedValue({
-      suggestions: [
-        {
-          target: 'Order.Header.Currency',
-          expression: 'default(source("Invoice.CurrencyCode"), "USD")',
-          explanation: 'Uses source currency and falls back to USD.',
-          confidence: 'high',
-          validation: { valid: true, diagnostics: [] },
-        },
-      ],
+    const startAutoMapSession = vi.fn().mockResolvedValue({
+      sessionId: 'ams_create_1',
+      runId: 'run_create_1',
+      status: 'queued',
+      scope: { mode: 'whole' },
     });
-    const adapter = createMockAdapter({ createMapping, autoMapSection });
+    const adapter = createMockAdapter({ createMapping, startAutoMapSession });
 
     renderPage(adapter);
 
@@ -795,29 +810,28 @@ describe('CreateMappingPage', () => {
     );
 
     await waitFor(() => {
-      expect(autoMapSection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          projectId: 'proj-1',
-          mappingId: CREATED_MAPPING.mappingId,
-          mode: 'whole',
-        }),
-      );
+      expect(startAutoMapSession).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        mappingId: CREATED_MAPPING.mappingId,
+        mode: 'whole',
+      });
     });
 
     await waitFor(() => {
       expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
     });
 
+    expect(startAutoMapSession).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('editor-auto-map-notice')).toHaveTextContent('');
   });
 
-  it('unsupported auto-map-at-create is handled explicitly and still navigates to editor', async () => {
+  it('auto-map startup failure is handled explicitly and still navigates to editor', async () => {
     const user = userEvent.setup();
     const createMapping = vi.fn().mockResolvedValue(CREATED_MAPPING);
-    const autoMapSection = vi
+    const startAutoMapSession = vi
       .fn()
       .mockRejectedValue(new Error('"autoMapSection" is not enabled in this mode.'));
-    const adapter = createMockAdapter({ createMapping, autoMapSection });
+    const adapter = createMockAdapter({ createMapping, startAutoMapSession });
 
     renderPage(adapter);
 
@@ -835,6 +849,7 @@ describe('CreateMappingPage', () => {
       expect(screen.getByTestId('mapping-editor-page')).toBeInTheDocument();
     });
 
+    expect(startAutoMapSession).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('editor-auto-map-notice')).toHaveTextContent(
       'Mapping created. Auto-Map suggestions are not available in this mode.',
     );
@@ -893,15 +908,15 @@ describe('CreateMappingPage', () => {
     expect(screen.queryByTestId('target-needs-review-warning')).not.toBeInTheDocument();
   });
 
-  it('falls back to schema detail parsing when selected schema fieldCount is zero', async () => {
+  it('falls back to schema detail field counting when selected schema fieldCount is zero', async () => {
     const adapter = createMockAdapter({
       listSchemas: vi.fn().mockResolvedValue([
         SCHEMA_DETAIL_A.metadata,
-        SCHEMA_DETAIL_ZERO_COUNT.metadata,
+        SCHEMA_DETAIL_ZERO_COUNT_ONE_LEVEL.metadata,
       ]),
       getSchema: vi.fn().mockImplementation(async (id: string) => {
-        if (id === 'schema-zero') {
-          return SCHEMA_DETAIL_ZERO_COUNT;
+        if (id === 'schema-zero-one-level') {
+          return SCHEMA_DETAIL_ZERO_COUNT_ONE_LEVEL;
         }
 
         return SCHEMA_DETAIL_A;
@@ -913,10 +928,11 @@ describe('CreateMappingPage', () => {
 
     await waitFor(() => expect(screen.getByTestId('schema-select-source-schema')).toBeInTheDocument());
 
-    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-zero');
+    await user.selectOptions(screen.getByTestId('schema-select-source-schema'), 'schema-zero-one-level');
 
     await waitFor(() => {
       expect(screen.getByTestId('source-total-fields')).toHaveTextContent('3');
+      expect(adapter.getSchema).toHaveBeenCalledWith('schema-zero-one-level');
     });
   });
 });

@@ -22,6 +22,7 @@ export const TABLE_NAMES = {
   deployments: getEnvValueOrDefault('DEPLOYMENTS_TABLE', 'keyra-deployments'),
   deploymentCurrent: getEnvValueOrDefault('DEPLOYMENT_CURRENT_TABLE', 'keyra-deployment-current'),
   deploymentOrchestrations: getEnvValueOrDefault('DEPLOYMENT_ORCHESTRATIONS_TABLE', 'keyra-deployment-orchestrations'),
+  autoMap: getEnvValueOrDefault('AUTO_MAP_TABLE', 'keyra-auto-map'),
 } as const;
 
 export const RUNTIME_TABLE_NAMES = {
@@ -89,4 +90,52 @@ export function runtimeSchemaPayloadKey(
   prefix: string = SCHEMAS_PREFIX,
 ): string {
   return `${normalizePrefix(prefix)}${mappingId}/${snapshotId}/${schemaRole}-${schemaId}.json`;
+}
+
+export function autoMapSessionPk(sessionId: string): string {
+  return `SESSION#${sessionId}`;
+}
+
+export function autoMapSessionMetaSk(): 'META' {
+  return 'META';
+}
+
+export function autoMapRunSk(createdAt: string, runId: string): string {
+  return `RUN#${createdAt}#${runId}`;
+}
+
+export function autoMapWorkUnitSk(runId: string, order: number, workUnitId: string): string {
+  if (!Number.isInteger(order) || order < 0) {
+    throw new Error(`order must be a non-negative integer. Received: ${order}`);
+  }
+
+  return `WORK_UNIT#${runId}#${String(order).padStart(6, '0')}#${workUnitId}`;
+}
+
+export function autoMapSuggestionSk(sectionOrder: number, targetOrder: number, suggestionId: string): string {
+  if (!Number.isInteger(sectionOrder) || sectionOrder < 0) {
+    throw new Error(`sectionOrder must be a non-negative integer. Received: ${sectionOrder}`);
+  }
+
+  if (!Number.isInteger(targetOrder) || targetOrder < 0) {
+    throw new Error(`targetOrder must be a non-negative integer. Received: ${targetOrder}`);
+  }
+
+  return `SUGGESTION#${String(sectionOrder).padStart(6, '0')}#${String(targetOrder).padStart(6, '0')}#${suggestionId}`;
+}
+
+export function autoMapHistoryGsiPk(mappingId: string): string {
+  return `MAPPING#${mappingId}`;
+}
+
+export function autoMapHistoryGsiSk(createdAt: string, sessionId: string): string {
+  return `CREATED#${createdAt}#${sessionId}`;
+}
+
+export function autoMapOpenGsiPk(mappingId: string): string {
+  return `MAPPING#${mappingId}`;
+}
+
+export function autoMapOpenGsiSk(updatedAt: string, sessionId: string): string {
+  return `OPEN#${updatedAt}#${sessionId}`;
 }

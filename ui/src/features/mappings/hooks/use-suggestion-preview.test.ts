@@ -60,6 +60,7 @@ describe('useSuggestionPreview', () => {
     expect(result.current.isEvaluating).toBe(true);
     act(() => {
       vi.advanceTimersByTime(150);
+      vi.runOnlyPendingTimers();
     });
     expect(result.current.isEvaluating).toBe(false);
     // Result depends on engine — just check it resolved
@@ -88,5 +89,36 @@ describe('useSuggestionPreview', () => {
     rerender({ expr: '', data: { id: 1 } });
     expect(result.current.result).toBeNull();
     expect(result.current.isEvaluating).toBe(false);
+  });
+
+  it('returns explicit error when required enrichment aliases are missing', () => {
+    const { result } = renderHook(() =>
+      useSuggestionPreview('get(external("carrier"), "rateCode")', { id: 1 }, {
+        requiredEnrichmentAliases: ['carrier'],
+        externalSources: {},
+      }),
+    );
+
+    expect(result.current.result).toBeNull();
+    expect(result.current.isEvaluating).toBe(false);
+    expect(result.current.error).toContain('Missing required enrichment sample');
+  });
+
+  it('evaluates enrichment expression when required alias data is present', () => {
+    const { result } = renderHook(() =>
+      useSuggestionPreview('get(external("carrier"), "rateCode")', { id: 1 }, {
+        requiredEnrichmentAliases: ['carrier'],
+        externalSources: { carrier: { rateCode: 'EXPRESS' } },
+      }),
+    );
+
+    expect(result.current.isEvaluating).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(150);
+      vi.runOnlyPendingTimers();
+    });
+    expect(result.current.isEvaluating).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.result).toBe('EXPRESS');
   });
 });

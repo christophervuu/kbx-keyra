@@ -4,6 +4,9 @@ import { formatRelativeTime } from './VersionHistoryDrawer';
 import type { BatchAcceptResult } from '../hooks';
 import type { AutoMapWorkspaceSummary } from '../types';
 
+import type { AutoMapRunSummary } from '@/lib/api/types';
+import type { AutoMapRunStatus } from '@/lib/types/domain';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -25,6 +28,13 @@ export interface WorkspaceHeaderProps {
   onClearBatchAcceptResult?: () => void;
   allExpanded?: boolean;
   isRefreshing?: boolean;
+  runStatus?: AutoMapRunStatus | null;
+  runProgress?: AutoMapRunSummary['progress'] | null;
+  runCounts?: AutoMapRunSummary['counts'] | null;
+  runFailure?: AutoMapRunSummary['failure'] | null;
+  isPolling?: boolean;
+  pollingWarning?: string | null;
+  onRetryFailed?: () => void;
   /** Optional className for the outer container */
   className?: string;
 }
@@ -82,6 +92,13 @@ export function WorkspaceHeader({
   onClearBatchAcceptResult,
   allExpanded = false,
   isRefreshing = false,
+  runStatus = null,
+  runProgress = null,
+  runCounts = null,
+  runFailure = null,
+  isPolling = false,
+  pollingWarning = null,
+  onRetryFailed,
   className = '',
 }: WorkspaceHeaderProps) {
   const hasValidPending = summary.validCount > 0 && summary.pending > 0;
@@ -278,6 +295,51 @@ export function WorkspaceHeader({
         </div>
       </div>
 
+      {(runStatus !== null || pollingWarning !== null) && (
+        <div
+          className="mt-2 rounded border border-slate-800/80 bg-slate-900/60 px-2.5 py-2"
+          data-testid="workspace-run-status"
+          aria-live="polite"
+        >
+          {runStatus !== null && (
+            <p className="text-[11px] text-slate-200" data-testid="workspace-run-status-text">
+              Run status: <span className="font-semibold capitalize">{runStatus}</span>
+              {isPolling ? ' · polling' : ''}
+            </p>
+          )}
+          {runProgress && (
+            <p className="mt-1 text-[10px] text-slate-400" data-testid="workspace-run-progress">
+              Work units {runProgress.completedWorkUnits}/{runProgress.totalWorkUnits} · targets {runProgress.completedTargets}/{runProgress.totalTargets}
+            </p>
+          )}
+          {runCounts && (
+            <p className="mt-1 text-[10px] text-slate-400" data-testid="workspace-run-counts">
+              Generated {runCounts.generated} · ready {runCounts.ready} · warnings {runCounts.warning} · invalid {runCounts.invalid} · failed targets {runCounts.failedTargets}
+            </p>
+          )}
+          {runFailure && (
+            <div className="mt-1 flex items-center gap-2 text-[10px] text-amber-300" data-testid="workspace-run-failure">
+              <span>{runFailure.code}: {runFailure.message}</span>
+              {runFailure.retryable && onRetryFailed && (
+                <button
+                  type="button"
+                  onClick={onRetryFailed}
+                  data-testid="workspace-run-retry-failed"
+                  className="rounded border border-amber-700/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 transition-colors hover:bg-amber-900/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+                >
+                  Retry failed
+                </button>
+              )}
+            </div>
+          )}
+          {pollingWarning && (
+            <p className="mt-1 text-[10px] text-amber-300" data-testid="workspace-polling-warning">
+              {pollingWarning}
+            </p>
+          )}
+        </div>
+      )}
+
       {batchAcceptResult && (
         <div
           data-testid="workspace-batch-result"
@@ -285,7 +347,7 @@ export function WorkspaceHeader({
         >
           <div className="min-w-0">
             <p className="text-[11px] text-slate-200" data-testid="workspace-batch-result-summary">
-              Batch accept applied {batchAcceptResult.applied} of {batchAcceptResult.attempted} suggestion
+              Batch accept applied {batchAcceptResult.applied} of {batchAcceptResult.attempted} filtered suggestion
               {batchAcceptResult.attempted === 1 ? '' : 's'}.
               {batchAcceptResult.skipped > 0
                 ? ` Skipped ${batchAcceptResult.skipped} ineligible suggestion${batchAcceptResult.skipped === 1 ? '' : 's'}.`

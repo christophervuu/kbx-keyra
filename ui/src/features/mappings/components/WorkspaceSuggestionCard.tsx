@@ -10,6 +10,39 @@ import { AiGeneratedStateLabel } from './AiSuggestionReviewPrimitives';
 
 const COLLAPSED_EXPRESSION_LENGTH = 80;
 
+function parseSuggestedExpressionReferences(expression: string): {
+  readonly primaryPaths: readonly string[];
+  readonly enrichmentReferences: readonly string[];
+} {
+  const primaryMatches = Array.from(expression.matchAll(/source\("([^"]+)"\)/g));
+  const enrichmentRootMatches = Array.from(expression.matchAll(/external\("([^"]+)"\)/g));
+  const enrichmentPathMatches = Array.from(expression.matchAll(/get\(external\("([^"]+)"\),\s*"([^"]+)"\)/g));
+
+  const primaryPaths = new Set<string>();
+  for (const match of primaryMatches) {
+    if (match[1]) primaryPaths.add(match[1]);
+  }
+
+  const enrichmentReferences = new Set<string>();
+  const aliasWithPath = new Set<string>();
+  for (const match of enrichmentPathMatches) {
+    const alias = match[1];
+    const path = match[2];
+    if (alias && path) {
+      aliasWithPath.add(alias);
+      enrichmentReferences.add(`${alias}.${path}`);
+    }
+  }
+  for (const match of enrichmentRootMatches) {
+    if (match[1] && !aliasWithPath.has(match[1])) enrichmentReferences.add(match[1]);
+  }
+
+  return {
+    primaryPaths: Array.from(primaryPaths),
+    enrichmentReferences: Array.from(enrichmentReferences),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -22,11 +55,16 @@ export interface WorkspaceSuggestionCardProps {
   onEdit: (targetPath: string) => void;
   onDismiss: (targetPath: string) => void;
   onUndoDismiss: (targetPath: string) => void;
+  onUndoAccept?: (targetPath: string) => void;
   onRefreshItem?: (targetPath: string) => void;
   /** Preview slot — wired by parent in T-09 */
   previewSlot?: ReactNode;
   /** True when a refresh is in flight — shows loading indicator on the card */
   isRefreshing?: boolean;
+  /** Optional reason text shown when one-click Accept is disabled. */
+  acceptBlockedReason?: string | null;
+  /** Whether one-click Accept is currently allowed. */
+  canAccept?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +84,7 @@ const STATUS_CONFIG: Record<SuggestionWorkspaceItem['status'], StatusConfig> = {
   edited: { label: 'Edited', classes: 'bg-purple-900/50 text-purple-300 border border-purple-700/50' },
   dismissed: { label: 'Dismissed', classes: 'bg-slate-700/60 text-slate-400 border border-slate-600/50' },
   stale: { label: 'Stale', classes: 'bg-amber-900/50 text-amber-300 border border-amber-700/50' },
+  conflict: { label: 'Conflict', classes: 'bg-red-900/50 text-red-300 border border-red-700/50' },
 };
 
 function StatusBadge({ status }: { status: SuggestionWorkspaceItem['status'] }) {
@@ -281,15 +320,20 @@ export function WorkspaceSuggestionCard({
   onEdit,
   onDismiss,
   onUndoDismiss,
+  onUndoAccept,
   onRefreshItem,
   previewSlot,
   isRefreshing = false,
+  acceptBlockedReason = null,
+  canAccept = true,
 }: WorkspaceSuggestionCardProps) {
   const { targetPath, suggestedExpression, explanation, confidence, validation, status, isNew, existingExpressionAtGeneration } = item;
 
   const isDismissed = status === 'dismissed';
-  const isTerminal = status === 'accepted' || status === 'edited' || status === 'dismissed';
+  const isTerminal = status === 'accepted' || status === 'edited' || status === 'dismissed' || status === 'conflict';
   const isStale = status === 'stale';
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const references = parseSuggestedExpressionReferences(suggestedExpression);
 
   const stopBubbling = (event: MouseEvent) => {
     event.stopPropagation();
@@ -363,10 +407,7 @@ export function WorkspaceSuggestionCard({
               />
             )}
           </div>
-          <code className="hidden shrink-0 max-w-[200px] truncate font-mono text-[10px] text-slate-500 sm:block">
-            {suggestedExpression.slice(0, COLLAPSED_EXPRESSION_LENGTH)}
-            {suggestedExpression.length > COLLAPSED_EXPRESSION_LENGTH ? '…' : ''}
-          </code>
+          <span className="hidden shrink-0 text-[10px] text-slate-500 sm:block">Review suggestion</span>
         </div>
       </div>
     );
@@ -452,22 +493,6 @@ export function WorkspaceSuggestionCard({
         </div>
       )}
 
-      {/* Expression comparison */}
-      <AiGeneratedStateLabel testId={`suggestion-generated-label-${targetPath}`} />
-
-      <div className="mb-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        <ExpressionBlock
-          label="Current rule"
-          expression={existingExpressionAtGeneration}
-          placeholder="No existing rule"
-        />
-        <ExpressionBlock
-          label="Suggested"
-          expression={suggestedExpression}
-          accentClass="border-l-2 border-blue-600 bg-slate-800/60"
-        />
-      </div>
-
       {/* Explanation */}
       {explanation && (
         <p className="mb-2 text-[10px] text-slate-400">
@@ -480,10 +505,62 @@ export function WorkspaceSuggestionCard({
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <ConfidenceBadge confidence={confidence} />
         <ValidationBadge validation={validation} />
+        <button
+          type="button"
+          data-testid={`toggle-technical-${targetPath}`}
+          onClick={(event) => {
+            stopBubbling(event);
+            setShowTechnicalDetails((prev) => !prev);
+          }}
+          aria-expanded={showTechnicalDetails}
+          className="rounded border border-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+        >
+          {showTechnicalDetails ? 'Hide technical details' : 'Show technical details'}
+        </button>
       </div>
 
+      {showTechnicalDetails ? (
+        <>
+          {/* Expression comparison */}
+          <AiGeneratedStateLabel testId={`suggestion-generated-label-${targetPath}`} />
+
+          <div className="mb-2.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2" data-testid={`technical-details-${targetPath}`}>
+            <ExpressionBlock
+              label="Current rule"
+              expression={existingExpressionAtGeneration}
+              placeholder="No existing rule"
+            />
+            <ExpressionBlock
+              label="Suggested"
+              expression={suggestedExpression}
+              accentClass="border-l-2 border-blue-600 bg-slate-800/60"
+            />
+          </div>
+
+          <div className="mb-2.5 rounded border border-slate-700/60 bg-slate-900/40 px-2.5 py-2" data-testid={`source-references-${targetPath}`}>
+            <p className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Source references</p>
+            {references.primaryPaths.length === 0 && references.enrichmentReferences.length === 0 ? (
+              <p className="text-[10px] italic text-slate-500">No source references detected.</p>
+            ) : (
+              <div className="space-y-1">
+                {references.primaryPaths.length > 0 && (
+                  <p className="text-[10px] text-slate-300" data-testid={`source-ref-primary-${targetPath}`}>
+                    Primary: {references.primaryPaths.join(', ')}
+                  </p>
+                )}
+                {references.enrichmentReferences.length > 0 && (
+                  <p className="text-[10px] text-slate-300" data-testid={`source-ref-enrichment-${targetPath}`}>
+                    Enrichment: {references.enrichmentReferences.join(', ')}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
+
       {/* Diagnostics */}
-      {hasDiagnostics && validation && (
+      {showTechnicalDetails && hasDiagnostics && validation && (
         <DiagnosticsSection diagnostics={validation.diagnostics} />
       )}
 
@@ -496,17 +573,38 @@ export function WorkspaceSuggestionCard({
 
       {/* Action buttons */}
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800 pt-2.5">
+        {(status === 'accepted' || status === 'edited' || status === 'conflict') && onUndoAccept && (
+          <button
+            type="button"
+            data-testid={`undo-accept-${targetPath}`}
+            onClick={(event) => {
+              stopBubbling(event);
+              onUndoAccept(targetPath);
+            }}
+            aria-label={`Undo accepted suggestion for ${targetPath}`}
+            className={[
+              'rounded border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors',
+              'hover:border-slate-500 hover:text-slate-100',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            ].join(' ')}
+          >
+            Undo
+          </button>
+        )}
         <button
           type="button"
           data-testid={`accept-${targetPath}`}
+          disabled={!canAccept}
           onClick={(event) => {
             stopBubbling(event);
             onAccept(targetPath);
           }}
           aria-label={`Accept suggestion for ${targetPath}`}
+          aria-disabled={!canAccept}
+          title={!canAccept ? (acceptBlockedReason ?? 'Accept is unavailable for this suggestion.') : undefined}
           className={[
             'rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors',
-            'hover:bg-blue-500',
+            canAccept ? 'hover:bg-blue-500' : 'cursor-not-allowed opacity-50',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
           ].join(' ')}
         >

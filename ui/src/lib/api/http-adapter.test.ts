@@ -1044,6 +1044,82 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('getAutoMapCapabilities falls back to legacy mode when capabilities route is unavailable', async () => {
+    const missingRoute = Object.assign(new Error('not found'), {
+      statusCode: 404,
+    });
+    vi.mocked(httpRequest).mockRejectedValueOnce(missingRoute);
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(adapter.getAutoMapCapabilities()).resolves.toEqual({
+      autoMap: {
+        enabled: true,
+        executionMode: 'legacy',
+      },
+    });
+  });
+
+  it('listAutoMapSuggestions normalizes pagination limit contract and forwards cursor/status filters', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      items: [],
+      page: {
+        limit: 20,
+        nextCursor: null,
+        total: 0,
+        offset: 0,
+      },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listAutoMapSuggestions('ams_1', {
+      limit: 1,
+      cursor: 'opaque-cursor',
+      status: ['pending', 'accepted'],
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map/sessions/ams_1/suggestions?limit=20&cursor=opaque-cursor&status=pending%2Caccepted',
+      method: 'GET',
+    });
+  });
+
+  it('startAutoMapRun forwards exact targetPaths scope to async run endpoint', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      sessionId: 'ams_1',
+      runId: 'run_2',
+      status: 'queued',
+      scope: {
+        mode: 'visible',
+        targetPaths: ['Order.Id', 'Order.Amount'],
+      },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.startAutoMapRun('ams_1', {
+      projectId: 'p-1',
+      mappingId: 'm-1',
+      mode: 'visible',
+      visibleTargetPaths: ['Order.Id', 'Order.Amount'],
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/ai/auto-map/sessions/ams_1/runs',
+      method: 'POST',
+      body: {
+        scope: {
+          mode: 'visible',
+          targetPaths: ['Order.Id', 'Order.Amount'],
+        },
+        idempotencyKey: 'm-1:visible:',
+      },
+    });
+  });
+
   it.each([
     ['listTemplates', (a: HttpAdapter) => a.listTemplates()],
     ['getTemplate', (a: HttpAdapter) => a.getTemplate('t-1')],
@@ -1138,29 +1214,7 @@ describe('HttpAdapter (CRUD)', () => {
     await expect(adapter.autoMap({ projectId: 'p-1', mappingId: 'm-1' })).resolves.toEqual(payload);
   });
 
-  it('autoMapSection maps to POST /ai/auto-map', async () => {
-    vi.mocked(httpRequest).mockResolvedValueOnce({ suggestions: [] });
-    const adapter = new HttpAdapter(API_URL);
-
-    await adapter.autoMapSection({
-      projectId: 'p-1',
-      mappingId: 'm-1',
-      sectionPath: 'Order.Header',
-    });
-
-    expect(httpRequest).toHaveBeenCalledWith({
-      baseUrl: API_URL,
-      path: '/ai/auto-map',
-      method: 'POST',
-      body: {
-        projectId: 'p-1',
-        mappingId: 'm-1',
-        sectionPath: 'Order.Header',
-      },
-    });
-  });
-
-  it('autoMapSection forwards mode and preserves retrieval/validation metadata', async () => {
+  it('autoMapSection uses legacy endpoint when capabilities mode is legacy', async () => {
     const payload: AutoMapSectionResult = {
       suggestions: [],
       retrievalMeta: {
@@ -1180,7 +1234,17 @@ describe('HttpAdapter (CRUD)', () => {
         visibleTargetPaths: ['Order.Header.DocumentType'],
       },
     };
-    vi.mocked(httpRequest).mockResolvedValueOnce(payload);
+
+    vi.mocked(httpRequest)
+      .mockResolvedValueOnce({
+        capabilities: {
+          autoMap: {
+            enabled: true,
+            executionMode: 'legacy',
+          },
+        },
+      })
+      .mockResolvedValueOnce(payload);
 
     const adapter = new HttpAdapter(API_URL);
 
@@ -1189,10 +1253,17 @@ describe('HttpAdapter (CRUD)', () => {
         projectId: 'p-1',
         mappingId: 'm-1',
         mode: 'whole',
+        visibleTargetPaths: ['Order.Header.DocumentType'],
       }),
     ).resolves.toEqual(payload);
 
-    expect(httpRequest).toHaveBeenCalledWith({
+    expect(httpRequest).toHaveBeenNthCalledWith(1, {
+      baseUrl: API_URL,
+      path: '/ai/auto-map/capabilities',
+      method: 'GET',
+    });
+
+    expect(httpRequest).toHaveBeenNthCalledWith(2, {
       baseUrl: API_URL,
       path: '/ai/auto-map',
       method: 'POST',
@@ -1200,6 +1271,91 @@ describe('HttpAdapter (CRUD)', () => {
         projectId: 'p-1',
         mappingId: 'm-1',
         mode: 'whole',
+        visibleTargetPaths: ['Order.Header.DocumentType'],
+      },
+    });
+  });
+
+  it('autoMapSection throws FEATURE_NOT_ENABLED when capabilities mode is disabled', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      capabilities: {
+        autoMap: {
+          enabled: false,
+          executionMode: 'disabled',
+        },
+      },
+    });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    await expect(
+      adapter.autoMapSection({
+        projectId: 'p-1',
+        mappingId: 'm-1',
+      }),
+    ).rejects.toBeInstanceOf(FeatureNotEnabledError);
+  });
+
+  it('autoMapSection starts async session/run and treats queued status as non-terminal empty result', async () => {
+    vi.mocked(httpRequest)
+      .mockResolvedValueOnce({
+        capabilities: {
+          autoMap: {
+            enabled: true,
+            executionMode: 'async',
+          },
+        },
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        sessionId: 'ams_1',
+        runId: 'run_1',
+        status: 'queued',
+      });
+
+    const adapter = new HttpAdapter(API_URL);
+
+    const result = await adapter.autoMapSection({
+      projectId: 'p-1',
+      mappingId: 'm-1',
+      mode: 'whole',
+      visibleTargetPaths: ['Order.Header.DocumentType'],
+    });
+
+    expect(result).toEqual({
+      suggestions: [],
+      session: {
+        sessionId: 'ams_1',
+        runId: 'run_1',
+        runStatus: 'queued',
+        executionMode: 'async',
+        queued: true,
+      },
+    });
+
+    expect(httpRequest).toHaveBeenNthCalledWith(1, {
+      baseUrl: API_URL,
+      path: '/ai/auto-map/capabilities',
+      method: 'GET',
+    });
+    expect(httpRequest).toHaveBeenNthCalledWith(2, {
+      baseUrl: API_URL,
+      path: '/mappings/m-1/auto-map-session',
+      method: 'GET',
+    });
+    expect(httpRequest).toHaveBeenNthCalledWith(3, {
+      baseUrl: API_URL,
+      path: '/ai/auto-map/sessions',
+      method: 'POST',
+      body: {
+        projectId: 'p-1',
+        mappingId: 'm-1',
+        baseMappingRevision: 0,
+        scope: {
+          mode: 'whole',
+          targetPaths: ['Order.Header.DocumentType'],
+        },
+        idempotencyKey: 'm-1:whole:',
       },
     });
   });

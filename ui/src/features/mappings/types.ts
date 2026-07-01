@@ -108,7 +108,7 @@ export type EditorView = 'target' | 'rules' | 'automap';
 /**
  * Lifecycle state for persisted Auto-Map workspace suggestions.
  */
-export type SuggestionLifecycleStatus = 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale';
+export type SuggestionLifecycleStatus = 'suggested' | 'accepted' | 'edited' | 'dismissed' | 'stale' | 'conflict';
 
 /**
  * Persisted shape for a single suggestion in Auto-Map workspace storage.
@@ -125,6 +125,9 @@ export interface PersistedSuggestionItem {
   readonly status: SuggestionLifecycleStatus;
   readonly isNew: boolean;
   readonly existingExpressionAtGeneration: string | null;
+  readonly acceptedExpression?: string | null;
+  readonly priorExpressionAtAcceptance?: string | null;
+  readonly isMaterialized?: boolean;
 }
 
 /**
@@ -183,6 +186,9 @@ export interface SuggestionWorkspaceItem {
   readonly status: SuggestionLifecycleStatus;
   readonly isNew: boolean;
   readonly existingExpressionAtGeneration: string | null;
+  readonly acceptedExpression?: string | null;
+  readonly priorExpressionAtAcceptance?: string | null;
+  readonly isMaterialized?: boolean;
 }
 
 /**

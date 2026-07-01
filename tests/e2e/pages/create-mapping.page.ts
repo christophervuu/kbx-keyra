@@ -15,6 +15,14 @@ export class CreateMappingPage {
     return this.page.getByTestId('next-button');
   }
 
+  getStartModeAutoMapOption(): Locator {
+    return this.page.locator('input[name="start-mode"][value="auto-map"]');
+  }
+
+  getStartModeAutoMapLabel(): Locator {
+    return this.page.getByText('Auto-map suggestions', { exact: true });
+  }
+
   getCreateButton(): Locator {
     return this.page.getByTestId('create-button');
   }
@@ -45,5 +53,10 @@ export class CreateMappingPage {
 
   async create(): Promise<void> {
     await this.getCreateButton().click();
+  }
+
+  async selectStartModeAutoMap(): Promise<void> {
+    await this.getStartModeAutoMapLabel().click();
+    await this.getStartModeAutoMapOption().check();
   }
 }

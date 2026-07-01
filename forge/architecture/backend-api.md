@@ -427,7 +427,9 @@ Sample lifecycle contract usage from Mapping Editor:
 
 Auto-map request/response addendum:
 
-- Existing `/ai/auto-map` contract remains canonical.
+- FS-092 request/response notes here describe the pre-FS-101 synchronous/legacy interaction shape.
+- FS-101 supersedes Auto-Map canonical API behavior with async session/run contracts under `/ai/auto-map/sessions*` and capabilities/open-session routes.
+- `/ai/auto-map` remains compatibility-oriented for legacy pathways; new async review flows must use session/run APIs.
 - FS-092 authoring UX uses deterministic visible-scope targeting via optional request field:
   - `visibleTargetPaths?: string[]`
 - Optional response `scopeMeta.visibleTargetPaths` and `scopeMeta.sectionPath/mode` are treated as additive metadata for workspace transparency and auditability.
@@ -650,7 +652,7 @@ The deterministic gate matrix now includes explicit AE-07 checks for:
 
 ---
 
-## 11) AI Handler API Conventions (FS-066/FS-067/FS-071 Addendum)
+## 11) AI Handler API Conventions (FS-066/FS-067/FS-071/FS-101 Addendum)
 
 This architecture primarily covers non-AI handlers, but Phase 2 introduced cross-cutting API conventions that AI handlers now follow consistently:
 
@@ -660,8 +662,8 @@ FS-074 cross-feature hardening clarification:
 - Apply-eligibility guard metadata (`readyToApply`, validation diagnostics, stale-guard snapshots where applicable) is part of the API contract so the UI can enforce explicit accept/edit/dismiss semantics.
 - Invalid/stale apply attempts must surface as explicit blocked outcomes (or conflict envelopes for stale snapshot mismatches), never as silent fallback apply paths.
 
-- AI handlers (`src/lambda/ai/{explain-rule,suggest-expression,smart-fix,auto-map}.ts`) are thin request/response shells and delegate invocation to shared runtime (`invokeAI(...)`).
-- Current canonical backend AI route surface used by the UI adapter includes `/ai/explain-rule`, `/ai/suggest-expression`, `/ai/auto-map`, `/ai/smart-fix`, and `/ai/validate-mappings` (endpoint rollout may be phased; temporary gating should use canonical error semantics).
+- AI handlers (`src/lambda/ai/{explain-rule,suggest-expression,smart-fix,auto-map,auto-map-sessions}.ts`) are thin request/response shells and delegate domain/runtime work to shared modules.
+- Current canonical backend AI route surface used by the UI adapter includes `/ai/explain-rule`, `/ai/suggest-expression`, `/ai/auto-map`, `/ai/smart-fix`, `/ai/validate-mappings`, plus FS-101 async auto-map session/run routes.
 - AI handler failures are normalized through `normalizeAIError(...)` into canonical backend error envelope semantics before returning `errorResponse(...)`.
 - AI handler responses use the same canonical error envelope contract in Section 5 (`code`, `message`, `statusCode`, `retryable`, `requestId`).
 - Request-lineage continuity is required end-to-end: `requestId` is preserved from handler envelope/header to UI client error normalization; optional `correlationId` may be propagated for cross-layer audit joins.
@@ -676,6 +678,83 @@ Canonical AI normalization behavior used by AI handlers (FS-066 baseline + FS-06
 - `TIMEOUT` -> `TIMEOUT` (504, retryable)
 - rate-limit and transient provider/runtime classes -> `SERVICE_UNAVAILABLE` (503, retryable)
 - remaining provider/config/parse/internal classes -> `INTERNAL_ERROR` (500)
+
+### Auto-Map async session/run API contract (FS-101)
+
+FS-101 introduces durable async session/run contracts for Auto-Map review workflows. These routes are canonical for async generation/review lifecycle behavior.
+
+Capability route:
+
+- `GET /ai/auto-map/capabilities`
+- Returns backend execution mode contract:
+  - `capabilities.autoMap.enabled`
+  - `capabilities.autoMap.executionMode` where enum is `disabled | legacy | async`
+- `AUTO_MAP_EXECUTION_MODE` controls backend mode policy; unknown values normalize to `async`.
+
+Session bootstrap + run start routes:
+
+- `POST /ai/auto-map/sessions`
+  - Creates or resumes canonical session for `{ mappingId, baseMappingRevision }`
+  - Starts run and returns `202` with `{ sessionId, runId, status, deduped }`
+  - One-open-session-per-mapping-revision rule is enforced; creating for newer revision supersedes older open session(s)
+- `POST /ai/auto-map/sessions/:sessionId/runs`
+  - Starts additional run inside existing session (whole/visible/section/selected/refresh/retry-failed)
+  - Returns `202` with queued/active run status
+
+Idempotency + dedup contract:
+
+- Start requests carry `idempotencyKey`.
+- Backend computes deterministic request fingerprint (`mappingId`, `baseMappingRevision`, schema/prompt/model versions, normalized scope).
+- Equivalent active starts dedupe to existing run and return `deduped: true`.
+- Dedup scope is active run set for the same session.
+
+Session lookup and run status routes:
+
+- `GET /mappings/:mappingId/auto-map-session`
+  - Returns current open/resumable session (`open|generating|reviewing`) or `null`.
+- `GET /ai/auto-map/sessions/:sessionId/runs/:runId`
+  - Returns run state/progress/counts/failure metadata.
+
+Suggestions list route:
+
+- `GET /ai/auto-map/sessions/:sessionId/suggestions`
+- Pagination contract:
+  - default `limit=100`
+  - normalize low limit to min `20`
+  - cap high limit at max `250`
+  - opaque cursor only
+- Cursor binding must include `sessionId + normalizedFilterHash + sortVersion + offset/position`.
+- Mismatched session/filter/sort cursor usage is rejected as `VALIDATION_ERROR` (`400`).
+
+Suggestion decision route (single update):
+
+- `PATCH /ai/auto-map/sessions/:sessionId/suggestions/:suggestionId`
+- Request requires `action` + `expectedVersion`; optional `editedExpression`.
+- Optimistic concurrency is mandatory:
+  - version mismatch returns canonical `CONFLICT` (`409`)
+  - caller must refresh and retry with latest `expectedVersion`
+
+Batch actions route:
+
+- `POST /ai/auto-map/sessions/:sessionId/suggestions/actions`
+- Applies action to explicit IDs or filtered set.
+- Response returns deterministic accounting:
+  - `appliedCount`
+  - `skippedCount`
+  - `skipped[]` with stable reason taxonomy
+- Batch accept skips ineligible suggestions (`invalid`, `stale`, `conflict`, non-pending states).
+
+Retry-failed route behavior:
+
+- `POST /ai/auto-map/sessions/:sessionId/runs` with `scope.mode='retry-failed'`.
+- If explicit `retryWorkUnitIds` omitted, backend derives from latest run failed work units.
+- Resulting run remains part of same session and follows standard dedup/idempotency contracts.
+
+Supersede and write-safety contract:
+
+- Session supersede is revision-driven (newer saved mapping revision start).
+- Late writes from superseded sessions/runs are rejected/ignored by conditional persistence guards.
+- Superseded runs must not mutate open-session index projection or active review aggregates.
 
 ### Suggest Expression endpoint contract (FS-070)
 

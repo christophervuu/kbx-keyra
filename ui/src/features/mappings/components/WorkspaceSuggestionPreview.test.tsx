@@ -20,6 +20,7 @@ describe('WorkspaceSuggestionPreview', () => {
       />,
     );
     expect(screen.getByTestId('suggestion-preview-no-data')).toBeInTheDocument();
+    expect(screen.getByText(/No sample selected/i)).toBeInTheDocument();
     expect(screen.queryByTestId('suggestion-preview')).not.toBeInTheDocument();
   });
 
@@ -69,6 +70,22 @@ describe('WorkspaceSuggestionPreview', () => {
     expect(screen.getByText('Current output:')).toBeInTheDocument();
     expect(screen.getByText('Suggested output:')).toBeInTheDocument();
   });
+
+  it('shows enrichment-input-required preview message when required alias payload is missing', () => {
+    render(
+      <WorkspaceSuggestionPreview
+        currentExpression="source.id"
+        suggestedExpression={'get(external("carrier"), "rateCode")'}
+        sourceData={{ id: 1 }}
+        requiredEnrichmentAliases={['carrier']}
+        externalSources={{}}
+      />,
+    );
+
+    expect(screen.getByTestId('preview-suggested-error')).toHaveTextContent(
+      /Missing required enrichment sample/i,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -83,6 +100,7 @@ describe('WorkspaceNoSourceDataCallout', () => {
 
   it('contains descriptive text about loading source data', () => {
     render(<WorkspaceNoSourceDataCallout />);
+    expect(screen.getByText(/No sample selected/i)).toBeInTheDocument();
     expect(screen.getByText(/Load sample source data/)).toBeInTheDocument();
   });
 });

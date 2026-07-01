@@ -1,0 +1,15 @@
+{
+  "Comment": "FS-101 Auto-Map session/run orchestration scaffold",
+  "StartAt": "InvokeAutoMapWorker",
+  "States": {
+    "InvokeAutoMapWorker": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AutoMapFunctionArn}",
+        "Payload.$": "$"
+      },
+      "End": true
+    }
+  }
+}

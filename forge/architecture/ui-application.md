@@ -204,7 +204,7 @@ ui/src/
         use-environment-comparison.ts Two-sided comparison orchestration (parallel side execution, progressive state, diff computation)
         use-comparison-snapshots.ts Comparison snapshot CRUD hook (`keyra:comparison-snapshots:{mappingId}`), linked by `testCaseId`
         use-suggest-expression.ts  FS-042 suggest-expression async lifecycle hook (`idle|inputting|loading|success|error`) with abort-on-reinvoke/unmount/reset semantics and user-friendly error mapping
-        use-auto-map-workspace.ts  FS-048 Auto-Map workspace lifecycle hook: section-triggered generation + persistence hydration, lifecycle transitions (suggested/accepted/edited/dismissed/stale), refresh merge strategy, filtering, and bulk actions
+        use-auto-map-workspace.ts  FS-101 canonical Auto-Map workspace lifecycle hook: async session/run bootstrap + polling/resume, backend-persisted suggestion review states, refresh/retry run creation, filtering/pagination, and batch action orchestration
         use-suggestion-preview.ts  FS-048 lazy per-expression preview hook for workspace cards (debounced evaluateExpression with source-data dependency)
       context/
         preview-context.tsx  PreviewContext + PreviewSettersContext + PreviewProvider + hooks (FS-012 T-03); FS-099 preview-context identity threads sample/input-set, target output format, and enrichment identity for stale isolation semantics
@@ -231,7 +231,7 @@ ui/src/
         array-decomposer.ts      FS-043 DSL -> structured ArrayBuilderState decomposition with custom-expression fallback
         array-validation.ts      FS-043 multi-level array validation derivation (collection/item/leaf/final output)
         execution-result-utils.ts  Pass/fail verdict derivation (deriveExecutionVerdict: idle/executing/pass/fail/error) + diff summary label formatting (formatDiffSummary) (FS-035 T-03, T-04)
-        auto-map-persistence.ts  FS-048 sessionStorage persistence utilities for workspace suggestions (`keyra:automap-suggestions:{mappingId}`), hydration, corruption recovery, and per-section metadata
+        auto-map-persistence.ts  Legacy compatibility-only browser persistence utilities retained for migration window handling; non-canonical once FS-101 async session/run backend persistence is available
         auto-map-staleness.ts    FS-048 stale-suggestion detection utilities (rule drift + manual-rule-add detection) used on hydration/re-entry
 
   lib/
@@ -371,7 +371,7 @@ Current slices:
 - **Explain Rule (FS-041, hardened by FS-069):** `HttpAdapter.explainRule` → `useExplainRule` → `ExplanationPanel`
 - **Suggest Expression (FS-042):** `HttpAdapter.suggestExpression` → `useSuggestExpression` → `SuggestExpressionInline`
 - **Smart Fix (FS-071):** `HttpAdapter.smartFix` → `useSmartFix` → `SmartFixInline` (rendered in `ScalarFieldBuilder`)
-- **Auto-Map Review Workspace (FS-046 → FS-048, hardened by FS-073):** `HttpAdapter.autoMapSection`/`autoMap` → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
+- **Auto-Map Review Workspace (FS-046 → FS-048/073, superseded by FS-101 async):** `HttpAdapter` async auto-map session/run methods → `useAutoMapWorkspace` → `AutoMapWorkspace` + `WorkspaceSuggestionCard`
 - **Phase 2 route-complete adapter surface (FS-068):** `HttpAdapter.autoMap` / `smartFix` / `validateMappings` map to canonical `/ai/*` routes; temporarily unavailable backend capability is surfaced as `FEATURE_NOT_ENABLED`
 
 Explain Rule UI semantics (current canonical behavior):
@@ -393,7 +393,7 @@ Non-canonical/prohibited shortcut patterns:
 - New production use of legacy `ai-api-client.ts` call loops is prohibited by repository guardrails.
 - Reintroducing legacy Auto-Map drawer/review loop surfaces retired in FS-065 is prohibited.
 
-The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion review flow** rendered as a dedicated editor workspace mode (not inline UI), with persistent per-section suggestion state and lifecycle tracking (`suggested` / `accepted` / `edited` / `dismissed` / `stale`). FS-073 extends this to canonical backend mode semantics (`mode: 'section' | 'whole'`) on the shared `/ai/auto-map` endpoint while preserving one workspace interaction model. See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048) for full details.
+The Auto-Map slice differs from the previous two in scope and interaction model: it is a **multi-suggestion review flow** rendered as a dedicated editor workspace mode (not inline UI), with backend-durable async session/run lifecycle and suggestion review states. FS-101 is canonical for production behavior. See [Auto-Map Review Workspace Architecture](#auto-map-review-workspace-architecture-fs-046--fs-048--fs-101) for full details.
 
 ### Cross-feature AI suggestion review contract (FS-074)
 
@@ -931,7 +931,7 @@ FS-092 UI interaction contracts:
   4. no sample context.
 - **Sample add/select integration:** sample add from editor uses canonical schema sample lifecycle (`POST /schemas/:id/samples`, save-only mutation mode), then allows immediate selection in picker.
 - **Auto-map scope semantics:** auto-map requests include deterministic visible scope (`visibleTargetPaths`), and top-bar copy makes scope explicit (`Scope: N visible fields`).
-- **Suggestion lifecycle surface:** suggestion states (`suggested`, `accepted`, `edited`, `dismissed`, `stale`) are visible in grid/details surfaces; accepted mappings are not silently overwritten.
+- **Suggestion lifecycle surface:** FS-101 async review statuses (`pending`, `editing`, `accepted`, `accepted-edited`, `dismissed`, `kept-current`, `stale`, `conflict`) are visible in review surfaces; accepted mappings are not silently overwritten.
 - **Array progressive disclosure:** child-field rendering thresholds are explicit: `<=25` inline, `26–75` filtered/prioritized workspace, `>75` summary-first + strong Array Builder CTA, with optional `View all child fields`.
 
 ### FS-099 inline Output contract addendum (Rev 3)
@@ -1054,7 +1054,7 @@ The **Target View / Rules View** segmented toggle is rendered in the `TargetWork
 
 - **Target View (default):** center column = node-type-specific builder; right panel = `TargetWorklist`
 - **Rules View:** center column = `ExpressionBuilderPanel`; right panel = `RuleList`
-- **Auto-Map Workspace View:** center column = `AutoMapWorkspace`; right panel stays visible for context
+- **Auto-Map Workspace View:** editor prioritizes `AutoMapWorkspace` as primary full-width review surface; any auxiliary context paneling must not collapse review into a narrow secondary rail
 
 **Selection persistence across view toggles:**
 - Target → Rules: find the rule whose `targetPath` matches `selectedTargetPath`; set `selectedRuleIndex`
@@ -1242,98 +1242,97 @@ Options mode is driven by the `PARAMETER_HINTS` registry (`ui/src/lib/data/param
 
 `ArgumentForm` delegates to `ParameterValueInput` for each standard slot. The `forceConditionEditor` carve-out (filter/find `condition` parameter) continues to render via `ArgumentSlotInput` with `forceConditionEditor={true}` — condition parsing helpers are private to `ArgumentSlotInput`.
 
-### Auto-Map Review Workspace Architecture (FS-046 → FS-048)
+### Auto-Map Review Workspace Architecture (FS-046 → FS-048 → FS-101)
 
-FS-048 replaces the FS-046 right-side drawer with a dedicated **center-panel workspace mode** for section-level AI suggestion review.
+FS-101 supersedes the FS-048 session-local review model. Auto-Map is now a durable, async **session/run** workflow with Mapping Editor as the canonical review surface.
 
 #### Workspace Mode Switch Pattern
 
 - `EditorView` extends to `target | rules | automap`
 - Entry to `automap` is explicit (`enterAutoMapWorkspace(sectionPath)`), not available from the target/rules segmented toggle
-- In `automap` mode, center panel renders `AutoMapWorkspace`
-- Right panel remains mounted but visually secondary (`opacity-60`, `pointer-events-none`) so review focus stays on the center workspace
+- In `automap` mode, the review workspace is the primary authoring surface (full-width center workspace, not a narrow drawer/right-rail panel)
 - Exit action (`Back to Editor`) returns to `target` while preserving section context and selected target path
 
 #### Trigger + Re-entry Entry Points
 
 Primary trigger:
 - `ObjectSummaryPanel` "Auto-Map This Section" button
-- Button label changes to **"Review Auto-Map Suggestions"** when persisted suggestions exist for the section
+- Button label changes to **"Review Auto-Map Suggestions"** when open-session suggestions exist for the section
 - Pending indicator text shows `N suggestions pending review`
 
 Persistent re-entry affordance:
 - `EditorTopBar` renders subtle pill (`Auto-Map: N pending`) when pending suggestions exist
-- Clicking the pill re-enters workspace for the persisted section path
+- Clicking the pill re-enters workspace for the open session context
+
+Create-time handoff:
+- Create Mapping auto-map start remains non-blocking: once session/run is acknowledged, navigation proceeds to Mapping Editor review mode
+- UI must not block on full generation completion before route handoff
 
 #### `useAutoMapWorkspace` Hook Contract
 
-`useAutoMapWorkspace` is now the canonical orchestration surface:
+`useAutoMapWorkspace` is the canonical orchestration surface:
 
-- Lifecycle state: `idle | loading | success | error`
-- Core actions: `triggerAutoMap`, `acceptSuggestion`, `editSuggestion`, `dismissSuggestion`, `undoDismiss`, `bulkAcceptAllValid`
-- Refresh actions: `refreshAll`, `refreshUnmapped`, `refreshStale`
-- Filtering: `activeFilters`, `toggleFilter`, `clearFilters`, `filteredItems`
-- Persistence + metadata: `sectionPath`, `generatedAt`, `previousSuggestionsAvailable`, `restorePreviousSuggestions`, `hasPersistedSuggestions`
-- Run metadata summary surfaced to workspace consumers: mode/chunk/retrieval/validation/dedup counters + explicit no-context reason when present
+- Lifecycle state includes async run/session semantics (`idle | loading | polling | success | error`) with run terminal outcomes (`completed | partial | failed | superseded`)
+- Core actions: start session/run, accept/apply-edit, dismiss/keep-current, undo/cancel-edit, and eligibility-scoped batch actions
+- Refresh/retry actions are run-creation paths (`refresh`, `retry-failed`) within the same open session
+- Filtering: exclusive primary status filter (`All | Needs Review | Accepted | Dismissed | Kept Current | Stale | Conflict`) plus secondary filters (validation/confidence/change-type/required/section/search)
+- Pagination uses backend cursor contract bound to session + normalized filter hash + sort version
+- Run/session metadata surfaced to workspace consumers: mode/progress/retrieval/validation/dedup summaries and explicit no-context reason when present
 - Draft-model integration: acceptance/edit actions call `updateDraft(targetPath, expression)` so AI suggestions remain suggestion-only and flow through unsaved-change tracking
 
 #### Suggestion Persistence Model
 
-Persistence is session-scoped and section-scoped:
+Persistence is backend-owned and durable:
 
-- Storage medium: `sessionStorage`
-- Key pattern: `keyra:automap-suggestions:{mappingId}`
-- Value model: record keyed by `sectionPath`, each with `items[]`, `generatedAt`, and optional `sourceContext`
-- Hydration behavior: `triggerAutoMap(sectionPath)` first attempts restore from persistence; only fetches when no persisted suggestions exist
-- Corruption recovery: malformed payloads are discarded safely and treated as empty state
-
-This model preserves review context across intra-session navigation without introducing backend persistence coupling.
+- Canonical store is Auto-Map session/run/suggestion persistence in backend (not browser `sessionStorage`)
+- Open-session lookup is mapping-scoped (`GET /mappings/:mappingId/auto-map-session`) and drives resume/re-entry behavior
+- Accepted-but-unsaved decisions persist in session store and rehydrate into draft with conflict guards
+- Browser-local suggestion persistence is compatibility-only and non-canonical during the migration window
 
 #### Extended Lifecycle State Machine
 
 ```ts
-type SuggestionLifecycleStatus =
-  | 'suggested'
+type SuggestionReviewStatus =
+  | 'pending'
+  | 'editing'
   | 'accepted'
-  | 'edited'
+  | 'accepted-edited'
   | 'dismissed'
-  | 'stale';
+  | 'kept-current'
+  | 'stale'
+  | 'conflict';
 ```
 
 Transition model:
 
 | From | Event | To | Side effect |
 |---|---|---|---|
-| suggested | accept | accepted | `updateDraft(targetPath, suggestedExpression)` |
-| suggested | edit | edited | `updateDraft(...)`, navigate to target, exit workspace |
-| suggested | dismiss | dismissed | none |
-| dismissed | undoDismiss | suggested | none |
-| suggested/dismissed | stale-detected | stale | none |
-| stale | accept | stale | none (blocked; refresh required before apply) |
-| stale | dismiss | dismissed | none |
-| stale | refresh | suggested | replaced by refreshed suggestion |
+| pending | accept | accepted | `updateDraft(targetPath, suggestedExpression)` |
+| pending/editing | apply-edit | accepted-edited | `updateDraft(targetPath, editedExpression)` |
+| pending/editing | dismiss | dismissed | none |
+| pending/editing | keep-current | kept-current | none |
+| accepted/accepted-edited/dismissed/kept-current | undo | pending | draft/state re-evaluated |
+| any unresolved | stale-detected | stale | none (blocked from direct apply until refresh) |
+| any unresolved | conflict-detected | conflict | none (blocked from direct apply until refresh/resolution) |
 
-`accepted` and `edited` are terminal review outcomes in the workspace model.
+Terminal review outcomes are `accepted | accepted-edited | dismissed | kept-current`, subject to explicit undo semantics before final save/materialization.
 
-#### Staleness Detection Strategy
+#### Staleness and conflict behavior
 
-`auto-map-staleness.ts` detects stale suggestions on hydration/re-entry by comparing generation-time baseline to current rule/draft state:
-
-- rule expression changed since generation for same target
-- rule added for a target that was previously unmapped (`isNew` at generation)
-
-Stale markers are hard-blocking review guards in V1; acceptance remains disabled until refresh/regeneration on latest state.
+- Stale/conflict markers are hard-blocking review guards in V1; direct apply remains disabled until refresh/regeneration on latest state
+- Rehydration must mark conflicts when prior expression no longer matches acceptance baseline instead of silently reapplying
 
 #### Refresh / Regenerate Merge Strategy
 
-Refresh operations use full-section generation with client-side merge behavior:
+Refresh/retry operations create new runs inside the same open session:
 
 - Refresh All: regenerate unresolved suggestions
-- Refresh Unmapped: focus refresh on unmapped subset
+- Refresh Unmapped: focus refresh on unresolved/unmapped subset
 - Refresh Stale: focus refresh on stale subset
+- Retry failed: start `retry-failed` run scoped to failed work units
 
 Merge rules:
-- preserve `accepted` and `edited`
+- preserve terminal review decisions unless explicitly undone
 - replace unresolved suggestions with refreshed results
 - keep workspace continuity (summary, filters, section context)
 
@@ -1348,32 +1347,37 @@ Preview in workspace cards is optional/progressive:
 
 #### Filter + Bulk Action Model
 
-Toolbar filter chips support status/state slices (`all`, `unmapped`, `replacing`, `valid`, `invalid`, `lowConfidence`, `accepted`, `dismissed`, `stale`).
+Primary status filtering is exclusive (`All | Needs Review | Accepted | Dismissed | Kept Current | Stale | Conflict`) with additive secondary filters.
 
-Bulk actions:
-- Accept All Valid
-- Refresh Unmapped
-- Refresh Stale
-- Refresh All (with inline confirmation banner)
+Batch actions apply only to currently filtered rows and return applied/skipped accounting.
 
-`Accept All Valid` applies only eligibility-passing items and records deterministic skip accounting for ineligible entries (`invalid`, `stale`, `dismissed`, already-reviewed/non-pending statuses) without mutating skipped suggestions.
+`Accept All Valid` applies only eligibility-passing items and records deterministic skip accounting for ineligible entries (`invalid`, `stale`, `conflict`, and already-reviewed/non-pending states) without mutating skipped suggestions.
 
 All actions are state-derived and disable safely when not applicable.
 
-#### Canonical backend contract alignment (FS-073)
+#### Polling, visibility, and accessibility requirements (FS-101)
 
-The workspace now assumes retrieval-backed backend behavior as canonical:
+- Polling uses immediate fetch on review open, active 2s cadence with jitter, unchanged-response backoff, and terminal-stop behavior
+- Hidden tabs pause polling; visibility regain triggers immediate poll and unchanged-counter reset
+- Poll errors must not mutate backend run/session states
+- Keyboard navigation and focus-return semantics are required for row/detail review flow
+- Screen-reader announcements are required for progress, completion, refresh outcomes, and errors
 
-- UI does not construct or require full source-schema prompt context blobs.
-- Canonical transport remains a single endpoint: `POST /ai/auto-map` with request `mode: 'section' | 'whole'`.
-- `useAutoMapWorkspace` sends mode-aware requests and normalizes review data for both section and whole runs.
-- Response metadata consumed by UI includes retrieval/chunk/validation/dedup summaries and per-suggestion validation.
-- No-context retrieval is handled as successful empty-result UX, with explicit empty-state guidance rather than generic error treatment.
-- UI contracts (`autoMapSection`, workspace persistence, lifecycle model) remain stable while backend retrieval/chunk internals evolve.
+#### Canonical backend contract alignment (FS-101)
 
-#### Drawer Retirement Note
+The workspace now assumes async session/run backend behavior as canonical:
 
-Legacy drawer-path surfaces were removed during FS-065 reconciliation. The active architecture is workspace mode (`useAutoMapWorkspace` + `AutoMapWorkspace`).
+- Capability gate: `GET /ai/auto-map/capabilities` (`executionMode: disabled | legacy | async`)
+- Session/run transport: `POST /ai/auto-map/sessions`, `POST /ai/auto-map/sessions/:sessionId/runs`, `GET /ai/auto-map/sessions/:sessionId/runs/:runId`
+- Suggestions transport: `GET /ai/auto-map/sessions/:sessionId/suggestions`, `PATCH .../suggestions/:suggestionId`, `POST .../suggestions/actions`
+- Open-session lookup: `GET /mappings/:mappingId/auto-map-session`
+- UI behavior must remain executor-agnostic (Lambda/Step Functions) and treat `202` as acknowledged async work, not completion
+
+#### Legacy compatibility window
+
+- Legacy browser-only suggestion payloads are not imported into canonical backend session state
+- If no backend session exists and legacy payload is detected, UI offers one-time choice to generate new canonical suggestions or discard local suggestions
+- Compatibility detection/migration utilities are removed after one release or 30 days post async production rollout (whichever is longer)
 
 ### Drag-and-Drop Pattern (HTML5 API)
 
@@ -2774,8 +2778,8 @@ Create-time branching contract:
 - **Blank mode:** create mapping via canonical `adapter.createMapping(...)`, then navigate to Mapping Editor.
 - **Auto-map mode:**
   1. create mapping first (mapping remains valid even if subsequent auto-map step fails),
-  2. trigger callable auto-map path keyed by created `mappingId`,
-  3. persist pending suggestion context by `mappingId`,
+  2. trigger async auto-map session/run start keyed by created `mappingId`,
+  3. rely on backend open-session lookup for review re-entry context,
   4. navigate to Mapping Editor with optional non-blocking notice state.
 
 Failure semantics:

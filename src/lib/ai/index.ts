@@ -67,10 +67,29 @@ export {
 export {
   classifySchemaSizeSegment,
   createTelemetrySession,
+  emitAutoMapReviewQualityTelemetry,
+  emitAutoMapTimingTelemetry,
   emitRetrievalTelemetry,
   readCorrelationId,
+  type AutoMapReviewQualityTelemetryPayload,
+  type AutoMapTimingTelemetryPayload,
   type AIInvocationTelemetrySession,
   type RetrievalTelemetryPayload,
   type SchemaSizeSegment,
 } from './telemetry.js';
 export { invokeAI } from './invoke-ai.js';
+export {
+  planAutoMapWorkUnits,
+  type AutoMapPlannerScope,
+  type AutoMapWorkUnitPlan,
+  type AutoMapWorkUnitPlannerInput,
+  type PlannedAutoMapWorkUnit,
+} from './auto-map-work-unit-planner.js';
+export {
+  orchestrateAutoMapRun,
+  type AutoMapRunOrchestrationDependencies,
+  type AutoMapRunOrchestrationInput,
+  type AutoMapRunOrchestrationOutput,
+  type WorkUnitExecutionResult,
+  type WorkUnitExecutionSuggestion,
+} from './auto-map-run-orchestrator.js';

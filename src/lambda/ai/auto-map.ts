@@ -1,9 +1,12 @@
-import { parse } from '../../engine/dsl/index.js';
-import { registerAllFunctions } from '../../engine/functions/index.js';
-import { defaultRegistry } from '../../engine/registry/function-registry.js';
+import { validate } from '../../engine/index.js';
+import type {
+  Diagnostic,
+  MappingConfig as EngineMappingConfig,
+  MappingRule as EngineMappingRule,
+  SchemaRef as EngineSchemaRef,
+} from '../../engine/types/index.js';
 import { getSchemaMetadata, getSchemaRetriever } from '../../lib/schema/index.js';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
-import type { Diagnostic } from '../../engine/types/index.js';
 import { invokeAI, normalizeAIError } from '../../lib/ai/index.js';
 import {
   classifySchemaSizeSegment,
@@ -13,6 +16,7 @@ import {
 import {
   ERROR_CODES,
   getItem,
+  getObject,
   generateRequestId,
   notFound,
   parseBody,
@@ -46,7 +50,55 @@ type AutoMapMode = 'section' | 'whole';
 interface MappingMetadataRecord {
   readonly mappingId: string;
   readonly sourceSchemaId?: string;
+  readonly targetSchemaId?: string;
+  readonly configS3Key?: string;
 }
+
+interface SchemaMetadataRecord {
+  readonly schemaId: string;
+  readonly format: 'json-schema' | 'xsd';
+}
+
+interface MappingConfigRecord {
+  readonly name?: string;
+  readonly version?: number;
+  readonly engineVersion?: string;
+  readonly sourceSchemaRef?: {
+    readonly schemaId?: string;
+    readonly type?: 'github' | 'local' | 'published';
+    readonly commitSha?: string;
+  };
+  readonly targetSchemaRef?: {
+    readonly schemaId?: string;
+    readonly type?: 'github' | 'local' | 'published';
+    readonly commitSha?: string;
+  };
+  readonly enrichmentSources?: readonly {
+    readonly alias?: string;
+  }[];
+  readonly config?: {
+    readonly unmappedTargets?: 'omit' | 'null' | 'error';
+    readonly nullSubtrees?: readonly string[];
+    readonly constants?: Readonly<Record<string, unknown>>;
+    readonly externalSources?: readonly string[];
+  };
+  readonly rules?: readonly {
+    readonly target?: string;
+    readonly type?: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'null' | 'any';
+    readonly expression?: string;
+    readonly description?: string;
+    readonly valueTableRef?: unknown;
+    readonly noMatchBehavior?: unknown;
+  }[];
+}
+
+const DEFAULT_INVALID_DIAGNOSTICS = [
+  {
+    code: 'CANDIDATE_CONFIG_INVALID',
+    severity: 'error' as const,
+    message: 'Missing required candidate fields: target and expression',
+  },
+];
 
 interface SuggestionActionEligibility {
   readonly canAccept: boolean;
@@ -60,6 +112,8 @@ function getEnvValue(key: string): string | undefined {
 }
 
 const MAPPINGS_TABLE = getEnvValue('MAPPINGS_TABLE');
+const SCHEMAS_TABLE = getEnvValue('SCHEMAS_TABLE');
+const CONTENT_BUCKET = getEnvValue('CONTENT_BUCKET');
 const AUTO_MAP_STEP_FUNCTIONS_ARN = getEnvValue('AUTO_MAP_STEP_FUNCTIONS_ARN');
 
 function getMappingsTableOrThrow(): string {
@@ -71,28 +125,27 @@ function getMappingsTableOrThrow(): string {
   return value;
 }
 
+function getSchemasTableOrThrow(): string {
+  const value = SCHEMAS_TABLE?.trim();
+  if (!value) {
+    throw new Error('Missing required environment variable: SCHEMAS_TABLE');
+  }
+
+  return value;
+}
+
+function getContentBucketOrThrow(): string {
+  const value = CONTENT_BUCKET?.trim();
+  if (!value) {
+    throw new Error('Missing required environment variable: CONTENT_BUCKET');
+  }
+
+  return value;
+}
+
 const sfnClient = new SFNClient({
   region: getEnvValue('AWS_REGION') ?? 'us-east-1',
 });
-
-let functionsInitialized = false;
-
-function ensureEngineFunctionsRegistered(): void {
-  if (functionsInitialized) {
-    return;
-  }
-
-  const registryLike = defaultRegistry as unknown as { registerFunction?: unknown };
-  if (typeof registryLike.registerFunction !== 'function') {
-    console.info(`${AUTO_MAP_LOG_PREFIX} skipped function registration: registry is not initialized`);
-    return;
-  }
-
-  registerAllFunctions(defaultRegistry);
-  functionsInitialized = true;
-}
-
-ensureEngineFunctionsRegistered();
 
 function truncateForLog(value: string): string {
   if (value.length <= LOG_TEXT_LIMIT) {
@@ -456,87 +509,321 @@ async function resolveSchemaFieldCount(schemaId: string): Promise<number | undef
   }
 }
 
-function validateExpression(expression: string): { valid: boolean; diagnostics: string[] } {
-  try {
-    const parseResult = parse(expression, {
-      registry: defaultRegistry,
-    });
-
-    const errorDiagnostics = parseResult.diagnostics.filter(
-      (diagnostic: Diagnostic) => diagnostic.severity === 'error',
-    );
-
-    return {
-      valid: errorDiagnostics.length === 0,
-      diagnostics: errorDiagnostics.map((diagnostic) => diagnostic.message),
-    };
-  } catch {
-    return {
-      valid: false,
-      diagnostics: ['Validation failed'],
-    };
-  }
+function contentKey(schemaId: string, format: 'json-schema' | 'xsd'): string {
+  return `schemas/${schemaId}/content.${format === 'xsd' ? 'xsd' : 'json'}`;
 }
 
-function normalizeValidationDiagnostics(diagnostics: string[]): Array<{
+function parseSchemaContent(raw: string, format: 'json-schema' | 'xsd'): unknown {
+  if (format === 'xsd') {
+    return raw;
+  }
+
+  return JSON.parse(raw) as unknown;
+}
+
+function normalizeSeverity(value: unknown): 'error' | 'warning' | 'info' {
+  if (value === 'warning' || value === 'info' || value === 'error') {
+    return value;
+  }
+
+  return 'error';
+}
+
+function severityRank(value: 'error' | 'warning' | 'info'): number {
+  if (value === 'error') {
+    return 0;
+  }
+  if (value === 'warning') {
+    return 1;
+  }
+  return 2;
+}
+
+function normalizeValidationDiagnostics(diagnostics: readonly Diagnostic[]): Array<{
   code: string;
   severity: 'error' | 'warning' | 'info';
   message: string;
 }> {
-  return diagnostics.map((message) => ({
-    code: 'PARSE_ERROR',
-    severity: 'error',
-    message,
+  const normalized = diagnostics.map((diagnostic) => ({
+    code: typeof diagnostic.code === 'string' && diagnostic.code.trim() !== ''
+      ? diagnostic.code
+      : 'VALIDATION_DIAGNOSTIC',
+    severity: normalizeSeverity(diagnostic.severity),
+    message: typeof diagnostic.message === 'string' && diagnostic.message.trim() !== ''
+      ? diagnostic.message
+      : 'Validation diagnostic',
   }));
+
+  return normalized.sort((left, right) => {
+    if (left.code !== right.code) {
+      return left.code.localeCompare(right.code);
+    }
+    const severityDelta = severityRank(left.severity) - severityRank(right.severity);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+
+    return left.message.localeCompare(right.message);
+  });
 }
 
-function normalizeRuleValidation(rule: Record<string, unknown>): {
-  valid: boolean;
-  diagnostics: Array<{
-    code: string;
-    severity: 'error' | 'warning' | 'info';
-    message: string;
-  }>;
-} {
-  const validationRecord =
-    typeof rule.validation === 'object' && rule.validation !== null
-      ? (rule.validation as Record<string, unknown>)
-      : null;
-
-  const rawDiagnostics =
-    validationRecord && Array.isArray(validationRecord.diagnostics)
-      ? validationRecord.diagnostics
-      : [];
-
-  const diagnostics = rawDiagnostics
-    .map((item) => {
-      if (typeof item === 'string') {
-        return item;
-      }
-
-      if (typeof item === 'object' && item !== null && typeof item.message === 'string') {
-        return item.message;
-      }
-
-      return null;
-    })
-    .filter((item): item is string => typeof item === 'string');
-
-  const hasExplicitValid = validationRecord && typeof validationRecord.valid === 'boolean';
-  const valid = hasExplicitValid ? (validationRecord.valid as boolean) : false;
-
-  if (valid) {
-    return {
-      valid: true,
-      diagnostics: [],
-    };
+function toValidationState(
+  diagnostics: readonly { severity: 'error' | 'warning' | 'info' }[],
+): 'ready' | 'warning' | 'invalid' {
+  if (diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+    return 'invalid';
+  }
+  if (diagnostics.some((diagnostic) => diagnostic.severity === 'warning')) {
+    return 'warning';
   }
 
-  const messages = diagnostics.length > 0 ? diagnostics : ['Validation failed'];
+  return 'ready';
+}
+
+function normalizeRuleType(value: unknown): EngineMappingRule['type'] {
+  if (value === 'number' || value === 'integer') {
+    return 'number';
+  }
+  if (value === 'boolean' || value === 'array' || value === 'object' || value === 'string') {
+    return value;
+  }
+  if (value === 'null' || value === 'any') {
+    return 'string';
+  }
+
+  return 'string';
+}
+
+function normalizeSchemaRefType(value: unknown): EngineSchemaRef['type'] {
+  return value === 'github' ? 'github' : 'local';
+}
+
+function uniqueStable(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    deduped.push(value);
+  }
+
+  return deduped;
+}
+
+function toBaseEngineConfig(record: MappingConfigRecord | null): EngineMappingConfig {
+  const enrichmentAliases = Array.isArray(record?.enrichmentSources)
+    ? record.enrichmentSources
+      .map((item) => (typeof item?.alias === 'string' ? item.alias.trim() : ''))
+      .filter((item) => item !== '')
+    : [];
+
+  const legacyExternalAliases = Array.isArray(record?.config?.externalSources)
+    ? record.config.externalSources
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item !== '')
+    : [];
+
+  const externalSources = uniqueStable([
+    ...enrichmentAliases,
+    ...legacyExternalAliases,
+  ]);
+
   return {
-    valid: false,
-    diagnostics: normalizeValidationDiagnostics(messages),
+    name: record?.name ?? 'Auto-Map Candidate Validation',
+    version: typeof record?.version === 'number' ? record.version : 1,
+    engineVersion: record?.engineVersion ?? '1.0.0',
+    sourceSchemaRef: {
+      schemaId: record?.sourceSchemaRef?.schemaId ?? 'source',
+      type: normalizeSchemaRefType(record?.sourceSchemaRef?.type),
+      ...(record?.sourceSchemaRef?.commitSha ? { commitSha: record.sourceSchemaRef.commitSha } : {}),
+    },
+    targetSchemaRef: {
+      schemaId: record?.targetSchemaRef?.schemaId ?? 'target',
+      type: normalizeSchemaRefType(record?.targetSchemaRef?.type),
+      ...(record?.targetSchemaRef?.commitSha ? { commitSha: record.targetSchemaRef.commitSha } : {}),
+    },
+    config: {
+      unmappedTargets: record?.config?.unmappedTargets ?? 'omit',
+      nullSubtrees: record?.config?.nullSubtrees ?? [],
+      constants: record?.config?.constants ?? {},
+      externalSources,
+    },
+    rules: [],
   };
+}
+
+function nearestArrayAncestor(path: string, targetTypeByPath: ReadonlyMap<string, string>): string | null {
+  const segments = path.split('.').map((segment) => segment.trim()).filter((segment) => segment !== '');
+  for (let index = segments.length; index > 0; index -= 1) {
+    const candidate = segments.slice(0, index).join('.');
+    if (targetTypeByPath.get(candidate) === 'array') {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function loadValidationContext(mappingId: string | undefined): Promise<{
+  readonly baseConfig: EngineMappingConfig;
+  readonly sourceSchema: unknown;
+  readonly targetSchema: unknown;
+}> {
+  const fallback = {
+    baseConfig: toBaseEngineConfig(null),
+    sourceSchema: null,
+    targetSchema: null,
+  };
+
+  if (!mappingId || mappingId.trim() === '') {
+    return fallback;
+  }
+
+  try {
+    const mapping = await getItem<MappingMetadataRecord>({
+      TableName: getMappingsTableOrThrow(),
+      Key: { mappingId },
+    });
+
+    if (!mapping || !mapping.configS3Key) {
+      return fallback;
+    }
+
+    const mappingConfigRaw = await getObject({
+      Bucket: getContentBucketOrThrow(),
+      Key: mapping.configS3Key,
+    });
+    const mappingConfig = JSON.parse(mappingConfigRaw) as MappingConfigRecord;
+
+    let sourceSchema: unknown = null;
+    let targetSchema: unknown = null;
+
+    if (mapping.sourceSchemaId && mapping.targetSchemaId) {
+      const [sourceMeta, targetMeta] = await Promise.all([
+        getItem<SchemaMetadataRecord>({
+          TableName: getSchemasTableOrThrow(),
+          Key: { schemaId: mapping.sourceSchemaId },
+        }),
+        getItem<SchemaMetadataRecord>({
+          TableName: getSchemasTableOrThrow(),
+          Key: { schemaId: mapping.targetSchemaId },
+        }),
+      ]);
+
+      if (sourceMeta && targetMeta) {
+        const [sourceRaw, targetRaw] = await Promise.all([
+          getObject({
+            Bucket: getContentBucketOrThrow(),
+            Key: contentKey(sourceMeta.schemaId, sourceMeta.format),
+          }),
+          getObject({
+            Bucket: getContentBucketOrThrow(),
+            Key: contentKey(targetMeta.schemaId, targetMeta.format),
+          }),
+        ]);
+
+        sourceSchema = parseSchemaContent(sourceRaw, sourceMeta.format);
+        targetSchema = parseSchemaContent(targetRaw, targetMeta.format);
+      }
+    }
+
+    return {
+      baseConfig: toBaseEngineConfig(mappingConfig),
+      sourceSchema,
+      targetSchema,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function validateCandidateRules(params: {
+  readonly rules: readonly Record<string, unknown>[];
+  readonly baseConfig: EngineMappingConfig;
+  readonly sourceSchema: unknown;
+  readonly targetSchema: unknown;
+  readonly targetTypeByPath: ReadonlyMap<string, string>;
+}): Array<{
+  state: 'ready' | 'warning' | 'invalid';
+  diagnostics: Array<{ code: string; severity: 'error' | 'warning' | 'info'; message: string }>;
+}> {
+  const results = params.rules.map(() => ({
+    state: 'invalid' as const,
+    diagnostics: DEFAULT_INVALID_DIAGNOSTICS,
+  }));
+
+  const groups = new Map<string, number[]>();
+  for (let index = 0; index < params.rules.length; index += 1) {
+    const rule = params.rules[index] as Record<string, unknown>;
+    const target = typeof rule.target === 'string' ? rule.target.trim() : '';
+    const expression = typeof rule.expression === 'string' ? rule.expression.trim() : '';
+    if (!target || !expression) {
+      continue;
+    }
+
+    const arrayRoot = nearestArrayAncestor(target, params.targetTypeByPath);
+    const key = arrayRoot ?? `__single__${index}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(index);
+    } else {
+      groups.set(key, [index]);
+    }
+  }
+
+  const orderedGroups = [...groups.entries()]
+    .sort((left, right) => (left[1][0] ?? 0) - (right[1][0] ?? 0));
+
+  for (const [, indices] of orderedGroups) {
+    const candidateRules: EngineMappingRule[] = indices
+      .map((index) => {
+        const rule = params.rules[index] as Record<string, unknown>;
+        const target = typeof rule.target === 'string' ? rule.target.trim() : '';
+        const expression = typeof rule.expression === 'string' ? rule.expression.trim() : '';
+        if (!target || !expression) {
+          return null;
+        }
+
+        return {
+          target,
+          type: normalizeRuleType(params.targetTypeByPath.get(target) ?? rule.type),
+          expression,
+          ...(typeof rule.description === 'string' && rule.description.trim() !== ''
+            ? { description: rule.description }
+            : {}),
+        } satisfies EngineMappingRule;
+      })
+      .filter((item): item is EngineMappingRule => item !== null);
+
+    if (candidateRules.length === 0) {
+      continue;
+    }
+
+    const validation = validate(
+      {
+        ...params.baseConfig,
+        rules: candidateRules,
+      },
+      params.sourceSchema,
+      params.targetSchema,
+    );
+
+    const diagnostics = normalizeValidationDiagnostics(validation.diagnostics);
+    const state = toValidationState(diagnostics);
+    const normalized = {
+      state,
+      diagnostics,
+    };
+
+    for (const index of indices) {
+      results[index] = normalized;
+    }
+  }
+
+  return results;
 }
 
 function buildSuggestions(
@@ -559,6 +846,7 @@ function buildSuggestions(
   lifecycleStatus: 'suggested';
   reviewStatus: 'pending';
   actionEligibility: SuggestionActionEligibility;
+  validationState: 'ready' | 'warning' | 'invalid';
 }> {
   const normalizeConfidence = (value: unknown): 'high' | 'medium' | 'low' => {
     if (value === 'high' || value === 'medium' || value === 'low') {
@@ -582,10 +870,38 @@ function buildSuggestions(
   return enrichedRules
     .filter((rule): rule is Record<string, unknown> => typeof rule === 'object' && rule !== null)
     .map((rule, index) => {
-      const normalizedValidation = normalizeRuleValidation(rule);
+      const validationRecord =
+        typeof rule.validation === 'object' && rule.validation !== null
+          ? (rule.validation as {
+            valid?: boolean;
+            diagnostics?: Array<{ code?: string; severity?: 'error' | 'warning' | 'info'; message?: string }>;
+          })
+          : { valid: false, diagnostics: DEFAULT_INVALID_DIAGNOSTICS };
+
+      const normalizedDiagnostics = Array.isArray(validationRecord.diagnostics)
+        ? validationRecord.diagnostics.map((item) => ({
+          code: typeof item.code === 'string' && item.code !== '' ? item.code : 'VALIDATION_DIAGNOSTIC',
+          severity: item.severity === 'warning' || item.severity === 'info' || item.severity === 'error'
+            ? item.severity
+            : 'error',
+          message: typeof item.message === 'string' && item.message !== '' ? item.message : 'Validation diagnostic',
+        }))
+        : DEFAULT_INVALID_DIAGNOSTICS;
+
+      const validationState =
+        typeof (rule as { validationState?: unknown }).validationState === 'string'
+          && ((rule as { validationState?: unknown }).validationState === 'ready'
+            || (rule as { validationState?: unknown }).validationState === 'warning'
+            || (rule as { validationState?: unknown }).validationState === 'invalid')
+          ? (rule as { validationState: 'ready' | 'warning' | 'invalid' }).validationState
+          : toValidationState(normalizedDiagnostics);
+      const normalizedValidation = {
+        valid: validationState !== 'invalid',
+        diagnostics: normalizedDiagnostics,
+      };
       const target = typeof rule.target === 'string' ? rule.target : '';
       const expression = typeof rule.expression === 'string' ? rule.expression : '';
-      const actionEligibility: SuggestionActionEligibility = normalizedValidation.valid
+      const actionEligibility: SuggestionActionEligibility = validationState !== 'invalid'
         ? {
             canAccept: true,
             canBatchAccept: true,
@@ -607,6 +923,7 @@ function buildSuggestions(
         lifecycleStatus: 'suggested' as const,
         reviewStatus: 'pending' as const,
         actionEligibility,
+        validationState,
       };
     })
     .filter((suggestion) => suggestion.target !== '' && suggestion.expression !== '')
@@ -1231,24 +1548,41 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       ruleCount: rulesValue.length,
     });
 
+    const validationContext = await loadValidationContext(mappingId);
+
     const enrichedRules = rulesValue.map((rule) => {
       if (typeof rule !== 'object' || rule === null) {
         return rule;
       }
 
-      const ruleRecord = rule as Record<string, unknown>;
-      const expression = ruleRecord.expression;
+      return {
+        ...(rule as Record<string, unknown>),
+      };
+    });
 
-      const validation =
-        typeof expression === 'string'
-          ? validateExpression(expression)
-          : { valid: false, diagnostics: ['No expression to validate'] };
+    const candidateRules = enrichedRules.filter(
+      (rule): rule is Record<string, unknown> => typeof rule === 'object' && rule !== null,
+    );
+    const candidateValidation = validateCandidateRules({
+      rules: candidateRules,
+      baseConfig: validationContext.baseConfig,
+      sourceSchema: validationContext.sourceSchema,
+      targetSchema: validationContext.targetSchema,
+      targetTypeByPath,
+    });
 
-        return {
-          ...ruleRecord,
-          validation,
-        };
-      });
+    for (let index = 0; index < candidateRules.length; index += 1) {
+      const outcome = candidateValidation[index] ?? {
+        state: 'invalid' as const,
+        diagnostics: DEFAULT_INVALID_DIAGNOSTICS,
+      };
+
+      candidateRules[index].validation = {
+        valid: outcome.state !== 'invalid',
+        diagnostics: outcome.diagnostics,
+      };
+      candidateRules[index].validationState = outcome.state;
+    }
 
     const dedupInput = enrichedRules.filter(
       (rule): rule is Record<string, unknown> => typeof rule === 'object' && rule !== null,
@@ -1258,11 +1592,32 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const suggestions = buildSuggestions(dedupedRules, parsedTargetListing);
     const validationOutcomes = dedupedRules.map((rule) => {
-      const normalizedValidation = normalizeRuleValidation(rule);
+      const validationRecord =
+        typeof rule.validation === 'object' && rule.validation !== null
+          ? (rule.validation as {
+            diagnostics?: readonly { severity?: 'error' | 'warning' | 'info' }[];
+          })
+          : null;
+      const validationState =
+        typeof (rule as { validationState?: unknown }).validationState === 'string'
+          && ((rule as { validationState?: unknown }).validationState === 'ready'
+            || (rule as { validationState?: unknown }).validationState === 'warning'
+            || (rule as { validationState?: unknown }).validationState === 'invalid')
+          ? (rule as { validationState: 'ready' | 'warning' | 'invalid' }).validationState
+          : toValidationState(
+            Array.isArray(validationRecord?.diagnostics)
+              ? validationRecord.diagnostics.map((item) => ({
+                severity: item.severity === 'warning' || item.severity === 'info' || item.severity === 'error'
+                  ? item.severity
+                  : 'error',
+              }))
+              : DEFAULT_INVALID_DIAGNOSTICS,
+          );
       return {
         target: typeof rule.target === 'string' ? rule.target : null,
         sourceChunkRef: typeof rule.sourceChunkRef === 'string' ? rule.sourceChunkRef : null,
-        valid: normalizedValidation.valid,
+        valid: validationState !== 'invalid',
+        state: validationState,
       };
     });
     const validationPassCount = validationOutcomes.filter((item) => item.valid).length;

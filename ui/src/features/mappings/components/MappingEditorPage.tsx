@@ -238,7 +238,7 @@ export function MappingEditorPage({
   const showBuilderCard = panelMode === 'row-editing' && !hideBuilderPanel;
 
   const mappingCardWidthClass = isOverview
-    ? 'w-[min(78%,1200px)]'
+    ? (isAutoMapMode ? 'w-[min(96%,1600px)]' : 'w-[min(78%,1200px)]')
     : showBuilderCard
       ? (targetPanelCondensed ? 'w-[44%]' : 'w-[56%]')
       : 'w-[68%]';

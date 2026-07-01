@@ -2,10 +2,14 @@ import type {
   ActivityEntry,
   AddSchemaSampleInput,
   AddSchemaSampleResult,
+  AutoMapExecutionMode,
   AutoMapInput,
   AutoMapResult,
+  AutoMapRunStatus,
   AutoMapSectionInput,
   AutoMapSectionResult,
+  AutoMapSessionStatus,
+  AutoMapScopeMode,
   CreateMappingInput,
   CreateProjectInput,
   CreateSchemaInput,
@@ -140,6 +144,66 @@ export interface MappingImportSummary {
   readonly issues: readonly MappingImportIssue[];
 }
 
+export interface AutoMapCapabilities {
+  readonly autoMap: {
+    readonly enabled: boolean;
+    readonly executionMode: AutoMapExecutionMode;
+  };
+}
+
+export interface AutoMapSessionLookupResult {
+  readonly sessionId: string;
+  readonly mappingId: string;
+  readonly projectId: string;
+  readonly status: AutoMapSessionStatus;
+  readonly baseMappingRevision: number;
+  readonly lastRunId?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface AutoMapRunSummary {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly status: AutoMapRunStatus;
+  readonly scope: {
+    readonly mode: AutoMapScopeMode;
+    readonly sectionPath?: string;
+    readonly targetPaths?: readonly string[];
+    readonly refreshOfRunId?: string;
+    readonly retryWorkUnitIds?: readonly string[];
+  };
+  readonly deduped?: boolean;
+  readonly progress?: {
+    readonly completedWorkUnits: number;
+    readonly totalWorkUnits: number;
+    readonly completedTargets: number;
+    readonly totalTargets: number;
+  };
+  readonly counts?: {
+    readonly generated: number;
+    readonly ready: number;
+    readonly warning: number;
+    readonly invalid: number;
+    readonly failedTargets: number;
+  };
+  readonly failure?: {
+    readonly code: string;
+    readonly message: string;
+    readonly retryable: boolean;
+  };
+}
+
+export interface AutoMapSuggestionsPage {
+  readonly items: readonly AutoMapSectionResult['suggestions'];
+  readonly page: {
+    readonly limit: number;
+    readonly nextCursor: string | null;
+    readonly total: number;
+    readonly offset: number;
+  };
+}
+
 export interface ApiAdapter {
   // Schemas
   listSchemas(): Promise<SchemaMetadata[]>;
@@ -253,6 +317,19 @@ export interface ApiAdapter {
   // AI
   autoMap(input: AutoMapInput): Promise<AutoMapResult>;
   autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult>;
+  getAutoMapCapabilities?(): Promise<AutoMapCapabilities>;
+  getAutoMapSession?(mappingId: string): Promise<AutoMapSessionLookupResult | null>;
+  startAutoMapSession?(input: AutoMapInput): Promise<AutoMapRunSummary>;
+  startAutoMapRun?(sessionId: string, input: AutoMapSectionInput): Promise<AutoMapRunSummary>;
+  getAutoMapRunStatus?(sessionId: string, runId: string): Promise<AutoMapRunSummary>;
+  listAutoMapSuggestions?(
+    sessionId: string,
+    options?: {
+      readonly limit?: number;
+      readonly cursor?: string;
+      readonly status?: readonly string[];
+    },
+  ): Promise<AutoMapSuggestionsPage>;
   suggestExpression(input: SuggestExpressionInput): Promise<SuggestExpressionResult>;
   explainRule(input: ExplainRuleInput): Promise<ExplainRuleResult>;
   smartFix(input: SmartFixInput): Promise<SmartFixResult>;

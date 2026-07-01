@@ -19,6 +19,54 @@ export class MappingEditorPage {
     return this.page.getByTestId('save-status');
   }
 
+  getAutoMapWorkspace(): Locator {
+    return this.page.getByTestId('automap-workspace');
+  }
+
+  getAutoMapRunStatusText(): Locator {
+    return this.page.getByTestId('workspace-run-status-text');
+  }
+
+  getAutoMapRunCounts(): Locator {
+    return this.page.getByTestId('workspace-run-counts');
+  }
+
+  getAutoMapSuggestionCard(targetPath: string): Locator {
+    return this.page.getByTestId(`suggestion-card-${targetPath}`);
+  }
+
+  getAutoMapAcceptButton(targetPath: string): Locator {
+    return this.page.getByTestId(`accept-${targetPath}`);
+  }
+
+  getAutoMapDismissButton(targetPath: string): Locator {
+    return this.page.getByTestId(`dismiss-${targetPath}`);
+  }
+
+  getAutoMapUndoDismissButton(targetPath: string): Locator {
+    return this.page.getByTestId(`undo-dismiss-${targetPath}`);
+  }
+
+  getAutoMapBackToEditorButton(): Locator {
+    return this.page.getByTestId('workspace-back-to-editor');
+  }
+
+  getAutoMapReentryPill(): Locator {
+    return this.page.getByTestId('automap-reentry-pill');
+  }
+
+  getAutoMapCreateNotice(): Locator {
+    return this.page.getByTestId('automap-create-notice');
+  }
+
+  getAutoMapRefreshAllButton(): Locator {
+    return this.page.getByTestId('bulk-refresh-all');
+  }
+
+  getAutoMapAcceptAllValidButton(): Locator {
+    return this.page.getByTestId('bulk-accept-all-valid');
+  }
+
   getToolbarViewRulesButton(): Locator {
     return this.page.getByTestId('toolbar-view-rules').first();
   }
@@ -82,6 +130,11 @@ export class MappingEditorPage {
 
   async switchToRulesView(): Promise<void> {
     await this.getToolbarViewRulesButton().click();
+  }
+
+  async waitForAutoMapReviewReady(targetPath: string): Promise<void> {
+    await this.getAutoMapWorkspace().waitFor({ state: 'visible' });
+    await this.getAutoMapSuggestionCard(targetPath).waitFor({ state: 'visible' });
   }
 
   async addRule(targetPath: string, expression: string): Promise<void> {

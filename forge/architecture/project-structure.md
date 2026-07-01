@@ -38,11 +38,14 @@ src/
     functions/        Built-in DSL function implementations (grouped by category)
   lambda/             AWS Lambda function handlers (current Phase 0 implementation)
     ai/               AI lambdas (showcase + canonical Phase 2 slices)
+      step-functions/  AI Step Functions orchestration artifacts
+        auto-map-orchestration.asl.json Auto-Map session/run orchestration scaffold definition used for async large-scope handoff (FS-101 T-02)
       explain-rule.ts AI explain-rule lambda handler consuming shared runtime
       suggest-expression.ts AI suggest-expression lambda handler consuming shared runtime
       smart-fix.ts    AI smart-fix lambda handler: rule-level diagnostic correction with context guardrails, stale apply guard metadata, and validation-aware suggestion response (FS-071 T-01)
       validate-mappings.ts AI validate-mappings lambda handler: single-mapping AI quality review with backend-owned mapping/schema context assembly, optional bounded sample-data input (JSON/XML text <=1 MB), canonical advisory report parsing/enum enforcement, and normalized error envelopes (FS-072 T-01)
       auto-map.ts     AI auto-map lambda handler consuming shared runtime
+      auto-map-sessions.ts Auto-Map async session/run contract handler: capabilities (`executionMode`), session bootstrap/run start, run status, suggestion pagination/cursor binding, optimistic-concurrency decision updates, batch actions, and mapping-level open-session lookup (FS-101 T-03)
     schema/           Schema ingestion/query + CDM integration lambdas (FS-056, FS-076)
       create-schema.ts  POST /schemas handler (FS-057 T-05)
       update-schema.ts  PUT /schemas/:id handler for schema metadata/content updates used by Schema Detail save flow
@@ -127,6 +130,8 @@ src/
       output-parser.ts  Model output JSON parsing into AIResponse shape
       error-normalization.ts Shared AI error normalization to canonical backend envelope semantics
       routing.ts        Shared invocation profile and Tier 1/Tier 2 routing resolution (defaults, allowlisted overrides, registry fallback)
+      auto-map-work-unit-planner.ts Deterministic structural Auto-Map work-unit planner for session runs: scope target-path normalization (`whole|visible|section|selected|refresh|retry-failed`), array/object/scalar coherence grouping, stable `workUnitOrder`/`workUnitId`, and oversized split behavior that preserves iterator context (FS-101 T-04)
+      auto-map-run-orchestrator.ts Auto-Map async run orchestration core: idempotent work-unit seeding, progressive suggestion persistence, transient retry handling, deterministic terminal status (`completed|partial|failed|superseded`), and supersede-safe conditional-write flow (FS-101 T-05)
       invocation-guards.ts Shared payload/prompt/profile validation helpers for invokeAI limit/contract enforcement
       telemetry.ts      Shared AI invocation telemetry session + structured event emission helpers
       invoke-ai.ts      AI runtime orchestration entry point
@@ -135,6 +140,8 @@ src/
       types.ts          DynamoDB item types, input contracts, and domain converters
       clients.ts        DynamoDB Document Client + S3 Client singletons from env config
       config.ts         Table-name constants, bucket name, and S3 key builders
+      auto-map.ts       Auto-Map session/run/work-unit/suggestion domain + persistence contracts: key/index builders, status-transition guards, request fingerprinting, and conditional-write/version helpers (FS-101 T-01)
+      auto-map-store.ts Auto-Map DynamoDB persistence accessors for session/run/suggestion/work-unit query/write flows and open-session GSI lookups (FS-101 T-03)
       hash.ts           Stable JSON SHA-256 config hashing utility for no-op revision detection
       projects.ts       Projects table CRUD data-access module (create/get/list/update/delete)
       mappings.ts       Mappings metadata + S3 config operations (create/get/listByProject/update/delete/duplicate) with revision/version compatibility fields
@@ -896,6 +903,8 @@ tests/
       invoke-ai.test.ts invokeAI orchestration unit tests (mocked adapters)
       routing.test.ts   AI routing profile tests (tier defaults, allowlisted overrides, registry fallback behavior)
       invocation-guards.test.ts Invocation guard tests (payload/prompt contract validation)
+      auto-map-work-unit-planner.test.ts Structural Auto-Map work-unit planner tests for deterministic grouping/order, oversized split behavior, and in-scope-only planning across scope modes (FS-101 T-04)
+      auto-map-run-orchestrator.test.ts Auto-Map run orchestration tests for progressive writes, retry/idempotent duplicate safety, partial terminal semantics, and superseded late-write rejection handling (FS-101 T-05)
       telemetry.test.ts AI telemetry contract tests (start/success/failure event shape + invariants)
       integration.test.ts AI runtime integration test with local adapters + mocked model
       fixtures/       AI runtime test fixtures (local prompt JSON and DSL reference files)
@@ -904,7 +913,7 @@ tests/
           nl-to-rule.json   Prompt fixture for nl-to-rule pipeline
           dsl-reference.md  DSL reference fixture content
   infrastructure/     Infrastructure template contract tests
-    runtime-bootstrap-template.test.ts Runtime bootstrap SAM template assertions for SANDBOX support and least-privilege runtime role boundaries (FS-100 T-05)
+    runtime-bootstrap-template.test.ts Runtime bootstrap SAM template assertions for SANDBOX support, least-privilege runtime role boundaries, and FS-101 Auto-Map infra contracts (table/index/TTL/PITR env + Step Functions resource scoping)
   schema/           Schema ingestion shared type/utility tests (FS-056 T-01)
       types.test.ts    Type contract tests and inline threshold env parsing tests
       retriever.test.ts Runtime schema retriever mode parsing/routing/shadow non-fatal behavior tests (FS-091 T-01)
@@ -927,7 +936,9 @@ tests/
     persistence/      Persistence module tests (FS-058 T-01)
       types.test.ts    Type-compatibility and converter-shape tests
       clients.test.ts  AWS client initialization tests (region + endpoint overrides)
-      config.test.ts   Table/bucket env defaults and S3 key-builder tests
+      config.test.ts   Table/bucket env defaults, Auto-Map table env override/defaults, and S3/key-builder helper tests
+      auto-map.test.ts  Auto-Map persistence contract tests for deterministic key/index builders, status-transition guards, request fingerprinting, and optimistic-concurrency helpers (FS-101 T-01)
+      auto-map-sessions.test.ts Auto-Map session/run handler tests for capability exposure, start deduplication, cursor/limit contracts, decision OCC conflicts, batch applied/skipped accounting, and retry-failed scoping (FS-101 T-03)
       projects.test.ts Projects CRUD command-shape and behavior tests with mocked Dynamo client
       mappings.test.ts Mappings CRUD/GSI/revision+version increment/S3-config tests with mocked Dynamo+S3 clients
       hash.test.ts      Config hash determinism and stable key-order hashing tests
@@ -996,6 +1007,7 @@ tests/
       mapping-editor.page.ts Mapping editor page object (save/history/config interactions)
     specs/
       fixtures-smoke.spec.ts Seed/reset infrastructure smoke test validating localStorage/httpBackend routing
+      auto-map-async.spec.ts Async Auto-Map parity coverage for backend-mode review lifecycle plus localStorage AI-isolation guard
       project-crud.spec.ts Project lifecycle parity spec (create/list/open/rename/delete) across both adapter modes
       mapping-crud.spec.ts Mapping parity spec (create/editor rule persist/reopen/duplicate/delete) across both adapter modes
       schema-flows.spec.ts Schema parity spec (upload/detail metadata+tree/reference) across both adapter modes
@@ -1006,6 +1018,7 @@ tests/
       response.ts     Envelope response helpers (success wrapper + standardized error envelope + CORS headers)
       types.ts        Mock-server local transport/control endpoint type contracts
       routes/
+        auto-map.ts   Async Auto-Map capability/session/run/suggestions routes for deterministic backend-mode E2E progression
         projects.ts   Project CRUD routes
         mappings.ts   Mapping CRUD + duplicate + version routes
         schemas.ts    Schema CRUD + query routes

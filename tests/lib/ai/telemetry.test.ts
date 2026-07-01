@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  emitAutoMapReviewQualityTelemetry,
+  emitAutoMapTimingTelemetry,
   classifySchemaSizeSegment,
   createTelemetrySession,
   emitRetrievalTelemetry,
@@ -103,6 +105,89 @@ describe('ai telemetry session', () => {
         handler: 'test.handler',
         retriever_mode: 'dynamodb',
         schema_size_segment: 'unknown',
+      });
+    }).not.toThrow();
+
+    infoSpy.mockRestore();
+  });
+
+  it('emits auto-map timing telemetry with schema-size segment payload semantics', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    emitAutoMapTimingTelemetry('auto-map.ttfsm', {
+      phase: 'editor_to_first_progress',
+      duration_ms: 1380,
+      schema_size_segment: 'medium',
+      mapping_id: 'm-1',
+      session_id: 'ams-1',
+      run_id: 'run-1',
+      request_id: 'req-1',
+      correlation_id: 'corr-1',
+    });
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[ai-auto-map-telemetry] auto-map.ttfsm',
+      expect.objectContaining({
+        phase: 'editor_to_first_progress',
+        duration_ms: 1380,
+        schema_size_segment: 'medium',
+      }),
+    );
+
+    infoSpy.mockRestore();
+  });
+
+  it('emits auto-map review-quality telemetry with acceptance/edit/dismiss distribution fields', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    emitAutoMapReviewQualityTelemetry('auto-map.review-quality', {
+      mapping_id: 'm-2',
+      session_id: 'ams-2',
+      accepted: 4,
+      edited: 1,
+      dismissed: 2,
+      total_reviewed: 7,
+      required_coverage_delta: 0.25,
+      request_id: 'req-2',
+      correlation_id: 'corr-2',
+    });
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[ai-auto-map-telemetry] auto-map.review-quality',
+      expect.objectContaining({
+        mapping_id: 'm-2',
+        accepted: 4,
+        edited: 1,
+        dismissed: 2,
+        total_reviewed: 7,
+        required_coverage_delta: 0.25,
+      }),
+    );
+
+    infoSpy.mockRestore();
+  });
+
+  it('keeps auto-map telemetry sink failures non-fatal', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('auto-map telemetry sink unavailable');
+    });
+
+    expect(() => {
+      emitAutoMapTimingTelemetry('auto-map.ttfsm', {
+        phase: 'work_unit_to_first_visible',
+        duration_ms: 900,
+        schema_size_segment: 'small',
+      });
+    }).not.toThrow();
+
+    expect(() => {
+      emitAutoMapReviewQualityTelemetry('auto-map.review-quality', {
+        mapping_id: 'm-3',
+        accepted: 1,
+        edited: 0,
+        dismissed: 0,
+        total_reviewed: 1,
+        required_coverage_delta: 0.1,
       });
     }).not.toThrow();
 

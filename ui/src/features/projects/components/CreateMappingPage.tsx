@@ -7,12 +7,8 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { PageHeader } from '@/components/PageHeader';
-import { deriveEligibleTargets, saveAutoMapSuggestions } from '@/features/mappings/lib';
-import type { PersistedSuggestionItem } from '@/features/mappings/types';
-import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
 import { useAdapter } from '@/lib/api';
 import type {
-  AutoMapSectionResult,
   MappingEnrichmentSource,
   SchemaMetadata,
   SchemaRef,
@@ -268,22 +264,15 @@ export function CreateMappingPage() {
         let navigationNotice: string | null = null;
 
         try {
-          const targetSchemaDetail = await adapter.getSchema(targetSchemaRef.schemaId);
-          const parsedTargetSchema = parseSchemaForAutoMapTargets(targetSchemaDetail);
-          const targetSection = deriveEligibleTargets(parsedTargetSchema, null);
-
-          if (!targetSection) {
-            navigationNotice = 'Mapping created, but no eligible target fields were found for Auto-Map review.';
-          } else {
-            const autoMapResult = await adapter.autoMapSection({
-              projectId,
-              mappingId: mapping.mappingId,
-              mode: 'whole',
-              targetSection,
-            });
-
-            persistCreateTimeAutoMapSuggestions(mapping.mappingId, autoMapResult);
+          if (typeof adapter.startAutoMapSession !== 'function') {
+            throw new Error('"autoMapSection" is not enabled in this mode.');
           }
+
+          await adapter.startAutoMapSession({
+            projectId,
+            mappingId: mapping.mappingId,
+            mode: 'whole',
+          });
         } catch (error: unknown) {
           navigationNotice = mapCreateTimeAutoMapFailure(error);
         }
@@ -1046,39 +1035,20 @@ export const __testables = {
   normalizeAliasToCamelCase,
 };
 
-function parseSchemaForAutoMapTargets(schema: { metadata: SchemaMetadata; content: Readonly<Record<string, unknown>> | string }) {
-  if (typeof schema.content === 'string') {
-    if (schema.metadata.format === 'xsd') {
-      return parseXsd(schema.content);
-    }
-
-    if (schema.metadata.origin === 'inferred') {
-      return parseInferredSchema(schema.content, 'xml');
-    }
-
-    return parseJsonSchema(schema.content);
-  }
-
-  return parseJsonSchema(schema.content);
-}
-
 function deriveFieldCountFromSchemaDetail(schema: { metadata: SchemaMetadata; content: Readonly<Record<string, unknown>> | string }): number {
-  try {
-    if (schema.metadata.origin === 'inferred') {
-      const inferredFormat = schema.metadata.dataFormat === 'xml' ? 'xml' : 'json';
-      const rawContent = typeof schema.content === 'string' ? schema.content : JSON.stringify(schema.content);
-      return parseInferredSchema(rawContent, inferredFormat).nodes.length;
-    }
-
-    if (schema.metadata.format === 'xsd') {
-      const rawXsd = typeof schema.content === 'string' ? schema.content : JSON.stringify(schema.content);
-      return parseXsd(rawXsd).nodes.length;
-    }
-
-    return parseJsonSchema(schema.content).nodes.length;
-  } catch {
-    return 0;
+  if (schema.metadata.fieldCount > 0) {
+    return schema.metadata.fieldCount;
   }
+
+  if (typeof schema.content !== 'string') {
+    const root = schema.content as { properties?: unknown };
+    const properties = root.properties;
+    if (typeof properties === 'object' && properties !== null && !Array.isArray(properties)) {
+      return Object.keys(properties as Record<string, unknown>).length;
+    }
+  }
+
+  return 0;
 }
 
 function getSchemaFieldCountForDisplay(
@@ -1095,23 +1065,6 @@ function getSchemaFieldCountForDisplay(
   }
 
   return schema.fieldCount;
-}
-
-function persistCreateTimeAutoMapSuggestions(mappingId: string, result: AutoMapSectionResult): void {
-  const persistedItems: PersistedSuggestionItem[] = result.suggestions.map((suggestion) => ({
-    targetPath: suggestion.target,
-    suggestedExpression: suggestion.expression,
-    explanation: suggestion.explanation,
-    confidence: suggestion.confidence,
-    validation: suggestion.validation,
-    status: 'suggested',
-    isNew: true,
-    existingExpressionAtGeneration: null,
-  }));
-
-  saveAutoMapSuggestions(mappingId, '', persistedItems, {
-    generatedAt: new Date().toISOString(),
-  });
 }
 
 function mapCreateTimeAutoMapFailure(error: unknown): string {

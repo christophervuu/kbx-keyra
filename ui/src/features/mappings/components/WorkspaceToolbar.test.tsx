@@ -43,6 +43,8 @@ function makeSummary(overrides: Partial<AutoMapWorkspaceSummary> = {}): AutoMapW
 const DEFAULT_CALLBACKS = {
   onToggleFilter: vi.fn(),
   onClearFilters: vi.fn(),
+  onTargetSearchChange: vi.fn(),
+  onClearTargetSearch: vi.fn(),
   onRefreshStale: vi.fn(),
 };
 
@@ -56,6 +58,8 @@ function renderToolbar(
     <WorkspaceToolbar
       summary={summary}
       activeFilters={activeFilters}
+      totalFilteredCount={summary.total}
+      targetSearchQuery=""
       isRefreshing={isRefreshing}
       {...callbacks}
     />,
@@ -91,6 +95,12 @@ describe('WorkspaceToolbar — rendering', () => {
   it('renders toolbar action group', () => {
     renderToolbar();
     expect(screen.getByRole('group', { name: 'Bulk actions' })).toBeInTheDocument();
+  });
+
+  it('renders target search input and filtered scope summary', () => {
+    renderToolbar(makeSummary({ total: 7 }), new Set(), false);
+    expect(screen.getByTestId('workspace-target-search')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-filtered-scope')).toHaveTextContent('Batch scope: 7 filtered rows');
   });
 });
 
@@ -223,6 +233,50 @@ describe('WorkspaceToolbar — clear filters', () => {
     );
     await userEvent.click(screen.getByTestId('filter-clear'));
     expect(onClearFilters).toHaveBeenCalledOnce();
+  });
+});
+
+describe('WorkspaceToolbar — target search', () => {
+  it('calls onTargetSearchChange when typing search text', async () => {
+    const onTargetSearchChange = vi.fn();
+    render(
+      <WorkspaceToolbar
+        summary={makeSummary({ total: 2 })}
+        activeFilters={new Set()}
+        totalFilteredCount={2}
+        targetSearchQuery=""
+        isRefreshing={false}
+        onToggleFilter={vi.fn()}
+        onClearFilters={vi.fn()}
+        onTargetSearchChange={onTargetSearchChange}
+        onClearTargetSearch={vi.fn()}
+        onRefreshStale={vi.fn()}
+      />,
+    );
+
+    await userEvent.type(screen.getByTestId('workspace-target-search'), 'Order.Id');
+    expect(onTargetSearchChange).toHaveBeenCalled();
+  });
+
+  it('renders clear search button and calls onClearTargetSearch', async () => {
+    const onClearTargetSearch = vi.fn();
+    render(
+      <WorkspaceToolbar
+        summary={makeSummary({ total: 1 })}
+        activeFilters={new Set()}
+        totalFilteredCount={1}
+        targetSearchQuery="Order"
+        isRefreshing={false}
+        onToggleFilter={vi.fn()}
+        onClearFilters={vi.fn()}
+        onTargetSearchChange={vi.fn()}
+        onClearTargetSearch={onClearTargetSearch}
+        onRefreshStale={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId('workspace-target-search-clear'));
+    expect(onClearTargetSearch).toHaveBeenCalledOnce();
   });
 });
 

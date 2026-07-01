@@ -89,4 +89,8 @@ describe('lambda shared errors', () => {
     expect(typeof error.requestId).toBe('string');
     expect(error.requestId).not.toBe('');
   });
+
+  it('includes FEATURE_NOT_ENABLED in shared error code catalog', () => {
+    expect(ERROR_CODES.FEATURE_NOT_ENABLED).toBe('FEATURE_NOT_ENABLED');
+  });
 });

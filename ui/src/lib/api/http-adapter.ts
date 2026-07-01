@@ -3,6 +3,10 @@ import { httpRequest } from './http-client';
 import { importLocalMappingsToBackend } from './local-mapping-import';
 import { LocalStorageAdapter } from './local-storage-adapter';
 import type {
+  AutoMapCapabilities,
+  AutoMapRunSummary,
+  AutoMapSessionLookupResult,
+  AutoMapSuggestionsPage,
   CurrentDeployment,
   CurrentDeployments,
   DeploymentMutationEnvironment,
@@ -93,6 +97,86 @@ function computeStatus(
 
   const latestVersion = mapping.latestVersion ?? deployment.sourceNumber;
   return latestVersion > deployment.sourceNumber ? 'stale' : 'current';
+}
+
+function normalizeAutoMapExecutionMode(value: unknown): 'disabled' | 'legacy' | 'async' {
+  if (value === 'disabled' || value === 'legacy' || value === 'async') {
+    return value;
+  }
+
+  return 'legacy';
+}
+
+function normalizeSuggestionPageLimit(input: number | undefined): number {
+  if (typeof input !== 'number' || !Number.isFinite(input)) {
+    return 100;
+  }
+
+  const parsed = Math.trunc(input);
+  if (parsed < 20) {
+    return 20;
+  }
+
+  if (parsed > 250) {
+    return 250;
+  }
+
+  return parsed;
+}
+
+function isQueuedRunStatus(status: unknown): boolean {
+  return (
+    status === 'queued'
+    || status === 'preparing'
+    || status === 'retrieving'
+    || status === 'generating'
+    || status === 'validating'
+  );
+}
+
+function normalizeRunSummary(
+  sessionId: string,
+  payload: {
+    readonly sessionId?: string;
+    readonly runId: string;
+    readonly status: AutoMapRunSummary['status'];
+    readonly scope?: AutoMapRunSummary['scope'];
+    readonly deduped?: boolean;
+    readonly progress?: AutoMapRunSummary['progress'];
+    readonly counts?: AutoMapRunSummary['counts'];
+    readonly failure?: AutoMapRunSummary['failure'];
+  },
+): AutoMapRunSummary {
+  return {
+    sessionId: payload.sessionId ?? sessionId,
+    runId: payload.runId,
+    status: payload.status,
+    scope: payload.scope ?? {
+      mode: 'whole',
+    },
+    ...(typeof payload.deduped === 'boolean' ? { deduped: payload.deduped } : {}),
+    ...(payload.progress ? { progress: payload.progress } : {}),
+    ...(payload.counts ? { counts: payload.counts } : {}),
+    ...(payload.failure ? { failure: payload.failure } : {}),
+  };
+}
+
+function toAutoMapScope(input: AutoMapSectionInput): AutoMapRunSummary['scope'] {
+  const normalizedTargetPaths = Array.isArray(input.visibleTargetPaths)
+    ? input.visibleTargetPaths
+      .map((path) => path.trim())
+      .filter((path) => path.length > 0)
+    : [];
+
+  const mode = input.mode ?? (normalizedTargetPaths.length > 0 ? 'visible' : 'whole');
+
+  return {
+    mode,
+    ...(typeof input.sectionPath === 'string' && input.sectionPath.trim().length > 0
+      ? { sectionPath: input.sectionPath.trim() }
+      : {}),
+    ...(normalizedTargetPaths.length > 0 ? { targetPaths: [...normalizedTargetPaths] } : {}),
+  };
 }
 
 /**
@@ -625,11 +709,229 @@ export class HttpAdapter extends LocalStorageAdapter {
   }
 
   override async autoMapSection(input: AutoMapSectionInput): Promise<AutoMapSectionResult> {
-    return httpRequest<AutoMapSectionResult>({
+    const capabilities = await this.getAutoMapCapabilities();
+    const executionMode = capabilities.autoMap.executionMode;
+
+    if (executionMode === 'disabled') {
+      throw this.featureNotEnabled('autoMapSection');
+    }
+
+    if (executionMode === 'legacy') {
+      return httpRequest<AutoMapSectionResult>({
+        baseUrl: this.apiUrl,
+        path: '/ai/auto-map',
+        method: 'POST',
+        body: {
+          ...input,
+          ...(input.visibleTargetPaths !== undefined
+            ? { visibleTargetPaths: [...input.visibleTargetPaths] }
+            : {}),
+        },
+      });
+    }
+
+    const sessionRun = await this.startAutoMapSession({
+      projectId: input.projectId,
+      mappingId: input.mappingId,
+      mode: input.mode,
+      sectionPath: input.sectionPath,
+      targetSection: input.targetSection,
+      sourceContext: input.sourceContext,
+      sourceSchemaId: input.sourceSchemaId,
+      businessContext: input.businessContext,
+      visibleTargetPaths: input.visibleTargetPaths,
+    });
+
+    if (isQueuedRunStatus(sessionRun.status)) {
+      return {
+        suggestions: [],
+        session: {
+          sessionId: sessionRun.sessionId,
+          runId: sessionRun.runId,
+          runStatus: sessionRun.status,
+          executionMode,
+          queued: true,
+        },
+      };
+    }
+
+    const page = await this.listAutoMapSuggestions(sessionRun.sessionId, {
+      limit: 100,
+    });
+
+    return {
+      suggestions: [...page.items],
+      session: {
+        sessionId: sessionRun.sessionId,
+        runId: sessionRun.runId,
+        runStatus: sessionRun.status,
+        executionMode,
+        queued: false,
+      },
+    };
+  }
+
+  async getAutoMapCapabilities(): Promise<AutoMapCapabilities> {
+    try {
+      const capabilities = await httpRequest<{
+        readonly capabilities?: {
+          readonly autoMap?: {
+            readonly enabled?: boolean;
+            readonly executionMode?: unknown;
+          };
+        };
+      }>({
+        baseUrl: this.apiUrl,
+        path: '/ai/auto-map/capabilities',
+        method: 'GET',
+      });
+
+      return {
+        autoMap: {
+          enabled: capabilities.capabilities?.autoMap?.enabled !== false,
+          executionMode: normalizeAutoMapExecutionMode(capabilities.capabilities?.autoMap?.executionMode),
+        },
+      };
+    } catch (error) {
+      const statusCode =
+        typeof error === 'object' && error !== null && 'statusCode' in error
+          ? (error as { statusCode?: unknown }).statusCode
+          : undefined;
+
+      if (statusCode === 404) {
+        return {
+          autoMap: {
+            enabled: true,
+            executionMode: 'legacy',
+          },
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  async getAutoMapSession(mappingId: string): Promise<AutoMapSessionLookupResult | null> {
+    return httpRequest<AutoMapSessionLookupResult | null>({
       baseUrl: this.apiUrl,
-      path: '/ai/auto-map',
+      path: `/mappings/${encodeURIComponent(mappingId)}/auto-map-session`,
+      method: 'GET',
+    });
+  }
+
+  async startAutoMapSession(input: AutoMapInput): Promise<AutoMapRunSummary> {
+    const openSession = await this.getAutoMapSession(input.mappingId);
+    const scope = toAutoMapScope({
+      ...input,
+      visibleTargetPaths: input.visibleTargetPaths,
+    });
+
+    if (openSession) {
+      const run = await this.startAutoMapRun(openSession.sessionId, {
+        ...input,
+        mode: input.mode,
+        sectionPath: input.sectionPath,
+        visibleTargetPaths: input.visibleTargetPaths,
+      });
+      return {
+        ...run,
+        sessionId: openSession.sessionId,
+      };
+    }
+
+    const payload = await httpRequest<{
+      readonly sessionId: string;
+      readonly runId: string;
+      readonly status: AutoMapRunSummary['status'];
+      readonly deduped?: boolean;
+    }>({
+      baseUrl: this.apiUrl,
+      path: '/ai/auto-map/sessions',
       method: 'POST',
-      body: input,
+      body: {
+        projectId: input.projectId,
+        mappingId: input.mappingId,
+        baseMappingRevision: 0,
+        scope,
+        idempotencyKey: `${input.mappingId}:${scope.mode}:${scope.sectionPath ?? ''}`,
+      },
+    });
+
+    return normalizeRunSummary(payload.sessionId, {
+      ...payload,
+      scope,
+    });
+  }
+
+  async startAutoMapRun(sessionId: string, input: AutoMapSectionInput): Promise<AutoMapRunSummary> {
+    const scope = toAutoMapScope(input);
+    const payload = await httpRequest<{
+      readonly sessionId?: string;
+      readonly runId: string;
+      readonly status: AutoMapRunSummary['status'];
+      readonly scope?: AutoMapRunSummary['scope'];
+      readonly deduped?: boolean;
+      readonly progress?: AutoMapRunSummary['progress'];
+      readonly counts?: AutoMapRunSummary['counts'];
+      readonly failure?: AutoMapRunSummary['failure'];
+    }>({
+      baseUrl: this.apiUrl,
+      path: `/ai/auto-map/sessions/${encodeURIComponent(sessionId)}/runs`,
+      method: 'POST',
+      body: {
+        scope,
+        idempotencyKey: `${input.mappingId}:${scope.mode}:${scope.sectionPath ?? ''}`,
+      },
+    });
+
+    return normalizeRunSummary(sessionId, {
+      ...payload,
+      scope: payload.scope ?? scope,
+    });
+  }
+
+  async getAutoMapRunStatus(sessionId: string, runId: string): Promise<AutoMapRunSummary> {
+    const payload = await httpRequest<{
+      readonly sessionId?: string;
+      readonly runId: string;
+      readonly status: AutoMapRunSummary['status'];
+      readonly scope?: AutoMapRunSummary['scope'];
+      readonly deduped?: boolean;
+      readonly progress?: AutoMapRunSummary['progress'];
+      readonly counts?: AutoMapRunSummary['counts'];
+      readonly failure?: AutoMapRunSummary['failure'];
+    }>({
+      baseUrl: this.apiUrl,
+      path: `/ai/auto-map/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}`,
+      method: 'GET',
+    });
+
+    return normalizeRunSummary(sessionId, payload);
+  }
+
+  async listAutoMapSuggestions(
+    sessionId: string,
+    options?: {
+      readonly limit?: number;
+      readonly cursor?: string;
+      readonly status?: readonly string[];
+    },
+  ): Promise<AutoMapSuggestionsPage> {
+    const search = new URLSearchParams();
+    search.set('limit', String(normalizeSuggestionPageLimit(options?.limit)));
+
+    if (typeof options?.cursor === 'string' && options.cursor.trim().length > 0) {
+      search.set('cursor', options.cursor);
+    }
+
+    if (Array.isArray(options?.status) && options.status.length > 0) {
+      search.set('status', options.status.join(','));
+    }
+
+    return httpRequest<AutoMapSuggestionsPage>({
+      baseUrl: this.apiUrl,
+      path: `/ai/auto-map/sessions/${encodeURIComponent(sessionId)}/suggestions?${search.toString()}`,
+      method: 'GET',
     });
   }
 

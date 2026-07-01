@@ -2126,6 +2126,10 @@ export default function MappingEditor() {
     }
     return tryParseEnrichmentSourceData(incomingExternalSourcesRaw) ?? {};
   }, [location.state]);
+  const requiredEnrichmentAliasesForPreview = useMemo<readonly string[]>(() => {
+    const defs = editor.config?.enrichmentSources ?? [];
+    return defs.filter((entry) => entry.required).map((entry) => entry.alias);
+  }, [editor.config]);
 
   const sourceSchemaMetadata = editor.sourceSchemaDetail?.metadata ?? null;
   const sourceSchemaId = sourceSchemaMetadata?.schemaId ?? null;
@@ -2433,6 +2437,19 @@ export default function MappingEditor() {
     return buildRenderableOutput(inlinePreviewResult.output).pathIndex;
   }, [inlinePreviewResult]);
 
+  // ---------------------------------------------------------------------------
+  // Target View selection state
+  // ---------------------------------------------------------------------------
+  const [selectedTargetPath, setSelectedTargetPath] = useState<string | null>(null);
+
+  const resolveSelectedTargetPath = useCallback(
+    (path: string) => {
+      if (!editor.parsedTargetSchema) return path;
+      return resolveBuilderTargetPath(editor.parsedTargetSchema.nodes, path);
+    },
+    [editor.parsedTargetSchema],
+  );
+
   const [outputResolverNotice, setOutputResolverNotice] = useState<string | null>(null);
   const [outputInteractionAnnouncement, setOutputInteractionAnnouncement] = useState<string | null>(null);
 
@@ -2716,9 +2733,11 @@ export default function MappingEditor() {
     exitWorkspace: () => setView('target'),
     parsedSourceSchema: editor.parsedSourceSchema,
     parsedTargetSchema: editor.parsedTargetSchema,
+    currentRevision: editor.currentRevision,
   });
 
   const hydratedPendingSessionForMappingIdRef = useRef<string | null>(null);
+  const consumedCreateTimeAutoMapForMappingIdRef = useRef<string | null>(null);
 
   /** Enter the Auto-Map workspace for a given section path. */
   const enterAutoMapWorkspace = useCallback((sectionPath: string) => {
@@ -2768,6 +2787,42 @@ export default function MappingEditor() {
     autoMapWorkspace.triggerAutoMap(initialPendingSectionPath);
   }, [mappingId, initialPendingSectionPath, autoMapWorkspace]);
 
+  // Create-time async auto-map handoff: when create flow acknowledges queued run,
+  // enter workspace and trigger root review fetch once after editor load.
+  useEffect(() => {
+    const navState = location.state as Record<string, unknown> | null;
+    if (!navState || navState.autoMapCreate !== true) {
+      return;
+    }
+
+    if (editor.loadState !== 'loaded') {
+      return;
+    }
+
+    if (consumedCreateTimeAutoMapForMappingIdRef.current === mappingId) {
+      return;
+    }
+
+    consumedCreateTimeAutoMapForMappingIdRef.current = mappingId;
+    enterAutoMapWorkspace('');
+    autoMapWorkspace.triggerAutoMap('');
+
+    const nextStateEntries = Object.entries(navState).filter(([key]) => key !== 'autoMapCreate');
+    const nextState = nextStateEntries.length > 0
+      ? Object.fromEntries(nextStateEntries)
+      : {};
+
+    navigate(location.pathname, { replace: true, state: nextState });
+  }, [
+    autoMapWorkspace,
+    editor.loadState,
+    enterAutoMapWorkspace,
+    location.pathname,
+    location.state,
+    mappingId,
+    navigate,
+  ]);
+
   // ---------------------------------------------------------------------------
   // Restore handler
   // ---------------------------------------------------------------------------
@@ -2786,26 +2841,15 @@ export default function MappingEditor() {
   /** Whether the Refresh All confirmation banner is showing */
   const [showRefreshAllConfirm, setShowRefreshAllConfirm] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // Target View selection state
-  // ---------------------------------------------------------------------------
-  const [selectedTargetPath, setSelectedTargetPath] = useState<string | null>(null);
-
-  const resolveSelectedTargetPath = useCallback(
-    (path: string) => {
-      if (!editor.parsedTargetSchema) return path;
-      return resolveBuilderTargetPath(editor.parsedTargetSchema.nodes, path);
-    },
-    [editor.parsedTargetSchema],
-  );
-
   // Consume jump-to-rule route state from TestLabPage (FS-036 T-07)
   useEffect(() => {
     const navState = location.state as Record<string, unknown> | null;
     const incomingPath = navState?.selectedTargetPath;
 
     if (incomingPath && typeof incomingPath === 'string') {
-      setSelectedTargetPath(resolveSelectedTargetPath(incomingPath));
+      queueMicrotask(() => {
+        setSelectedTargetPath(resolveSelectedTargetPath(incomingPath));
+      });
       // Clear the state to prevent stale re-application on refresh
       navigate(location.pathname, { replace: true, state: {} });
     }
@@ -2833,13 +2877,6 @@ export default function MappingEditor() {
       ]),
     );
   }, [editor.parsedSourceSchema?.nodes]);
-
-  useEffect(() => {
-    smartDraftByTargetRef.current = new Map();
-    setSmartDraftByTargetState({});
-    setSmartActionMetaByTarget({});
-    setValueMapProjectSelectionByTarget({});
-  }, [mappingId]);
 
   const setSmartDraftForTarget = useCallback((
     targetPath: string,
@@ -2975,7 +3012,7 @@ export default function MappingEditor() {
         setActivePanelView('fields');
       }
     },
-    [view, selectedTargetPath, selectedRuleIndex, editor.rules, resolveSelectedTargetPath],
+    [view, selectedTargetPath, selectedRuleIndex, editor.rules, resolveSelectedTargetPath, setSelectedTargetPath],
   );
 
   // ---------------------------------------------------------------------------
@@ -3000,7 +3037,7 @@ export default function MappingEditor() {
       setIsSourcePanelHidden(false);
       setSelectedTargetPath(resolveSelectedTargetPath(path));
     },
-    [selectedTargetPath, editor.actions, resolveSelectedTargetPath],
+    [selectedTargetPath, editor.actions, resolveSelectedTargetPath, setSelectedTargetPath],
   );
 
   const effectiveRules = useMemo(
@@ -3191,12 +3228,22 @@ export default function MappingEditor() {
     return { draft: hydrated.draft, guided: true as const };
   }, [hydrateSmartDraftForTarget, mappingId, setSmartDraftForTarget, sourceValueTypeByPath]);
 
-  const selectedNodeSmartHydration = (() => {
+  const selectedNodeSmartHydration = useMemo(() => {
     if (!selectedNode) return null;
-    const resolved = resolveSmartDraftForTarget(selectedNode.path, { syncState: false });
-    if (!resolved.guided || resolved.draft === null) return null;
-    return { kind: 'guided' as const, draft: resolved.draft };
-  })();
+
+    const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedNode.path);
+    const cachedDraft = smartDraftByTargetState[targetSessionKey];
+    if (cachedDraft) {
+      return {
+        kind: 'guided' as const,
+        draft: hydrateUnknownPrimaryInputTypes(cachedDraft, sourceValueTypeByPath),
+      };
+    }
+
+    const hydrated = hydrateSmartDraftForTarget(selectedNode.path);
+    if (hydrated.kind === 'advanced') return null;
+    return { kind: 'guided' as const, draft: hydrated.draft };
+  }, [hydrateSmartDraftForTarget, mappingId, selectedNode, smartDraftByTargetState, sourceValueTypeByPath]);
 
   const syncRuleValueMapMetadataForTarget = useCallback((targetPath: string, draft: SmartBuilderDraft) => {
     const composition = draft.composition;
@@ -3801,7 +3848,80 @@ export default function MappingEditor() {
     />
   ) : undefined;
 
-  // Right column: Target Worklist (target view) or RuleList (rules view)
+  const autoMapWorkspaceContent = (
+    <AutoMapWorkspace
+      status={autoMapWorkspace.status}
+      error={autoMapWorkspace.error}
+      items={autoMapWorkspace.items}
+      filteredItems={autoMapWorkspace.filteredItems}
+      summary={autoMapWorkspace.summary}
+      sectionPath={autoMapSectionPath}
+      onRetry={() => {
+        if (autoMapSectionPath !== null) {
+          autoMapWorkspace.triggerAutoMap(autoMapSectionPath);
+        }
+      }}
+      onRefreshAll={autoMapWorkspace.refreshAll}
+      onRefreshUnmapped={autoMapWorkspace.refreshUnmapped}
+      onAcceptAllValid={autoMapWorkspace.bulkAcceptAllValid}
+      batchAcceptResult={autoMapWorkspace.lastBatchAcceptResult}
+      onClearBatchAcceptResult={autoMapWorkspace.clearBatchAcceptResult}
+      onExitWorkspace={exitAutoMapWorkspace}
+      onAccept={autoMapWorkspace.acceptSuggestion}
+      onEdit={autoMapWorkspace.editSuggestion}
+      onDismiss={autoMapWorkspace.dismissSuggestion}
+      onUndoDismiss={autoMapWorkspace.undoDismiss}
+      onUndoAccept={autoMapWorkspace.undoAccept}
+      previousSuggestionsAvailable={autoMapWorkspace.previousSuggestionsAvailable}
+      onRestorePrevious={autoMapWorkspace.restorePreviousSuggestions}
+      generatedAt={autoMapWorkspace.generatedAt}
+      runStatus={autoMapWorkspace.runStatus}
+      runProgress={autoMapWorkspace.runProgress}
+      runCounts={autoMapWorkspace.runCounts}
+      runFailure={autoMapWorkspace.runFailure}
+      isPolling={autoMapWorkspace.isPolling}
+      pollingWarning={autoMapWorkspace.pollingWarning}
+      onRetryFailed={autoMapWorkspace.refreshAll}
+      className="h-full"
+      toolbarSlot={() => (
+        <WorkspaceToolbar
+          activeFilters={autoMapWorkspace.activeFilters}
+          onToggleFilter={autoMapWorkspace.toggleFilter}
+          onClearFilters={autoMapWorkspace.clearFilters}
+          summary={autoMapWorkspace.summary}
+          totalFilteredCount={autoMapWorkspace.filteredItems.length}
+          items={autoMapWorkspace.items}
+          targetSearchQuery={autoMapWorkspace.targetSearchQuery}
+          onTargetSearchChange={autoMapWorkspace.setTargetSearchQuery}
+          onClearTargetSearch={autoMapWorkspace.clearTargetSearch}
+          onRefreshStale={autoMapWorkspace.refreshStale}
+          isRefreshing={autoMapWorkspace.status === 'loading'}
+        />
+      )}
+      confirmationSlot={
+        showRefreshAllConfirm ? (
+          <RefreshConfirmBanner
+            refreshCount={autoMapWorkspace.items.length}
+            preservedCount={
+              autoMapWorkspace.items.filter(
+                (i) => i.status === 'accepted' || i.status === 'edited',
+              ).length
+            }
+            onConfirm={() => {
+              setShowRefreshAllConfirm(false);
+              autoMapWorkspace.refreshAll();
+            }}
+            onCancel={() => setShowRefreshAllConfirm(false)}
+          />
+        ) : null
+      }
+      noSourceDataSlot={<WorkspaceNoSourceDataSlot />}
+      previewExternalSources={routeEnrichmentSourceData}
+      requiredEnrichmentAliases={requiredEnrichmentAliasesForPreview}
+    />
+  );
+
+  // Right column: RuleList (rules view), Auto-Map review workspace (automap view), or Target Worklist (target view)
   const targetWorklistContent =
     view === 'rules' ? (
       <div className="flex h-full min-h-0 flex-col" data-testid="rules-view-panel">
@@ -3846,6 +3966,8 @@ export default function MappingEditor() {
           />
         </div>
       </div>
+    ) : view === 'automap' ? (
+      autoMapWorkspaceContent
     ) : (
       <TargetWorklist
         nodes={editor.parsedTargetSchema?.nodes ?? []}
@@ -3924,65 +4046,6 @@ export default function MappingEditor() {
         onPathKeyDown={handleOutputPathKeyDown}
       />
     </div>
-  );
-
-  const autoMapWorkspaceContent = (
-    <AutoMapWorkspace
-      status={autoMapWorkspace.status}
-      error={autoMapWorkspace.error}
-      items={autoMapWorkspace.items}
-      filteredItems={autoMapWorkspace.filteredItems}
-      summary={autoMapWorkspace.summary}
-      sectionPath={autoMapSectionPath}
-      onRetry={() => {
-        if (autoMapSectionPath !== null) {
-          autoMapWorkspace.triggerAutoMap(autoMapSectionPath);
-        }
-      }}
-      onRefreshAll={autoMapWorkspace.refreshAll}
-      onRefreshUnmapped={autoMapWorkspace.refreshUnmapped}
-      onAcceptAllValid={autoMapWorkspace.bulkAcceptAllValid}
-      batchAcceptResult={autoMapWorkspace.lastBatchAcceptResult}
-      onClearBatchAcceptResult={autoMapWorkspace.clearBatchAcceptResult}
-      onExitWorkspace={exitAutoMapWorkspace}
-      onAccept={autoMapWorkspace.acceptSuggestion}
-      onEdit={autoMapWorkspace.editSuggestion}
-      onDismiss={autoMapWorkspace.dismissSuggestion}
-      onUndoDismiss={autoMapWorkspace.undoDismiss}
-      previousSuggestionsAvailable={autoMapWorkspace.previousSuggestionsAvailable}
-      onRestorePrevious={autoMapWorkspace.restorePreviousSuggestions}
-      generatedAt={autoMapWorkspace.generatedAt}
-      className="h-full"
-      toolbarSlot={() => (
-        <WorkspaceToolbar
-          activeFilters={autoMapWorkspace.activeFilters}
-          onToggleFilter={autoMapWorkspace.toggleFilter}
-          onClearFilters={autoMapWorkspace.clearFilters}
-          summary={autoMapWorkspace.summary}
-          items={autoMapWorkspace.items}
-          onRefreshStale={autoMapWorkspace.refreshStale}
-          isRefreshing={autoMapWorkspace.status === 'loading'}
-        />
-      )}
-      confirmationSlot={
-        showRefreshAllConfirm ? (
-          <RefreshConfirmBanner
-            refreshCount={autoMapWorkspace.items.length}
-            preservedCount={
-              autoMapWorkspace.items.filter(
-                (i) => i.status === 'accepted' || i.status === 'edited',
-              ).length
-            }
-            onConfirm={() => {
-              setShowRefreshAllConfirm(false);
-              autoMapWorkspace.refreshAll();
-            }}
-            onCancel={() => setShowRefreshAllConfirm(false)}
-          />
-        ) : null
-      }
-      noSourceDataSlot={<WorkspaceNoSourceDataSlot />}
-    />
   );
 
   // Center panel: node-type-specific builder (target view) or expression builder (rules view)
@@ -4495,10 +4558,12 @@ export default function MappingEditor() {
       />
     );
 
-  const builderContent = view === 'automap' ? autoMapWorkspaceContent : builderContentInner;
+  const builderContent = builderContentInner;
 
   const panelMode: 'overview' | 'source-browse' | 'row-editing' =
-    view === 'automap' || view === 'rules' || selectedNode !== null
+    view === 'automap'
+      ? 'overview'
+      : view === 'rules' || selectedNode !== null
       ? 'row-editing'
       : isSourceBrowseOpen
         ? 'source-browse'

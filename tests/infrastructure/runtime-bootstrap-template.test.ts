@@ -94,6 +94,50 @@ describe('runtime bootstrap template (FS-100 T-05)', () => {
     expect(template).toContain('Path: /mappings/{mappingId}/revisions/{revision}');
   });
 
+  it('defines Auto-Map infrastructure resources and execution-mode env wiring (FS-101 T-02)', () => {
+    expect(template).toContain('AutoMapExecutionMode:');
+    expect(template).toContain('- disabled');
+    expect(template).toContain('- legacy');
+    expect(template).toContain('- async');
+
+    expect(template).toContain('EnableAutoMapTablePitr:');
+    expect(template).toContain('AutoMapTable:');
+    expect(template).toContain('TimeToLiveSpecification:');
+    expect(template).toContain('AttributeName: expiresAt');
+    expect(template).toContain('PointInTimeRecoverySpecification:');
+    expect(template).toContain('IndexName: GSI1');
+    expect(template).toContain('IndexName: GSI2');
+    expect(template).toContain('AUTO_MAP_TABLE: !Ref AutoMapTable');
+    expect(template).toContain('AUTO_MAP_EXECUTION_MODE: !Ref AutoMapExecutionMode');
+  });
+
+  it('keeps Auto-Map Step Functions start permissions scoped to concrete resources', () => {
+    const autoMapBlock = template.match(/AutoMapFunction:[\s\S]*?CreateSchemaFunction:/)?.[0] ?? '';
+    expect(autoMapBlock).toContain('Action:');
+    expect(autoMapBlock).toContain('- states:StartExecution');
+    expect(autoMapBlock).toContain('- !Ref AutoMapStateMachine');
+    expect(autoMapBlock).not.toContain("Resource: '*'");
+
+    const stateMachineBlock = template.match(/AutoMapStateMachine:[\s\S]*?RuntimeBootstrapApi:/)?.[0] ?? '';
+    expect(stateMachineBlock).toContain('Type: AWS::Serverless::StateMachine');
+    expect(stateMachineBlock).toContain('DefinitionUri: src/lambda/ai/step-functions/auto-map-orchestration.asl.json');
+    expect(stateMachineBlock).toContain('DefinitionSubstitutions:');
+    expect(stateMachineBlock).toContain('AutoMapFunctionArn: !GetAtt AutoMapFunction.Arn');
+  });
+
+  it('wires FS-101 T-03 Auto-Map session/run API routes to dedicated handler', () => {
+    expect(template).toContain('AutoMapSessionsFunction:');
+    expect(template).toContain('Handler: src/lambda/ai/auto-map-sessions.handler');
+    expect(template).toContain('Path: /ai/auto-map/capabilities');
+    expect(template).toContain('Path: /ai/auto-map/sessions');
+    expect(template).toContain('Path: /ai/auto-map/sessions/{sessionId}/runs');
+    expect(template).toContain('Path: /ai/auto-map/sessions/{sessionId}/runs/{runId}');
+    expect(template).toContain('Path: /ai/auto-map/sessions/{sessionId}/suggestions');
+    expect(template).toContain('Path: /ai/auto-map/sessions/{sessionId}/suggestions/{suggestionId}');
+    expect(template).toContain('Path: /ai/auto-map/sessions/{sessionId}/suggestions/actions');
+    expect(template).toContain('Path: /mappings/{mappingId}/auto-map-session');
+  });
+
   it('includes deploy-context route used by deployment page bootstrap', () => {
     expect(template).toContain('Path: /mappings/{mappingId}/deploy-context');
     expect(template).toContain('Handler: src/lambda/deployment/get-deployment-context.handler');

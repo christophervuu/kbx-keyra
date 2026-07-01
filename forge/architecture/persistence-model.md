@@ -18,6 +18,7 @@ Purpose:
 
 Scope:
 - Projects, Mappings, SchemaMetadata, SchemaNodes, MappingRevisions, MappingVersions, ValueTables, ValueTableRevisions tables
+- AutoMap table (session/run/work-unit/suggestion persistence)
 - S3 key patterns for schema content, mapping configs, and value-table revision row payloads
 - Shared data-access module structure
 
@@ -211,6 +212,50 @@ FS-091 retrieval control decisions:
 | `createdBy` | — | String | Optional author identifier |
 
 ---
+
+### AutoMap (FS-101)
+
+FS-101 introduces a dedicated DynamoDB table for durable Auto-Map async session/run persistence.
+
+| Attribute | Key | Type | Description |
+|-----------|-----|------|-------------|
+| `PK` | PK | String | `SESSION#{sessionId}` |
+| `SK` | SK | String | Entity discriminator (`META`, `RUN#...`, `WORK_UNIT#...`, `SUGGESTION#...`) |
+| `entityType` | — | String | `AutoMapSession | AutoMapRun | AutoMapWorkUnit | AutoMapSuggestion` |
+| `expiresAt` | TTL | Number | Epoch-seconds TTL for lifecycle expiry |
+
+Session (`SK=META`) sparse GSI attributes:
+
+| Attribute | Index | Type | Description |
+|-----------|-------|------|-------------|
+| `GSI1PK` | `mapping-history-index` PK | String | `MAPPING#{mappingId}` |
+| `GSI1SK` | `mapping-history-index` SK | String | `CREATED#{createdAt}#{sessionId}` |
+| `GSI2PK` | `mapping-open-index` PK | String | `MAPPING#{mappingId}` |
+| `GSI2SK` | `mapping-open-index` SK | String | `OPEN#{updatedAt}#{sessionId}` |
+
+Entity key shapes:
+
+- Session metadata:
+  - `PK=SESSION#{sessionId}`
+  - `SK=META`
+- Run:
+  - `PK=SESSION#{sessionId}`
+  - `SK=RUN#{createdAt}#{runId}`
+- Work unit:
+  - `PK=SESSION#{sessionId}`
+  - `SK=WORK_UNIT#{runId}#{workUnitOrder}#{workUnitId}`
+- Suggestion:
+  - `PK=SESSION#{sessionId}`
+  - `SK=SUGGESTION#{sectionOrder}#{targetOrder}#{suggestionId}`
+
+Canonical persistence rules:
+
+- One-open-session-per-mapping-revision policy; newer-revision starts supersede prior open sessions.
+- Session and run are separate entities: review state persists at session level; execution attempts persist as runs.
+- Suggestion decisions persist versioned optimistic-concurrency fields (`version`, expected-version check contract).
+- Accepted-but-unsaved metadata persists on suggestion records (`acceptedExpression`, `priorExpressionAtAcceptance`, materialization fields).
+- Superseded write protection is required for run/work-unit progression and aggregate/session pointer updates.
+- No schema blobs, sample payloads, or prompt/template content are stored in this table.
 
 ## 3) S3 Object Layout
 
@@ -541,6 +586,8 @@ src/lib/persistence/
   mapping-revisions.ts  MappingRevisions operations (save/list/get/getConfig + selective prune)
   mapping-versions.ts   MappingVersions operations (create/list/get + compatibility shims)
   value-tables.ts       Project value-table operations (metadata/revision/usage/resolve)
+  auto-map.ts           Auto-Map domain contracts (keys/indexes/status guards/fingerprints/OCC helpers)
+  auto-map-store.ts     Auto-Map table accessors (session/run/work-unit/suggestion query/write + open-session lookup)
   s3/
     index.ts            S3 helper barrel
     schema-content.ts   Schema original + processed content helpers
@@ -574,6 +621,7 @@ Rules:
 | `MAPPING_VERSIONS_TABLE` | MappingVersions table name | `keyra-mapping-versions` |
 | `VALUE_TABLES_TABLE` | ValueTables table name | `keyra-value-tables` |
 | `VALUE_TABLE_REVISIONS_TABLE` | ValueTableRevisions table name | `keyra-value-table-revisions` |
+| `AUTO_MAP_TABLE` | AutoMap table name | `integrations-keyra-auto-map` |
 | `STORAGE_BUCKET` | S3 bucket name | `keyra-storage` |
 
 For local development, set `DYNAMODB_ENDPOINT=http://localhost:8000` and `S3_ENDPOINT=http://localhost:4566`.

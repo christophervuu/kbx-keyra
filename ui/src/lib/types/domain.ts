@@ -963,6 +963,38 @@ export interface AutoMapSuggestion {
   readonly actionEligibility?: SuggestionActionEligibility;
 }
 
+export type AutoMapExecutionMode = 'disabled' | 'legacy' | 'async';
+
+export type AutoMapSessionStatus =
+  | 'open'
+  | 'generating'
+  | 'reviewing'
+  | 'resolved'
+  | 'superseded'
+  | 'expired';
+
+export type AutoMapRunStatus =
+  | 'queued'
+  | 'preparing'
+  | 'retrieving'
+  | 'generating'
+  | 'validating'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'superseded';
+
+export type AutoMapScopeMode = 'whole' | 'visible' | 'section' | 'selected' | 'refresh' | 'retry-failed';
+
+export interface AutoMapSessionRef {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly runStatus: AutoMapRunStatus;
+  readonly executionMode: AutoMapExecutionMode;
+  /** True when backend acknowledged async run start (202-style queued/preparing lifecycle). */
+  readonly queued: boolean;
+}
+
 export interface AutoMapSectionResult {
   readonly suggestions: readonly AutoMapSuggestion[];
   readonly diagnostics?: readonly Diagnostic[];
@@ -986,6 +1018,8 @@ export interface AutoMapSectionResult {
     readonly mode?: 'section' | 'whole';
     readonly sectionPath?: string;
   };
+  /** Async session/run metadata when backend mode is `async`. */
+  readonly session?: AutoMapSessionRef;
 }
 
 export type AiSuggestionLifecycleStatus =

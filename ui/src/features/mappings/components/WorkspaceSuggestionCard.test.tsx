@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SuggestionWorkspaceItem } from '../types';
@@ -28,13 +29,14 @@ const DEFAULT_CALLBACKS = {
   onEdit: vi.fn(),
   onDismiss: vi.fn(),
   onUndoDismiss: vi.fn(),
+  onUndoAccept: vi.fn(),
 };
 
 function renderCard(
   item: SuggestionWorkspaceItem,
   isExpanded = true,
   callbacks = DEFAULT_CALLBACKS,
-  extra: Partial<{ onRefreshItem: (p: string) => void; previewSlot: React.ReactNode }> = {},
+  extra: Partial<{ onRefreshItem: (p: string) => void; previewSlot: ReactNode }> = {},
 ) {
   return render(
     <WorkspaceSuggestionCard
@@ -56,6 +58,7 @@ describe('WorkspaceSuggestionCard — status badges', () => {
     'accepted',
     'edited',
     'stale',
+    'conflict',
   ];
 
   for (const status of statuses) {
@@ -68,6 +71,41 @@ describe('WorkspaceSuggestionCard — status badges', () => {
   it('renders dismissed status badge in dismissed row', () => {
     renderCard(makeItem({ status: 'dismissed' }), false);
     expect(screen.getByTestId('status-badge-dismissed')).toBeInTheDocument();
+  });
+});
+
+describe('WorkspaceSuggestionCard — accepted/edited/conflict undo', () => {
+  it('renders undo button for accepted suggestion and calls onUndoAccept', async () => {
+    const onUndoAccept = vi.fn();
+    renderCard(makeItem({ status: 'accepted' }), true, { ...DEFAULT_CALLBACKS, onUndoAccept });
+
+    expect(screen.getByTestId('undo-accept-Order.Id')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('undo-accept-Order.Id'));
+    expect(onUndoAccept).toHaveBeenCalledWith('Order.Id');
+  });
+
+  it('renders conflict status badge and undo button', () => {
+    renderCard(makeItem({ status: 'conflict' }), true);
+    expect(screen.getByTestId('status-badge-conflict')).toBeInTheDocument();
+    expect(screen.getByTestId('undo-accept-Order.Id')).toBeInTheDocument();
+  });
+
+  it('disables Accept button and exposes blocking reason when canAccept is false', () => {
+    render(
+      <WorkspaceSuggestionCard
+        item={makeItem({ status: 'suggested' })}
+        isExpanded={true}
+        {...DEFAULT_CALLBACKS}
+        canAccept={false}
+        acceptBlockedReason="Accept is disabled because this suggestion has blocking validation diagnostics."
+      />,
+    );
+
+    expect(screen.getByTestId('accept-Order.Id')).toBeDisabled();
+    expect(screen.getByTestId('accept-Order.Id')).toHaveAttribute(
+      'title',
+      'Accept is disabled because this suggestion has blocking validation diagnostics.',
+    );
   });
 });
 
@@ -208,24 +246,50 @@ describe('WorkspaceSuggestionCard — expanded', () => {
 
   it('renders "No existing rule" when existingExpressionAtGeneration is null', () => {
     renderCard(makeItem({ existingExpressionAtGeneration: null }));
+    expect(screen.queryByTestId('technical-details-Order.Id')).not.toBeInTheDocument();
+  });
+
+  it('renders "No existing rule" when existingExpressionAtGeneration is null after showing technical details', async () => {
+    renderCard(makeItem({ existingExpressionAtGeneration: null }));
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
     expect(screen.getByText('No existing rule')).toBeInTheDocument();
   });
 
-  it('renders existing expression when provided', () => {
+  it('renders existing expression when provided after showing technical details', async () => {
     renderCard(makeItem({ existingExpressionAtGeneration: 'source.oldId', isNew: false }));
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
     expect(screen.getByText('source.oldId')).toBeInTheDocument();
   });
 
-  it('renders suggested expression', () => {
+  it('renders suggested expression after showing technical details', async () => {
     renderCard(makeItem({ suggestedExpression: 'source.orderId' }));
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
     expect(screen.getByText('source.orderId')).toBeInTheDocument();
+  });
+
+  it('renders parsed source references when technical details are shown', async () => {
+    renderCard(makeItem({ suggestedExpression: 'concat(source("orderId"), get(external("carrier"), "rateCode"))' }));
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
+
+    expect(screen.getByTestId('source-references-Order.Id')).toBeInTheDocument();
+    expect(screen.getByTestId('source-ref-primary-Order.Id')).toHaveTextContent('Primary: orderId');
+    expect(screen.getByTestId('source-ref-enrichment-Order.Id')).toHaveTextContent('Enrichment: carrier.rateCode');
   });
 
   it('renders generated-state label copy', () => {
     renderCard(makeItem());
+    expect(screen.queryByTestId('suggestion-generated-label-Order.Id')).not.toBeInTheDocument();
+  });
+
+  it('shows technical details and generated-state label only after toggling technical details', async () => {
+    renderCard(makeItem());
+
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
+
     expect(screen.getByTestId('suggestion-generated-label-Order.Id')).toHaveTextContent(
       'AI-generated assistance. Suggestions are not persisted until you explicitly accept.',
     );
+    expect(screen.getByTestId('technical-details-Order.Id')).toBeInTheDocument();
   });
 
   it('renders New rule badge for new suggestions', () => {
@@ -356,8 +420,7 @@ describe('WorkspaceSuggestionCard — diagnostics', () => {
 
   it('renders diagnostics toggle button', () => {
     renderCard(itemWithDiagnostics);
-    expect(screen.getByTestId('diagnostics-section')).toBeInTheDocument();
-    expect(screen.getByText('Diagnostics (2)')).toBeInTheDocument();
+    expect(screen.queryByTestId('diagnostics-section')).not.toBeInTheDocument();
   });
 
   it('diagnostics list is hidden by default', () => {
@@ -367,6 +430,8 @@ describe('WorkspaceSuggestionCard — diagnostics', () => {
 
   it('expands diagnostics list on click', async () => {
     renderCard(itemWithDiagnostics);
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
+    expect(screen.getByTestId('diagnostics-section')).toBeInTheDocument();
     await userEvent.click(screen.getByText('Diagnostics (2)'));
     expect(screen.getByTestId('diagnostics-list')).toBeInTheDocument();
     expect(screen.getByText(/Type mismatch/)).toBeInTheDocument();
@@ -375,6 +440,7 @@ describe('WorkspaceSuggestionCard — diagnostics', () => {
 
   it('diagnostics toggle has aria-expanded', async () => {
     renderCard(itemWithDiagnostics);
+    await userEvent.click(screen.getByTestId('toggle-technical-Order.Id'));
     const toggle = screen.getByText('Diagnostics (2)').closest('button')!;
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(toggle);

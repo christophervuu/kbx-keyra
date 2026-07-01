@@ -1,6 +1,7 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 
+import { createAutoMapRouter } from './routes/auto-map';
 import { createMappingRouter } from './routes/mappings';
 import { createProjectRouter } from './routes/projects';
 import { createSchemaRouter } from './routes/schemas';
@@ -36,6 +37,7 @@ app.use('/test', createTestControlRouter(store));
 app.use(createProjectRouter(store));
 app.use(createMappingRouter(store));
 app.use(createSchemaRouter(store));
+app.use(createAutoMapRouter(store));
 
 app.use((_req, res) => {
   const requestId = store.nextRequestId();

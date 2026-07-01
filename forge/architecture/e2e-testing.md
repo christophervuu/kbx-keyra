@@ -47,6 +47,7 @@ tests/
       mapping-crud.spec.ts
       schema-flows.spec.ts
       error-handling.spec.ts
+      auto-map-async.spec.ts
     mock-server/
       index.ts
       store.ts
@@ -55,6 +56,7 @@ tests/
       routes/
         projects.ts
         mappings.ts
+        auto-map.ts
         schemas.ts
         test-control.ts
 ```
@@ -182,3 +184,20 @@ Verification emphasis for this slice:
 Scope note:
 
 - These FS-100 checks are architecture/contract assertions and can be satisfied by a mix of UI integration tests and backend contract tests when full browser E2E wiring is not yet expanded for deployment flows.
+
+---
+
+## FS-101 async Auto-Map verification addendum
+
+FS-101 adds parity expectations for async Auto-Map session/run contracts and review workspace lifecycle behavior.
+
+Canonical E2E expectations in this slice:
+
+- `httpBackend` project validates async create→review flow against session/run API behavior (acknowledged async start, workspace review lifecycle, suggestion interactions).
+- `localStorage` project validates AI isolation: browser does not call backend/provider AI endpoints during offline adapter runs.
+- Test harness seed model includes deterministic Auto-Map scenarios (`autoMapScenarios`) routed through `/test/seed` for backend-mode progression control.
+- Mock server includes dedicated Auto-Map session/run/suggestion routes to emulate capabilities, open-session lookup, run status progression, and paginated/filterable suggestions.
+
+Contract boundary reminder:
+
+- E2E verifies user-visible async review behavior and adapter parity invariants; it does not assert provider/model internals.

@@ -8,11 +8,61 @@ import type {
   SchemaMetadata,
 } from '../../../ui/src/lib/types/domain';
 
+export interface AutoMapMockScenarioSeed {
+  readonly scenarioId: string;
+  readonly mappingId: string;
+  readonly sectionPath: string;
+  readonly visibleTargetPaths?: readonly string[];
+  readonly startRun: {
+    readonly sessionId: string;
+    readonly runId: string;
+    readonly status: string;
+    readonly queued: boolean;
+  };
+  readonly runStatuses: ReadonlyArray<{
+    readonly status: string;
+    readonly progress?: {
+      readonly completedWorkUnits: number;
+      readonly totalWorkUnits: number;
+      readonly completedTargets: number;
+      readonly totalTargets: number;
+    };
+    readonly counts?: {
+      readonly generated: number;
+      readonly ready: number;
+      readonly warning: number;
+      readonly invalid: number;
+      readonly failedTargets: number;
+    };
+    readonly failure?: {
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: boolean;
+    };
+  }>;
+  readonly suggestionsByPoll: ReadonlyArray<ReadonlyArray<{
+    readonly target: string;
+    readonly expression: string;
+    readonly explanation: string;
+    readonly confidence: 'high' | 'medium' | 'low';
+    readonly reviewStatus?: 'pending' | 'accepted' | 'dismissed' | 'kept-current' | 'stale' | 'conflict';
+    readonly validation?: {
+      readonly valid: boolean;
+      readonly diagnostics: ReadonlyArray<{
+        readonly severity: 'info' | 'warning' | 'error';
+        readonly code: string;
+        readonly message: string;
+      }>;
+    };
+  }>>;
+}
+
 export interface TestSeedData {
   projects: Project[];
   mappings: Array<{ metadata: MappingMetadata; config: MappingConfig }>;
   schemas: Array<{ metadata: SchemaMetadata; content: SchemaDetail['content'] }>;
   mappingVersions?: Record<string, MappingVersionEntry[]>;
+  autoMapScenarios?: readonly AutoMapMockScenarioSeed[];
 }
 
 export function createTestProject(
@@ -89,13 +139,13 @@ export function createTestSchema(
     name: 'Test Schema',
     format: 'json-schema',
     fieldCount: 8,
-    origin: 'local',
+    origin: 'uploaded',
     status: 'ready',
     scope: 'global',
     description: 'Schema for E2E tests',
     updatedBy: 'e2e-test',
     inferred: false,
-    syncStatus: 'not-synced',
+    syncStatus: 'sync-failed',
     source: { type: 'upload' },
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

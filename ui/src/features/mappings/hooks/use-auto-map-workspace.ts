@@ -13,13 +13,14 @@ import type {
   SuggestionWorkspaceItem,
 } from '../types';
 
-import type { ApiAdapter } from '@/lib/api/types';
+import type { ApiAdapter, AutoMapRunSummary } from '@/lib/api/types';
 import type {
   SuggestionActionEligibility,
   SuggestionApplyBlockReason,
   AutoMapSectionInput,
   AutoMapSectionResult,
   AutoMapSuggestion,
+  AutoMapRunStatus,
   MappingRule,
   ParsedSchema,
 } from '@/lib/types/domain';
@@ -43,6 +44,18 @@ const FEATURE_NOT_ENABLED_CODE = 'FEATURE_NOT_ENABLED';
 const GENERIC_ERROR_MESSAGE = 'An unexpected error occurred. Please try again.';
 const OFFLINE_USER_MESSAGE = 'Auto-Map is not available in offline mode';
 const NO_ELIGIBLE_TARGETS_MESSAGE = 'No eligible target fields found in this section';
+
+const ACTIVE_POLL_MS = 2000;
+const UNCHANGED_BACKOFF_MS = {
+  fast: 2000,
+  medium: 5000,
+  slow: 10000,
+} as const;
+const NETWORK_RETRY_MS = [2000, 4000, 8000, 15000, 30000] as const;
+const JITTER_RATIO = 0.15;
+const VISIBILITY_STALE_THRESHOLD_MS = 5000;
+const POLLING_WARNING_MESSAGE =
+  'Connection interrupted while checking Auto-Map progress. Retrying…';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -75,6 +88,8 @@ export interface UseAutoMapWorkspaceParams {
   parsedTargetSchema?: ParsedSchema | null;
   /** Optional accessor for in-flight draft expressions — used by staleness detection (T-04). */
   getDraftExpression?: (targetPath: string) => string | null;
+  /** Current persisted mapping revision number (used for materialization transitions). */
+  currentRevision?: number;
 }
 
 export interface UseAutoMapWorkspaceResult {
@@ -105,17 +120,30 @@ export interface UseAutoMapWorkspaceResult {
 
   // Staleness (for T-04)
   markStale: (targetPath: string) => void;
+  undoAccept: (targetPath: string) => void;
 
   // Filtering
   activeFilters: Set<SuggestionFilter>;
   toggleFilter: (filter: SuggestionFilter) => void;
   clearFilters: () => void;
+  targetSearchQuery: string;
+  setTargetSearchQuery: (query: string) => void;
+  clearTargetSearch: () => void;
   filteredItems: readonly SuggestionWorkspaceItem[];
 
   // Metadata
   generatedAt: string | null;
   previousSuggestionsAvailable: boolean;
   restorePreviousSuggestions: () => void;
+  rehydrationConflicts: readonly string[];
+
+  // Async run visibility (FS-101 T-14)
+  runStatus: AutoMapRunStatus | null;
+  runProgress: AutoMapRunSummary['progress'] | null;
+  runCounts: AutoMapRunSummary['counts'] | null;
+  runFailure: AutoMapRunSummary['failure'] | null;
+  isPolling: boolean;
+  pollingWarning: string | null;
 }
 
 export interface BatchAcceptSkipEntry {
@@ -221,7 +249,7 @@ function deriveSuggestionActionEligibility(item: {
     blockReasons.push('dismissed');
   }
 
-  if (item.status === 'accepted' || item.status === 'edited') {
+  if (item.status === 'accepted' || item.status === 'edited' || item.status === 'conflict') {
     blockReasons.push('already-reviewed');
   }
 
@@ -264,6 +292,9 @@ function suggestionToWorkspaceItem(
     status: overrideStatus ?? 'suggested',
     isNew: existingRule === undefined,
     existingExpressionAtGeneration: existingRule?.expression ?? null,
+    acceptedExpression: null,
+    priorExpressionAtAcceptance: null,
+    isMaterialized: false,
   };
 }
 
@@ -277,6 +308,9 @@ function workspaceItemToPersistedItem(item: SuggestionWorkspaceItem): PersistedS
     status: item.status,
     isNew: item.isNew,
     existingExpressionAtGeneration: item.existingExpressionAtGeneration,
+    acceptedExpression: item.acceptedExpression ?? null,
+    priorExpressionAtAcceptance: item.priorExpressionAtAcceptance ?? null,
+    isMaterialized: item.isMaterialized ?? false,
   };
 }
 
@@ -290,6 +324,9 @@ function persistedItemToWorkspaceItem(item: PersistedSuggestionItem): Suggestion
     status: item.status,
     isNew: item.isNew,
     existingExpressionAtGeneration: item.existingExpressionAtGeneration,
+    acceptedExpression: item.acceptedExpression ?? null,
+    priorExpressionAtAcceptance: item.priorExpressionAtAcceptance ?? null,
+    isMaterialized: item.isMaterialized ?? false,
   };
 }
 
@@ -367,6 +404,41 @@ type WorkspaceRunMeta = Pick<
   | 'noContext'
   | 'noContextReason'
 >;
+
+const ACTIVE_RUN_STATUSES: ReadonlySet<AutoMapRunStatus> = new Set([
+  'queued',
+  'preparing',
+  'retrieving',
+  'generating',
+  'validating',
+]);
+
+const TERMINAL_RUN_STATUSES: ReadonlySet<AutoMapRunStatus> = new Set([
+  'completed',
+  'partial',
+  'failed',
+  'superseded',
+]);
+
+function isActiveRunStatus(status: AutoMapRunStatus | null | undefined): status is AutoMapRunStatus {
+  return Boolean(status && ACTIVE_RUN_STATUSES.has(status));
+}
+
+function isTerminalRunStatus(status: AutoMapRunStatus | null | undefined): status is AutoMapRunStatus {
+  return Boolean(status && TERMINAL_RUN_STATUSES.has(status));
+}
+
+function withJitter(baseMs: number): number {
+  const jitterWindow = baseMs * JITTER_RATIO;
+  const delta = (Math.random() * jitterWindow * 2) - jitterWindow;
+  return Math.max(250, Math.round(baseMs + delta));
+}
+
+function nextUnchangedDelay(unchangedCount: number): number {
+  if (unchangedCount <= 2) return UNCHANGED_BACKOFF_MS.fast;
+  if (unchangedCount <= 11) return UNCHANGED_BACKOFF_MS.medium;
+  return UNCHANGED_BACKOFF_MS.slow;
+}
 
 const EMPTY_RUN_META: WorkspaceRunMeta = {
   mode: null,
@@ -460,6 +532,23 @@ function applyFilters(
   });
 }
 
+function applyTargetSearch(
+  items: readonly SuggestionWorkspaceItem[],
+  query: string,
+): readonly SuggestionWorkspaceItem[] {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) return items;
+
+  return items.filter((item) => item.targetPath.toLowerCase().includes(normalized));
+}
+
+function isPrimaryStatusFilter(filter: SuggestionFilter): boolean {
+  return filter === 'needsReview'
+    || filter === 'accepted'
+    || filter === 'dismissed'
+    || filter === 'stale';
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -486,6 +575,7 @@ export function useAutoMapWorkspace({
   parsedSourceSchema,
   parsedTargetSchema,
   getDraftExpression,
+  currentRevision = 0,
 }: UseAutoMapWorkspaceParams): UseAutoMapWorkspaceResult {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -498,7 +588,18 @@ export function useAutoMapWorkspace({
   const [activeFilters, setActiveFilters] = useState<Set<SuggestionFilter>>(
     () => new Set(['needsReview']),
   );
+  const [targetSearchQuery, setTargetSearchQueryState] = useState('');
   const [lastBatchAcceptResult, setLastBatchAcceptResult] = useState<BatchAcceptResult | null>(null);
+  const [rehydrationConflicts, setRehydrationConflicts] = useState<readonly string[]>([]);
+  const [runSessionId, setRunSessionId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<AutoMapRunStatus | null>(null);
+  const [runProgress, setRunProgress] = useState<AutoMapRunSummary['progress'] | null>(null);
+  const [runCounts, setRunCounts] = useState<AutoMapRunSummary['counts'] | null>(null);
+  const [runFailure, setRunFailure] = useState<AutoMapRunSummary['failure'] | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+  const [pollingWarning, setPollingWarning] = useState<string | null>(null);
+  const filteredItemsRef = useRef<readonly SuggestionWorkspaceItem[]>([]);
 
   const runMetaRef = useRef<WorkspaceRunMeta>(EMPTY_RUN_META);
   useEffect(() => {
@@ -534,6 +635,13 @@ export function useAutoMapWorkspace({
   const getDraftExpressionRef = useRef(getDraftExpression);
   useEffect(() => { getDraftExpressionRef.current = getDraftExpression; });
 
+  const currentRevisionRef = useRef(currentRevision);
+  useEffect(() => {
+    currentRevisionRef.current = currentRevision;
+  }, [currentRevision]);
+
+  const previousRevisionRef = useRef(currentRevision);
+
   // Stale-run guard
   const requestIdRef = useRef(0);
 
@@ -542,11 +650,38 @@ export function useAutoMapWorkspace({
 
   // Abort controller for unmount cleanup
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRunStatusRef = useRef<((options?: { force?: boolean }) => Promise<void>) | null>(null);
+  const lastPollAtRef = useRef<number | null>(null);
+  const unchangedCountRef = useRef(0);
+  const networkRetryAttemptRef = useRef(0);
+  const pollingSignatureRef = useRef<string | null>(null);
+  const isDocumentHiddenRef = useRef(
+    typeof document !== 'undefined' && typeof document.visibilityState === 'string'
+      ? document.visibilityState === 'hidden'
+      : false,
+  );
+
+  const clearPollingTimer = useCallback(() => {
+    if (pollingTimerRef.current !== null) {
+      clearTimeout(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    clearPollingTimer();
+    setIsPolling(false);
+    unchangedCountRef.current = 0;
+    networkRetryAttemptRef.current = 0;
+  }, [clearPollingTimer]);
+
   useEffect(() => {
     return () => {
+      clearPollingTimer();
       abortControllerRef.current?.abort();
     };
-  }, []);
+  }, [clearPollingTimer]);
 
   // ---------------------------------------------------------------------------
   // Internal: update items + summary + persist
@@ -578,6 +713,26 @@ export function useAutoMapWorkspace({
     [mappingId],
   );
 
+  const applyRunSummary = useCallback((summary: AutoMapRunSummary) => {
+    setRunSessionId(summary.sessionId);
+    setRunId(summary.runId);
+    setRunStatus(summary.status);
+    setRunProgress(summary.progress ?? null);
+    setRunCounts(summary.counts ?? null);
+    setRunFailure(summary.failure ?? null);
+  }, []);
+
+  const clearRunState = useCallback(() => {
+    setRunSessionId(null);
+    setRunId(null);
+    setRunStatus(null);
+    setRunProgress(null);
+    setRunCounts(null);
+    setRunFailure(null);
+    pollingSignatureRef.current = null;
+    stopPolling();
+  }, [stopPolling]);
+
   // ---------------------------------------------------------------------------
   // Staleness detection (T-04)
   // ---------------------------------------------------------------------------
@@ -599,7 +754,7 @@ export function useAutoMapWorkspace({
       setItems((prev) => {
         let changed = false;
         const next = prev.map((item) => {
-          if (staleSet.has(item.targetPath) && item.status !== 'stale') {
+          if (staleSet.has(item.targetPath) && item.status !== 'stale' && item.status !== 'conflict') {
             changed = true;
             return { ...item, status: 'stale' as SuggestionLifecycleStatus };
           }
@@ -636,6 +791,157 @@ export function useAutoMapWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]); // intentionally only rules — applyStaleDetection is stable
 
+  const pollRunStatus = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!runSessionId || !runId) {
+        stopPolling();
+        return;
+      }
+
+      if (isDocumentHiddenRef.current && options?.force !== true) {
+        stopPolling();
+        return;
+      }
+
+      const getRunStatus = adapterRef.current.getAutoMapRunStatus;
+      if (!getRunStatus) {
+        stopPolling();
+        return;
+      }
+
+      clearPollingTimer();
+      setIsPolling(true);
+
+      try {
+        const runSummary = await getRunStatus(runSessionId, runId);
+        lastPollAtRef.current = Date.now();
+        applyRunSummary(runSummary);
+
+        const listSuggestions = adapterRef.current.listAutoMapSuggestions;
+        if (listSuggestions) {
+          const page = await listSuggestions(runSessionId, { limit: 250 });
+          const currentRules = rulesRef.current;
+
+          const seen = new Set<string>();
+          const deduped = page.items.filter((s) => {
+            if (seen.has(s.target)) return false;
+            seen.add(s.target);
+            return true;
+          });
+
+          const freshItems = deduped.map((suggestion) => suggestionToWorkspaceItem(suggestion, currentRules));
+          const previousItems = itemsRef.current;
+          const merged = mergeItems(previousItems, freshItems);
+          const now = new Date().toISOString();
+          const path = sectionPathRef.current;
+          commitItems(
+            merged,
+            generatedAtRef.current ?? now,
+            now,
+            path,
+            runMetaRef.current,
+          );
+
+          const signature = JSON.stringify({
+            status: runSummary.status,
+            progress: runSummary.progress ?? null,
+            counts: runSummary.counts ?? null,
+            failure: runSummary.failure ?? null,
+            suggestions: page.items.map((item) => [item.target, item.expression, item.reviewStatus ?? null]),
+          });
+
+          if (pollingSignatureRef.current === signature) {
+            unchangedCountRef.current += 1;
+          } else {
+            pollingSignatureRef.current = signature;
+            unchangedCountRef.current = 0;
+          }
+        }
+
+        networkRetryAttemptRef.current = 0;
+        setPollingWarning(null);
+
+        if (isTerminalRunStatus(runSummary.status)) {
+          stopPolling();
+          return;
+        }
+
+        const delayMs = unchangedCountRef.current === 0
+          ? ACTIVE_POLL_MS
+          : nextUnchangedDelay(unchangedCountRef.current);
+        pollingTimerRef.current = setTimeout(() => {
+          void pollRunStatusRef.current?.();
+        }, withJitter(delayMs));
+      } catch {
+        setPollingWarning(POLLING_WARNING_MESSAGE);
+
+        const attempt = Math.min(networkRetryAttemptRef.current, NETWORK_RETRY_MS.length - 1);
+        const nextDelay = NETWORK_RETRY_MS[attempt] ?? NETWORK_RETRY_MS[NETWORK_RETRY_MS.length - 1];
+        networkRetryAttemptRef.current = Math.min(attempt + 1, NETWORK_RETRY_MS.length - 1);
+
+        pollingTimerRef.current = setTimeout(() => {
+          void pollRunStatusRef.current?.();
+        }, withJitter(nextDelay));
+      }
+    },
+    [
+      applyRunSummary,
+      clearPollingTimer,
+      commitItems,
+      runId,
+      runSessionId,
+      stopPolling,
+    ],
+  );
+
+  useEffect(() => {
+    pollRunStatusRef.current = pollRunStatus;
+  }, [pollRunStatus]);
+
+  useEffect(() => {
+    if (!isActiveRunStatus(runStatus) || !runSessionId || !runId) {
+      clearPollingTimer();
+      return;
+    }
+
+    if (isDocumentHiddenRef.current) {
+      clearPollingTimer();
+      return;
+    }
+
+    if (pollingTimerRef.current !== null || isPolling) {
+      return;
+    }
+
+    void pollRunStatus({ force: true });
+  }, [clearPollingTimer, isPolling, pollRunStatus, runId, runSessionId, runStatus]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      const hidden = document.visibilityState === 'hidden';
+      isDocumentHiddenRef.current = hidden;
+
+      if (hidden) {
+        clearPollingTimer();
+        setIsPolling(false);
+        const lastPoll = lastPollAtRef.current;
+        if (!lastPoll || Date.now() - lastPoll > VISIBILITY_STALE_THRESHOLD_MS) {
+          void pollRunStatus({ force: true });
+        }
+        return;
+      }
+
+      unchangedCountRef.current = 0;
+      networkRetryAttemptRef.current = 0;
+      void pollRunStatus({ force: true });
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [clearPollingTimer, pollRunStatus]);
+
   // ---------------------------------------------------------------------------
   // Core fetch logic (shared by triggerAutoMap + refresh variants)
   // ---------------------------------------------------------------------------
@@ -657,6 +963,7 @@ export function useAutoMapWorkspace({
 
       setStatus('loading');
       setError(null);
+      setPollingWarning(null);
       setLastBatchAcceptResult(null);
 
       const normalizedPath = normalizeSectionPath(path);
@@ -685,6 +992,20 @@ export function useAutoMapWorkspace({
         const nextRunMeta = extractRunMeta(result);
 
         if (requestIdRef.current !== currentRequestId || controller.signal.aborted) return;
+
+        if (result.session) {
+          setRunSessionId(result.session.sessionId);
+          setRunId(result.session.runId);
+          setRunStatus(result.session.runStatus);
+          setRunProgress(null);
+          setRunCounts(null);
+          setRunFailure(null);
+          if (isTerminalRunStatus(result.session.runStatus)) {
+            stopPolling();
+          }
+        } else {
+          clearRunState();
+        }
 
         // Deduplicate by target path
         const seen = new Set<string>();
@@ -717,7 +1038,11 @@ export function useAutoMapWorkspace({
         );
 
         const now = new Date().toISOString();
-        const merged = mergeItems(existingItems, freshItems);
+        const shouldPreserveExisting =
+          result.session !== undefined
+          && isActiveRunStatus(result.session.runStatus)
+          && freshItems.length === 0;
+        const merged = shouldPreserveExisting ? existingItems : mergeItems(existingItems, freshItems);
 
         commitItems(merged, generatedAtRef.current ?? now, now, path, nextRunMeta);
         setStatus('success');
@@ -727,7 +1052,7 @@ export function useAutoMapWorkspace({
         setError(mapErrorToMessage(err));
       }
     },
-    [projectId, mappingId, commitItems],
+    [projectId, mappingId, commitItems, clearRunState, stopPolling],
   );
 
   // ---------------------------------------------------------------------------
@@ -737,31 +1062,57 @@ export function useAutoMapWorkspace({
   const triggerAutoMap = useCallback(
     (path: string, visibleTargetPaths?: readonly string[]): void => {
       const normalizedPath = normalizeSectionPath(path);
+      clearRunState();
       setSectionPath(normalizedPath);
       setLastBatchAcceptResult(null);
+      setRehydrationConflicts([]);
 
       // Check for persisted suggestions first (AE-02)
       const persisted = loadAutoMapSuggestions(mappingId, normalizedPath);
       if (persisted !== null) {
         const restoredItems = persisted.items.map(persistedItemToWorkspaceItem);
+        const conflicts: string[] = [];
+        const rehydrated = restoredItems.map((item): SuggestionWorkspaceItem => {
+          if (
+            (item.status === 'accepted' || item.status === 'edited')
+            && item.isMaterialized !== true
+            && item.acceptedExpression
+            && item.priorExpressionAtAcceptance !== undefined
+          ) {
+            const currentSaved = rulesRef.current.find((rule) => rule.target === item.targetPath)?.expression ?? null;
+            if (currentSaved === item.priorExpressionAtAcceptance) {
+              updateDraftRef.current(item.targetPath, item.acceptedExpression);
+              return item;
+            }
+
+            conflicts.push(item.targetPath);
+            return {
+              ...item,
+              status: 'conflict',
+            };
+          }
+          return item;
+        });
+
+        setRehydrationConflicts(conflicts);
         const restoredAt = persisted.generatedAt;
-        setItems(restoredItems);
+        setItems(rehydrated);
         setGeneratedAt(restoredAt);
         generatedAtRef.current = restoredAt;
         setLastRefreshedAt(restoredAt);
         setRunMeta(EMPTY_RUN_META);
-        setSummary(computeSummary(restoredItems, restoredAt, restoredAt, EMPTY_RUN_META));
+        setSummary(computeSummary(rehydrated, restoredAt, restoredAt, EMPTY_RUN_META));
         setStatus('success');
         setError(null);
         // Run staleness detection on restored items (AE-03)
-        applyStaleDetection(restoredItems, rulesRef.current, normalizedPath);
+        applyStaleDetection(rehydrated, rulesRef.current, normalizedPath);
         return;
       }
 
       // No persisted suggestions — fetch fresh
       void runFetch(normalizedPath, 'all', [], visibleTargetPaths);
     },
-    [mappingId, runFetch, applyStaleDetection],
+    [mappingId, runFetch, applyStaleDetection, clearRunState],
   );
 
   // ---------------------------------------------------------------------------
@@ -825,7 +1176,13 @@ export function useAutoMapWorkspace({
         updateDraftRef.current(targetPath, item.suggestedExpression);
         const idx = prev.findIndex((i) => i.targetPath === targetPath);
         const next = [...prev];
-        next[idx] = { ...next[idx], status: 'accepted' };
+        next[idx] = {
+          ...next[idx],
+          status: 'accepted',
+          acceptedExpression: item.suggestedExpression,
+          priorExpressionAtAcceptance: item.existingExpressionAtGeneration ?? null,
+          isMaterialized: false,
+        };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
         setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
@@ -844,14 +1201,19 @@ export function useAutoMapWorkspace({
       setItems((prev) => {
         const item = prev.find((i) => i.targetPath === targetPath);
         if (!item) return prev;
-        const eligibility = deriveSuggestionActionEligibility(item);
-        if (!eligibility.canAccept) return prev;
+        if (item.status === 'dismissed' || item.status === 'stale') return prev;
         updateDraftRef.current(targetPath, item.suggestedExpression);
         setSelectedTargetPathRef.current(targetPath);
         exitWorkspaceRef.current();
         const idx = prev.findIndex((i) => i.targetPath === targetPath);
         const next = [...prev];
-        next[idx] = { ...next[idx], status: 'edited' };
+        next[idx] = {
+          ...next[idx],
+          status: 'edited',
+          acceptedExpression: item.suggestedExpression,
+          priorExpressionAtAcceptance: item.existingExpressionAtGeneration ?? null,
+          isMaterialized: false,
+        };
         const nextItems = next as readonly SuggestionWorkspaceItem[];
         setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
         if (sectionPath !== null) {
@@ -893,7 +1255,42 @@ export function useAutoMapWorkspace({
     [generatedAt, lastRefreshedAt, mappingId, sectionPath],
   );
 
+  const undoAccept = useCallback(
+    (targetPath: string): void => {
+      setItems((prev) => {
+        const item = prev.find((i) => i.targetPath === targetPath);
+        if (!item || (item.status !== 'accepted' && item.status !== 'edited' && item.status !== 'conflict')) {
+          return prev;
+        }
+
+        const idx = prev.findIndex((i) => i.targetPath === targetPath);
+        const next = [...prev];
+        next[idx] = {
+          ...next[idx],
+          status: 'suggested',
+          acceptedExpression: null,
+          priorExpressionAtAcceptance: null,
+          isMaterialized: false,
+        };
+
+        updateDraftRef.current(targetPath, item.priorExpressionAtAcceptance ?? '');
+
+        const nextItems = next as readonly SuggestionWorkspaceItem[];
+        setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
+        if (sectionPath !== null) {
+          saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
+            generatedAt: generatedAt ?? undefined,
+          });
+        }
+        return nextItems;
+      });
+    },
+    [generatedAt, lastRefreshedAt, mappingId, sectionPath],
+  );
+
   const bulkAcceptAllValid = useCallback((): void => {
+    const filteredTargetPaths = new Set(filteredItemsRef.current.map((item) => item.targetPath));
+
     setItems((prev) => {
       const skippedByReason: Record<SuggestionApplyBlockReason, number> = {
         invalid: 0,
@@ -904,8 +1301,14 @@ export function useAutoMapWorkspace({
       };
       const skippedItems: BatchAcceptSkipEntry[] = [];
       let applied = 0;
+      let attempted = 0;
 
       const next = prev.map((item): SuggestionWorkspaceItem => {
+        if (!filteredTargetPaths.has(item.targetPath)) {
+          return item;
+        }
+
+        attempted += 1;
         const eligibility = deriveSuggestionActionEligibility(item);
         if (!eligibility.canBatchAccept) {
           const primaryReason = eligibility.blockReasons[0] ?? 'not-ready';
@@ -924,9 +1327,9 @@ export function useAutoMapWorkspace({
       });
 
       const computedResult: BatchAcceptResult = {
-        attempted: prev.length,
+        attempted,
         applied,
-        skipped: prev.length - applied,
+        skipped: attempted - applied,
         skippedByReason,
         skippedItems,
         completedAt: new Date().toISOString(),
@@ -977,6 +1380,41 @@ export function useAutoMapWorkspace({
     setPreviousGeneratedAt(null);
   }, [previousItems, previousGeneratedAt]);
 
+  useEffect(() => {
+    if (currentRevision <= previousRevisionRef.current) {
+      previousRevisionRef.current = currentRevision;
+      return;
+    }
+
+    previousRevisionRef.current = currentRevision;
+
+    setItems((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if ((item.status !== 'accepted' && item.status !== 'edited') || item.isMaterialized === true) {
+          return item;
+        }
+
+        changed = true;
+        return {
+          ...item,
+          isMaterialized: true,
+        };
+      });
+
+      if (!changed) return prev;
+
+      const nextItems = next as readonly SuggestionWorkspaceItem[];
+      setSummary(computeSummary(nextItems, generatedAt, lastRefreshedAt, runMetaRef.current));
+      if (sectionPath !== null) {
+        saveAutoMapSuggestions(mappingId, sectionPath, nextItems.map(workspaceItemToPersistedItem), {
+          generatedAt: generatedAt ?? undefined,
+        });
+      }
+      return nextItems;
+    });
+  }, [currentRevision, generatedAt, lastRefreshedAt, mappingId, sectionPath]);
+
   // ---------------------------------------------------------------------------
   // Filtering
   // ---------------------------------------------------------------------------
@@ -984,6 +1422,19 @@ export function useAutoMapWorkspace({
   const toggleFilter = useCallback((filter: SuggestionFilter): void => {
     setActiveFilters((prev) => {
       const next = new Set(prev);
+
+      if (isPrimaryStatusFilter(filter)) {
+        const wasActive = next.has(filter);
+        next.delete('needsReview');
+        next.delete('accepted');
+        next.delete('dismissed');
+        next.delete('stale');
+        if (!wasActive) {
+          next.add(filter);
+        }
+        return next;
+      }
+
       if (next.has(filter)) {
         next.delete(filter);
       } else {
@@ -997,7 +1448,18 @@ export function useAutoMapWorkspace({
     setActiveFilters(new Set());
   }, []);
 
-  const filteredItems = applyFilters(items, activeFilters);
+  const setTargetSearchQuery = useCallback((query: string): void => {
+    setTargetSearchQueryState(query);
+  }, []);
+
+  const clearTargetSearch = useCallback((): void => {
+    setTargetSearchQueryState('');
+  }, []);
+
+  const filteredItems = applyTargetSearch(applyFilters(items, activeFilters), targetSearchQuery);
+  useEffect(() => {
+    filteredItemsRef.current = filteredItems;
+  }, [filteredItems]);
 
   // ---------------------------------------------------------------------------
   // Derived
@@ -1025,12 +1487,23 @@ export function useAutoMapWorkspace({
     refreshUnmapped,
     refreshStale,
     markStale,
+    undoAccept,
     activeFilters,
     toggleFilter,
     clearFilters,
+    targetSearchQuery,
+    setTargetSearchQuery,
+    clearTargetSearch,
     filteredItems,
     generatedAt,
     previousSuggestionsAvailable: previousItems !== null,
     restorePreviousSuggestions,
+    rehydrationConflicts,
+    runStatus,
+    runProgress,
+    runCounts,
+    runFailure,
+    isPolling,
+    pollingWarning,
   };
 }

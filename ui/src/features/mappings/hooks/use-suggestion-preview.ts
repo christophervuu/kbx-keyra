@@ -9,7 +9,7 @@
  * and uses a shorter 150ms debounce for snappier card-level feedback.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { evaluateExpression } from '@/lib/engine';
 
@@ -26,11 +26,33 @@ export interface UseSuggestionPreviewResult {
   isEvaluating: boolean;
 }
 
+export interface UseSuggestionPreviewOptions {
+  /** Optional enrichment payloads keyed by alias for external("alias") expressions. */
+  externalSources?: Record<string, unknown>;
+  /** Required enrichment aliases for the current preview context. */
+  requiredEnrichmentAliases?: readonly string[];
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
 const DEBOUNCE_MS = 150;
+const EMPTY_EXTERNAL_SOURCES: Record<string, unknown> = {};
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
+}
 
 /**
  * Evaluates `expression` against `sourceData` with a 150ms debounce.
@@ -41,12 +63,26 @@ const DEBOUNCE_MS = 150;
 export function useSuggestionPreview(
   expression: string,
   sourceData: unknown | null,
+  options: UseSuggestionPreviewOptions = {},
 ): UseSuggestionPreviewResult {
-  const [result, setResult] = useState<unknown | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [completed, setCompleted] = useState<{
+    signature: string | null;
+    result: unknown | null;
+    error: string | null;
+  }>({ signature: null, result: null, error: null });
+  const externalSources = options.externalSources ?? EMPTY_EXTERNAL_SOURCES;
+  const requiredEnrichmentAliases = options.requiredEnrichmentAliases ?? [];
+  const missingRequiredAliases = requiredEnrichmentAliases.filter((alias) => !(alias in externalSources));
+  const missingRequiredAliasesError =
+    missingRequiredAliases.length > 0
+      ? `Missing required enrichment sample${missingRequiredAliases.length === 1 ? '' : 's'}: ${missingRequiredAliases.join(', ')}`
+      : null;
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const evaluationSignature = useMemo(
+    () => `${expression}\n${stableStringify(sourceData)}\n${stableStringify(externalSources)}`,
+    [expression, sourceData, externalSources],
+  );
 
   useEffect(() => {
     // Short-circuit: no data or no expression
@@ -55,23 +91,28 @@ export function useSuggestionPreview(
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      setResult(null);
-      setError(null);
-      setIsEvaluating(false);
       return;
     }
 
-    setIsEvaluating(true);
+    if (missingRequiredAliasesError !== null) {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      return;
+    }
 
     if (debounceRef.current !== null) {
       clearTimeout(debounceRef.current);
     }
 
     debounceRef.current = setTimeout(() => {
-      const { value, error: evalError } = evaluateExpression(expression, sourceData);
-      setResult(value);
-      setError(evalError);
-      setIsEvaluating(false);
+      const { value, error: evalError } = evaluateExpression(expression, sourceData, {}, externalSources);
+      setCompleted({
+        signature: evaluationSignature,
+        result: value,
+        error: evalError,
+      });
       debounceRef.current = null;
     }, DEBOUNCE_MS);
 
@@ -80,8 +121,23 @@ export function useSuggestionPreview(
         clearTimeout(debounceRef.current);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expression, sourceData]);
+  }, [expression, sourceData, externalSources, missingRequiredAliasesError, evaluationSignature]);
 
-  return { result, error, isEvaluating };
+  if (expression.trim() === '' || sourceData === null || sourceData === undefined) {
+    return { result: null, error: null, isEvaluating: false };
+  }
+
+  if (missingRequiredAliasesError !== null) {
+    return { result: null, error: missingRequiredAliasesError, isEvaluating: false };
+  }
+
+  if (completed.signature !== evaluationSignature) {
+    return { result: null, error: null, isEvaluating: true };
+  }
+
+  return {
+    result: completed.result,
+    error: completed.error,
+    isEvaluating: false,
+  };
 }

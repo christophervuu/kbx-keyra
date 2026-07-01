@@ -12,7 +12,11 @@ export interface WorkspaceToolbarProps {
   onToggleFilter: (filter: SuggestionFilter) => void;
   onClearFilters: () => void;
   summary: AutoMapWorkspaceSummary;
+  totalFilteredCount: number;
   items?: readonly SuggestionWorkspaceItem[];
+  targetSearchQuery: string;
+  onTargetSearchChange: (query: string) => void;
+  onClearTargetSearch: () => void;
   onRefreshStale: () => void;
   isRefreshing: boolean;
   /** Optional className for the outer container */
@@ -169,7 +173,11 @@ export function WorkspaceToolbar({
   onToggleFilter,
   onClearFilters,
   summary,
+  totalFilteredCount,
   items,
+  targetSearchQuery,
+  onTargetSearchChange,
+  onClearTargetSearch,
   onRefreshStale,
   isRefreshing,
   className = '',
@@ -249,6 +257,31 @@ export function WorkspaceToolbar({
           )}
         </div>
 
+        <div className="flex min-w-[16rem] flex-1 justify-end">
+          <div className="flex w-full max-w-xs items-center gap-1">
+            <input
+              type="search"
+              value={targetSearchQuery}
+              onChange={(event) => onTargetSearchChange(event.target.value)}
+              placeholder="Search target paths"
+              aria-label="Search target suggestions"
+              data-testid="workspace-target-search"
+              className="h-7 w-full rounded border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-200 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {targetSearchQuery.trim().length > 0 ? (
+              <button
+                type="button"
+                onClick={onClearTargetSearch}
+                data-testid="workspace-target-search-clear"
+                aria-label="Clear target search"
+                className="inline-flex items-center rounded border border-slate-700 bg-slate-900 px-1.5 py-1 text-[10px] text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+              >
+                <X size={10} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
         {/* Bulk action buttons */}
         <div
           role="group"
@@ -277,6 +310,12 @@ export function WorkspaceToolbar({
           )}
 
         </div>
+      </div>
+
+      <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500" data-testid="workspace-filtered-scope">
+        <span>
+          Batch scope: {totalFilteredCount} filtered row{totalFilteredCount === 1 ? '' : 's'}
+        </span>
       </div>
     </div>
   );

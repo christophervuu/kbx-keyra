@@ -13,6 +13,10 @@ export interface WorkspaceSuggestionPreviewProps {
   suggestedExpression: string;
   /** Source data to evaluate against (null when no sample data is loaded) */
   sourceData: unknown | null;
+  /** Optional enrichment payloads keyed by alias for external("alias") expressions. */
+  externalSources?: Record<string, unknown>;
+  /** Required enrichment aliases for the selected mapping preview context. */
+  requiredEnrichmentAliases?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -43,13 +47,26 @@ interface PreviewOutputProps {
   label: string;
   expression: string | null;
   sourceData: unknown | null;
+  externalSources?: Record<string, unknown>;
+  requiredEnrichmentAliases?: readonly string[];
   testId: string;
 }
 
-function PreviewOutput({ label, expression, sourceData, testId }: PreviewOutputProps) {
+function PreviewOutput({
+  label,
+  expression,
+  sourceData,
+  externalSources,
+  requiredEnrichmentAliases,
+  testId,
+}: PreviewOutputProps) {
   const { result, error, isEvaluating } = useSuggestionPreview(
     expression ?? '',
     sourceData,
+    {
+      externalSources,
+      requiredEnrichmentAliases,
+    },
   );
 
   return (
@@ -105,6 +122,8 @@ export function WorkspaceSuggestionPreview({
   currentExpression,
   suggestedExpression,
   sourceData,
+  externalSources = {},
+  requiredEnrichmentAliases = [],
 }: WorkspaceSuggestionPreviewProps) {
   if (sourceData === null) {
     return (
@@ -114,7 +133,7 @@ export function WorkspaceSuggestionPreview({
       >
         <Info size={11} className="shrink-0 text-slate-500" aria-hidden="true" />
         <p className="text-[10px] text-slate-500">
-          Load sample source data to preview what this suggestion would produce.
+          No sample selected. Load sample source data to preview what this suggestion would produce.
         </p>
       </div>
     );
@@ -129,12 +148,16 @@ export function WorkspaceSuggestionPreview({
         label="Current output:"
         expression={currentExpression}
         sourceData={sourceData}
+        externalSources={externalSources}
+        requiredEnrichmentAliases={requiredEnrichmentAliases}
         testId="preview-current"
       />
       <PreviewOutput
         label="Suggested output:"
         expression={suggestedExpression}
         sourceData={sourceData}
+        externalSources={externalSources}
+        requiredEnrichmentAliases={requiredEnrichmentAliases}
         testId="preview-suggested"
       />
     </div>
@@ -157,7 +180,7 @@ export function WorkspaceNoSourceDataCallout() {
     >
       <Info size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
       <p className="text-[10px] text-slate-500">
-        Load sample source data in the Preview panel to see what each suggestion would produce.
+        No sample selected. Load sample source data in the Preview panel to see what each suggestion would produce.
       </p>
     </div>
   );
