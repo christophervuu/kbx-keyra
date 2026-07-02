@@ -212,6 +212,55 @@ describe('EditorTopBar', () => {
     fireEvent.click(screen.getByTestId('more-menu-settings'));
     expect(onConfigToggle).toHaveBeenCalledTimes(1);
   });
+
+  it('routes More → Layout submenu actions through callbacks and reflects selected option', () => {
+    const onSetEditorPanelLayout = vi.fn();
+    const onResetEditorPanelLayout = vi.fn();
+
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        editorPanelLayout="input-first"
+        onSetEditorPanelLayout={onSetEditorPanelLayout}
+        onResetEditorPanelLayout={onResetEditorPanelLayout}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-layout'));
+
+    expect(screen.getByTestId('layout-option-input-first')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('layout-option-target-first')).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByTestId('layout-option-target-first'));
+    expect(onSetEditorPanelLayout).toHaveBeenCalledWith('target-first');
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-layout'));
+    fireEvent.click(screen.getByTestId('layout-reset-default'));
+    expect(onResetEditorPanelLayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders one-time layout announcement and supports change/dismiss actions', () => {
+    const onDismissEditorLayoutAnnouncement = vi.fn();
+
+    renderWithRouter(
+      <EditorTopBar
+        {...DEFAULT_TOP_BAR_PROPS}
+        showEditorLayoutAnnouncement={true}
+        onDismissEditorLayoutAnnouncement={onDismissEditorLayoutAnnouncement}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    expect(screen.getByTestId('editor-layout-announcement')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('editor-layout-announcement-change'));
+    expect(screen.getByTestId('layout-submenu')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('editor-layout-announcement-dismiss'));
+    expect(onDismissEditorLayoutAnnouncement).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('MappingEditorPage', () => {
@@ -343,6 +392,37 @@ describe('MappingEditorPage', () => {
     );
     expect(screen.getByTestId('source-card')).toBeInTheDocument();
     expect(screen.getByTestId('builder-card')).toBeInTheDocument();
+  });
+
+  it('uses target-first row-editing panel order by default (Target → Input → Builder)', () => {
+    renderWithRouter(
+      <MappingEditorPage projectId="proj-1" mappingId="mapping-1" panelMode="row-editing" />,
+    );
+
+    const mappingCard = screen.getByTestId('mapping-fields-card');
+    const sourceCard = screen.getByTestId('source-card');
+    const builderCard = screen.getByTestId('builder-card');
+
+    expect((mappingCard.compareDocumentPosition(sourceCard) & Node.DOCUMENT_POSITION_FOLLOWING) > 0).toBe(true);
+    expect((sourceCard.compareDocumentPosition(builderCard) & Node.DOCUMENT_POSITION_FOLLOWING) > 0).toBe(true);
+  });
+
+  it('uses input-first row-editing panel order when configured (Input → Target → Builder)', () => {
+    renderWithRouter(
+      <MappingEditorPage
+        projectId="proj-1"
+        mappingId="mapping-1"
+        panelMode="row-editing"
+        editorPanelLayout="input-first"
+      />,
+    );
+
+    const mappingCard = screen.getByTestId('mapping-fields-card');
+    const sourceCard = screen.getByTestId('source-card');
+    const builderCard = screen.getByTestId('builder-card');
+
+    expect((sourceCard.compareDocumentPosition(mappingCard) & Node.DOCUMENT_POSITION_FOLLOWING) > 0).toBe(true);
+    expect((mappingCard.compareDocumentPosition(builderCard) & Node.DOCUMENT_POSITION_FOLLOWING) > 0).toBe(true);
   });
   it('target worklist is always rendered regardless of other slots', () => {
     renderWithRouter(<MappingEditorPage projectId="proj-1" mappingId="mapping-1" />);

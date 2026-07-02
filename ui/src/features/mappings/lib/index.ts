@@ -332,3 +332,12 @@ export {
   resolveOutputRenderMode,
 } from './output-render-limits';
 export type { OutputRenderMode } from './output-render-limits';
+export {
+  useEditorPanelLayoutPreference,
+  readEditorPanelLayoutPreference,
+  writeEditorPanelLayoutPreference,
+  resetEditorPanelLayoutPreference,
+  isEditorLayoutAnnouncementDismissed,
+  dismissEditorLayoutAnnouncement,
+} from './editor-preferences';
+export type { EditorPanelLayout } from './editor-preferences';

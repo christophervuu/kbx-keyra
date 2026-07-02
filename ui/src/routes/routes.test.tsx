@@ -268,7 +268,7 @@ describe('Route rendering', () => {
 
     expect(screen.getByTestId('page-settings')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+    expect(screen.getByTestId('editor-preferences-section')).toBeInTheDocument();
   });
 
   it('renders Not Found for unknown paths (AE-10)', () => {

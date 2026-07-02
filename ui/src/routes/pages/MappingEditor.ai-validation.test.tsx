@@ -2,14 +2,35 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  resetEditorPanelLayoutPreference,
+} from '@/features/mappings/lib';
 import { AdapterProvider } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { ValidationResult as EngineValidationResult } from '@/lib/engine';
 import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
 import MappingEditor from '@/routes/pages/MappingEditor';
 import { PATHS } from '@/routes/paths';
+
+const localStorageStore: Record<string, string> = {};
+
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: (key: string) => (key in localStorageStore ? localStorageStore[key] : null),
+    setItem: (key: string, value: string) => {
+      localStorageStore[key] = String(value);
+    },
+    removeItem: (key: string) => {
+      delete localStorageStore[key];
+    },
+    clear: () => {
+      Object.keys(localStorageStore).forEach((key) => delete localStorageStore[key]);
+    },
+  },
+});
 
 const MOCK_CONFIG: MappingConfig = {
   id: 'mapping-1',
@@ -340,6 +361,102 @@ function createValidationErrorResult(targetPath: string): EngineValidationResult
 }
 
 describe('MappingEditor AI Validation integration', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('changes layout from editor More menu, persists preference, and preserves row-editing panels', async () => {
+    resetEditorPanelLayoutPreference();
+
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-orderId'));
+    expect(screen.getByTestId('source-card')).toBeInTheDocument();
+    expect(screen.getByTestId('builder-card')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    expect(screen.getByTestId('editor-layout-announcement')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('more-menu-layout'));
+    fireEvent.click(screen.getByTestId('layout-option-input-first'));
+
+    await waitFor(() => {
+      const ordered = Array.from(
+        screen.getByTestId('mapping-editor-page').querySelectorAll(
+          '[data-testid="source-card"], [data-testid="mapping-fields-card"], [data-testid="builder-card"]',
+        ),
+      ).map((node) => node.getAttribute('data-testid'));
+      expect(ordered).toEqual(['source-card', 'mapping-fields-card', 'builder-card']);
+    });
+  });
+
+  it('resets layout to default from editor menu and keeps announcement dismissed', async () => {
+    resetEditorPanelLayoutPreference();
+
+    const adapter = createMockAdapter({
+      getMapping: vi.fn().mockResolvedValue({
+        ...MOCK_CONFIG,
+        rules: [],
+      }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-orderId'));
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('more-menu-layout'));
+    fireEvent.click(screen.getByTestId('layout-option-input-first'));
+
+    await waitFor(() => {
+      const ordered = Array.from(
+        screen.getByTestId('mapping-editor-page').querySelectorAll(
+          '[data-testid="source-card"], [data-testid="mapping-fields-card"], [data-testid="builder-card"]',
+        ),
+      ).map((node) => node.getAttribute('data-testid'));
+      expect(ordered).toEqual(['source-card', 'mapping-fields-card', 'builder-card']);
+    });
+
+    fireEvent.click(screen.getByTestId('more-menu-button'));
+    fireEvent.click(screen.getByTestId('editor-layout-announcement-dismiss'));
+
+    fireEvent.click(screen.getByTestId('more-menu-layout'));
+    fireEvent.click(screen.getByTestId('layout-reset-default'));
+
+    await waitFor(() => {
+      const ordered = Array.from(
+        screen.getByTestId('mapping-editor-page').querySelectorAll(
+          '[data-testid="source-card"], [data-testid="mapping-fields-card"], [data-testid="builder-card"]',
+        ),
+      ).map((node) => node.getAttribute('data-testid'));
+      expect(ordered).toEqual(['mapping-fields-card', 'source-card', 'builder-card']);
+    });
+  });
+
   it('renders AI panel in rules view and keeps deterministic summary visible', async () => {
     const adapter = createMockAdapter();
     renderPage(adapter);

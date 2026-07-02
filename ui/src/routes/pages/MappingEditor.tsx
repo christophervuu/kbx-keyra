@@ -50,6 +50,8 @@ import {
   getPendingAutoMapSession,
   findSmartBuilderActionById,
   hydrateSmartBuilderFromExpression,
+  isEditorLayoutAnnouncementDismissed,
+  dismissEditorLayoutAnnouncement,
   setSlotScopedInput,
   normalizeSmartBuilderDraft,
   pushSmartBuilderSnapshot,
@@ -59,6 +61,7 @@ import {
   updateSmartBuilderExpression,
   buildRenderableOutput,
   resolveOutputNodeSelection,
+  useEditorPanelLayoutPreference,
 } from '@/features/mappings/lib';
 import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-display';
 import type { EditorView } from '@/features/mappings/types';
@@ -2118,6 +2121,14 @@ export default function MappingEditor() {
   const [samplePayloadCache, setSamplePayloadCache] = useState<Record<string, { raw: string; parsed: unknown | null }>>({});
   const [localSamplePayloadsBySchema, setLocalSamplePayloadsBySchema] = useState<Record<string, readonly SchemaSamplePayloadMetadata[]>>({});
   const [projectName, setProjectName] = useState<string>('Project');
+  const {
+    panelLayout: editorPanelLayout,
+    setPanelLayout: setEditorPanelLayout,
+    resetPanelLayout: resetEditorPanelLayout,
+  } = useEditorPanelLayoutPreference();
+  const [showEditorLayoutAnnouncement, setShowEditorLayoutAnnouncement] = useState(
+    () => !isEditorLayoutAnnouncementDismissed(),
+  );
   const routeEnrichmentSourceData = useMemo<Record<string, unknown>>(() => {
     const navState = location.state as Record<string, unknown> | null;
     const incomingExternalSourcesRaw = navState?.externalSourcesRaw;
@@ -4593,6 +4604,11 @@ export default function MappingEditor() {
     setIsBuilderPanelHidden(true);
   };
 
+  const handleDismissEditorLayoutAnnouncement = () => {
+    dismissEditorLayoutAnnouncement();
+    setShowEditorLayoutAnnouncement(false);
+  };
+
   const issueOverlay = isIssuesOpen
     ? (
       <div
@@ -4668,6 +4684,11 @@ export default function MappingEditor() {
         activePanelView={activePanelView}
         onActivePanelViewChange={setActivePanelView}
         showPanelViewToggle={view === 'target'}
+        editorPanelLayout={editorPanelLayout}
+        onSetEditorPanelLayout={setEditorPanelLayout}
+        onResetEditorPanelLayout={resetEditorPanelLayout}
+        showEditorLayoutAnnouncement={showEditorLayoutAnnouncement}
+        onDismissEditorLayoutAnnouncement={handleDismissEditorLayoutAnnouncement}
         onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
         onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />

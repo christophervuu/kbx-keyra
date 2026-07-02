@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 
 import type { Environment } from '@/lib/types/domain';
 import { PATHS } from '@/routes/paths';
+import type { EditorPanelLayout } from '../lib/editor-preferences';
 
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error';
 
@@ -54,6 +55,11 @@ export interface EditorTopBarProps {
   requiredFieldCount?: number;
   warningCount?: number;
   errorCount?: number;
+  editorPanelLayout?: EditorPanelLayout;
+  onSetEditorPanelLayout?: (layout: EditorPanelLayout) => void;
+  onResetEditorPanelLayout?: () => void;
+  showEditorLayoutAnnouncement?: boolean;
+  onDismissEditorLayoutAnnouncement?: () => void;
 }
 
 function saveStatusLabel(status: SaveStatus, unsavedChangeCount: number): string {
@@ -67,6 +73,7 @@ function saveStatusLabel(status: SaveStatus, unsavedChangeCount: number): string
 
 export function EditorTopBar(props: EditorTopBarProps) {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -81,6 +88,7 @@ export function EditorTopBar(props: EditorTopBarProps) {
 
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        setIsLayoutMenuOpen(false);
         setIsMoreMenuOpen(false);
       }
     }
@@ -93,6 +101,12 @@ export function EditorTopBar(props: EditorTopBarProps) {
     };
   }, [isMoreMenuOpen]);
 
+  useEffect(() => {
+    if (!isMoreMenuOpen) {
+      setIsLayoutMenuOpen(false);
+    }
+  }, [isMoreMenuOpen]);
+
   const projectPath = PATHS.PROJECT_OVERVIEW.replace(':projectId', props.projectId);
   const saveLabel = saveStatusLabel(props.saveStatus, props.unsavedChangeCount);
   const isSaving = props.saveStatus === 'saving';
@@ -101,6 +115,7 @@ export function EditorTopBar(props: EditorTopBarProps) {
 
   const sourceName = props.sourceSchemaName ?? 'No source';
   const targetName = props.targetSchemaName ?? 'No target';
+  const panelLayout = props.editorPanelLayout ?? 'target-first';
 
   return (
     <header
@@ -197,6 +212,111 @@ export function EditorTopBar(props: EditorTopBarProps) {
                 data-testid="more-menu-popover"
                 className="absolute right-0 z-50 mt-1 w-56 rounded border border-slate-700 bg-slate-900 p-1.5 shadow-xl"
               >
+                {props.showEditorLayoutAnnouncement ? (
+                  <div
+                    className="mb-1.5 rounded border border-blue-700/60 bg-blue-950/40 p-2"
+                    data-testid="editor-layout-announcement"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <p className="text-xs font-semibold text-blue-100">Prefer inputs on the left?</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-blue-200/90">
+                      You can now switch between Target-first and Input-first layouts from the editor menu.
+                    </p>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        data-testid="editor-layout-announcement-change"
+                        onClick={() => setIsLayoutMenuOpen(true)}
+                        className="rounded border border-blue-500/60 bg-blue-900/60 px-2 py-1 text-[11px] font-medium text-blue-100 transition-colors hover:bg-blue-800"
+                      >
+                        Change layout
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="editor-layout-announcement-dismiss"
+                        onClick={() => props.onDismissEditorLayoutAnnouncement?.()}
+                        className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-300 transition-colors hover:bg-slate-800"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={isLayoutMenuOpen}
+                    data-testid="more-menu-layout"
+                    onClick={() => setIsLayoutMenuOpen((prev) => !prev)}
+                    className="flex w-full items-center justify-between gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                  >
+                    <span>Layout</span>
+                    <span aria-hidden="true" className="text-slate-500">▸</span>
+                  </button>
+
+                  {isLayoutMenuOpen ? (
+                    <div
+                      role="menu"
+                      aria-label="Layout"
+                      data-testid="layout-submenu"
+                      className="mt-1 space-y-1 rounded border border-slate-700 bg-slate-950 p-1"
+                    >
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={panelLayout === 'target-first'}
+                        data-testid="layout-option-target-first"
+                        onClick={() => {
+                          props.onSetEditorPanelLayout?.('target-first');
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                      >
+                        <span className="inline-block w-3 text-center" aria-hidden="true">
+                          {panelLayout === 'target-first' ? '✓' : ''}
+                        </span>
+                        <span>Target first</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={panelLayout === 'input-first'}
+                        data-testid="layout-option-input-first"
+                        onClick={() => {
+                          props.onSetEditorPanelLayout?.('input-first');
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                      >
+                        <span className="inline-block w-3 text-center" aria-hidden="true">
+                          {panelLayout === 'input-first' ? '✓' : ''}
+                        </span>
+                        <span>Input first</span>
+                      </button>
+
+                      <div className="my-1 border-t border-slate-800" />
+
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="layout-reset-default"
+                        onClick={() => {
+                          props.onResetEditorPanelLayout?.();
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                      >
+                        Reset to default
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
                 <button
                   type="button"
                   role="menuitem"

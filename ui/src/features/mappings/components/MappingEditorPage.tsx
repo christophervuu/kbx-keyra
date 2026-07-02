@@ -1,10 +1,12 @@
 import { X } from 'lucide-react';
+import { Fragment } from 'react';
 import type { ReactNode } from 'react';
 
 import { EditorTopBar } from './EditorTopBar';
 import type { HighestDeployStatus, SaveStatus } from './EditorTopBar';
 import { PanelPlaceholder } from './PanelPlaceholder';
 import { PreviewProvider } from '../context/preview-context';
+import type { EditorPanelLayout } from '../lib/editor-preferences';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,6 +138,16 @@ export interface MappingEditorPageProps {
   onActivePanelViewChange?: (view: 'fields' | 'output') => void;
   /** Hide segmented control when panel sub-view switching is not applicable. */
   showPanelViewToggle?: boolean;
+  /** Visual and DOM order preference for Target/Input cards in editor workspace. */
+  editorPanelLayout?: EditorPanelLayout;
+  /** Callback to set editor panel layout preference from More → Layout menu. */
+  onSetEditorPanelLayout?: (layout: EditorPanelLayout) => void;
+  /** Callback to reset editor panel layout preference to default. */
+  onResetEditorPanelLayout?: () => void;
+  /** Whether to show one-time layout announcement in overflow menu. */
+  showEditorLayoutAnnouncement?: boolean;
+  /** Dismiss callback for one-time layout announcement. */
+  onDismissEditorLayoutAnnouncement?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +240,11 @@ export function MappingEditorPage({
   activePanelView = 'fields',
   onActivePanelViewChange,
   showPanelViewToggle = false,
+  editorPanelLayout = 'target-first',
+  onSetEditorPanelLayout,
+  onResetEditorPanelLayout,
+  showEditorLayoutAnnouncement = false,
+  onDismissEditorLayoutAnnouncement,
 }: MappingEditorPageProps) {
   // FS-092: in-page bottom preview section is intentionally removed from Mapping Editor.
   // Keep prop for backward compatibility with existing call sites.
@@ -242,6 +259,176 @@ export function MappingEditorPage({
     : showBuilderCard
       ? (targetPanelCondensed ? 'w-[44%]' : 'w-[56%]')
       : 'w-[68%]';
+
+  const sourceCard = showSourceCard ? (
+    <section
+      className="flex h-full min-h-0 w-[22%] min-w-[260px] flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out"
+      data-testid="source-card"
+    >
+      <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="flex items-center justify-between gap-2">
+          <span>Input Fields</span>
+          {onHideSourcePanel ? (
+            <button
+              type="button"
+              aria-label="Hide Source panel"
+              data-testid="hide-source-panel"
+              onClick={onHideSourcePanel}
+              className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto" data-testid="source-panel">
+        {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
+      </div>
+    </section>
+  ) : null;
+
+  const mappingFieldsCard = (
+    <section
+      className={[
+        'flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out',
+        mappingCardWidthClass,
+      ].join(' ')}
+      data-testid="mapping-fields-card"
+    >
+      <div className="border-b border-slate-800 px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Target Mapping Fields
+          </span>
+
+          {showPanelViewToggle ? (
+            <div
+              role="tablist"
+              aria-label="Target panel view"
+              data-testid="target-panel-view-toggle"
+              className="inline-flex items-center rounded border border-slate-700 bg-slate-900 p-0.5"
+            >
+              {(['fields', 'output'] as const).map((view) => {
+                const isSelected = activePanelView === view;
+                const label = view === 'fields' ? 'Fields' : 'Output';
+
+                return (
+                  <button
+                    key={view}
+                    type="button"
+                    role="tab"
+                    id={`target-panel-tab-${view}`}
+                    aria-controls={`target-panel-view-${view}`}
+                    aria-selected={isSelected}
+                    tabIndex={isSelected ? 0 : -1}
+                    data-testid={`target-panel-tab-${view}`}
+                    onClick={() => onActivePanelViewChange?.(view)}
+                    onKeyDown={(event) => {
+                      if (!onActivePanelViewChange) return;
+                      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                        event.preventDefault();
+                        onActivePanelViewChange(view === 'fields' ? 'output' : 'fields');
+                        return;
+                      }
+                      if (event.key === 'Home') {
+                        event.preventDefault();
+                        onActivePanelViewChange('fields');
+                        return;
+                      }
+                      if (event.key === 'End') {
+                        event.preventDefault();
+                        onActivePanelViewChange('output');
+                      }
+                    }}
+                    className={[
+                      'rounded px-2 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+                      isSelected
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100',
+                    ].join(' ')}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto" data-testid="target-worklist">
+        {showPanelViewToggle ? (
+          <>
+            <div
+              id="target-panel-view-fields"
+              role="tabpanel"
+              aria-labelledby="target-panel-tab-fields"
+              data-testid="target-panel-view-fields"
+              className={activePanelView === 'fields' ? 'h-full' : 'hidden h-full'}
+            >
+              {targetWorklistContent ?? (
+                <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+              )}
+            </div>
+
+            <div
+              id="target-panel-view-output"
+              role="tabpanel"
+              aria-labelledby="target-panel-tab-output"
+              data-testid="target-panel-view-output"
+              className={activePanelView === 'output' ? 'h-full' : 'hidden h-full'}
+            >
+              {targetOutputContent ?? (
+                <PanelPlaceholder name="Output" />
+              )}
+            </div>
+          </>
+        ) : (
+          targetWorklistContent ?? (
+            <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
+          )
+        )}
+      </div>
+    </section>
+  );
+
+  const builderCard = showBuilderCard ? (
+    <section
+      className={[
+        'flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out',
+        targetPanelCondensed ? 'w-[36%] min-w-[420px]' : 'w-[24%] min-w-[300px]',
+      ].join(' ')}
+      data-testid="builder-card"
+    >
+      <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="flex items-center justify-between gap-2">
+          <span>Builder</span>
+          {onHideBuilderPanel ? (
+            <button
+              type="button"
+              aria-label="Hide Builder panel"
+              data-testid="hide-builder-panel"
+              onClick={onHideBuilderPanel}
+              className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div
+        data-testid="builder-panel"
+        data-automap-mode={isAutoMapMode ? 'true' : undefined}
+        tabIndex={-1}
+        className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+      >
+        {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
+      </div>
+    </section>
+  ) : null;
+
+  const orderedLeadingPanels = editorPanelLayout === 'input-first'
+    ? [sourceCard, mappingFieldsCard]
+    : [mappingFieldsCard, sourceCard];
 
   return (
     <div
@@ -289,8 +476,13 @@ export function MappingEditorPage({
         autoMapScopeCount={autoMapScopeCount}
           showDeployControls={showDeployControls}
           sampleSelectorSlot={sampleSelectorSlot}
-          onToggleBrowseSource={onToggleBrowseSource}
-          isBrowseSourceActive={isBrowseSourceActive}
+        onToggleBrowseSource={onToggleBrowseSource}
+        isBrowseSourceActive={isBrowseSourceActive}
+        editorPanelLayout={editorPanelLayout}
+        onSetEditorPanelLayout={onSetEditorPanelLayout}
+        onResetEditorPanelLayout={onResetEditorPanelLayout}
+        showEditorLayoutAnnouncement={showEditorLayoutAnnouncement}
+        onDismissEditorLayoutAnnouncement={onDismissEditorLayoutAnnouncement}
         />
 
       {/* Main content area — wrapped in PreviewProvider so all panels share preview state */}
@@ -302,169 +494,11 @@ export function MappingEditorPage({
               isOverview ? 'items-stretch justify-center' : 'items-stretch justify-start',
             ].join(' ')}
           >
-            <section
-              className={[
-                'flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out',
-                mappingCardWidthClass,
-              ].join(' ')}
-              data-testid="mapping-fields-card"
-            >
-              <div className="border-b border-slate-800 px-3 py-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Target Mapping Fields
-                  </span>
+            {orderedLeadingPanels.map((panel, index) => (
+              panel ? <Fragment key={`ordered-panel-${index}`}>{panel}</Fragment> : null
+            ))}
 
-                  {showPanelViewToggle ? (
-                    <div
-                      role="tablist"
-                      aria-label="Target panel view"
-                      data-testid="target-panel-view-toggle"
-                      className="inline-flex items-center rounded border border-slate-700 bg-slate-900 p-0.5"
-                    >
-                      {(['fields', 'output'] as const).map((view) => {
-                        const isSelected = activePanelView === view;
-                        const label = view === 'fields' ? 'Fields' : 'Output';
-
-                        return (
-                          <button
-                            key={view}
-                            type="button"
-                            role="tab"
-                            id={`target-panel-tab-${view}`}
-                            aria-controls={`target-panel-view-${view}`}
-                            aria-selected={isSelected}
-                            tabIndex={isSelected ? 0 : -1}
-                            data-testid={`target-panel-tab-${view}`}
-                            onClick={() => onActivePanelViewChange?.(view)}
-                            onKeyDown={(event) => {
-                              if (!onActivePanelViewChange) return;
-                              if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-                                event.preventDefault();
-                                onActivePanelViewChange(view === 'fields' ? 'output' : 'fields');
-                                return;
-                              }
-                              if (event.key === 'Home') {
-                                event.preventDefault();
-                                onActivePanelViewChange('fields');
-                                return;
-                              }
-                              if (event.key === 'End') {
-                                event.preventDefault();
-                                onActivePanelViewChange('output');
-                              }
-                            }}
-                            className={[
-                              'rounded px-2 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
-                              isSelected
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100',
-                            ].join(' ')}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto" data-testid="target-worklist">
-                {showPanelViewToggle ? (
-                  <>
-                    <div
-                      id="target-panel-view-fields"
-                      role="tabpanel"
-                      aria-labelledby="target-panel-tab-fields"
-                      data-testid="target-panel-view-fields"
-                      className={activePanelView === 'fields' ? 'h-full' : 'hidden h-full'}
-                    >
-                      {targetWorklistContent ?? (
-                        <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
-                      )}
-                    </div>
-
-                    <div
-                      id="target-panel-view-output"
-                      role="tabpanel"
-                      aria-labelledby="target-panel-tab-output"
-                      data-testid="target-panel-view-output"
-                      className={activePanelView === 'output' ? 'h-full' : 'hidden h-full'}
-                    >
-                      {targetOutputContent ?? (
-                        <PanelPlaceholder name="Output" />
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  targetWorklistContent ?? (
-                    <PanelPlaceholder name={PLACEHOLDER_LABELS.targetWorklist} />
-                  )
-                )}
-              </div>
-            </section>
-
-            {showSourceCard && (
-              <section
-                className="flex h-full min-h-0 w-[22%] min-w-[260px] flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out"
-                data-testid="source-card"
-              >
-                <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  <div className="flex items-center justify-between gap-2">
-                    <span>Input Fields</span>
-                    {onHideSourcePanel ? (
-                      <button
-                        type="button"
-                        aria-label="Hide Source panel"
-                        data-testid="hide-source-panel"
-                        onClick={onHideSourcePanel}
-                        className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-                      >
-                        <X size={12} aria-hidden="true" />
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="min-h-0 flex-1 overflow-auto" data-testid="source-panel">
-                  {sourceContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.source} />}
-                </div>
-              </section>
-            )}
-
-            {showBuilderCard && (
-              <section
-                className={[
-                  'flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900/40 shadow-[0_0_0_1px_rgba(15,23,42,0.2)] transition-all duration-200 ease-in-out',
-                  targetPanelCondensed ? 'w-[36%] min-w-[420px]' : 'w-[24%] min-w-[300px]',
-                ].join(' ')}
-                data-testid="builder-card"
-              >
-                <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  <div className="flex items-center justify-between gap-2">
-                    <span>Builder</span>
-                    {onHideBuilderPanel ? (
-                      <button
-                        type="button"
-                        aria-label="Hide Builder panel"
-                        data-testid="hide-builder-panel"
-                        onClick={onHideBuilderPanel}
-                        className="inline-flex items-center justify-center rounded border border-slate-700 bg-slate-900 p-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
-                      >
-                        <X size={12} aria-hidden="true" />
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div
-                  data-testid="builder-panel"
-                  data-automap-mode={isAutoMapMode ? 'true' : undefined}
-                  tabIndex={-1}
-                  className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
-                >
-                  {builderContent ?? <PanelPlaceholder name={PLACEHOLDER_LABELS.builder} />}
-                </div>
-              </section>
-            )}
+            {builderCard}
           </div>
 
           <div className="sr-only" data-testid="bottom-area-removed" />
