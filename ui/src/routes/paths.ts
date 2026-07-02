@@ -1,5 +1,7 @@
 export const PATHS = {
   HOME: '/',
+  VALUE_MAPPINGS: '/value-mappings',
+  VALUE_MAPPING_DETAIL: '/value-mappings/:valueMapId',
   CREATE_PROJECT: '/projects/new',
   PROJECT_OVERVIEW: '/projects/:projectId',
   PROJECT_SETTINGS: '/projects/:projectId/settings',

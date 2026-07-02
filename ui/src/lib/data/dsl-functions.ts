@@ -392,15 +392,16 @@ export const DSL_FUNCTION_CATALOG: readonly FunctionCatalogEntry[] = [
   {
     name: 'valueMap',
     category: 'Lookup',
-    description: 'Maps an input value to an output value using a key-value object. Returns an optional fallback if no match is found.',
+    description: 'Maps an input value to an output value using a key-value object or valueTable binding. Optional fallback controls no-match behavior, and optional matchMode selects exact or ignore-case lookup.',
     parameterCount: '2+',
     parameters: [
       { name: 'value', type: 'any', required: true },
       { name: 'mappings', type: 'any', required: true },
       { name: 'fallback', type: 'any', required: false },
+      { name: 'matchMode', type: 'string', required: false },
     ],
     returnType: 'any',
-    example: 'valueMap(source("status"), { "A": "Active", "I": "Inactive" }, static("Unknown"))',
+    example: 'valueMap(source("status"), { "A": "Active", "I": "Inactive" }, static("Unknown"), "ignore-case")',
   },
 
   // ----- Array -----

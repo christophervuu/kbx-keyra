@@ -17,11 +17,15 @@ import type {
   MappingVersionEntry,
   ProjectDetail,
   ProjectMetadata,
+  ProjectValueMapDetail,
+  ProjectValueMapLinkSummary,
   ProjectValueTable,
   ProjectValueTableRevision,
+  ReviewProjectValueMapUpdateResult,
   ResolveProjectValueTableReferenceResult,
   SchemaDetail,
   SchemaMetadata,
+  ValueMapUsageSummary,
   ValueTableDiffPage,
   ValueTableUsageEntry,
 } from '@/lib/types';
@@ -71,6 +75,56 @@ const USAGE: ValueTableUsageEntry[] = [
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
 ];
+
+const LINK_SUMMARY: ProjectValueMapLinkSummary = {
+  projectId: 'p-1',
+  valueMapId: 'gvm-1',
+  key: 'global-order-status',
+  name: 'Global Order Status',
+  pinnedRevision: 1,
+  latestRevision: 2,
+  overlayRevision: 0,
+  updateAvailable: true,
+  dependencyState: 'needs-review',
+  status: 'active',
+};
+
+const LINK_DETAIL: ProjectValueMapDetail = {
+  projectId: 'p-1',
+  valueMapId: 'gvm-1',
+  key: 'global-order-status',
+  name: 'Global Order Status',
+  pinnedRevision: 1,
+  latestRevision: 2,
+  overlayRevision: 1,
+  updateAvailable: true,
+  dependencyState: 'needs-review',
+  effectiveRows: [
+    { rowId: 'g-row-1', sideAValue: 'confirmed', sideBValue: 'OPEN', provenance: 'inherited' },
+    { rowId: 'g-row-2', sideAValue: 'cancelled', sideBValue: 'CLOSED', provenance: 'override' },
+    { rowId: 'add-1', sideAValue: 'on-hold', sideBValue: 'PAUSED', provenance: 'add' },
+  ],
+};
+
+const REVIEW_BLOCKED: ReviewProjectValueMapUpdateResult = {
+  projectId: 'p-1',
+  valueMapId: 'gvm-1',
+  currentPinnedRevision: 1,
+  candidateRevision: 2,
+  updateAvailable: true,
+  conflicts: [{ type: 'orphan', rowId: 'g-row-9', message: 'Overlay target row no longer exists in candidate revision: g-row-9' }],
+  orphanedRowIds: ['g-row-9'],
+  canAccept: false,
+};
+
+const VALUE_MAP_USAGE: ValueMapUsageSummary = {
+  mappings: [USAGE[0]],
+  linkedProjects: [],
+  counts: {
+    mappings: 1,
+    linkedProjects: 0,
+  },
+};
 
 function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
   return {
@@ -226,6 +280,55 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
         resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }],
       },
     })),
+    listGlobalValueMaps: vi.fn(async (): Promise<ProjectValueTable[]> => [{
+      ...TABLE,
+      id: 'gvm-1',
+      projectId: 'global',
+      key: 'global-order-status',
+      name: 'Global Order Status',
+      currentRevision: 2,
+    }]),
+    createGlobalValueMap: vi.fn(async (): Promise<ProjectValueTable> => ({
+      ...TABLE,
+      id: 'gvm-1',
+      projectId: 'global',
+      key: 'global-order-status',
+      name: 'Global Order Status',
+      currentRevision: 2,
+    })),
+    getGlobalValueMap: vi.fn(async (): Promise<ProjectValueTable> => ({
+      ...TABLE,
+      id: 'gvm-1',
+      projectId: 'global',
+      key: 'global-order-status',
+      name: 'Global Order Status',
+      currentRevision: 2,
+    })),
+    listGlobalValueMapRevisions: vi.fn(async (): Promise<ProjectValueTableRevision[]> => [
+      { ...REVISION, valueTableId: 'gvm-1', revision: 2 },
+      { ...REVISION, valueTableId: 'gvm-1', revision: 1 },
+    ]),
+    createGlobalValueMapRevision: vi.fn(async (): Promise<ProjectValueTableRevision> => ({ ...REVISION, valueTableId: 'gvm-1', revision: 3 })),
+    getGlobalValueMapRevision: vi.fn(async (): Promise<ProjectValueTableRevision> => ({ ...REVISION, valueTableId: 'gvm-1' })),
+    archiveGlobalValueMap: vi.fn(async (): Promise<ProjectValueTable> => ({ ...TABLE, id: 'gvm-1', status: 'archived' })),
+    getGlobalValueMapUsage: vi.fn(async (): Promise<ValueMapUsageSummary> => VALUE_MAP_USAGE),
+
+    listProjectValueMaps: vi.fn(async (): Promise<ProjectValueMapLinkSummary[]> => [LINK_SUMMARY]),
+    linkProjectValueMap: vi.fn(async (): Promise<ProjectValueMapDetail> => LINK_DETAIL),
+    getProjectValueMapDetail: vi.fn(async (): Promise<ProjectValueMapDetail> => LINK_DETAIL),
+    updateProjectValueMapOverlay: vi.fn(async (): Promise<ProjectValueMapDetail> => ({
+      ...LINK_DETAIL,
+      overlayRevision: LINK_DETAIL.overlayRevision + 1,
+    })),
+    reviewProjectValueMapUpdate: vi.fn(async (): Promise<ReviewProjectValueMapUpdateResult> => REVIEW_BLOCKED),
+    acceptProjectValueMapUpdate: vi.fn(async (): Promise<ProjectValueMapDetail> => ({
+      ...LINK_DETAIL,
+      pinnedRevision: 2,
+      latestRevision: 2,
+      updateAvailable: false,
+      dependencyState: 'current',
+    })),
+    unlinkProjectValueMap: vi.fn(async (): Promise<void> => undefined),
     ...overrides,
   } as unknown as ApiAdapter;
 }
@@ -284,10 +387,10 @@ describe('ProjectValueMappingsPage', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Create Table' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create Project-only Map' })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Create Table' }));
+    await user.click(screen.getByRole('button', { name: 'Create Project-only Map' }));
 
     expect(screen.getByTestId('value-table-editor-dialog')).toBeInTheDocument();
 
@@ -376,5 +479,88 @@ describe('ProjectValueMappingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Back to Project' }));
 
     expect(screen.getByTestId('project-overview-page')).toBeInTheDocument();
+  });
+
+  it('supports link global map modal flow', async () => {
+    const linkProjectValueMap = vi.fn(async (): Promise<ProjectValueMapDetail> => LINK_DETAIL);
+    const adapter = createMockAdapter({ linkProjectValueMap });
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Link Global Map' })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Link Global Map' }));
+
+    expect(screen.getByTestId('project-value-map-link-modal')).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText('Global value map selection'),
+      'gvm-1',
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Global value map revision selection')).not.toBeDisabled();
+    });
+
+    await user.selectOptions(screen.getByLabelText('Global value map revision selection'), '2');
+    await user.click(screen.getByTestId('project-value-map-link-modal-confirm'));
+
+    await waitFor(() => {
+      expect(linkProjectValueMap).toHaveBeenCalledWith('p-1', {
+        valueMapId: 'gvm-1',
+        revision: 2,
+      });
+    });
+  });
+
+  it('shows provenance filter and collision warning for add overlay', async () => {
+    const adapter = createMockAdapter();
+    const user = userEvent.setup();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-value-map-link-detail')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByLabelText('Overlay action'), 'add');
+    await user.type(screen.getByLabelText('Overlay side A value'), 'confirmed');
+    await user.type(screen.getByLabelText('Overlay side B value'), 'OPEN');
+
+    expect(screen.getByTestId('project-value-map-overlay-collision-warning')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Provenance filter'), 'override');
+
+    await waitFor(() => {
+      const effectiveRows = screen.getByTestId('project-value-map-effective-rows');
+      expect(within(effectiveRows).getByText('cancelled')).toBeInTheDocument();
+      expect(within(effectiveRows).queryByText('confirmed')).not.toBeInTheDocument();
+    });
+  });
+
+  it('blocks update acceptance when review has orphan conflicts', async () => {
+    const acceptProjectValueMapUpdate = vi.fn(async (): Promise<ProjectValueMapDetail> => LINK_DETAIL);
+    const adapter = createMockAdapter({ acceptProjectValueMapUpdate });
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-value-map-review-summary')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('project-value-map-accept-update')).toBeDisabled();
+    expect(screen.getByTestId('project-value-map-review-conflicts')).toBeInTheDocument();
+    expect(acceptProjectValueMapUpdate).not.toHaveBeenCalled();
+  });
+
+  it('shows unlink usage guard and disables unlink action when referenced', async () => {
+    const adapter = createMockAdapter();
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-value-map-unlink-usage-guard')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('project-value-map-unlink')).toBeDisabled();
   });
 });

@@ -69,6 +69,7 @@ import { useAdapter } from '@/lib/api';
 import { executeMapping } from '@/lib/engine';
 import type {
   MappingRuleProjectValueTableRef,
+  ValueMapMatchMode,
   MappingRuleValueTableRef,
   ProjectValueTable,
   ProjectValueTableRevision,
@@ -523,6 +524,12 @@ interface ValueTableDirectionOption {
 
 type ValueMapProjectSelectionState = ValueMapProjectUiState;
 
+const VALUE_MAP_MATCH_MODE_OPTIONS: readonly ValueMapMatchMode[] = ['exact', 'ignore-case'];
+
+function normalizeValueMapMatchMode(value: unknown): ValueMapMatchMode {
+  return value === 'ignore-case' ? 'ignore-case' : 'exact';
+}
+
 interface ValueMapConversionPromptState {
   readonly targetPath: string;
   readonly selectedTableId: string;
@@ -625,6 +632,15 @@ function deriveFallbackValueFromDraft(draft: SmartBuilderDraft): ValueTablePrimi
     return composition.fallback.value;
   }
   return '';
+}
+
+function deriveMatchModeFromDraft(draft: SmartBuilderDraft): ValueMapMatchMode {
+  const composition = draft.composition;
+  if (!composition || composition.kind !== 'valueMap') return 'exact';
+  const candidate = composition.matchMode
+    ?? (composition.scope === 'project' ? composition.project?.matchMode : undefined)
+    ?? (composition.scope === 'project' ? composition.project?.ref.matchMode : undefined);
+  return candidate === 'ignore-case' ? 'ignore-case' : 'exact';
 }
 
 function toDirectionLabel(direction: ValueTableDirection, revision: ProjectValueTableRevision): string {
@@ -813,6 +829,7 @@ export function applySmartActionToDraft(
     readonly valueMapScope?: ValueTableScope;
     readonly valueMapProjectSelection?: {
       readonly ref: MappingRuleProjectValueTableRef;
+      readonly matchMode?: ValueMapMatchMode;
       readonly tableName?: string;
       readonly tableStatus?: ValueTableStatus;
       readonly currentRevision?: number;
@@ -821,6 +838,7 @@ export function applySmartActionToDraft(
       readonly directionSupport?: ValueTableDirectionSupport;
       readonly usageCount?: number;
     };
+    readonly valueMapMatchMode?: ValueMapMatchMode;
     readonly valueMapNoMatchMode?: ValueTableNoMatchMode;
     readonly valueMapFallbackValue?: ValueTablePrimitiveValue;
     readonly fixedValue?: unknown;
@@ -854,14 +872,19 @@ export function applySmartActionToDraft(
   const actionParameters = parameterResolution.ok ? parameterResolution.values : {};
   let nextDraft: SmartBuilderDraft = draft;
 
-  const resolveValueMapFallback = () => {
-    const fallbackMode = options?.valueMapNoMatchMode ?? deriveNoMatchModeFromDraft(draft);
-    const fallbackValue = coerceValueMapFallbackByTargetType(
-      draft.targetType,
-      options?.valueMapFallbackValue ?? deriveFallbackValueFromDraft(draft),
-    );
-    return normalizeValueMapFallback(fallbackMode, fallbackValue);
-  };
+    const resolveValueMapFallback = () => {
+      const fallbackMode = options?.valueMapNoMatchMode ?? deriveNoMatchModeFromDraft(draft);
+      const fallbackValue = coerceValueMapFallbackByTargetType(
+        draft.targetType,
+        options?.valueMapFallbackValue ?? deriveFallbackValueFromDraft(draft),
+      );
+      return normalizeValueMapFallback(fallbackMode, fallbackValue);
+    };
+
+    const resolveValueMapMatchMode = (): ValueMapMatchMode => {
+      const raw = options?.valueMapMatchMode ?? deriveMatchModeFromDraft(draft);
+      return VALUE_MAP_MATCH_MODE_OPTIONS.includes(raw) ? raw : 'exact';
+    };
 
   const toMathOperator = (id: string): 'add' | 'subtract' | 'multiply' | 'divide' =>
     id === 'number.add'
@@ -1489,16 +1512,33 @@ export function applySmartActionToDraft(
       const fallback = resolveValueMapFallback();
       const scope = options?.valueMapScope
         ?? (draft.composition?.kind === 'valueMap' ? (draft.composition.scope ?? 'inline') : 'inline');
+      const matchMode = resolveValueMapMatchMode();
       nextDraft = {
         ...draft,
         composition: {
           kind: 'valueMap',
           inputId: selectedLookup.id,
+          matchMode,
           scope,
-          project: scope === 'project' ? (options?.valueMapProjectSelection ?? (draft.composition?.kind === 'valueMap' ? (draft.composition.project ?? null) : null)) : null,
-          mappings: draft.composition?.kind === 'valueMap' ? draft.composition.mappings : [],
-          fallback: fallback.fallbackArgument,
-          noMatchBehavior: fallback.noMatchBehavior,
+      project: scope === 'project'
+        ? {
+          ...(options?.valueMapProjectSelection
+            ?? (draft.composition?.kind === 'valueMap' ? (draft.composition.project ?? null) : null)),
+              ...(options?.valueMapProjectSelection?.ref
+                ? {
+                  ref: {
+                    ...options.valueMapProjectSelection.ref,
+                    matchMode,
+                  },
+                }
+                : {}),
+          matchMode,
+        }
+        : null,
+      ...(scope !== 'project' ? { matchMode } : {}),
+      mappings: draft.composition?.kind === 'valueMap' ? draft.composition.mappings : [],
+      fallback: fallback.fallbackArgument,
+      noMatchBehavior: fallback.noMatchBehavior,
         },
       };
       break;
@@ -3280,7 +3320,15 @@ export default function MappingEditor() {
 
     const scope = composition.scope ?? 'inline';
     const valueTableRef: MappingRuleValueTableRef = scope === 'project' && composition.project
-      ? composition.project.ref
+      ? {
+        ...composition.project.ref,
+        matchMode: normalizeValueMapMatchMode(
+          composition.matchMode
+          ?? composition.project.matchMode
+          ?? composition.project.ref.matchMode
+          ?? 'exact',
+        ),
+      }
       : { scope: 'inline' };
 
     editor.actions.updateRuleByTarget(targetPath, {
@@ -3318,6 +3366,14 @@ export default function MappingEditor() {
       : undefined;
 
     const noMatchMode = composition.noMatchBehavior?.mode ?? 'fallback_value';
+    const matchMode: ValueMapMatchMode = scope === 'project'
+      ? normalizeValueMapMatchMode(
+        composition.matchMode
+        ?? composition.project?.matchMode
+        ?? composition.project?.ref.matchMode
+        ?? 'exact',
+      )
+      : normalizeValueMapMatchMode(composition.matchMode ?? 'exact');
     const fallbackValue = composition.noMatchBehavior?.fallbackValue
       ?? (composition.fallback.kind === 'static' && (
         typeof composition.fallback.value === 'string'
@@ -3346,6 +3402,7 @@ export default function MappingEditor() {
           ? selectedDirectionOption.reason
           : undefined,
       noMatchMode,
+      matchMode,
       fallbackValue,
       projectSelection: composition.project ?? null,
     };
@@ -3371,6 +3428,7 @@ export default function MappingEditor() {
     targetPath: string;
     tableId: string;
     direction: ValueTableDirection;
+    matchMode?: ValueMapMatchMode;
     noMatchMode?: ValueTableNoMatchMode;
     fallbackValue?: ValueTablePrimitiveValue;
     preserveInlineMappings?: boolean;
@@ -3398,9 +3456,14 @@ export default function MappingEditor() {
       input.noMatchMode ?? deriveNoMatchModeFromDraft(resolved.draft),
       input.fallbackValue ?? deriveFallbackValueFromDraft(resolved.draft),
     );
+    const matchMode = input.matchMode ?? deriveMatchModeFromDraft(resolved.draft);
 
     const projectSelection = {
-      ref: resolvedRef.ref,
+      ref: {
+        ...resolvedRef.ref,
+        matchMode: normalizeValueMapMatchMode(matchMode),
+      },
+      matchMode: normalizeValueMapMatchMode(matchMode),
       tableName: selected.table.name,
       tableStatus: selected.table.status,
       currentRevision: selected.table.currentRevision,
@@ -3413,6 +3476,7 @@ export default function MappingEditor() {
     const nextDraft = applySmartActionToDraft(resolved.draft, 'lookup.valueMap', {
       valueMapScope: 'project',
       valueMapProjectSelection: projectSelection,
+      valueMapMatchMode: normalizeValueMapMatchMode(matchMode),
       valueMapNoMatchMode: fallback.noMatchBehavior.mode,
       valueMapFallbackValue:
         fallback.noMatchBehavior.mode === 'fallback_value'
@@ -3426,6 +3490,7 @@ export default function MappingEditor() {
         ...nextDraft,
         composition: {
           ...composed,
+          matchMode: normalizeValueMapMatchMode(matchMode),
           scope: 'project',
           project: projectSelection,
           mappings: input.preserveInlineMappings ? composed.mappings : [],
@@ -3436,6 +3501,7 @@ export default function MappingEditor() {
         ...nextDraft,
         composition: {
           ...composed,
+          matchMode: normalizeValueMapMatchMode(matchMode),
           scope: 'project',
           project: projectSelection,
           mappings: input.preserveInlineMappings ? composed.mappings : [],
@@ -4344,6 +4410,12 @@ export default function MappingEditor() {
               targetPath: selectedTargetPath,
               patch: (composition) => ({
                 ...composition,
+                matchMode: normalizeValueMapMatchMode(
+                  composition.matchMode
+                  ?? composition.project?.matchMode
+                  ?? composition.project?.ref.matchMode
+                  ?? 'exact',
+                ),
                 scope: 'inline',
                 project: null,
               }),
@@ -4381,7 +4453,7 @@ export default function MappingEditor() {
             preserveInlineMappings: false,
           });
         }}
-        onValueMapDirectionSelect={(direction) => {
+          onValueMapDirectionSelect={(direction) => {
           if (!selectedTargetPath) return;
           const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
           const state = (() => {
@@ -4398,11 +4470,58 @@ export default function MappingEditor() {
             return deriveValueMapProjectSelectionState(selectedTargetPath, hydrated.draft);
           })();
 
-          if (!state?.tableId) return;
+            if (!state?.tableId) return;
+            void applyValueMapSelectionToDraft({
+              targetPath: selectedTargetPath,
+              tableId: state.tableId,
+              direction,
+              matchMode: normalizeValueMapMatchMode(state.matchMode),
+              preserveInlineMappings: true,
+            });
+          }}
+        onValueMapMatchModeChange={(matchMode) => {
+          if (!selectedTargetPath) return;
+          const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
+          const state = (() => {
+            const cached = valueMapProjectSelectionByTarget[targetSessionKey];
+            if (cached) return cached;
+
+            const existingDraft = smartDraftByTargetState[targetSessionKey];
+            if (existingDraft) {
+              return deriveValueMapProjectSelectionState(selectedTargetPath, existingDraft);
+            }
+
+            const hydrated = hydrateSmartDraftForTarget(selectedTargetPath);
+            if (hydrated.kind === 'advanced') return null;
+            return deriveValueMapProjectSelectionState(selectedTargetPath, hydrated.draft);
+          })();
+
+          if (!state?.tableId || !state.direction) {
+            updateValueMapCompositionForTarget({
+              targetPath: selectedTargetPath,
+              patch: (composition) => ({
+                ...composition,
+                matchMode: normalizeValueMapMatchMode(matchMode),
+                project: composition.project
+                  ? {
+                    ...composition.project,
+                    matchMode: normalizeValueMapMatchMode(matchMode),
+                    ref: {
+                      ...composition.project.ref,
+                      matchMode: normalizeValueMapMatchMode(matchMode),
+                    },
+                  }
+                  : composition.project,
+              }),
+            });
+            return;
+          }
+
           void applyValueMapSelectionToDraft({
             targetPath: selectedTargetPath,
             tableId: state.tableId,
-            direction,
+            direction: state.direction,
+            matchMode: normalizeValueMapMatchMode(matchMode),
             preserveInlineMappings: true,
           });
         }}
@@ -4425,6 +4544,12 @@ export default function MappingEditor() {
               );
               return {
                 ...composition,
+                matchMode: normalizeValueMapMatchMode(
+                  composition.matchMode
+                  ?? composition.project?.matchMode
+                  ?? composition.project?.ref.matchMode
+                  ?? 'exact',
+                ),
                 fallback: normalized.fallbackArgument,
                 noMatchBehavior: normalized.noMatchBehavior,
               };
@@ -4437,6 +4562,12 @@ export default function MappingEditor() {
             targetPath: selectedTargetPath,
             patch: (composition) => ({
               ...composition,
+              matchMode: normalizeValueMapMatchMode(
+                composition.matchMode
+                ?? composition.project?.matchMode
+                ?? composition.project?.ref.matchMode
+                ?? 'exact',
+              ),
               scope: 'inline',
               project: null,
               mappings: [
@@ -4455,6 +4586,12 @@ export default function MappingEditor() {
             targetPath: selectedTargetPath,
             patch: (composition) => ({
               ...composition,
+              matchMode: normalizeValueMapMatchMode(
+                composition.matchMode
+                ?? composition.project?.matchMode
+                ?? composition.project?.ref.matchMode
+                ?? 'exact',
+              ),
               scope: 'inline',
               project: null,
               mappings: composition.mappings.map((entry, rowIndex) => {
@@ -4476,6 +4613,12 @@ export default function MappingEditor() {
             targetPath: selectedTargetPath,
             patch: (composition) => ({
               ...composition,
+              matchMode: normalizeValueMapMatchMode(
+                composition.matchMode
+                ?? composition.project?.matchMode
+                ?? composition.project?.ref.matchMode
+                ?? 'exact',
+              ),
               scope: 'inline',
               project: null,
               mappings: composition.mappings.filter((_, rowIndex) => rowIndex !== index),
@@ -4493,6 +4636,12 @@ export default function MappingEditor() {
               );
               return {
                 ...composition,
+                matchMode: normalizeValueMapMatchMode(
+                  composition.matchMode
+                  ?? composition.project?.matchMode
+                  ?? composition.project?.ref.matchMode
+                  ?? 'exact',
+                ),
                 fallback: normalized.fallbackArgument,
                 noMatchBehavior: normalized.noMatchBehavior,
               };

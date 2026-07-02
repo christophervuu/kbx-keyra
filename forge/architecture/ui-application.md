@@ -659,6 +659,69 @@ Adapter parity + offline determinism:
 - `ApiAdapter` exposes equivalent value-table methods in `HttpAdapter` and `LocalStorageAdapter`.
 - Offline/browser execution continues using embedded `resolvedEntries` in mapping config; no runtime table fetches are introduced.
 
+### FS-102 Value Mapping UI/domain addendum
+
+FS-102 formalizes Value Mapping terminology and global reusable mapping inheritance UX while preserving FS-096 deterministic execution guarantees.
+
+Terminology and route contracts:
+
+- UI surfaces use **Value Mapping** naming consistently.
+- Preferred API/domain route family is `/value-maps`.
+- Compatibility `/value-tables` API aliases remain supported during migration window through shared adapter/service behavior.
+- Existing project management route `/projects/:projectId/value-mappings` remains the canonical project UI surface.
+
+Global library UX contract:
+
+- Global Value Mapping Library is a top-level reusable-asset destination (not Settings-only behavior).
+- Supports:
+  - search/filter/sort
+  - create/duplicate/archive
+  - immutable revision history inspection
+  - usage visibility (projects + mappings)
+
+Project inheritance/customization UX contract:
+
+- Project can link global value mapping revision and starts in inherited state.
+- Project overlay operations are explicit and provenance-aware:
+  - override inherited row
+  - add project row
+  - exclude inherited row
+- Editing inherited rows from project context always creates project override; never mutates global rows directly.
+- Update-available state is distinct from customized/inherited state.
+- Update-review flow surfaces row/default diffs plus orphaned overlays and blocks acceptance until resolved.
+
+Builder + authoring contract refinements:
+
+- Builder supports direction, match mode (default/override), and fallback (default/override) for reusable value mappings.
+- Inline DSL compatibility remains, including optional `matchMode` argument for inline `valueMap(...)`.
+- Reusable global/project lifecycle details are persisted in rule binding metadata (not expression args).
+
+Mapping dependency-state UX contract:
+
+- Mapping dependencies expose `current | needs-review | invalid`.
+- Accepting global revision updates or effective overlay/default changes marks affected mappings `needs-review`.
+- Review + save creates mapping version; UI reflects normal stale/deploy behavior after save.
+- New deployment actions are blocked in UI when dependencies are `needs-review` or `invalid`.
+
+Import-resolution UX contract:
+
+- Import with unavailable referenced global revision requires explicit resolution choice:
+  - create project-only copy (recommended),
+  - choose another global value mapping,
+  - cancel.
+- UI must not silently relink or silently detach.
+
+FS-102 finalized adapter/workflow compatibility notes (T-12 alignment):
+
+- `ApiAdapter` supports promotion flow for project value maps (`promoteProjectValueMap`) mapped to preferred backend route `/projects/:projectId/value-maps/:valueMapId/promote`.
+- Compatibility export method supports portable mode:
+  - `exportProjectValueTableCsv(..., { portable: true })` returns portable JSON (`value-map-portable-v1`) instead of CSV text.
+  - default export behavior remains CSV for existing flows.
+- Portable import is explicit via adapter contract (`importProjectValueMapPortable`) and reuses canonical backend import endpoint.
+- Duplication UX/adapter contract supports explicit mode selection:
+  - `detached-copy` (default behavior),
+  - `preserve-link` (copy link + overlays semantics for linked value maps).
+
 ---
 
 ## State Management

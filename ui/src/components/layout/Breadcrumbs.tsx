@@ -120,6 +120,18 @@ function buildBreadcrumbs(
     return buildProjectHierarchyBreadcrumbs(segments, params, labels);
   }
 
+  if (segments[0] === 'value-mappings') {
+    const crumbs: BreadcrumbSegment[] = [{ label: 'Home', path: '/' }];
+    if (segments.length === 1) {
+      crumbs.push({ label: 'Value Mappings' });
+      return crumbs;
+    }
+
+    crumbs.push({ label: 'Value Mappings', path: '/value-mappings' });
+    crumbs.push({ label: formatSegment(segments[1], params, labels) });
+    return crumbs;
+  }
+
   const crumbs: BreadcrumbSegment[] = [{ label: 'Home', path: '/' }];
 
   let currentPath = '';

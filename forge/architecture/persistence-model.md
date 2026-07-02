@@ -523,6 +523,64 @@ Determinism and snapshot compatibility:
 - Mapping revisions/versions continue to snapshot full config in S3; embedded project `valueTableRef.resolvedEntries` are part of those immutable snapshots.
 - This preserves offline/browser determinism and downstream deployment/runtime no-table-fetch behavior.
 
+## FS-102 Value Mapping persistence/domain addendum
+
+FS-102 extends the FS-096 value-table model into the canonical Value Mapping domain while preserving deterministic snapshot execution and migration safety.
+
+Terminology + compatibility:
+
+- Public domain naming is **Value Mapping**.
+- Persistence layer may retain existing physical resource names (`ValueTables`, `ValueTableRevisions`, env vars, and `value-tables/...` S3 prefixes) for compatibility.
+- No big-bang storage/resource rename is required in this feature.
+
+Canonical modeling direction:
+
+- Extend existing value-table asset/revision model rather than introducing parallel global-map asset tables.
+- Add/extend metadata fields for:
+  - `scope` (`global` | `project`)
+  - ownership/status metadata
+  - revision/default metadata needed for matching/fallback behavior
+- Introduce project-link and overlay persistence entities for global inheritance/customization:
+  - pinned global revision
+  - overlay revision
+  - overlay operations (`override`, `add`, `exclude`)
+  - orphan/conflict/update-available state metadata
+
+Service/repository abstraction contract:
+
+- One canonical `ValueMapService`/repository abstraction owns access to:
+  - preferred `/value-maps` contracts,
+  - compatibility `/value-tables` contracts,
+  - underlying shared persistence resources.
+- Compatibility aliases must not fork behavior or data paths.
+
+Stable row identity contract:
+
+- Every persisted row requires stable row identity (`rowId`) for overlay targeting.
+- Migration/backfill must preserve behavior and make row identity deterministic for existing revision rows.
+
+Determinism contract continuity:
+
+- Runtime execution continues to rely on mapping/snapshot-embedded resolved rows.
+- Live mutable value-mapping storage reads are not part of runtime execute path.
+
+FS-102 finalized persistence behavior additions (T-12 alignment):
+
+- Promotion contract persistence:
+  - Project-to-global promotion creates a new global value-map asset revision `1` using effective source rows.
+  - Optional relink persists project link item with `pinnedRevision=1` and `overlayRevision=0` when behavior-equivalence validation passes.
+- Portable export persistence contract:
+  - Compatibility export endpoint may emit portable payload (`value-map-portable-v1`) including pinned-global metadata, overlay operations, effective rows, and rule-usage bindings.
+  - Portable payload is an interchange contract derived from canonical persisted metadata + revision row payloads.
+- Portable import persistence contract:
+  - Canonical import endpoint accepts portable payload + explicit resolution choice.
+  - Missing referenced pinned global revision must not silently relink/detach; conflict payload carries explicit resolution options (`project-copy`, `choose-global`, `cancel`).
+  - `project-copy` resolution persists a detached project-scoped value map created from portable effective rows.
+  - `choose-global` resolution persists new project link to explicitly selected global map revision only after behavior-equivalence validation.
+- Duplication persistence modes:
+  - `detached-copy`: persists a new project value map with materialized effective rows.
+  - `preserve-link`: persists copied project-link metadata and overlay revision records for destination project without rewriting global revision rows.
+
 ## FS-100 deployment/runtime compatibility addendum
 
 FS-100 clarifies persistence compatibility boundaries for canonical deployment/runtime environments and runtime execute determinism.

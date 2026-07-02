@@ -83,6 +83,7 @@ import type {
   MappingRuleProjectValueTableRef,
   SchemaTreeNode,
   SmartFixInput,
+  ValueMapMatchMode,
   ValueTableDirection,
   ValueTableNoMatchMode,
   ValueTablePrimitiveValue,
@@ -224,7 +225,9 @@ export interface ScalarFieldBuilderProps {
       valueMapScope?: ValueTableScope;
       valueMapProjectSelection?: {
         readonly ref: MappingRuleProjectValueTableRef;
+        readonly matchMode?: ValueMapMatchMode;
       };
+      valueMapMatchMode?: ValueMapMatchMode;
       valueMapNoMatchMode?: ValueTableNoMatchMode;
       valueMapFallbackValue?: ValueTablePrimitiveValue;
     },
@@ -233,6 +236,7 @@ export interface ScalarFieldBuilderProps {
   onValueMapScopeChange?: (scope: ValueTableScope) => void;
   onValueMapProjectTableSelect?: (tableId: string) => void;
   onValueMapDirectionSelect?: (direction: ValueTableDirection) => void;
+  onValueMapMatchModeChange?: (mode: ValueMapMatchMode) => void;
   onValueMapNoMatchModeChange?: (mode: ValueTableNoMatchMode) => void;
   onValueMapFallbackValueChange?: (value: string) => void;
   onValueMapInlineMappingAdd?: () => void;
@@ -663,6 +667,7 @@ export function ScalarFieldBuilder({
   onValueMapScopeChange,
   onValueMapProjectTableSelect,
   onValueMapDirectionSelect,
+  onValueMapMatchModeChange,
   onValueMapNoMatchModeChange,
   onValueMapFallbackValueChange,
   onValueMapInlineMappingAdd,
@@ -1566,6 +1571,7 @@ export function ScalarFieldBuilder({
               onValueMapScopeChange={onValueMapScopeChange}
               onValueMapProjectTableSelect={onValueMapProjectTableSelect}
               onValueMapDirectionSelect={onValueMapDirectionSelect}
+              onValueMapMatchModeChange={onValueMapMatchModeChange}
               onValueMapNoMatchModeChange={onValueMapNoMatchModeChange}
               onValueMapFallbackValueChange={onValueMapFallbackValueChange}
               onValueMapInlineMappingAdd={onValueMapInlineMappingAdd}

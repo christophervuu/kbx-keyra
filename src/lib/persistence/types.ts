@@ -60,6 +60,10 @@ export type MappingStatus = 'draft' | 'ready' | 'has-errors';
 
 export type ValueTableValueType = 'string' | 'number' | 'boolean';
 
+export type ValueMapScope = 'project' | 'global';
+
+export type ValueMapMatchMode = 'exact' | 'ignore-case';
+
 export type ValueTablePrimitiveValue = string | number | boolean;
 
 export type ValueTableStatus = 'active' | 'archived';
@@ -84,12 +88,14 @@ export interface ValueTableDirectionSupport {
 
 export interface ValueTableItem {
   readonly valueTableId: string;
-  readonly projectId: string;
+  readonly projectId?: string;
+  readonly scope?: ValueMapScope;
   readonly key: string;
   readonly name: string;
   readonly description?: string;
   readonly sideA: ValueTableSideDefinition;
   readonly sideB: ValueTableSideDefinition;
+  readonly defaultMatchMode?: ValueMapMatchMode;
   readonly currentRevision: number;
   readonly currentRowCount: number;
   readonly status: ValueTableStatus;
@@ -102,6 +108,7 @@ export interface ValueTableItem {
 export interface ValueTableRevisionItem {
   readonly valueTableId: string;
   readonly revision: number;
+  readonly scope?: ValueMapScope;
   readonly sideA: ValueTableSideDefinition;
   readonly sideB: ValueTableSideDefinition;
   readonly rowCount: number;
@@ -184,6 +191,7 @@ export interface MappingRuleProjectValueTableRef {
   readonly outputSideKey: string;
   readonly inputType: ValueTableValueType;
   readonly outputType: ValueTableValueType;
+  readonly matchMode?: ValueMapMatchMode;
   readonly resolvedEntries: readonly ValueTableResolvedEntry[];
   readonly sourceMeta?: {
     readonly tableName?: string;
@@ -214,6 +222,75 @@ export interface ValueTableUsageEntry {
   readonly latestRevision: number;
   readonly latestDirectionSupported?: boolean;
   readonly updatedAt?: ISODateString;
+}
+
+export interface CreateGlobalValueMapInput {
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+  readonly defaultMatchMode?: ValueMapMatchMode;
+  readonly createdBy?: string;
+}
+
+export interface CreateGlobalValueMapRevisionInput {
+  readonly valueTableId: string;
+  readonly expectedCurrentRevision?: number;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
+  readonly createdBy?: string;
+}
+
+export type ValueMapDependencyState = 'current' | 'needs-review' | 'invalid';
+
+export interface ValueMapProjectLinkItem {
+  readonly linkId: string;
+  readonly projectId: string;
+  readonly valueTableId: string;
+  readonly pinnedRevision: number;
+  readonly overlayRevision: number;
+  readonly dependencyState: ValueMapDependencyState;
+  readonly updateAvailable: boolean;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+  readonly updatedAt: ISODateString;
+  readonly updatedBy?: string;
+}
+
+export type ValueMapOverlayOperationType = 'override' | 'add' | 'exclude';
+
+export interface ValueMapOverlayOperation {
+  readonly operationId: string;
+  readonly type: ValueMapOverlayOperationType;
+  readonly targetRowId?: string;
+  readonly row?: ProjectValueTableRevisionRow;
+}
+
+export interface ValueMapOverlayRevisionItem {
+  readonly linkId: string;
+  readonly overlayRevision: number;
+  readonly operationCount: number;
+  readonly operations: readonly ValueMapOverlayOperation[];
+  readonly contentHash: string;
+  readonly createdAt: ISODateString;
+  readonly createdBy?: string;
+}
+
+export interface CreateValueMapProjectLinkInput {
+  readonly projectId: string;
+  readonly valueTableId: string;
+  readonly pinnedRevision: number;
+  readonly createdBy?: string;
+}
+
+export interface CreateValueMapOverlayRevisionInput {
+  readonly linkId: string;
+  readonly expectedOverlayRevision?: number;
+  readonly operations: readonly ValueMapOverlayOperation[];
+  readonly createdBy?: string;
 }
 
 export type SchemaFormat = 'json-schema' | 'xsd';
@@ -1013,7 +1090,7 @@ export function toMappingMetadata(item: MappingItem): MappingMetadata {
 export function toProjectValueTable(item: ValueTableItem): ProjectValueTable {
   return {
     id: item.valueTableId,
-    projectId: item.projectId,
+    projectId: item.projectId ?? '',
     key: item.key,
     name: item.name,
     ...(item.description ? { description: item.description } : {}),

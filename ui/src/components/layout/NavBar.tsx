@@ -6,6 +6,7 @@ import { PATHS } from '@/routes';
 
 const NAV_ITEMS = [
   { to: PATHS.HOME, label: 'Home', icon: Home },
+  { to: PATHS.VALUE_MAPPINGS, label: 'Value Mappings', icon: Library },
   { to: PATHS.SCHEMA_LIBRARY, label: 'Schemas', icon: Library },
   { to: PATHS.TEMPLATE_LIBRARY, label: 'Templates', icon: Layout },
   { to: PATHS.SETTINGS, label: 'Settings', icon: Settings },

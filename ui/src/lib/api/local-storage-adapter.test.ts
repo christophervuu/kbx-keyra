@@ -678,6 +678,270 @@ describe('LocalStorageAdapter', () => {
     expect(executionAfter.output).toEqual({ Order: { status: 'COMPLETED' } });
   });
 
+  it('supports global value-map CRUD/revision/archive/usage flows', async () => {
+    const adapter = new LocalStorageAdapter();
+
+    const created = await adapter.createGlobalValueMap({
+      key: 'global-order-status',
+      name: 'Global Order Status',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    expect(created.projectId).toBe('global');
+
+    const list = await adapter.listGlobalValueMaps();
+    expect(list.some((item) => item.id === created.id)).toBe(true);
+
+    const detail = await adapter.getGlobalValueMap(created.id);
+    expect(detail.name).toBe('Global Order Status');
+
+    const revision = await adapter.createGlobalValueMapRevision(created.id, {
+      valueTableId: created.id,
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'DONE' }],
+    });
+    expect(revision.revision).toBe(2);
+
+    const revisions = await adapter.listGlobalValueMapRevisions(created.id);
+    expect(revisions.map((item) => item.revision)).toEqual([2, 1]);
+
+    const usage = await adapter.getGlobalValueMapUsage(created.id);
+    expect(usage.counts.linkedProjects).toBe(0);
+    expect(usage.counts.mappings).toBeGreaterThanOrEqual(0);
+
+    const archived = await adapter.archiveGlobalValueMap(created.id);
+    expect(archived.status).toBe('archived');
+  });
+
+  it('supports project link overlay lifecycle with deterministic dependency-state transitions', async () => {
+    const adapter = new LocalStorageAdapter();
+    const sourceProject = await adapter.createProject({
+      name: 'Source Project',
+      description: 'desc',
+      slug: 'source-project',
+    });
+
+    const created = await adapter.createGlobalValueMap({
+      key: 'global-order-status',
+      name: 'Global Order Status',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    await adapter.createGlobalValueMapRevision(created.id, {
+      valueTableId: created.id,
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [
+        { id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+        { id: 'r2', sideAValue: 'shipped', sideBValue: 'COMPLETE' },
+      ],
+    });
+
+    await adapter.linkProjectValueMap(sourceProject.projectId, {
+      valueMapId: created.id,
+      revision: 1,
+    });
+
+    const overlayed = await adapter.updateProjectValueMapOverlay(sourceProject.projectId, created.id, {
+      operations: [
+        {
+          operationId: 'op-1',
+          type: 'override',
+          targetRowId: 'r1',
+          row: { id: 'r1', sideAValue: 'confirmed', sideBValue: 'IN_PROGRESS' },
+        },
+      ],
+      expectedOverlayRevision: 0,
+    });
+    expect(overlayed.overlayRevision).toBe(1);
+    expect(overlayed.dependencyState).toBe('needs-review');
+
+    const review = await adapter.reviewProjectValueMapUpdate(sourceProject.projectId, created.id, {
+      candidateRevision: 2,
+    });
+    expect(review.canAccept).toBe(true);
+
+    const accepted = await adapter.acceptProjectValueMapUpdate(sourceProject.projectId, created.id, {
+      candidateRevision: 2,
+    });
+    expect(accepted.pinnedRevision).toBe(2);
+    expect(accepted.dependencyState).toBe('needs-review');
+
+    const summaries = await adapter.listProjectValueMaps(sourceProject.projectId);
+    expect(summaries[0]).toEqual(expect.objectContaining({
+      valueMapId: created.id,
+      pinnedRevision: 2,
+      dependencyState: 'needs-review',
+    }));
+  });
+
+  it('duplicates linked value maps with preserve-link mode and copies overlay state', async () => {
+    const adapter = new LocalStorageAdapter();
+    const sourceProject = await adapter.createProject({
+      name: 'Source Project',
+      description: 'desc',
+      slug: 'source-project-2',
+    });
+    const destinationProject = await adapter.createProject({
+      name: 'Destination Project',
+      description: 'desc',
+      slug: 'destination-project',
+    });
+
+    const globalMap = await adapter.createGlobalValueMap({
+      key: 'global-order-status-2',
+      name: 'Global Order Status 2',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [
+        { id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+        { id: 'r2', sideAValue: 'shipped', sideBValue: 'COMPLETE' },
+      ],
+    });
+
+    await adapter.linkProjectValueMap(sourceProject.projectId, {
+      valueMapId: globalMap.id,
+      revision: 1,
+    });
+    await adapter.updateProjectValueMapOverlay(sourceProject.projectId, globalMap.id, {
+      operations: [{ operationId: 'op-1', type: 'exclude', targetRowId: 'r2' }],
+      expectedOverlayRevision: 0,
+    });
+
+    await adapter.duplicateProjectValueTable({
+      projectId: destinationProject.projectId,
+      sourceProjectId: sourceProject.projectId,
+      valueTableId: globalMap.id,
+      name: 'Global Order Status 2 Copy',
+      mode: 'preserve-link',
+    });
+
+    const detail = await adapter.getProjectValueMapDetail(destinationProject.projectId, globalMap.id);
+    expect(detail.pinnedRevision).toBe(1);
+    expect(detail.overlayRevision).toBe(1);
+    expect(detail.effectiveRows.some((row) => row.rowId === 'r2')).toBe(false);
+  });
+
+  it('supports portable export/import resolution choices with deterministic outcomes', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Portable Source',
+      description: 'desc',
+      slug: 'portable-source',
+    });
+    const destination = await adapter.createProject({
+      name: 'Portable Destination',
+      description: 'desc',
+      slug: 'portable-destination',
+    });
+
+    const globalMap = await adapter.createGlobalValueMap({
+      key: 'portable-global-order-status',
+      name: 'Portable Global Order Status',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    await adapter.linkProjectValueMap(project.projectId, {
+      valueMapId: globalMap.id,
+      revision: 1,
+    });
+
+    const portable = await adapter.exportProjectValueTableCsv(globalMap.id, 1, { portable: true });
+    if (typeof portable === 'string') {
+      throw new Error('Expected portable export payload to be object');
+    }
+
+    const linked = await adapter.importProjectValueMapPortable(destination.projectId, {
+      portablePayload: {
+        ...portable,
+        valueMap: {
+          ...portable.valueMap,
+          pinnedGlobal: {
+            valueMapId: globalMap.id,
+            revision: 1,
+            key: globalMap.key,
+            name: globalMap.name,
+          },
+        },
+      },
+    });
+    expect(linked.importStatus).toBe('linked');
+
+    const detached = await adapter.importProjectValueMapPortable(destination.projectId, {
+      portablePayload: {
+        ...portable,
+        valueMap: {
+          ...portable.valueMap,
+          pinnedGlobal: undefined,
+          scope: 'project',
+        },
+      },
+      resolution: { action: 'project-copy' },
+      key: 'portable-detached-copy',
+      name: 'Portable Detached Copy',
+    });
+    expect(detached.importStatus).toBe('detached-project-copy');
+    expect(detached.table?.key).toBe('portable-detached-copy');
+
+    await expect(
+      adapter.importProjectValueMapPortable(destination.projectId, {
+        portablePayload: {
+          ...portable,
+          valueMap: {
+            ...portable.valueMap,
+            pinnedGlobal: {
+              valueMapId: globalMap.id,
+              revision: 1,
+              key: globalMap.key,
+              name: globalMap.name,
+            },
+          },
+        },
+        resolution: { action: 'cancel' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
+
+  it('promotes project value map to global and optionally relinks project', async () => {
+    const adapter = new LocalStorageAdapter();
+    const project = await adapter.createProject({
+      name: 'Promotion Project',
+      description: 'desc',
+      slug: 'promotion-project',
+    });
+
+    const table = await adapter.createProjectValueTable({
+      projectId: project.projectId,
+      key: 'project-order-status',
+      name: 'Project Order Status',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    });
+
+    const promoted = await adapter.promoteProjectValueMap(project.projectId, table.id, {
+      key: 'promoted-order-status',
+      name: 'Promoted Order Status',
+      relink: true,
+    });
+
+    expect(promoted.promoted.projectId).toBe('global');
+    expect(promoted.promoted.currentRevision).toBe(1);
+    expect(promoted.relinked).toEqual(expect.objectContaining({
+      projectId: project.projectId,
+      pinnedRevision: 1,
+    }));
+  });
+
   it.each([
     ['autoMap', (adapter: LocalStorageAdapter) => adapter.autoMap({ projectId: 'p', mappingId: 'm' })],
     [

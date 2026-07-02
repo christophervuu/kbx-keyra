@@ -6,6 +6,7 @@ import { createEmptySmartBuilderDraft } from '../lib/smart-builder-state';
 
 const valueMapProjectUiStateFixture = {
   scope: 'project' as const,
+  matchMode: 'exact' as const,
   tableId: 'vt-1',
   direction: 'a_to_b' as const,
   pinnedRevision: 2,
@@ -730,6 +731,7 @@ describe('SmartBuilderPanel', () => {
   it('AE-19/AE-20: renders value-map scope controls, inline editor, and project selection callbacks', () => {
     const onValueMapProjectTableSelect = vi.fn();
     const onValueMapDirectionSelect = vi.fn();
+    const onValueMapMatchModeChange = vi.fn();
     const onValueMapNoMatchModeChange = vi.fn();
     const onValueMapFallbackValueChange = vi.fn();
     const onValueMapAdoptLatestRevision = vi.fn();
@@ -769,6 +771,7 @@ describe('SmartBuilderPanel', () => {
         valueMapProjectState={valueMapProjectUiStateFixture}
         onValueMapProjectTableSelect={onValueMapProjectTableSelect}
         onValueMapDirectionSelect={onValueMapDirectionSelect}
+        onValueMapMatchModeChange={onValueMapMatchModeChange}
         onValueMapNoMatchModeChange={onValueMapNoMatchModeChange}
         onValueMapFallbackValueChange={onValueMapFallbackValueChange}
         onValueMapAdoptLatestRevision={onValueMapAdoptLatestRevision}
@@ -786,6 +789,8 @@ describe('SmartBuilderPanel', () => {
     expect(onValueMapDirectionSelect).toHaveBeenCalledWith('a_to_b');
 
     expect(screen.getByTestId('smart-value-map-direction-b_to_a')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('smart-value-map-match-mode'), { target: { value: 'ignore-case' } });
+    expect(onValueMapMatchModeChange).toHaveBeenCalledWith('ignore-case');
     fireEvent.change(screen.getByTestId('smart-value-map-no-match-mode'), { target: { value: 'return_null' } });
     expect(onValueMapNoMatchModeChange).toHaveBeenCalledWith('return_null');
 
@@ -834,6 +839,7 @@ describe('SmartBuilderPanel', () => {
         inputId: 'input-1',
         scope: 'project' as const,
         project: {
+          matchMode: 'exact' as const,
           ref: {
             scope: 'project' as const,
             valueTableId: 'vt-1',
@@ -841,6 +847,7 @@ describe('SmartBuilderPanel', () => {
             revision: 2,
             inputSideKey: 'code',
             outputSideKey: 'label',
+            matchMode: 'exact' as const,
           },
         },
         mappings: [],
@@ -873,6 +880,7 @@ describe('SmartBuilderPanel', () => {
       directInputId: 'input-2',
       valueMapScope: 'project',
       valueMapProjectSelection: {
+        matchMode: 'exact',
         ref: {
           scope: 'project',
           valueTableId: 'vt-1',
@@ -880,11 +888,68 @@ describe('SmartBuilderPanel', () => {
           revision: 2,
           inputSideKey: 'code',
           outputSideKey: 'label',
+          matchMode: 'exact',
         },
       },
+      valueMapMatchMode: 'exact',
       valueMapNoMatchMode: 'fallback_value',
       valueMapFallbackValue: 'UNKNOWN',
     });
+  });
+
+  it('renders and wires match-mode selector for value maps', () => {
+    const onValueMapMatchModeChange = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.statusLabel',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      inputs: [
+        {
+          id: 'input-1',
+          sourceKind: 'primary' as const,
+          label: 'statusCode',
+          path: 'statusCode',
+          valueType: 'string' as const,
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap' as const,
+        inputId: 'input-1',
+        matchMode: 'exact' as const,
+        scope: 'project' as const,
+        project: {
+          matchMode: 'exact' as const,
+          ref: {
+            scope: 'project' as const,
+            valueTableId: 'vt-1',
+            tableKey: 'status_codes',
+            revision: 2,
+            inputSideKey: 'code',
+            outputSideKey: 'label',
+            matchMode: 'exact' as const,
+          },
+        },
+        mappings: [],
+        fallback: { kind: 'static' as const, value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value' as const, fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.statusLabel"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        valueMapProjectState={{ ...valueMapProjectUiStateFixture, matchMode: 'exact' }}
+        onValueMapMatchModeChange={onValueMapMatchModeChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('smart-value-map-match-mode'), { target: { value: 'ignore-case' } });
+    expect(onValueMapMatchModeChange).toHaveBeenCalledWith('ignore-case');
   });
 
   it('AE-32: supports inline row editing without conversion CTA', () => {

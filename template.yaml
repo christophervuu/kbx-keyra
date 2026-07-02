@@ -1171,6 +1171,522 @@ Resources:
             Path: /projects/{id}/value-tables/resolve
             Method: post
 
+  ListProjectValueMapsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listprojectvaluemaps
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.listProjectValueMapsHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps
+            Method: get
+
+  LinkProjectValueMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-linkprojectvaluemap
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.linkProjectValueMapHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/link
+            Method: post
+
+  PromoteProjectValueMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-promoteprojectvaluemap
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.promoteProjectValueMapHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/{valueTableId}/promote
+            Method: post
+
+  GetProjectValueMapDetailFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getprojectvaluemapdetail
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.getProjectValueMapDetailHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/{valueTableId}
+            Method: get
+
+  UpdateProjectValueMapOverlayFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-updateprojectvaluemapoverlay
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.updateProjectValueMapOverlayHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/{valueTableId}/overlay
+            Method: put
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-tables/{valueTableId}/overlay
+            Method: put
+
+  ReviewProjectValueMapUpdateFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-reviewprojectvaluemapupdate
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.reviewProjectValueMapUpdateHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/{valueTableId}/review-update
+            Method: post
+
+  AcceptProjectValueMapUpdateFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-acceptprojectvaluemapupdate
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.acceptProjectValueMapUpdateHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/{valueTableId}/accept-update
+            Method: post
+
+  UnlinkProjectValueMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-unlinkprojectvaluemap
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.unlinkProjectValueMapHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /projects/{projectId}/value-maps/{valueTableId}/link
+            Method: delete
+
+  ListGlobalValueMapsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listglobalvaluemaps
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.listGlobalValueMapsHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps
+            Method: get
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables
+            Method: get
+
+  CreateGlobalValueMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-createglobalvaluemap
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.createGlobalValueMapHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps
+            Method: post
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables
+            Method: post
+
+  GetGlobalValueMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getglobalvaluemap
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.getProjectValueTableHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps/{valueTableId}
+            Method: get
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}
+            Method: get
+
+  CreateGlobalValueMapRevisionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-createglobalvaluemaprevision
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.createProjectValueTableRevisionHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps/{valueTableId}/revisions
+            Method: post
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/revisions
+            Method: post
+
+  ListGlobalValueMapRevisionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listglobalvaluemaprevisions
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.listValueTableRevisionsHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps/{valueTableId}/revisions
+            Method: get
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/revisions
+            Method: get
+
+  GetGlobalValueMapRevisionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-getglobalvaluemaprevision
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.getProjectValueTableRevisionHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps/{valueTableId}/revisions/{revision}
+            Method: get
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/revisions/{revision}
+            Method: get
+
+  ArchiveGlobalValueMapFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-archiveglobalvaluemap
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.archiveProjectValueTableHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ValueTablesTable
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps/{valueTableId}/archive
+            Method: post
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/archive
+            Method: post
+
+  ListGlobalValueMapUsageFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: node20
+        Sourcemap: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      FunctionName: kbx-keyra-listglobalvaluemapusage
+      CodeUri: .
+      Handler: src/lambda/project/value-tables.listProjectValueTableUsageHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTablesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ValueTableRevisionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MappingsTable
+        - S3ReadPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ApiEventPreferred:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-maps/{valueTableId}/usage
+            Method: get
+        ApiEventAlias:
+          Type: Api
+          Properties:
+            RestApiId: !Ref KeyraApi
+            Path: /value-tables/{valueTableId}/usage
+            Method: get
+
   ListVersionsFunction:
     Type: AWS::Serverless::Function
     Metadata:

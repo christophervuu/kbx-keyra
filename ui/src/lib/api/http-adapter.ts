@@ -71,9 +71,23 @@ import type {
   ValueTableUsageEntry,
   CreateProjectValueTableInput,
   CreateProjectValueTableRevisionInput,
+  CreateGlobalValueMapInput,
+  LinkProjectValueMapInput,
+  UpdateProjectValueMapOverlayInput,
+  ReviewProjectValueMapUpdateInput,
+  ReviewProjectValueMapUpdateResult,
+  AcceptProjectValueMapUpdateInput,
+  ProjectValueMapLinkSummary,
+  ProjectValueMapDetail,
   DuplicateProjectValueTableInput,
+  PromoteProjectValueMapInput,
+  PromoteProjectValueMapResult,
+  PortableValueMapExportPayload,
+  ImportProjectValueMapPortableInput,
+  ImportProjectValueMapPortableResult,
   ValidateMappingsInput,
   ValidationReport,
+  ValueMapUsageSummary,
 } from '@/lib/types';
 
 interface CurrentDeploymentsApiResponse {
@@ -1064,6 +1078,19 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
+  override async promoteProjectValueMap(
+    projectId: string,
+    valueMapId: string,
+    input: PromoteProjectValueMapInput = {},
+  ): Promise<PromoteProjectValueMapResult> {
+    return httpRequest<PromoteProjectValueMapResult>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/${encodeURIComponent(valueMapId)}/promote`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
   override async archiveProjectValueTable(valueTableId: string): Promise<ProjectValueTable> {
     return httpRequest<ProjectValueTable>({
       baseUrl: this.apiUrl,
@@ -1109,11 +1136,23 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
-  override async exportProjectValueTableCsv(valueTableId: string, revision?: number): Promise<string> {
-    const query = typeof revision === 'number' ? `?revision=${encodeURIComponent(String(revision))}` : '';
-    return httpRequest<string>({
+  override async exportProjectValueTableCsv(
+    valueTableId: string,
+    revision?: number,
+    options?: { portable?: boolean },
+  ): Promise<string | PortableValueMapExportPayload> {
+    const searchParams = new URLSearchParams();
+    if (typeof revision === 'number') {
+      searchParams.set('revision', String(revision));
+    }
+    if (options?.portable) {
+      searchParams.set('portable', 'true');
+    }
+    const query = searchParams.toString();
+
+    return httpRequest<string | PortableValueMapExportPayload>({
       baseUrl: this.apiUrl,
-      path: `/value-tables/${encodeURIComponent(valueTableId)}/export.csv${query}`,
+      path: `/value-tables/${encodeURIComponent(valueTableId)}/export.csv${query ? `?${query}` : ''}`,
       method: 'GET',
     });
   }
@@ -1135,6 +1174,18 @@ export class HttpAdapter extends LocalStorageAdapter {
     });
   }
 
+  override async importProjectValueMapPortable(
+    projectId: string,
+    input: ImportProjectValueMapPortableInput,
+  ): Promise<ImportProjectValueMapPortableResult> {
+    return httpRequest<ImportProjectValueMapPortableResult>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-tables/import-csv`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
   override async resolveProjectValueTableReference(
     input: ResolveProjectValueTableReferenceInput,
   ): Promise<ResolveProjectValueTableReferenceResult> {
@@ -1143,6 +1194,155 @@ export class HttpAdapter extends LocalStorageAdapter {
       path: `/projects/${encodeURIComponent(input.projectId)}/value-tables/resolve`,
       method: 'POST',
       body: input,
+    });
+  }
+
+  override async listGlobalValueMaps(options?: ValueTableListOptions): Promise<ProjectValueTable[]> {
+    const searchParams = new URLSearchParams();
+    if (options?.query) searchParams.set('query', options.query);
+    if (options?.status) searchParams.set('status', options.status);
+    if (options?.sortBy) searchParams.set('sortBy', options.sortBy);
+    if (options?.sortDirection) searchParams.set('sortDirection', options.sortDirection);
+    const query = searchParams.toString();
+
+    return httpRequest<ProjectValueTable[]>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps${query ? `?${query}` : ''}`,
+      method: 'GET',
+    });
+  }
+
+  override async createGlobalValueMap(input: CreateGlobalValueMapInput): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: '/value-maps',
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async getGlobalValueMap(valueMapId: string): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps/${encodeURIComponent(valueMapId)}`,
+      method: 'GET',
+    });
+  }
+
+  override async listGlobalValueMapRevisions(valueMapId: string): Promise<ProjectValueTableRevision[]> {
+    return httpRequest<ProjectValueTableRevision[]>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps/${encodeURIComponent(valueMapId)}/revisions`,
+      method: 'GET',
+    });
+  }
+
+  override async createGlobalValueMapRevision(
+    valueMapId: string,
+    input: CreateProjectValueTableRevisionInput,
+  ): Promise<ProjectValueTableRevision> {
+    return httpRequest<ProjectValueTableRevision>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps/${encodeURIComponent(valueMapId)}/revisions`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async getGlobalValueMapRevision(valueMapId: string, revision: number): Promise<ProjectValueTableRevision> {
+    return httpRequest<ProjectValueTableRevision>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps/${encodeURIComponent(valueMapId)}/revisions/${encodeURIComponent(String(revision))}`,
+      method: 'GET',
+    });
+  }
+
+  override async archiveGlobalValueMap(valueMapId: string): Promise<ProjectValueTable> {
+    return httpRequest<ProjectValueTable>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps/${encodeURIComponent(valueMapId)}/archive`,
+      method: 'POST',
+      body: {},
+    });
+  }
+
+  override async getGlobalValueMapUsage(valueMapId: string): Promise<ValueMapUsageSummary> {
+    return httpRequest<ValueMapUsageSummary>({
+      baseUrl: this.apiUrl,
+      path: `/value-maps/${encodeURIComponent(valueMapId)}/usage`,
+      method: 'GET',
+    });
+  }
+
+  override async listProjectValueMaps(projectId: string): Promise<ProjectValueMapLinkSummary[]> {
+    return httpRequest<ProjectValueMapLinkSummary[]>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps`,
+      method: 'GET',
+    });
+  }
+
+  override async linkProjectValueMap(projectId: string, input: LinkProjectValueMapInput): Promise<ProjectValueMapDetail> {
+    return httpRequest<ProjectValueMapDetail>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/link`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async getProjectValueMapDetail(projectId: string, valueMapId: string): Promise<ProjectValueMapDetail> {
+    return httpRequest<ProjectValueMapDetail>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/${encodeURIComponent(valueMapId)}`,
+      method: 'GET',
+    });
+  }
+
+  override async updateProjectValueMapOverlay(
+    projectId: string,
+    valueMapId: string,
+    input: UpdateProjectValueMapOverlayInput,
+  ): Promise<ProjectValueMapDetail> {
+    return httpRequest<ProjectValueMapDetail>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/${encodeURIComponent(valueMapId)}/overlay`,
+      method: 'PUT',
+      body: input,
+    });
+  }
+
+  override async reviewProjectValueMapUpdate(
+    projectId: string,
+    valueMapId: string,
+    input?: ReviewProjectValueMapUpdateInput,
+  ): Promise<ReviewProjectValueMapUpdateResult> {
+    return httpRequest<ReviewProjectValueMapUpdateResult>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/${encodeURIComponent(valueMapId)}/review-update`,
+      method: 'POST',
+      body: input ?? {},
+    });
+  }
+
+  override async acceptProjectValueMapUpdate(
+    projectId: string,
+    valueMapId: string,
+    input: AcceptProjectValueMapUpdateInput,
+  ): Promise<ProjectValueMapDetail> {
+    return httpRequest<ProjectValueMapDetail>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/${encodeURIComponent(valueMapId)}/accept-update`,
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  override async unlinkProjectValueMap(projectId: string, valueMapId: string): Promise<void> {
+    await httpRequest<void>({
+      baseUrl: this.apiUrl,
+      path: `/projects/${encodeURIComponent(projectId)}/value-maps/${encodeURIComponent(valueMapId)}/link`,
+      method: 'DELETE',
     });
   }
 

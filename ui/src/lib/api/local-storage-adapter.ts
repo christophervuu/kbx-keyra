@@ -71,11 +71,27 @@ import type {
   ValueTableDiffPage,
   ValueTableDirectionSupport,
   ValueTableListOptions,
+  ValueMapUsageSummary,
+  ProjectValueMapLinkSummary,
+  ProjectValueMapDetail,
+  ValueMapDependencyState,
+  ValueMapOverlayOperation,
+  LinkProjectValueMapInput,
+  UpdateProjectValueMapOverlayInput,
+  ReviewProjectValueMapUpdateInput,
+  ReviewProjectValueMapUpdateResult,
+  AcceptProjectValueMapUpdateInput,
   ValueTableUsageEntry,
   ValueTableValueType,
   CreateProjectValueTableInput,
   CreateProjectValueTableRevisionInput,
+  CreateGlobalValueMapInput,
   DuplicateProjectValueTableInput,
+  PromoteProjectValueMapInput,
+  PromoteProjectValueMapResult,
+  PortableValueMapExportPayload,
+  ImportProjectValueMapPortableInput,
+  ImportProjectValueMapPortableResult,
   ResolveProjectValueTableReferenceInput,
   ResolveProjectValueTableReferenceResult,
   UpdateSchemaInput,
@@ -93,6 +109,8 @@ const STORAGE_KEYS = {
   activity: 'keyra:activity',
   valueTables: 'keyra:value-tables',
   valueTableUsage: 'keyra:value-table-usage',
+  projectValueMapLinks: 'keyra:project-value-map-links',
+  projectValueMapOverlays: 'keyra:project-value-map-overlays',
 } as const;
 
 const MAX_MAPPING_VERSIONS = 50;
@@ -290,6 +308,25 @@ interface StoredValueTable {
   readonly revisions: readonly ProjectValueTableRevision[];
 }
 
+interface StoredProjectValueMapLink {
+  readonly projectId: string;
+  readonly valueMapId: string;
+  readonly pinnedRevision: number;
+  readonly overlayRevision: number;
+  readonly dependencyState: ValueMapDependencyState;
+  readonly updateAvailable: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+interface StoredProjectValueMapOverlayRevision {
+  readonly projectId: string;
+  readonly valueMapId: string;
+  readonly revision: number;
+  readonly operations: readonly ValueMapOverlayOperation[];
+  readonly createdAt: string;
+}
+
 function normalizeValueTableRows(rows: readonly ProjectValueTableRevisionRow[]): readonly ProjectValueTableRevisionRow[] {
   return rows.map((row) => ({
     ...row,
@@ -332,6 +369,10 @@ function computeDirectionSupport(rows: readonly ProjectValueTableRevisionRow[]):
   }
 
   return { aToB, bToA };
+}
+
+function toProjectValueMapKey(projectId: string, valueMapId: string): string {
+  return `${projectId}::${valueMapId}`;
 }
 
 interface CurrentDeploymentsInput {
@@ -509,6 +550,118 @@ export class LocalStorageAdapter implements ApiAdapter {
 
   private writeValueTables(value: StoredValueTable[]): void {
     this.writeArray(STORAGE_KEYS.valueTables, value);
+  }
+
+  private readProjectValueMapLinks(): StoredProjectValueMapLink[] {
+    return this.readArray<StoredProjectValueMapLink>(STORAGE_KEYS.projectValueMapLinks);
+  }
+
+  private writeProjectValueMapLinks(value: StoredProjectValueMapLink[]): void {
+    this.writeArray(STORAGE_KEYS.projectValueMapLinks, value);
+  }
+
+  private readProjectValueMapOverlayRevisions(): StoredProjectValueMapOverlayRevision[] {
+    return this.readArray<StoredProjectValueMapOverlayRevision>(STORAGE_KEYS.projectValueMapOverlays);
+  }
+
+  private writeProjectValueMapOverlayRevisions(value: StoredProjectValueMapOverlayRevision[]): void {
+    this.writeArray(STORAGE_KEYS.projectValueMapOverlays, value);
+  }
+
+  private getProjectValueMapLink(projectId: string, valueMapId: string): StoredProjectValueMapLink | null {
+    const key = toProjectValueMapKey(projectId, valueMapId);
+    return this.readProjectValueMapLinks().find((entry) => toProjectValueMapKey(entry.projectId, entry.valueMapId) === key) ?? null;
+  }
+
+  private listProjectValueMapOverlayRevisions(projectId: string, valueMapId: string): StoredProjectValueMapOverlayRevision[] {
+    return this.readProjectValueMapOverlayRevisions()
+      .filter((entry) => entry.projectId === projectId && entry.valueMapId === valueMapId)
+      .sort((a, b) => a.revision - b.revision);
+  }
+
+  private applyProjectValueMapOverlayOperations(
+    baseRows: readonly ProjectValueTableRevisionRow[],
+    operations: readonly ValueMapOverlayOperation[],
+  ): readonly {
+    rowId: string;
+    sideAValue: string | number | boolean;
+    sideBValue: string | number | boolean;
+    description?: string;
+    provenance: 'inherited' | 'override' | 'add';
+  }[] {
+    const rows = new Map<string, {
+      rowId: string;
+      sideAValue: string | number | boolean;
+      sideBValue: string | number | boolean;
+      description?: string;
+      provenance: 'inherited' | 'override' | 'add';
+    }>();
+
+    for (const row of baseRows) {
+      rows.set(row.id, {
+        rowId: row.id,
+        sideAValue: row.sideAValue,
+        sideBValue: row.sideBValue,
+        ...(row.description ? { description: row.description } : {}),
+        provenance: 'inherited',
+      });
+    }
+
+    for (const operation of operations) {
+      if (operation.type === 'exclude' && operation.targetRowId) {
+        rows.delete(operation.targetRowId);
+        continue;
+      }
+
+      if (operation.type === 'override' && operation.targetRowId && operation.row) {
+        rows.set(operation.targetRowId, {
+          rowId: operation.targetRowId,
+          sideAValue: operation.row.sideAValue,
+          sideBValue: operation.row.sideBValue,
+          ...(operation.row.description ? { description: operation.row.description } : {}),
+          provenance: 'override',
+        });
+        continue;
+      }
+
+      if (operation.type === 'add' && operation.row) {
+        rows.set(operation.row.id, {
+          rowId: operation.row.id,
+          sideAValue: operation.row.sideAValue,
+          sideBValue: operation.row.sideBValue,
+          ...(operation.row.description ? { description: operation.row.description } : {}),
+          provenance: 'add',
+        });
+      }
+    }
+
+    return Array.from(rows.values());
+  }
+
+  private async resolveProjectValueMapDetail(projectId: string, valueMapId: string): Promise<ProjectValueMapDetail> {
+    const link = this.getProjectValueMapLink(projectId, valueMapId);
+    if (!link) {
+      throw this.notFound('ProjectValueMapLink', `${projectId}:${valueMapId}`);
+    }
+
+    const globalMap = await this.getGlobalValueMap(valueMapId);
+    const pinnedRevision = await this.getGlobalValueMapRevision(valueMapId, link.pinnedRevision);
+
+    const operations = this.listProjectValueMapOverlayRevisions(projectId, valueMapId)
+      .flatMap((revision) => revision.operations);
+
+    return {
+      projectId,
+      valueMapId,
+      key: globalMap.key,
+      name: globalMap.name,
+      pinnedRevision: link.pinnedRevision,
+      latestRevision: globalMap.currentRevision,
+      overlayRevision: link.overlayRevision,
+      updateAvailable: link.updateAvailable,
+      dependencyState: link.dependencyState,
+      effectiveRows: this.applyProjectValueMapOverlayOperations(pinnedRevision.rows, operations),
+    };
   }
 
   private getValueTableUsageCount(valueTableId: string): number {
@@ -2004,6 +2157,8 @@ export class LocalStorageAdapter implements ApiAdapter {
       sideA: input.sideA,
       sideB: input.sideB,
       currentRevision: 1,
+      currentRowCount: normalizedRows.length,
+      defaultMatchMode: 'exact',
       status: 'active',
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -2087,6 +2242,7 @@ export class LocalStorageAdapter implements ApiAdapter {
       sideA: input.sideA,
       sideB: input.sideB,
       currentRevision: nextRevision,
+      currentRowCount: normalizedRows.length,
       updatedAt: timestamp,
       updatedBy: 'local-user',
     };
@@ -2101,6 +2257,48 @@ export class LocalStorageAdapter implements ApiAdapter {
   }
 
   async duplicateProjectValueTable(input: DuplicateProjectValueTableInput): Promise<ProjectValueTable> {
+    if (input.mode === 'preserve-link' && input.sourceProjectId) {
+      const sourceLink = this.getProjectValueMapLink(input.sourceProjectId, input.valueTableId);
+      if (!sourceLink) {
+        throw this.notFound('ProjectValueMapLink', `${input.sourceProjectId}:${input.valueTableId}`);
+      }
+
+      if (this.getProjectValueMapLink(input.projectId, input.valueTableId)) {
+        throw {
+          message: `Project is already linked to value map: ${input.valueTableId}`,
+          code: 'CONFLICT',
+          statusCode: 409,
+          retryable: false,
+        };
+      }
+
+      const now = this.nowIso();
+      const links = this.readProjectValueMapLinks();
+      links.push({
+        ...sourceLink,
+        projectId: input.projectId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.writeProjectValueMapLinks(links);
+
+      const sourceOverlays = this.readProjectValueMapOverlayRevisions()
+        .filter((entry) => entry.projectId === input.sourceProjectId && entry.valueMapId === input.valueTableId)
+        .map((entry) => ({
+          ...entry,
+          projectId: input.projectId,
+          createdAt: now,
+        } satisfies StoredProjectValueMapOverlayRevision));
+      if (sourceOverlays.length > 0) {
+        this.writeProjectValueMapOverlayRevisions([
+          ...this.readProjectValueMapOverlayRevisions(),
+          ...sourceOverlays,
+        ]);
+      }
+
+      return this.getGlobalValueMap(input.valueTableId);
+    }
+
     const original = this.readValueTables().find((entry) => entry.table.id === input.valueTableId);
     if (!original) {
       throw this.notFound('ProjectValueTable', input.valueTableId);
@@ -2121,6 +2319,41 @@ export class LocalStorageAdapter implements ApiAdapter {
       sideB: latestRevision.sideB,
       rows: latestRevision.rows,
     });
+  }
+
+  async promoteProjectValueMap(
+    projectId: string,
+    valueMapId: string,
+    input: PromoteProjectValueMapInput = {},
+  ): Promise<PromoteProjectValueMapResult> {
+    const source = await this.getProjectValueTable(valueMapId);
+    if (source.projectId !== projectId) {
+      throw this.notFound('ProjectValueTable', valueMapId);
+    }
+
+    const sourceRevision = await this.getProjectValueTableRevision(valueMapId, source.currentRevision);
+    const promoted = await this.createGlobalValueMap({
+      key: input.key ?? source.key,
+      name: input.name ?? source.name,
+      description: input.description ?? source.description,
+      sideA: sourceRevision.sideA,
+      sideB: sourceRevision.sideB,
+      rows: sourceRevision.rows,
+    });
+
+    if (!input.relink) {
+      return { promoted };
+    }
+
+    const relinked = await this.linkProjectValueMap(projectId, {
+      valueMapId: promoted.id,
+      revision: 1,
+    });
+
+    return {
+      promoted,
+      relinked,
+    };
   }
 
   async archiveProjectValueTable(valueTableId: string): Promise<ProjectValueTable> {
@@ -2286,7 +2519,11 @@ export class LocalStorageAdapter implements ApiAdapter {
     };
   }
 
-  async exportProjectValueTableCsv(valueTableId: string, revision?: number): Promise<string> {
+  async exportProjectValueTableCsv(
+    valueTableId: string,
+    revision?: number,
+    options?: { portable?: boolean },
+  ): Promise<string | PortableValueMapExportPayload> {
     const table = this.readValueTables().find((entry) => entry.table.id === valueTableId);
     if (!table) {
       throw this.notFound('ProjectValueTable', valueTableId);
@@ -2296,6 +2533,31 @@ export class LocalStorageAdapter implements ApiAdapter {
     const revisionEntry = table.revisions.find((entry) => entry.revision === resolvedRevision);
     if (!revisionEntry) {
       throw this.notFound('ProjectValueTableRevision', `${valueTableId}@${resolvedRevision}`);
+    }
+
+    if (options?.portable) {
+      return {
+        format: 'value-map-portable-v1',
+        exportedAt: this.nowIso(),
+        projectId: table.table.projectId,
+        valueMap: {
+          valueMapId: valueTableId,
+          key: table.table.key,
+          name: table.table.name,
+          ...(table.table.description ? { description: table.table.description } : {}),
+          sideA: revisionEntry.sideA,
+          sideB: revisionEntry.sideB,
+          ...(table.table.defaultMatchMode ? { defaultMatchMode: table.table.defaultMatchMode } : {}),
+          scope: (table.table.projectId === 'global' || table.table.projectId === '') ? 'global' : 'project',
+          ...(table.table.projectId !== 'global' && table.table.projectId !== ''
+            ? { sourceProjectId: table.table.projectId }
+            : {}),
+          overlayRevision: 0,
+          overlayOperations: [],
+          effectiveRows: revisionEntry.rows,
+        },
+        usageBindings: [],
+      };
     }
 
     const header = [revisionEntry.sideA.label, revisionEntry.sideB.label, 'Description'];
@@ -2354,6 +2616,55 @@ export class LocalStorageAdapter implements ApiAdapter {
     });
 
     return this.getProjectValueTableRevision(table.id, 1);
+  }
+
+  async importProjectValueMapPortable(
+    projectId: string,
+    input: ImportProjectValueMapPortableInput,
+  ): Promise<ImportProjectValueMapPortableResult> {
+    const pinnedGlobal = input.portablePayload.valueMap.pinnedGlobal;
+    const resolution = input.resolution;
+
+    if (pinnedGlobal && (!resolution || resolution.action === 'choose-global')) {
+      const selectedValueMapId = resolution?.selectedValueMapId ?? pinnedGlobal.valueMapId;
+      const selectedRevision = resolution?.selectedRevision ?? pinnedGlobal.revision;
+
+      const globalMap = await this.getGlobalValueMap(selectedValueMapId);
+      await this.getGlobalValueMapRevision(selectedValueMapId, selectedRevision);
+      const detail = await this.linkProjectValueMap(projectId, {
+        valueMapId: globalMap.id,
+        revision: selectedRevision,
+      });
+
+      return {
+        importStatus: resolution?.action === 'choose-global' ? 'linked-via-resolution' : 'linked',
+        detail,
+      };
+    }
+
+    if (resolution?.action === 'cancel') {
+      throw {
+        message: 'Import canceled by user resolution choice',
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const createdTable = await this.createProjectValueTable({
+      projectId,
+      key: input.key ?? `${input.portablePayload.valueMap.key}-imported`,
+      name: input.name ?? `${input.portablePayload.valueMap.name} (Imported)`,
+      description: input.portablePayload.valueMap.description,
+      sideA: input.portablePayload.valueMap.sideA,
+      sideB: input.portablePayload.valueMap.sideB,
+      rows: input.portablePayload.valueMap.effectiveRows,
+    });
+
+    return {
+      importStatus: 'detached-project-copy',
+      table: createdTable,
+    };
   }
 
   async resolveProjectValueTableReference(
@@ -2444,5 +2755,330 @@ export class LocalStorageAdapter implements ApiAdapter {
         },
       },
     };
+  }
+
+  async listGlobalValueMaps(options?: ValueTableListOptions): Promise<ProjectValueTable[]> {
+    let tables = this.readValueTables()
+      .map((entry) => entry.table)
+      .filter((table) => table.projectId === 'global' || table.projectId === '');
+
+    if (options?.query) {
+      const query = options.query.toLowerCase();
+      tables = tables.filter((table) =>
+        table.name.toLowerCase().includes(query)
+        || table.key.toLowerCase().includes(query)
+        || table.sideA.label.toLowerCase().includes(query)
+        || table.sideB.label.toLowerCase().includes(query),
+      );
+    }
+
+    if (options?.status) {
+      tables = tables.filter((table) => table.status === options.status);
+    }
+
+    const sortBy = options?.sortBy ?? 'updatedAt';
+    const sortDirection = options?.sortDirection ?? 'desc';
+    const direction = sortDirection === 'asc' ? 1 : -1;
+
+    tables = [...tables].sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name) * direction;
+      if (sortBy === 'updatedAt') return a.updatedAt.localeCompare(b.updatedAt) * direction;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+
+    return tables;
+  }
+
+  async createGlobalValueMap(input: CreateGlobalValueMapInput): Promise<ProjectValueTable> {
+    const existingByKey = this.readValueTables().find(
+      (entry) => (entry.table.projectId === 'global' || entry.table.projectId === '')
+        && entry.table.key === input.key,
+    );
+
+    if (existingByKey) {
+      throw {
+        message: `Value map key already exists in global library: ${input.key}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    return this.createProjectValueTable({
+      projectId: 'global',
+      key: input.key,
+      name: input.name,
+      description: input.description,
+      sideA: input.sideA,
+      sideB: input.sideB,
+      rows: input.rows,
+    });
+  }
+
+  async getGlobalValueMap(valueMapId: string): Promise<ProjectValueTable> {
+    const table = await this.getProjectValueTable(valueMapId);
+    if (table.projectId !== 'global' && table.projectId !== '') {
+      throw this.notFound('GlobalValueMap', valueMapId);
+    }
+    return table;
+  }
+
+  async listGlobalValueMapRevisions(valueMapId: string): Promise<ProjectValueTableRevision[]> {
+    const table = await this.getGlobalValueMap(valueMapId);
+    const found = this.readValueTables().find((entry) => entry.table.id === table.id);
+    return [...(found?.revisions ?? [])].sort((a, b) => b.revision - a.revision);
+  }
+
+  async createGlobalValueMapRevision(
+    valueMapId: string,
+    input: CreateProjectValueTableRevisionInput,
+  ): Promise<ProjectValueTableRevision> {
+    await this.getGlobalValueMap(valueMapId);
+    return this.createProjectValueTableRevision(valueMapId, input);
+  }
+
+  async getGlobalValueMapRevision(valueMapId: string, revision: number): Promise<ProjectValueTableRevision> {
+    await this.getGlobalValueMap(valueMapId);
+    return this.getProjectValueTableRevision(valueMapId, revision);
+  }
+
+  async archiveGlobalValueMap(valueMapId: string): Promise<ProjectValueTable> {
+    await this.getGlobalValueMap(valueMapId);
+    return this.archiveProjectValueTable(valueMapId);
+  }
+
+  async getGlobalValueMapUsage(valueMapId: string): Promise<ValueMapUsageSummary> {
+    await this.getGlobalValueMap(valueMapId);
+    const mappings = await this.listProjectValueTableUsage(valueMapId);
+    return {
+      mappings,
+      linkedProjects: [],
+      counts: {
+        mappings: mappings.length,
+        linkedProjects: 0,
+      },
+    };
+  }
+
+  async listProjectValueMaps(projectId: string): Promise<ProjectValueMapLinkSummary[]> {
+    const links = this.readProjectValueMapLinks()
+      .filter((link) => link.projectId === projectId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    const summaries = await Promise.all(links.map(async (link) => {
+      const globalMap = await this.getGlobalValueMap(link.valueMapId);
+      return {
+        projectId,
+        valueMapId: link.valueMapId,
+        key: globalMap.key,
+        name: globalMap.name,
+        pinnedRevision: link.pinnedRevision,
+        latestRevision: globalMap.currentRevision,
+        overlayRevision: link.overlayRevision,
+        updateAvailable: link.updateAvailable,
+        dependencyState: link.dependencyState,
+        status: globalMap.status,
+      } satisfies ProjectValueMapLinkSummary;
+    }));
+
+    return summaries;
+  }
+
+  async linkProjectValueMap(projectId: string, input: LinkProjectValueMapInput): Promise<ProjectValueMapDetail> {
+    const globalMap = await this.getGlobalValueMap(input.valueMapId);
+    if (globalMap.status === 'archived') {
+      throw {
+        message: `Archived value map cannot be newly linked: ${input.valueMapId}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    await this.getGlobalValueMapRevision(input.valueMapId, input.revision);
+
+    if (this.getProjectValueMapLink(projectId, input.valueMapId)) {
+      throw {
+        message: `Project is already linked to value map: ${input.valueMapId}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const timestamp = this.nowIso();
+    const links = this.readProjectValueMapLinks();
+    links.push({
+      projectId,
+      valueMapId: input.valueMapId,
+      pinnedRevision: input.revision,
+      overlayRevision: 0,
+      dependencyState: 'current',
+      updateAvailable: input.revision < globalMap.currentRevision,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    this.writeProjectValueMapLinks(links);
+
+    return this.resolveProjectValueMapDetail(projectId, input.valueMapId);
+  }
+
+  async getProjectValueMapDetail(projectId: string, valueMapId: string): Promise<ProjectValueMapDetail> {
+    return this.resolveProjectValueMapDetail(projectId, valueMapId);
+  }
+
+  async updateProjectValueMapOverlay(
+    projectId: string,
+    valueMapId: string,
+    input: UpdateProjectValueMapOverlayInput,
+  ): Promise<ProjectValueMapDetail> {
+    const links = this.readProjectValueMapLinks();
+    const linkIndex = links.findIndex((link) => link.projectId === projectId && link.valueMapId === valueMapId);
+    if (linkIndex < 0) {
+      throw this.notFound('ProjectValueMapLink', `${projectId}:${valueMapId}`);
+    }
+
+    const current = links[linkIndex];
+    if (
+      typeof input.expectedOverlayRevision === 'number'
+      && input.expectedOverlayRevision !== current.overlayRevision
+    ) {
+      throw {
+        message: `Overlay revision mismatch: expected ${current.overlayRevision}, got ${input.expectedOverlayRevision}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+      };
+    }
+
+    const revisions = this.readProjectValueMapOverlayRevisions();
+    const nextOverlayRevision = current.overlayRevision + 1;
+    revisions.push({
+      projectId,
+      valueMapId,
+      revision: nextOverlayRevision,
+      operations: input.operations,
+      createdAt: this.nowIso(),
+    });
+    this.writeProjectValueMapOverlayRevisions(revisions);
+
+    links[linkIndex] = {
+      ...current,
+      overlayRevision: nextOverlayRevision,
+      dependencyState: 'needs-review',
+      updatedAt: this.nowIso(),
+    };
+    this.writeProjectValueMapLinks(links);
+
+    return this.resolveProjectValueMapDetail(projectId, valueMapId);
+  }
+
+  async reviewProjectValueMapUpdate(
+    projectId: string,
+    valueMapId: string,
+    input?: ReviewProjectValueMapUpdateInput,
+  ): Promise<ReviewProjectValueMapUpdateResult> {
+    const link = this.getProjectValueMapLink(projectId, valueMapId);
+    if (!link) {
+      throw this.notFound('ProjectValueMapLink', `${projectId}:${valueMapId}`);
+    }
+
+    const globalMap = await this.getGlobalValueMap(valueMapId);
+    const candidateRevision = input?.candidateRevision ?? globalMap.currentRevision;
+    const candidate = await this.getGlobalValueMapRevision(valueMapId, candidateRevision);
+    const pinned = await this.getGlobalValueMapRevision(valueMapId, link.pinnedRevision);
+
+    const pinnedIds = new Set(pinned.rows.map((row) => row.id));
+    const candidateIds = new Set(candidate.rows.map((row) => row.id));
+    const orphanedRowIds = Array.from(pinnedIds).filter((rowId) => !candidateIds.has(rowId));
+    const conflicts = orphanedRowIds.map((rowId) => ({
+      type: 'orphan' as const,
+      rowId,
+      message: `Overlay target row no longer exists in candidate revision: ${rowId}`,
+    }));
+
+    return {
+      projectId,
+      valueMapId,
+      currentPinnedRevision: link.pinnedRevision,
+      candidateRevision,
+      updateAvailable: candidateRevision > link.pinnedRevision,
+      conflicts,
+      orphanedRowIds,
+      canAccept: conflicts.length === 0,
+    };
+  }
+
+  async acceptProjectValueMapUpdate(
+    projectId: string,
+    valueMapId: string,
+    input: AcceptProjectValueMapUpdateInput,
+  ): Promise<ProjectValueMapDetail> {
+    const links = this.readProjectValueMapLinks();
+    const linkIndex = links.findIndex((link) => link.projectId === projectId && link.valueMapId === valueMapId);
+    if (linkIndex < 0) {
+      throw this.notFound('ProjectValueMapLink', `${projectId}:${valueMapId}`);
+    }
+
+    const current = links[linkIndex];
+    const candidate = await this.getGlobalValueMapRevision(valueMapId, input.candidateRevision);
+    const pinned = await this.getGlobalValueMapRevision(valueMapId, current.pinnedRevision);
+
+    const pinnedIds = new Set(pinned.rows.map((row) => row.id));
+    const candidateIds = new Set(candidate.rows.map((row) => row.id));
+    const orphanedRowIds = Array.from(pinnedIds).filter((rowId) => !candidateIds.has(rowId));
+    const resolved = new Set(input.resolveOrphansAsExcludes ?? []);
+    const unresolved = orphanedRowIds.filter((rowId) => !resolved.has(rowId));
+
+    if (unresolved.length > 0) {
+      throw {
+        message: 'Cannot accept update while unresolved conflicts/orphans remain',
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+        details: {
+          unresolvedOrphans: unresolved,
+        },
+      };
+    }
+
+    links[linkIndex] = {
+      ...current,
+      pinnedRevision: input.candidateRevision,
+      dependencyState: 'needs-review',
+      updateAvailable: false,
+      updatedAt: this.nowIso(),
+    };
+    this.writeProjectValueMapLinks(links);
+
+    return this.resolveProjectValueMapDetail(projectId, valueMapId);
+  }
+
+  async unlinkProjectValueMap(projectId: string, valueMapId: string): Promise<void> {
+    const link = this.getProjectValueMapLink(projectId, valueMapId);
+    if (!link) {
+      throw this.notFound('ProjectValueMapLink', `${projectId}:${valueMapId}`);
+    }
+
+    const usage = await this.listProjectValueTableUsage(valueMapId);
+    if (usage.length > 0) {
+      throw {
+        message: `Cannot unlink value map while mappings reference it: ${valueMapId}`,
+        code: 'CONFLICT',
+        statusCode: 409,
+        retryable: false,
+        details: {
+          usageCount: usage.length,
+          usage,
+        },
+      };
+    }
+
+    this.writeProjectValueMapLinks(
+      this.readProjectValueMapLinks().filter((entry) => !(entry.projectId === projectId && entry.valueMapId === valueMapId)),
+    );
+    this.writeProjectValueMapOverlayRevisions(
+      this.readProjectValueMapOverlayRevisions().filter((entry) => !(entry.projectId === projectId && entry.valueMapId === valueMapId)),
+    );
   }
 }

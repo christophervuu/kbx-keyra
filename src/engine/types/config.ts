@@ -19,6 +19,8 @@ export interface MappingConfigBlock {
 
 export type ValueTableValueType = 'string' | 'number' | 'boolean';
 
+export type ValueMapMatchMode = 'exact' | 'ignore-case';
+
 export type ValueTablePrimitiveValue = string | number | boolean;
 
 export interface ValueTableResolvedEntry {
@@ -36,6 +38,7 @@ export interface MappingRuleProjectValueTableRef {
   readonly outputSideKey: string;
   readonly inputType: ValueTableValueType;
   readonly outputType: ValueTableValueType;
+  readonly matchMode?: ValueMapMatchMode;
   readonly resolvedEntries: readonly ValueTableResolvedEntry[];
 }
 

@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  CreateGlobalValueMapInput,
   CreateValueTableInput,
   MappingConfig,
   MappingItem,
   ProjectValueTableRevisionRow,
   ValueTableItem,
+  ValueMapProjectLinkItem,
   ValueTableRevisionItem,
 } from '../../../src/lib/persistence/types.js';
 
@@ -51,6 +53,17 @@ function makeCreateInput(): CreateValueTableInput {
     sideB: { key: 'cdm', label: 'CDM', type: 'string' },
     rows: makeRows(),
     createdBy: 'tester',
+  };
+}
+
+function makeCreateGlobalInput(): CreateGlobalValueMapInput {
+  return {
+    key: 'global-order-status',
+    name: 'Global Order Status',
+    sideA: { key: 'oms', label: 'OMS', type: 'string' },
+    sideB: { key: 'cdm', label: 'CDM', type: 'string' },
+    rows: makeRows(),
+    createdBy: 'global-owner',
   };
 }
 
@@ -221,7 +234,8 @@ describe('persistence value-tables', () => {
   it('resolveReference returns pinned project ref and resolved entries', async () => {
     dynamoSendMock
       .mockResolvedValueOnce({ Items: [makeTableItem({ currentRevision: 2 })] })
-      .mockResolvedValueOnce({ Item: makeRevisionItem({ revision: 2 }) });
+      .mockResolvedValueOnce({ Item: makeRevisionItem({ revision: 2 }) })
+      .mockResolvedValueOnce({ Item: makeTableItem({ currentRevision: 2 }) });
     getRowsMock.mockResolvedValueOnce(makeRows());
 
     const mod = await importModule();
@@ -242,5 +256,141 @@ describe('persistence value-tables', () => {
       outputSideKey: 'cdm',
     }));
     expect(resolved?.ref.resolvedEntries).toHaveLength(2);
+  });
+
+  it('createGlobal stores scoped global value map metadata and revision rows', async () => {
+    dynamoSendMock
+      .mockResolvedValueOnce({ Items: [] })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    const mod = await importModule();
+    const created = await mod.createGlobal(makeCreateGlobalInput());
+
+    expect(created).toEqual(expect.objectContaining({
+      id: 'vt-1',
+      key: 'global-order-status',
+      currentRevision: 1,
+      status: 'active',
+    }));
+    expect(putRowsMock).toHaveBeenCalledWith('vt-1', 1, makeRows());
+
+    const putArgs = dynamoSendMock.mock.calls[1]?.[0] as { input?: { Item?: Partial<ValueTableItem> } };
+    expect(putArgs.input?.Item).toEqual(expect.objectContaining({
+      scope: 'global',
+      defaultMatchMode: 'exact',
+    }));
+  });
+
+  it('migrateValueTablesToScopedModel is idempotent and updates only missing defaults', async () => {
+    const firstScanItems: ValueTableItem[] = [
+      makeTableItem({ valueTableId: 'vt-1' }) as ValueTableItem,
+      makeTableItem({ valueTableId: 'vt-2', scope: 'global', defaultMatchMode: 'ignore-case', projectId: undefined }),
+    ];
+
+    dynamoSendMock
+      .mockResolvedValueOnce({ Items: firstScanItems })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ Items: firstScanItems.map((item) => ({
+        ...item,
+        scope: item.scope ?? 'project',
+        defaultMatchMode: item.defaultMatchMode ?? 'exact',
+      })) });
+
+    const mod = await importModule();
+    const first = await mod.migrateValueTablesToScopedModel();
+    const second = await mod.migrateValueTablesToScopedModel();
+
+    expect(first).toEqual({ scanned: 2, updated: 1 });
+    expect(second).toEqual({ scanned: 2, updated: 0 });
+  });
+
+  it('createProjectLink persists link metadata under canonical persistence abstraction', async () => {
+    dynamoSendMock
+      .mockResolvedValueOnce({ Item: makeTableItem({ scope: 'global', currentRevision: 5, projectId: undefined }) })
+      .mockResolvedValueOnce({});
+
+    const mod = await importModule();
+    const link = await mod.createProjectLink({
+      projectId: 'p-2',
+      valueTableId: 'vt-1',
+      pinnedRevision: 3,
+      createdBy: 'tester',
+    });
+
+    expect(link).toEqual(expect.objectContaining({
+      projectId: 'p-2',
+      valueTableId: 'vt-1',
+      pinnedRevision: 3,
+      overlayRevision: 0,
+      dependencyState: 'current',
+      updateAvailable: true,
+    } satisfies Partial<ValueMapProjectLinkItem>));
+  });
+
+  it('createOverlayRevision appends overlay ops and marks dependency needs-review', async () => {
+    dynamoSendMock
+      .mockResolvedValueOnce({ Item: {
+        valueTableId: 'link#link-1',
+        revision: 0,
+        linkId: 'link-1',
+        projectId: 'p-1',
+        pinnedRevision: 1,
+        overlayRevision: 0,
+        dependencyState: 'current',
+        updateAvailable: false,
+      } })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    const mod = await importModule();
+    const overlay = await mod.createOverlayRevision({
+      linkId: 'link-1',
+      expectedOverlayRevision: 0,
+      operations: [
+        {
+          operationId: 'op-1',
+          type: 'exclude',
+          targetRowId: 'r1',
+        },
+      ],
+      createdBy: 'tester',
+    });
+
+    expect(overlay).toEqual(expect.objectContaining({
+      linkId: 'link-1',
+      overlayRevision: 1,
+      operationCount: 1,
+    }));
+    expect(dynamoSendMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('backfillRevisionRowIds updates missing row ids deterministically and is safe to rerun', async () => {
+    dynamoSendMock
+      .mockResolvedValueOnce({ Items: [makeRevisionItem({ valueTableId: 'vt-1', revision: 2 })] })
+      .mockResolvedValueOnce({ Items: [makeRevisionItem({ valueTableId: 'vt-1', revision: 2 })] });
+
+    getRowsMock
+      .mockResolvedValueOnce([
+        { id: '', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'row-vt-1-2-0-confirmed-OPEN-', sideAValue: 'confirmed', sideBValue: 'OPEN' },
+      ]);
+
+    const mod = await importModule();
+    const first = await mod.backfillRevisionRowIds();
+    const second = await mod.backfillRevisionRowIds();
+
+    expect(first).toEqual({ revisionsScanned: 1, revisionsUpdated: 1 });
+    expect(second).toEqual({ revisionsScanned: 1, revisionsUpdated: 0 });
+    expect(putRowsMock).toHaveBeenCalledTimes(1);
+    expect(putRowsMock).toHaveBeenCalledWith(
+      'vt-1',
+      2,
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'row-vt-1-2-0-confirmed-OPEN-' }),
+      ]),
+    );
   });
 });

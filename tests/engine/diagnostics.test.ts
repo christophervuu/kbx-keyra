@@ -10,10 +10,11 @@ describe('diagnostic codes', () => {
   it('includes all expected diagnostic codes with expected count', () => {
     const codes = Object.keys(DIAGNOSTIC_CODES);
 
-    expect(codes).toHaveLength(34);
+    expect(codes).toHaveLength(35);
     expect(codes).toContain('KEYRA-E001');
     expect(codes).toContain('KEYRA-E060');
     expect(codes).toContain('KEYRA-E067');
+    expect(codes).toContain('KEYRA-E068');
     expect(codes).toContain('KEYRA-W005');
     expect(codes).toContain('KEYRA-W006');
   });
@@ -27,6 +28,7 @@ describe('diagnostic codes', () => {
     expect(DIAGNOSTIC_CODES['KEYRA-E065'].messageTemplate).toContain('duplicate input value');
     expect(DIAGNOSTIC_CODES['KEYRA-E066'].messageTemplate).toContain('fallbackValue');
     expect(DIAGNOSTIC_CODES['KEYRA-E067'].messageTemplate).toContain('fallback type mismatch');
+    expect(DIAGNOSTIC_CODES['KEYRA-E068'].messageTemplate).toContain('match mode');
     expect(DIAGNOSTIC_CODES['KEYRA-W003'].messageTemplate).toContain('no match');
   });
 

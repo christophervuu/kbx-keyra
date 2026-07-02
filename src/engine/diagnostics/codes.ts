@@ -151,6 +151,11 @@ export const DIAGNOSTIC_CODES = {
     severity: 'error',
     messageTemplate: 'No-match fallback type mismatch: expected `{expected}`, got `{actual}`',
   },
+  'KEYRA-E068': {
+    code: 'KEYRA-E068',
+    severity: 'error',
+    messageTemplate: 'Invalid valueMap match mode: `{mode}`. Expected `exact` or `ignore-case`',
+  },
   'KEYRA-W001': {
     code: 'KEYRA-W001',
     severity: 'warning',

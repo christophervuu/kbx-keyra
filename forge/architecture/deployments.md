@@ -499,6 +499,38 @@ Runtime execute invariant:
 - Runtime execute must not fetch project value-table storage (DynamoDB/S3/project APIs).
 - Missing project `resolvedEntries` in snapshot payload is treated as deterministic snapshot integrity failure.
 
+## 22) FS-102 Value Mapping snapshot/deploy compatibility addendum
+
+FS-102 extends FS-096 snapshot invariants from project value tables to scoped Value Mapping (global + project link/overlay) without changing immutable artifact principles.
+
+Snapshot compatibility requirements:
+
+- Deployment artifacts embed resolved effective value-mapping bindings required for execution:
+  - source mapping/value-map identity metadata
+  - pinned global revision (when applicable)
+  - project overlay revision (when applicable)
+  - direction
+  - resolved match mode
+  - resolved fallback behavior
+  - effective executable rows
+- Snapshot payload is the runtime source of truth; no mutable library reads at runtime.
+
+Determinism invariants:
+
+- Post-deploy global map edits, overlay edits, or default changes must not alter already deployed behavior.
+- Promote reuses the same artifact identity/data for value-mapping bindings.
+- Rollback restores the exact prior value-mapping behavior from prior snapshot pointer.
+
+Deployment gate compatibility requirements:
+
+- New deployment is blocked when mapping dependency state is `needs-review` or `invalid`.
+- Gate evaluation is deterministic from persisted dependency/readiness state; no implicit auto-versioning is triggered by deploy path.
+
+Import/export and promotion compatibility note:
+
+- FS-102 promotion, portable export/import, and duplication workflows are authoring-time data-shaping operations and do not alter deployment runtime invariants.
+- Deploy/promote/rollback continue to execute against immutable snapshot-embedded effective value-map bindings only.
+
 ## 21) FS-100 runtime execute compatibility addendum
 
 FS-100 finalizes runtime execute request/response compatibility behavior without implicit shape detection.

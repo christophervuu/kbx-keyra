@@ -110,6 +110,84 @@ describe('validate() value table semantics', () => {
     expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E065')).toBe(true);
   });
 
+  it('emits E065 when ignore-case mode causes normalized collisions', () => {
+    const result = validate(
+      createConfig({
+        matchMode: 'ignore-case',
+        resolvedEntries: [
+          { in: 'confirmed', out: 'OPEN', rowId: 'r1' },
+          { in: 'CONFIRMED', out: 'COMPLETE', rowId: 'r2' },
+        ],
+      }),
+      sourceSchema,
+      targetSchema,
+    );
+
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E065')).toBe(true);
+  });
+
+  it('does not emit E065 for case-only differences under exact mode', () => {
+    const result = validate(
+      createConfig({
+        matchMode: 'exact',
+        resolvedEntries: [
+          { in: 'confirmed', out: 'OPEN', rowId: 'r1' },
+          { in: 'CONFIRMED', out: 'COMPLETE', rowId: 'r2' },
+        ],
+      }),
+      sourceSchema,
+      targetSchema,
+    );
+
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E065')).toBe(false);
+  });
+
+  it('emits E068 when valueMap match mode argument is invalid', () => {
+    const base = createConfig();
+    const [firstRule] = base.rules;
+    if (!firstRule) {
+      throw new Error('Expected one rule in base config');
+    }
+
+    const config: MappingConfig = {
+      ...base,
+      rules: [
+        {
+          ...firstRule,
+          expression:
+            'valueMap(source("status"), valueTable("order-status", "oms-status", "cdm-status"), "UNKNOWN", "fuzzy")',
+        },
+      ],
+    };
+
+    const result = validate(config, sourceSchema, targetSchema);
+
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E068')).toBe(true);
+  });
+
+  it('accepts valueMap match mode argument when valid', () => {
+    const base = createConfig();
+    const [firstRule] = base.rules;
+    if (!firstRule) {
+      throw new Error('Expected one rule in base config');
+    }
+
+    const config: MappingConfig = {
+      ...base,
+      rules: [
+        {
+          ...firstRule,
+          expression:
+            'valueMap(source("status"), valueTable("order-status", "oms-status", "cdm-status"), "UNKNOWN", "ignore-case")',
+        },
+      ],
+    };
+
+    const result = validate(config, sourceSchema, targetSchema);
+
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-E068')).toBe(false);
+  });
+
   it('emits E067 for fallback_value type mismatch', () => {
     const base = createConfig();
     const [firstRule] = base.rules;

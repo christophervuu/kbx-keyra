@@ -104,6 +104,14 @@ const mockAdapter: ApiAdapter = {
   exportProjectValueTableCsv: vi.fn(),
   importProjectValueTableCsv: vi.fn(),
   resolveProjectValueTableReference: vi.fn(),
+  listGlobalValueMaps: vi.fn(),
+  createGlobalValueMap: vi.fn(),
+  getGlobalValueMap: vi.fn(),
+  listGlobalValueMapRevisions: vi.fn(),
+  createGlobalValueMapRevision: vi.fn(),
+  getGlobalValueMapRevision: vi.fn(),
+  archiveGlobalValueMap: vi.fn(),
+  getGlobalValueMapUsage: vi.fn(),
 } as unknown as ApiAdapter;
 
 // ---------------------------------------------------------------------------

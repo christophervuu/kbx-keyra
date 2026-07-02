@@ -12,6 +12,7 @@ import type {
   MappingRuleNoMatchBehavior,
   MappingRuleProjectValueTableRef,
   MappingRuleValueTableRef,
+  ValueMapMatchMode,
   ValueTableDirectionSupport,
   ValueTableScope,
   ValueTableSideDefinition,
@@ -138,6 +139,7 @@ export interface BuilderValueMapEntry {
 
 export interface BuilderProjectValueMapSelection {
   readonly ref: MappingRuleProjectValueTableRef;
+  readonly matchMode?: ValueMapMatchMode;
   readonly tableName?: string;
   readonly tableStatus?: ValueTableStatus;
   readonly currentRevision?: number;
@@ -186,6 +188,7 @@ export type BuilderComposition =
   | {
       readonly kind: 'valueMap';
       readonly inputId: string;
+      readonly matchMode?: ValueMapMatchMode;
       readonly scope?: ValueTableScope;
       readonly project?: BuilderProjectValueMapSelection | null;
       readonly mappings: readonly BuilderValueMapEntry[];
@@ -1256,6 +1259,7 @@ export function hydrateSmartBuilderFromExpression(input: {
       composition: {
         kind: 'valueMap',
         inputId: hydratedValueMap.primaryInput.id,
+        matchMode: hydratedValueMap.matchMode,
         scope: hydratedValueMap.scope,
         project: hydratedValueMap.project,
         mappings: hydratedValueMap.mappings,
@@ -1380,10 +1384,6 @@ function createRecipeInputRegistry(): RecipeInputRegistry {
     bySignature: new Map(),
     ordered: [],
   };
-}
-
-function astNodeToExpressionSlice(expression: string, node: AstNode): string {
-  return expression.slice(node.start, node.end).trim();
 }
 
 function astNodeToStaticValue(node: AstNode): unknown | undefined {
@@ -1538,28 +1538,6 @@ function tryHydrateRecipeInputFromAstNode(
   }
 
   return null;
-}
-
-function tryHydrateRecipeArgumentValueFromAstNode(
-  node: AstNode,
-  expression: string,
-  registry: RecipeInputRegistry,
-  context: RecipeHydrationContext,
-): BuilderArgumentValue {
-  const input = tryHydrateRecipeInputFromAstNode(node, registry, context);
-  if (input) {
-    return { kind: 'input', inputId: input.id };
-  }
-
-  const staticValue = astNodeToStaticValue(node);
-  if (staticValue !== undefined) {
-    return { kind: 'static', value: staticValue };
-  }
-
-  return {
-    kind: 'expression',
-    expression: astNodeToExpressionSlice(expression, node),
-  };
 }
 
 function tryHydrateRepresentableMathComposition(
@@ -2446,6 +2424,7 @@ function hydrateValueMapCompositionFromExpression(
   },
 ): {
   readonly primaryInput: BuilderInput;
+  readonly matchMode: ValueMapMatchMode;
   readonly scope: ValueTableScope;
   readonly project: BuilderProjectValueMapSelection | null;
   readonly mappings: readonly BuilderValueMapEntry[];
@@ -2481,6 +2460,7 @@ function hydrateValueMapCompositionFromExpression(
   if (parsed.mapping.kind === 'inline') {
     return {
       primaryInput,
+      matchMode: parsed.matchMode ?? 'exact',
       scope: 'inline',
       project: null,
       mappings: parsed.mapping.entries,
@@ -2515,11 +2495,15 @@ function hydrateValueMapCompositionFromExpression(
         resolvedEntries: [],
       };
 
+  const matchMode: ValueMapMatchMode = projectRef.matchMode ?? 'exact';
+
   return {
     primaryInput,
+    matchMode,
     scope: 'project',
     project: {
       ref: projectRef,
+      matchMode,
       ...(projectRef.valueTableId.startsWith('unknown:') ? { tableName: tableKey } : {}),
     },
     mappings: projectRef.resolvedEntries.map((entry) => ({
@@ -2545,18 +2529,23 @@ function parseValueMapExpression(expression: string): {
         readonly entries: readonly BuilderValueMapEntry[];
       };
   readonly fallbackExpression: string;
+  readonly matchMode?: ValueMapMatchMode;
 } | null {
   const trimmed = expression.trim();
   const valueMapMatch = trimmed.match(/^valueMap\((?<args>[\s\S]*)\)$/);
   if (!valueMapMatch?.groups?.args) return null;
 
   const topLevelArgs = splitTopLevelDslArgs(valueMapMatch.groups.args);
-  if (topLevelArgs.length !== 3) return null;
+  if (topLevelArgs.length < 3 || topLevelArgs.length > 4) return null;
 
   const sourceExpression = topLevelArgs[0]?.trim() ?? '';
   const mappingExpression = topLevelArgs[1]?.trim() ?? '';
   const fallbackExpression = topLevelArgs[2]?.trim() ?? '';
+  const matchModeExpression = topLevelArgs[3]?.trim();
   if (!sourceExpression || !mappingExpression || !fallbackExpression) return null;
+
+  const matchMode = parseValueMapMatchModeExpression(matchModeExpression);
+  if (matchModeExpression !== undefined && !matchMode) return null;
 
   const projectMapping = parseProjectValueTableReference(mappingExpression);
   const inlineMapping = projectMapping ? null : parseInlineValueMapEntries(mappingExpression);
@@ -2566,7 +2555,18 @@ function parseValueMapExpression(expression: string): {
     sourceExpression,
     mapping: projectMapping ?? { kind: 'inline', entries: inlineMapping ?? [] },
     fallbackExpression,
+    ...(matchMode ? { matchMode } : {}),
   };
+}
+
+function parseValueMapMatchModeExpression(
+  matchModeExpression: string | undefined,
+): ValueMapMatchMode | null {
+  if (matchModeExpression === undefined) return null;
+  const value = readQuotedDslString(matchModeExpression);
+  if (!value) return null;
+  if (value === 'exact' || value === 'ignore-case') return value;
+  return null;
 }
 
 function parseProjectValueTableReference(mappingExpression: string): {

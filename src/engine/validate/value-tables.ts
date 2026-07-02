@@ -1,10 +1,14 @@
 import { DIAGNOSTIC_CODES } from '../diagnostics/codes.js';
 import { formatDiagnosticMessage } from '../diagnostics/format.js';
 import type { AstNode } from '../dsl/types.js';
+import {
+  DEFAULT_VALUE_MAP_MATCH_MODE,
+  normalizeLookupKey,
+  resolveValueMapMatchMode,
+} from '../functions/match-mode.js';
 import type {
   Diagnostic,
   MappingRule,
-  MappingRuleNoMatchBehavior,
   MappingRuleProjectValueTableRef,
   ValueTablePrimitiveValue,
 } from '../types/index.js';
@@ -118,6 +122,7 @@ function validateProjectValueTableRef(
   ruleIndex: number,
   rule: MappingRule,
   ref: MappingRuleProjectValueTableRef,
+  valueMapCall: Extract<AstNode, { type: 'FunctionCall' }> | null,
   valueTableCall: Extract<AstNode, { type: 'FunctionCall' }> | null,
 ): void {
   if (!TABLE_KEY_PATTERN.test(ref.tableKey)) {
@@ -159,6 +164,22 @@ function validateProjectValueTableRef(
     }
   }
 
+  const explicitMatchModeArg = valueMapCall?.arguments[3];
+  if (explicitMatchModeArg !== undefined) {
+    if (explicitMatchModeArg.type !== 'StringLiteral' || resolveValueMapMatchMode(explicitMatchModeArg.value) === null) {
+      addDiagnostic(diagnostics, 'KEYRA-E068', ruleIndex, rule, 'valueMap', {
+        mode: explicitMatchModeArg.type === 'StringLiteral' ? explicitMatchModeArg.value : explicitMatchModeArg.type,
+      });
+    }
+  }
+
+  const matchMode =
+    (explicitMatchModeArg && explicitMatchModeArg.type === 'StringLiteral'
+      ? resolveValueMapMatchMode(explicitMatchModeArg.value)
+      : null)
+    ?? resolveValueMapMatchMode(ref.matchMode)
+    ?? DEFAULT_VALUE_MAP_MATCH_MODE;
+
   const seenInputs = new Map<string, number>();
   for (const entry of ref.resolvedEntries) {
     if (!isPrimitiveValue(entry.in) || !isPrimitiveValue(entry.out)) {
@@ -174,7 +195,7 @@ function validateProjectValueTableRef(
       });
     }
 
-    const key = String(entry.in);
+    const key = normalizeLookupKey(entry.in, matchMode);
     const existing = seenInputs.get(key);
     if (existing !== undefined) {
       addDiagnostic(diagnostics, 'KEYRA-E065', ruleIndex, rule, 'valueTable', {
@@ -225,7 +246,7 @@ export function validateValueTables(parsedRules: readonly ParsedRuleAst[]): Diag
       continue;
     }
 
-    validateProjectValueTableRef(diagnostics, ruleIndex, rule, ref, mappingArg);
+    validateProjectValueTableRef(diagnostics, ruleIndex, rule, ref, valueMapCall, mappingArg);
   }
 
   return diagnostics;

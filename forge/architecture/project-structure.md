@@ -211,7 +211,7 @@ ui/
     App.tsx               Root component and router setup
     routes/               Route path constants and placeholder pages
       index.ts            Barrel export for route constants
-      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test-lab' (FS-021 T-05, FS-032 T-01) and PROJECT_VALUE_MAPPINGS = '/projects/:projectId/value-mappings' (FS-096 T-06)
+      paths.ts            Route path string constants (PATHS object); includes MAPPING_TEST = '/projects/:projectId/mappings/:mappingId/test-lab' (FS-021 T-05, FS-032 T-01), PROJECT_VALUE_MAPPINGS = '/projects/:projectId/value-mappings' (FS-096 T-06), VALUE_MAPPINGS = '/value-mappings', and VALUE_MAPPING_DETAIL = '/value-mappings/:valueMapId' (FS-102 T-07)
       pages/              Placeholder page components (one per route)
         HomeDashboard.tsx   Renders HomeDashboardPage from features/home (FS-014 T-11)
         CreateProject.tsx          Renders CreateProjectPage from features/projects (FS-013 T-09)
@@ -226,6 +226,8 @@ ui/
         SchemaLibrary.tsx          Renders SchemaLibraryPage from features/schemas (FS-016 T-04)
         SchemaDetail.tsx
         TemplateLibrary.tsx
+        ValueMappingsLibrary.tsx  Renders GlobalValueMappingsLibraryPage from features/value-mappings (FS-102 T-07)
+        ValueMappingDetail.tsx     Renders GlobalValueMappingDetailPage from features/value-mappings (FS-102 T-07)
         Settings.tsx
         NotFound.tsx
     features/             Feature-scoped code — one folder per major screen or domain
@@ -418,6 +420,16 @@ ui/
           detect-schema-format.ts  Schema upload format detection utility (json-schema/xsd/sample-json/sample-xml/unknown)
           __tests__/
             detect-schema-format.test.ts  Unit tests for schema format detection heuristics (FS-013 T-02)
+      value-mappings/     Global Value Mapping library/detail feature module (FS-102 T-07)
+        index.ts            Feature barrel export
+        components/
+          index.ts          Components barrel
+          GlobalValueMappingsLibraryPage.tsx  Global library route surface (`/value-mappings`): search/filter/sort, metadata table, create modal, duplicate/archive actions, and navigation to detail (FS-102 T-07)
+          GlobalValueMappingDetailPage.tsx    Global detail route surface (`/value-mappings/:valueMapId`): current rows, immutable revision history with diff summary, usage context, archive action, and revision creation modal (FS-102 T-07)
+          __tests__/
+            GlobalValueMappingsLibraryPage.test.tsx  Component tests for list/filter/sort/create/archive/duplicate flows (FS-102 T-07)
+            GlobalValueMappingDetailPage.test.tsx    Component tests for detail/revision history/usage/revision-create/archive flows (FS-102 T-07)
+            GlobalValueMappingsNavigation.test.tsx   Route + app-shell navigation wiring tests for global library surfaces (FS-102 T-07)
       mappings/           Mapping Editor (panels, expression builder, preview, AI features)
         index.ts          Feature barrel (re-exports hooks + components)
         types.ts          Feature-shared mapping types (TargetFilter/TargetSort/EditorView, linked debug selection, comparison mode config)

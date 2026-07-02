@@ -46,6 +46,7 @@ function renderNavBar(path = '/') {
       <NavBar />
       <Routes>
         <Route path="/" element={<div data-testid="page-home" />} />
+        <Route path="/value-mappings" element={<div data-testid="page-value-mappings" />} />
         <Route path="/schemas" element={<div data-testid="page-schemas" />} />
         <Route path="/templates" element={<div data-testid="page-templates" />} />
         <Route path="/settings" element={<div data-testid="page-settings" />} />
@@ -73,6 +74,8 @@ function renderBreadcrumbs(path: string) {
             <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div />} />
             <Route path="/projects/:projectId/deployments" element={<div />} />
             <Route path="/projects/:projectId/value-mappings" element={<div />} />
+            <Route path="/value-mappings" element={<div />} />
+            <Route path="/value-mappings/:valueMapId" element={<div />} />
             <Route path="/schemas" element={<div />} />
             <Route path="/schemas/:schemaId" element={<div />} />
             <Route path="*" element={<div />} />
@@ -217,10 +220,11 @@ describe('NavBar', () => {
     expect(screen.getByText('Ra')).toBeInTheDocument();
   });
 
-  it('renders all 4 primary nav links in expanded mode', () => {
+  it('renders all 5 primary nav links in expanded mode', () => {
     renderNavBar();
 
     expect(screen.getByTestId('sidebar-link-home')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-link-value mappings')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-link-schemas')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-link-templates')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-link-settings')).toBeInTheDocument();
@@ -297,6 +301,15 @@ describe('Breadcrumbs', () => {
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByText('Schemas')).toBeInTheDocument();
+  });
+
+  it('renders breadcrumbs for /value-mappings/:valueMapId', () => {
+    renderBreadcrumbs('/value-mappings/vm-1');
+
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Value Mappings' })).toHaveAttribute('href', '/value-mappings');
+    expect(screen.getByText('vm-1')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'vm-1' })).not.toBeInTheDocument();
   });
 
   it('renders breadcrumbs with dynamic params for nested routes (AE-05)', () => {

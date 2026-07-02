@@ -32,7 +32,7 @@ Deployment/preview architecture contracts are covered via addenda in this docume
 
 ## 2) Route Table (Phase 1)
 
-Phase 1 exposes 40 routes in this architecture slice (including FS-076 CDM read-only integration, FS-090 inferred-review/sample contracts, and FS-096 project value-table routes). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
+Phase 1 exposes the core CRUD/query routes in this architecture slice (including FS-076 CDM read-only integration, FS-090 inferred-review/sample contracts, FS-096 project value-table routes, and FS-102 preferred value-map surfaces). Logical Lambda names follow the naming conventions documented in `infrastructure.md` (`{Verb}{Resource}Function`).
 
 | Method | Path | Handler File | Lambda Name (logical) | Description |
 |---|---|---|---|---|
@@ -76,6 +76,22 @@ Phase 1 exposes 40 routes in this architecture slice (including FS-076 CDM read-
 | GET | `/value-tables/:valueTableId/export.csv` | `src/lambda/project/value-tables.ts` | `ExportProjectValueTableCsvFunction` | Export selected/current revision rows as CSV |
 | POST | `/projects/:id/value-tables/import-csv` | `src/lambda/project/value-tables.ts` | `ImportProjectValueTableCsvFunction` | Import CSV as new table + revision `1` |
 | POST | `/projects/:id/value-tables/resolve` | `src/lambda/project/value-tables.ts` | `ResolveProjectValueTableReferenceFunction` | Resolve pinned table/direction to embedded `valueTableRef.resolvedEntries` payload |
+| GET | `/projects/:projectId/value-maps` | `src/lambda/project/value-tables.ts` | `ListProjectValueMapsFunction` | List project linked value maps (preferred FS-102 route family) |
+| POST | `/projects/:projectId/value-maps/link` | `src/lambda/project/value-tables.ts` | `LinkProjectValueMapFunction` | Link project to pinned global value map revision |
+| POST | `/projects/:projectId/value-maps/:valueTableId/promote` | `src/lambda/project/value-tables.ts` | `PromoteProjectValueMapFunction` | Promote project map to global revision `1` with optional behavior-equivalent relink |
+| GET | `/projects/:projectId/value-maps/:valueTableId` | `src/lambda/project/value-tables.ts` | `GetProjectValueMapDetailFunction` | Get effective project value-map detail (pinned + overlay applied) |
+| PUT | `/projects/:projectId/value-maps/:valueTableId/overlay` | `src/lambda/project/value-tables.ts` | `UpdateProjectValueMapOverlayFunction` | Create next overlay revision from operations (`override`/`add`/`exclude`) |
+| POST | `/projects/:projectId/value-maps/:valueTableId/review-update` | `src/lambda/project/value-tables.ts` | `ReviewProjectValueMapUpdateFunction` | Review candidate global revision; surface orphan/conflict state |
+| POST | `/projects/:projectId/value-maps/:valueTableId/accept-update` | `src/lambda/project/value-tables.ts` | `AcceptProjectValueMapUpdateFunction` | Accept candidate global revision (blocked until unresolved orphans are handled) |
+| DELETE | `/projects/:projectId/value-maps/:valueTableId/link` | `src/lambda/project/value-tables.ts` | `UnlinkProjectValueMapFunction` | Unlink global value map from project (guarded when references exist) |
+| GET | `/value-maps` | `src/lambda/project/value-tables.ts` | `ListGlobalValueMapsFunction` | List global value maps (preferred FS-102 route family) |
+| POST | `/value-maps` | `src/lambda/project/value-tables.ts` | `CreateGlobalValueMapFunction` | Create global value map |
+| GET | `/value-maps/:valueTableId` | `src/lambda/project/value-tables.ts` | `GetGlobalValueMapFunction` | Get global value map metadata |
+| GET | `/value-maps/:valueTableId/revisions` | `src/lambda/project/value-tables.ts` | `ListGlobalValueMapRevisionsFunction` | List global value map revisions |
+| POST | `/value-maps/:valueTableId/revisions` | `src/lambda/project/value-tables.ts` | `CreateGlobalValueMapRevisionFunction` | Append immutable global value map revision |
+| GET | `/value-maps/:valueTableId/revisions/:revision` | `src/lambda/project/value-tables.ts` | `GetGlobalValueMapRevisionFunction` | Get specific global value map revision |
+| POST | `/value-maps/:valueTableId/archive` | `src/lambda/project/value-tables.ts` | `ArchiveGlobalValueMapFunction` | Archive global value map (existing pinned usage remains executable) |
+| GET | `/value-maps/:valueTableId/usage` | `src/lambda/project/value-tables.ts` | `GetGlobalValueMapUsageFunction` | List global value map usage across mappings/projects |
 
 ---
 
@@ -533,6 +549,65 @@ Runtime and execution invariants:
 - Runtime execute path remains no-I/O relative to project value-table storage.
 - Execution uses mapping/snapshot-embedded `resolvedEntries`; no runtime table fetch fallback is permitted.
 - Snapshot integrity failures for unresolved project table references surface deterministic integrity errors.
+
+### FS-102 Value Mapping domain/API addendum
+
+FS-102 standardizes Value Mapping as the public domain contract and introduces global reusable value mappings with project linking/overlay behavior.
+
+Terminology and route compatibility contract:
+
+- Public/domain terminology is **Value Mapping**.
+- Preferred API surface is `/value-maps`.
+- Existing `/value-tables` routes remain temporary compatibility aliases.
+- Preferred and compatibility routes are required to resolve through one canonical backend service abstraction (single behavior source; no split implementations).
+
+Canonical service contract:
+
+- One `ValueMapService`/repository abstraction owns global/project value-mapping behavior.
+- FS-102 extends existing value-table model; no parallel global-asset table family is introduced by API contract.
+- Existing physical resource names may remain during migration window; API layer handles canonical naming and compatibility aliasing.
+
+Required API behavior additions:
+
+- Global library lifecycle (`/value-maps` preferred):
+  - create/list/get
+  - immutable revision append/list/get
+  - archive
+  - usage listing
+- Project link/overlay lifecycle:
+  - list linked/project-only mappings
+  - link to pinned global revision
+  - update overlay operations (`override`, `add`, `exclude`)
+  - review update (diff + orphan/conflict surfacing)
+  - accept update (blocked on unresolved conflicts/orphans)
+  - unlink guard while referenced
+
+Mapping dependency-state contract:
+
+- Mapping dependency states: `current`, `needs-review`, `invalid`.
+- New global revision publication marks project link as `update available` only.
+- Accepting linked revision update or changing effective overlay/default marks affected mappings `needs-review`.
+- No automatic mapping version creation for dependency-state transitions.
+- Review + explicit save creates the new mapping version.
+- Deployment initiation must be blocked while dependencies are `needs-review` or `invalid`.
+
+Import/export resolution contract:
+
+- If referenced global revision is unavailable on import, API requires explicit user resolution:
+  - create project-only copy (recommended),
+  - choose another global value mapping,
+  - cancel import.
+- API must never silently relink to latest revision or silently detach.
+- Project-only fallback copy must be derived from exported effective rows and reproduce source behavior exactly.
+
+Portable export/import and duplication compatibility details:
+
+- `GET /value-tables/:valueTableId/export.csv?portable=true` is a compatibility endpoint that returns portable JSON payload (`format: value-map-portable-v1`) instead of CSV; default behavior without `portable=true` remains CSV.
+- `POST /projects/:id/value-tables/import-csv` supports both CSV body and portable body (`portablePayload` + optional `resolution`) through one canonical handler contract.
+- When referenced pinned global revision is unavailable and no resolution is provided, API returns deterministic conflict details with `importStatus='requires-resolution'` and explicit options: `project-copy | choose-global | cancel`.
+- Project duplication supports explicit modes:
+  - `detached-copy` (default): materialize effective rows into a project-only map copy.
+  - `preserve-link`: copy pinned global link + overlay revisions into destination project.
 
 | Handler | DynamoDB patterns |
 |---|---|

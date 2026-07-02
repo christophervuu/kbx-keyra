@@ -789,4 +789,92 @@ describe('generateSmartBuilderExpression', () => {
       'if(eq(trim(source("priority")), upper("HIGH")), lower(source("priority")), length(source("priority")))',
     );
   });
+
+  it('emits optional 4th matchMode argument for project value-map when ignore-case', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary',
+          label: 'status',
+          path: 'status',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap',
+        inputId: 'status',
+        matchMode: 'ignore-case',
+        scope: 'project',
+        project: {
+          matchMode: 'ignore-case',
+          ref: {
+            scope: 'project',
+            valueTableId: 'vt-1',
+            tableKey: 'status-table',
+            revision: 1,
+            inputSideKey: 'in',
+            outputSideKey: 'out',
+            inputType: 'string',
+            outputType: 'string',
+            matchMode: 'ignore-case',
+            resolvedEntries: [],
+          },
+        },
+        mappings: [],
+        fallback: { kind: 'static', value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value', fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'valueMap(source("status"), valueTable("status-table", "in", "out"), "UNKNOWN", "ignore-case")',
+    );
+  });
+
+  it('does not emit 4th matchMode argument for project value-map when exact', () => {
+    const draft: SmartBuilderDraft = {
+      ...makeBaseDraft(),
+      inputs: [
+        {
+          id: 'status',
+          sourceKind: 'primary',
+          label: 'status',
+          path: 'status',
+          valueType: 'string',
+          transforms: [],
+        },
+      ],
+      composition: {
+        kind: 'valueMap',
+        inputId: 'status',
+        matchMode: 'exact',
+        scope: 'project',
+        project: {
+          matchMode: 'exact',
+          ref: {
+            scope: 'project',
+            valueTableId: 'vt-1',
+            tableKey: 'status-table',
+            revision: 1,
+            inputSideKey: 'in',
+            outputSideKey: 'out',
+            inputType: 'string',
+            outputType: 'string',
+            matchMode: 'exact',
+            resolvedEntries: [],
+          },
+        },
+        mappings: [],
+        fallback: { kind: 'static', value: 'UNKNOWN' },
+        noMatchBehavior: { mode: 'fallback_value', fallbackValue: 'UNKNOWN' },
+      },
+    };
+
+    expect(generateSmartBuilderExpression(draft)).toBe(
+      'valueMap(source("status"), valueTable("status-table", "in", "out"), "UNKNOWN")',
+    );
+  });
 });

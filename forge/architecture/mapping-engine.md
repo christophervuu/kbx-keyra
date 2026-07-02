@@ -494,6 +494,50 @@ No-I/O invariant (engine boundary):
 - Engine does not fetch project value tables, revisions, or external storage.
 - All project-table runtime data must be embedded in mapping config before engine execution.
 
+## FS-102 Value Mapping Domain Contract
+
+FS-102 evolves FS-096 value-table behavior into the Value Mapping domain model while preserving engine determinism and backward compatibility.
+
+Canonical engine-facing behavior:
+
+- Public/product terminology is **Value Mapping**.
+- Existing `valueTableRef`-based rule bindings remain compatible; FS-102 extends metadata semantics (scope/revision/overlay/match/fallback provenance) without requiring a big-bang rename at engine boundary.
+- Reusable asset lifecycle details are not encoded into DSL arguments; rule binding metadata carries reusable-reference identity and resolved executable lookup data.
+
+DSL compatibility contract:
+
+- Inline lookup signatures remain valid:
+  - `valueMap(value, mappings)`
+  - `valueMap(value, mappings, fallback)`
+- FS-102 adds optional inline match-mode argument:
+  - `valueMap(value, mappings, fallback?, matchMode?)`
+- For reusable project/global value mappings, runtime behavior is resolved from binding metadata before engine execution, not from asset references in expression arguments.
+
+Match-mode contract additions:
+
+- `ValueMapMatchMode = 'exact' | 'ignore-case'`.
+- `exact` remains the default for migrated and existing expressions/usages.
+- `ignore-case` uses locale-independent `String.prototype.toLowerCase()` on string lookup keys only.
+- Explicit exclusions in ignore-case mode:
+  - no trim
+  - no accent folding
+  - no punctuation/symbol normalization
+  - no locale-specific casing rules
+  - no additional type casting
+- The same normalization helper must be used by validation collision checks and runtime lookup execution.
+
+Collision/validation compatibility requirements:
+
+- Duplicate normalized lookup keys are blocking for the active direction+match-mode combination.
+- Direction remains usage-level (`a-to-b` / `b-to-a`) and validation inspects the active input side.
+- Deterministic diagnostics must continue to carry rule/path/expression context.
+
+Execution boundary invariants (unchanged):
+
+- Engine executes against already-resolved lookup rows only.
+- Engine does not perform repository/library/persistence I/O for mutable value-mapping assets.
+- Browser and Lambda must produce identical lookup outcomes for identical resolved bindings.
+
 ### Performance Characteristics and Design Choices
 
 - Validate is synchronous and deterministic for interactive editor use.

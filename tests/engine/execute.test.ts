@@ -438,6 +438,59 @@ describe('execute', () => {
     expect(result.stats?.rulesFailed).toBe(0);
   });
 
+  it('supports ignore-case valueMap fixtures consistently at execute boundary', () => {
+    const config = createMinimalConfig({
+      rules: [
+        {
+          target: 'Ascii',
+          type: 'string',
+          expression: 'valueMap(source("ascii"), { "confirmed": "ascii-ok" }, "missing", "ignore-case")',
+        },
+        {
+          target: 'Accented',
+          type: 'string',
+          expression: 'valueMap(source("accented"), { "äpfel": "accented-ok" }, "missing", "ignore-case")',
+        },
+        {
+          target: 'TurkishDotted',
+          type: 'string',
+          expression: 'valueMap(source("turkishDotted"), { "i̇": "turkish-i-dot" }, "missing", "ignore-case")',
+        },
+        {
+          target: 'TurkishDotless',
+          type: 'string',
+          expression: 'valueMap(source("turkishDotless"), { "ı": "dotless" }, "missing", "ignore-case")',
+        },
+        {
+          target: 'SharpS',
+          type: 'string',
+          expression: 'valueMap(source("sharpS"), { "straße": "eszett" }, "missing", "ignore-case")',
+        },
+      ],
+    });
+
+    const result = execute(
+      config,
+      {
+        ascii: 'CONFIRMED',
+        accented: 'ÄPFEL',
+        turkishDotted: 'İ',
+        turkishDotless: 'I',
+        sharpS: 'STRASSE',
+      },
+      {},
+      {},
+    );
+
+    expect(result.output).toEqual({
+      Ascii: 'ascii-ok',
+      Accented: 'accented-ok',
+      TurkishDotted: 'turkish-i-dot',
+      TurkishDotless: 'missing',
+      SharpS: 'missing',
+    });
+  });
+
   it('records one trace entry per rule when trace mode is enabled', () => {
     const config = createMinimalConfig({
       rules: [

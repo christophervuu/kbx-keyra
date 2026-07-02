@@ -249,6 +249,14 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
     exportProjectValueTableCsv: vi.fn<(valueTableId: string, revision?: number) => Promise<string>>(),
     importProjectValueTableCsv: vi.fn<(projectId: string, csv: string, options?: { name?: string; key?: string }) => Promise<ProjectValueTableRevision>>(),
     resolveProjectValueTableReference: vi.fn<(input: ResolveProjectValueTableReferenceInput) => Promise<ResolveProjectValueTableReferenceResult>>(),
+    listGlobalValueMaps: vi.fn<(options?: ValueTableListOptions) => Promise<ProjectValueTable[]>>(),
+    createGlobalValueMap: vi.fn(),
+    getGlobalValueMap: vi.fn(),
+    listGlobalValueMapRevisions: vi.fn(),
+    createGlobalValueMapRevision: vi.fn(),
+    getGlobalValueMapRevision: vi.fn(),
+    archiveGlobalValueMap: vi.fn(),
+    getGlobalValueMapUsage: vi.fn(),
     ...overrides,
   };
 

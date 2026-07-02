@@ -172,6 +172,8 @@ describe('deployment handlers', () => {
     getEnvStore().MAPPINGS_TABLE = 'Mappings';
     getEnvStore().PROJECTS_TABLE = 'Projects';
     getEnvStore().SCHEMAS_TABLE = 'Schemas';
+    getEnvStore().VALUE_TABLES_TABLE = 'ValueTables';
+    getEnvStore().VALUE_TABLE_REVISIONS_TABLE = 'ValueTableRevisions';
 
     sharedMocks.parsePathParam.mockReset().mockImplementation((event, name: string) => event.pathParameters?.[name] ?? null);
     sharedMocks.parseBody.mockReset().mockReturnValue({});
@@ -656,6 +658,67 @@ describe('deployment handlers', () => {
     expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
   });
 
+  it('deploy handler blocks when linked global value-map dependency state is needs-review', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    revisionMocks.getConfig.mockResolvedValueOnce({
+      id: 'config',
+      rules: [
+        {
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'vm-1',
+            resolvedEntries: [],
+          },
+        },
+      ],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({ mappingId: 'map-1', projectId: 'proj-1' })
+      .mockResolvedValueOnce({ valueTableId: 'vm-1', scope: 'global' })
+      .mockResolvedValueOnce({ dependencyState: 'needs-review' });
+
+    const { handler } = await importDeployHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+    expect(result.statusCode).toBe(409);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('CONFLICT');
+    expect(body.error.message).toContain('value-map dependency state');
+    expect(body.error.details.issues).toEqual([
+      {
+        valueMapId: 'vm-1',
+        dependencyState: 'needs-review',
+        reason: 'dependency-state',
+      },
+    ]);
+    expect(runtimeRelayMocks.relayClient.pushArtifact).not.toHaveBeenCalled();
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('deploy handler blocks with snapshot integrity error when project value-map bindings are unresolved', async () => {
+    sharedMocks.parseBody.mockReturnValue({ environment: 'DEV', sourceType: 'revision', sourceNumber: 2 });
+    revisionMocks.getConfig.mockResolvedValueOnce({
+      id: 'config',
+      rules: [
+        {
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'vm-1',
+          },
+        },
+      ],
+    });
+
+    const { handler } = await importDeployHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('SNAPSHOT_INTEGRITY_ERROR');
+    expect(body.error.message).toContain('unresolved value-map bindings');
+    expect(runtimeRelayMocks.relayClient.pushArtifact).not.toHaveBeenCalled();
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
   it('promote handler requires version-backed source', async () => {
     sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
     deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'revision', sourceNumber: 2 });
@@ -898,6 +961,67 @@ describe('deployment handlers', () => {
         ],
       }),
     );
+  });
+
+  it('promote handler blocks when linked global value-map dependency state is invalid', async () => {
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
+    deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
+    versionMocks.getConfig.mockResolvedValueOnce({
+      id: 'config',
+      rules: [
+        {
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'vm-1',
+            resolvedEntries: [],
+          },
+        },
+      ],
+    });
+    sharedMocks.getItem
+      .mockResolvedValueOnce({ mappingId: 'map-1', projectId: 'proj-1' })
+      .mockResolvedValueOnce({ valueTableId: 'vm-1', scope: 'global' })
+      .mockResolvedValueOnce({ dependencyState: 'invalid' });
+
+    const { handler } = await importPromoteHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+    expect(result.statusCode).toBe(409);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('CONFLICT');
+    expect(body.error.details.issues).toEqual([
+      {
+        valueMapId: 'vm-1',
+        dependencyState: 'invalid',
+        reason: 'dependency-state',
+      },
+    ]);
+    expect(runtimeRelayMocks.relayClient.pushArtifact).not.toHaveBeenCalled();
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
+  });
+
+  it('promote handler blocks with snapshot integrity error when project value-map bindings are unresolved', async () => {
+    sharedMocks.parseBody.mockReturnValue({ fromEnvironment: 'DEV', toEnvironment: 'PREPROD' });
+    deploymentPersistenceMocks.getCurrent.mockResolvedValueOnce({ sourceType: 'version', sourceNumber: 3 });
+    versionMocks.getConfig.mockResolvedValueOnce({
+      id: 'config',
+      rules: [
+        {
+          valueTableRef: {
+            scope: 'project',
+            valueTableId: 'vm-1',
+          },
+        },
+      ],
+    });
+
+    const { handler } = await importPromoteHandler();
+    const result = await handler({ body: '{}', pathParameters: { mappingId: 'map-1' } });
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.error.code).toBe('SNAPSHOT_INTEGRITY_ERROR');
+    expect(body.error.message).toContain('unresolved value-map bindings');
+    expect(runtimeRelayMocks.relayClient.pushArtifact).not.toHaveBeenCalled();
+    expect(deploymentPersistenceMocks.create).not.toHaveBeenCalled();
   });
 
   it('promote handler blocks when referenced CDM target schema is missing', async () => {

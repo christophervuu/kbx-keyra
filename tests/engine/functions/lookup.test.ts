@@ -74,6 +74,63 @@ describe('valueMap()', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  it('keeps default exact matching when match mode is omitted', () => {
+    const context = createContext();
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'WEB', start: 0, end: 0 },
+        objectNode([{ key: 'web', value: { type: 'StringLiteral', value: 'WEB_PORTAL', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('UNKNOWN');
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-W003')).toBe(true);
+  });
+
+  it('supports ignore-case explicit match mode for inline mappings', () => {
+    const context = createContext();
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'CONFIRMED', start: 0, end: 0 },
+        objectNode([
+          { key: 'confirmed', value: { type: 'StringLiteral', value: 'In_Progress', start: 0, end: 0 } },
+        ]),
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'ignore-case', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('In_Progress');
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('emits E068 for invalid valueMap match mode and returns null', () => {
+    const context = createContext();
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'confirmed', start: 0, end: 0 },
+        objectNode([{ key: 'confirmed', value: { type: 'StringLiteral', value: 'OPEN', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'fuzzy', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBeNull();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'KEYRA-E068',
+        location: expect.objectContaining({ function: 'valueMap', argumentIndex: 3 }),
+      }),
+    );
+  });
+
   it('AE-15: emits W003 and returns fallback when no match', () => {
     const context = createContext();
 
@@ -263,6 +320,141 @@ describe('valueMap()', () => {
 
     expect(result.value).toBe('OPEN');
     expect(result.diagnostics).toEqual([]);
+  });
+
+  it('uses reusable value table matchMode metadata when valueMap argument is omitted', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression: 'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        matchMode: 'ignore-case',
+        resolvedEntries: [{ in: 'confirmed', out: 'In_Progress', rowId: 'r1' }],
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'CONFIRMED', start: 0, end: 0 },
+        {
+          type: 'FunctionCall',
+          name: 'valueTable',
+          arguments: [
+            { type: 'StringLiteral', value: 'order-status', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'oms', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'cdm', start: 0, end: 0 },
+          ],
+          start: 0,
+          end: 0,
+        },
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('In_Progress');
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('allows explicit valueMap match mode to override reusable value table metadata', () => {
+    const context = createContext({
+      target: 'Order.status',
+      type: 'string',
+      expression:
+        'valueMap(source("status"), valueTable("order-status", "oms", "cdm"), "UNKNOWN", "exact")',
+      valueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt_123',
+        tableKey: 'order-status',
+        revision: 4,
+        inputSideKey: 'oms',
+        outputSideKey: 'cdm',
+        inputType: 'string',
+        outputType: 'string',
+        matchMode: 'ignore-case',
+        resolvedEntries: [{ in: 'confirmed', out: 'OPEN', rowId: 'r1' }],
+      },
+    });
+
+    const result = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'CONFIRMED', start: 0, end: 0 },
+        {
+          type: 'FunctionCall',
+          name: 'valueTable',
+          arguments: [
+            { type: 'StringLiteral', value: 'order-status', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'oms', start: 0, end: 0 },
+            { type: 'StringLiteral', value: 'cdm', start: 0, end: 0 },
+          ],
+          start: 0,
+          end: 0,
+        },
+        { type: 'StringLiteral', value: 'UNKNOWN', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'exact', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(result.value).toBe('UNKNOWN');
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === 'KEYRA-W003')).toBe(true);
+  });
+
+  it('uses locale-independent ignore-case normalization fixtures for accented, Turkish I/İ, and ß behavior', () => {
+    const context = createContext();
+
+    const accented = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'ÄPFEL', start: 0, end: 0 },
+        objectNode([{ key: 'äpfel', value: { type: 'StringLiteral', value: 'accented-ok', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'ignore-case', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    const turkishCapitalDottedI = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'İ', start: 0, end: 0 },
+        objectNode([{ key: 'i̇', value: { type: 'StringLiteral', value: 'turkish-i-dot', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'ignore-case', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    const turkishDotlessI = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'I', start: 0, end: 0 },
+        objectNode([{ key: 'ı', value: { type: 'StringLiteral', value: 'dotless', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'ignore-case', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    const sharpS = evaluate(
+      callValueMap([
+        { type: 'StringLiteral', value: 'STRASSE', start: 0, end: 0 },
+        objectNode([{ key: 'straße', value: { type: 'StringLiteral', value: 'eszett', start: 0, end: 0 } }]),
+        { type: 'StringLiteral', value: 'missing', start: 0, end: 0 },
+        { type: 'StringLiteral', value: 'ignore-case', start: 0, end: 0 },
+      ]),
+      context,
+    );
+
+    expect(accented.value).toBe('accented-ok');
+    expect(turkishCapitalDottedI.value).toBe('turkish-i-dot');
+    expect(turkishDotlessI.value).toBe('missing');
+    expect(sharpS.value).toBe('missing');
   });
 
   it('respects noMatchBehavior return_input for project value table refs', () => {

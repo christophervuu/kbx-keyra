@@ -39,8 +39,34 @@ interface DeployRequest {
 
 interface MappingMetadata {
   readonly mappingId: string;
+  readonly projectId?: string;
   readonly sourceSchemaId?: string;
   readonly targetSchemaId?: string;
+}
+
+interface ValueMapDependencyIssue {
+  readonly valueMapId: string;
+  readonly dependencyState: 'needs-review' | 'invalid';
+  readonly reason: 'dependency-state' | 'link-missing' | 'value-map-missing';
+}
+
+interface ValueTableItem {
+  readonly valueTableId: string;
+  readonly scope?: 'project' | 'global';
+}
+
+interface ValueMapProjectLinkItem {
+  readonly dependencyState?: 'current' | 'needs-review' | 'invalid';
+}
+
+interface MappingConfigLike {
+  readonly rules?: readonly Array<{
+    readonly valueTableRef?: {
+      readonly scope?: string;
+      readonly valueTableId?: string;
+      readonly resolvedEntries?: unknown;
+    };
+  }>;
 }
 
 interface OrchestrationContext {
@@ -73,6 +99,123 @@ function getMappingsTableOrThrow(): string {
   }
 
   return table;
+}
+
+function getValueTablesTableOrThrow(): string {
+  const table = getEnvValue('VALUE_TABLES_TABLE')?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: VALUE_TABLES_TABLE');
+  }
+
+  return table;
+}
+
+function getValueTableRevisionsTableOrThrow(): string {
+  const table = getEnvValue('VALUE_TABLE_REVISIONS_TABLE')?.trim();
+  if (!table) {
+    throw new Error('Missing required environment variable: VALUE_TABLE_REVISIONS_TABLE');
+  }
+
+  return table;
+}
+
+function projectLinkSk(projectId: string, valueMapId: string): string {
+  return `link#${projectId}#${valueMapId}`;
+}
+
+function extractProjectValueMapIds(config: MappingConfigLike): readonly string[] {
+  const rules = Array.isArray(config.rules) ? config.rules : [];
+  const ids = new Set<string>();
+
+  for (const rule of rules) {
+    const ref = rule?.valueTableRef;
+    if (!ref || ref.scope !== 'project' || typeof ref.valueTableId !== 'string' || ref.valueTableId.trim() === '') {
+      continue;
+    }
+
+    ids.add(ref.valueTableId);
+  }
+
+  return [...ids.values()];
+}
+
+function hasUnresolvedProjectValueMapBindings(config: MappingConfigLike): boolean {
+  const rules = Array.isArray(config.rules) ? config.rules : [];
+
+  for (const rule of rules) {
+    const ref = rule?.valueTableRef;
+    if (!ref || ref.scope !== 'project') {
+      continue;
+    }
+
+    if (!Array.isArray(ref.resolvedEntries)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function evaluateValueMapDependencyGate(input: {
+  readonly projectId?: string;
+  readonly config: MappingConfigLike;
+}): Promise<readonly ValueMapDependencyIssue[]> {
+  if (!input.projectId) {
+    return [];
+  }
+
+  const valueMapIds = extractProjectValueMapIds(input.config);
+  if (valueMapIds.length === 0) {
+    return [];
+  }
+
+  const issues: ValueMapDependencyIssue[] = [];
+  for (const valueMapId of valueMapIds) {
+    const valueMap = await getItem<ValueTableItem>({
+      TableName: getValueTablesTableOrThrow(),
+      Key: { valueTableId: valueMapId },
+    });
+
+    if (!valueMap) {
+      issues.push({
+        valueMapId,
+        dependencyState: 'invalid',
+        reason: 'value-map-missing',
+      });
+      continue;
+    }
+
+    if (valueMap.scope !== 'global') {
+      continue;
+    }
+
+    const link = await getItem<ValueMapProjectLinkItem>({
+      TableName: getValueTableRevisionsTableOrThrow(),
+      Key: {
+        valueTableId: projectLinkSk(input.projectId, valueMapId),
+        revision: 0,
+      },
+    });
+
+    if (!link) {
+      issues.push({
+        valueMapId,
+        dependencyState: 'invalid',
+        reason: 'link-missing',
+      });
+      continue;
+    }
+
+    if (link.dependencyState === 'needs-review' || link.dependencyState === 'invalid') {
+      issues.push({
+        valueMapId,
+        dependencyState: link.dependencyState,
+        reason: 'dependency-state',
+      });
+    }
+  }
+
+  return issues;
 }
 
 function parseIdempotencyKey(event: APIGatewayProxyEvent): string | null {
@@ -387,6 +530,39 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         );
       }
 
+      if (hasUnresolvedProjectValueMapBindings(config as MappingConfigLike)) {
+        return errorResponse(
+          ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
+          `Deployment blocked: unresolved value-map bindings in source config (${mappingId}:${request.sourceType}:${request.sourceNumber})`,
+          500,
+          false,
+        );
+      }
+
+      const dependencyIssues = await evaluateValueMapDependencyGate({
+        projectId: mapping.projectId,
+        config: config as MappingConfigLike,
+      });
+      if (dependencyIssues.length > 0) {
+        const gateRequestId = generateRequestId();
+        return jsonResponse(
+          409,
+          {
+            error: {
+              code: ERROR_CODES.CONFLICT,
+              message: 'Deployment blocked: value-map dependency state requires review or is invalid',
+              statusCode: 409,
+              retryable: false,
+              requestId: gateRequestId,
+              details: {
+                issues: dependencyIssues,
+              },
+            },
+          },
+          gateRequestId,
+        );
+      }
+
       const artifact = await buildRuntimeDeployArtifact({
         mappingId,
         sourceType: 'revision',
@@ -532,6 +708,39 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         `Version config snapshot unavailable: ${mappingId}:${request.sourceNumber}`,
         500,
         false,
+      );
+    }
+
+    if (hasUnresolvedProjectValueMapBindings(config as MappingConfigLike)) {
+      return errorResponse(
+        ERROR_CODES.SNAPSHOT_INTEGRITY_ERROR,
+        `Deployment blocked: unresolved value-map bindings in source config (${mappingId}:${request.sourceType}:${request.sourceNumber})`,
+        500,
+        false,
+      );
+    }
+
+    const dependencyIssues = await evaluateValueMapDependencyGate({
+      projectId: mapping.projectId,
+      config: config as MappingConfigLike,
+    });
+    if (dependencyIssues.length > 0) {
+      const gateRequestId = generateRequestId();
+      return jsonResponse(
+        409,
+        {
+          error: {
+            code: ERROR_CODES.CONFLICT,
+            message: 'Deployment blocked: value-map dependency state requires review or is invalid',
+            statusCode: 409,
+            retryable: false,
+            requestId: gateRequestId,
+            details: {
+              issues: dependencyIssues,
+            },
+          },
+        },
+        gateRequestId,
       );
     }
 

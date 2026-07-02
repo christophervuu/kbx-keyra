@@ -1,12 +1,18 @@
 import { DIAGNOSTIC_CODES } from '../diagnostics/codes.js';
 import { formatDiagnosticMessage } from '../diagnostics/format.js';
 import type { EvaluationContext } from '../dsl/types.js';
+import {
+  DEFAULT_VALUE_MAP_MATCH_MODE,
+  normalizeLookupKey,
+  resolveValueMapMatchMode,
+} from './match-mode.js';
 import type { FunctionRegistry } from '../registry/function-registry.js';
 import type {
   FunctionImplementation,
   FunctionSignature,
   MappingRuleNoMatchBehavior,
   MappingRuleProjectValueTableRef,
+  ValueMapMatchMode,
   ValueTablePrimitiveValue,
 } from '../types/index.js';
 
@@ -15,6 +21,7 @@ const valueMapSignature: FunctionSignature = {
     { name: 'value', type: 'any', required: true },
     { name: 'mappings', type: 'any', required: true },
     { name: 'fallback', type: 'any', required: false },
+    { name: 'matchMode', type: 'string', required: false },
   ],
   returnType: 'any',
   handlesNull: true,
@@ -68,6 +75,35 @@ function resolveNoMatch(
   }
 }
 
+function resolveMatchMode(
+  args: readonly unknown[],
+  context: EvaluationContext,
+): ValueMapMatchMode | null {
+  const fromArgument = resolveValueMapMatchMode(args[3]);
+  if (fromArgument) {
+    return fromArgument;
+  }
+
+  if (args.length >= 4 && args[3] !== undefined) {
+    context.addDiagnostic({
+      code: DIAGNOSTIC_CODES['KEYRA-E068'].code,
+      severity: DIAGNOSTIC_CODES['KEYRA-E068'].severity,
+      message: formatDiagnosticMessage('KEYRA-E068', {
+        mode: String(args[3]),
+      }),
+      location: { function: 'valueMap', argumentIndex: 3 },
+    });
+    return null;
+  }
+
+  const ruleRef = context.currentRule?.valueTableRef;
+  const ruleMode =
+    ruleRef && ruleRef.scope === 'project'
+      ? resolveValueMapMatchMode(ruleRef.matchMode)
+      : null;
+  return ruleMode ?? DEFAULT_VALUE_MAP_MATCH_MODE;
+}
+
 function isPrimitiveValue(value: unknown): value is ValueTablePrimitiveValue {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
@@ -81,14 +117,18 @@ const valueMapImplementation: FunctionImplementation = (
   const hasFallback = args.length >= 3;
   const fallback = hasFallback ? args[2] : null;
   const currentRule = context.currentRule;
+  const matchMode = resolveMatchMode(args, context);
+  if (matchMode === null) {
+    return null;
+  }
 
   if (value === null) {
     return resolveNoMatch(value, fallback, hasFallback, currentRule?.noMatchBehavior);
   }
 
   if (isValueTableRef(mappings)) {
-    const key = String(value);
-    const match = mappings.resolvedEntries.find((entry) => String(entry.in) === key);
+    const key = normalizeLookupKey(value, matchMode);
+    const match = mappings.resolvedEntries.find((entry) => normalizeLookupKey(entry.in, matchMode) === key);
 
     if (match) {
       return match.out;
@@ -115,10 +155,12 @@ const valueMapImplementation: FunctionImplementation = (
     return null;
   }
 
-  const key = String(value);
+  const key = normalizeLookupKey(value, matchMode);
 
-  if (Object.hasOwn(mappings, key)) {
-    return mappings[key];
+  const matchKey = Object.keys(mappings).find((candidate) => normalizeLookupKey(candidate, matchMode) === key);
+
+  if (matchKey !== undefined) {
+    return mappings[matchKey];
   }
 
   context.addDiagnostic({

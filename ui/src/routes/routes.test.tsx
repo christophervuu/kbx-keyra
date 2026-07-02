@@ -23,6 +23,8 @@ import SchemaDetail from '@/routes/pages/SchemaDetail';
 import SchemaLibrary from '@/routes/pages/SchemaLibrary';
 import Settings from '@/routes/pages/Settings';
 import TemplateLibrary from '@/routes/pages/TemplateLibrary';
+import ValueMappingDetail from '@/routes/pages/ValueMappingDetail';
+import ValueMappingsLibrary from '@/routes/pages/ValueMappingsLibrary';
 
 // Mock adapter that never resolves (keeps component in loading state)
 const mockAdapter: ApiAdapter = {
@@ -104,6 +106,18 @@ const mockAdapter: ApiAdapter = {
   exportProjectValueTableCsv: vi.fn(),
   importProjectValueTableCsv: vi.fn(),
   resolveProjectValueTableReference: vi.fn(),
+  listGlobalValueMaps: vi.fn().mockResolvedValue([]),
+  createGlobalValueMap: vi.fn(),
+  getGlobalValueMap: vi.fn(),
+  listGlobalValueMapRevisions: vi.fn().mockResolvedValue([]),
+  createGlobalValueMapRevision: vi.fn(),
+  getGlobalValueMapRevision: vi.fn(),
+  archiveGlobalValueMap: vi.fn(),
+  getGlobalValueMapUsage: vi.fn().mockResolvedValue({
+    mappings: [],
+    linkedProjects: [],
+    counts: { mappings: 0, linkedProjects: 0 },
+  }),
 };
 
 function renderWithRouter(path: string) {
@@ -111,6 +125,8 @@ function renderWithRouter(path: string) {
     createRoutesFromElements(
       <>
         <Route path="/" element={<HomeDashboard />} />
+        <Route path="/value-mappings" element={<ValueMappingsLibrary />} />
+        <Route path="/value-mappings/:valueMapId" element={<ValueMappingDetail />} />
         <Route path="/projects/new" element={<CreateProject />} />
         <Route path="/projects/:projectId" element={<ProjectOverview />} />
         <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
@@ -162,6 +178,19 @@ describe('Route rendering', () => {
 
     expect(screen.getByTestId('page-create-project')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Create New Project' })).toBeInTheDocument();
+  });
+
+  it('renders Global Value Mappings Library at /value-mappings', () => {
+    renderWithRouter('/value-mappings');
+
+    expect(screen.getByTestId('page-global-value-mappings-library')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Global Value Mappings' })).toBeInTheDocument();
+  });
+
+  it('renders Global Value Mapping Detail at /value-mappings/:valueMapId', () => {
+    renderWithRouter('/value-mappings/vm-123');
+
+    expect(screen.getByTestId('page-global-value-mapping-detail')).toBeInTheDocument();
   });
 
   it('renders Project Overview at /projects/:projectId', () => {

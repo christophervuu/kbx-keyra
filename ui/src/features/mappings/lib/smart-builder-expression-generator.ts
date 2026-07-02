@@ -307,6 +307,9 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
         break;
       }
       const sourceExpr = inputExpression(source);
+      const matchModeValue = composition.matchMode
+        ?? (composition.scope === 'project' ? composition.project?.matchMode : undefined)
+        ?? 'exact';
       const mappingExpr = composition.scope === 'project' && composition.project
         ? `valueTable(${quote(composition.project.ref.tableKey)}, ${quote(composition.project.ref.inputSideKey)}, ${quote(composition.project.ref.outputSideKey)})`
         : `{${composition.mappings
@@ -314,7 +317,12 @@ export function generateSmartBuilderExpression(draft: SmartBuilderDraft): string
           .map((entry) => `${quote(entry.whenValue)}: ${argumentValueToExpression(draft, entry.output)}`)
           .join(', ')}}`;
       const fallbackExpr = noMatchFallbackExpression(draft, sourceExpr, composition.fallback);
-      baseExpression = `valueMap(${sourceExpr}, ${mappingExpr}, ${fallbackExpr})`;
+      const matchModeExpr = matchModeValue === 'ignore-case'
+        ? literalToDsl(matchModeValue)
+        : '';
+      baseExpression = matchModeExpr
+        ? `valueMap(${sourceExpr}, ${mappingExpr}, ${fallbackExpr}, ${matchModeExpr})`
+        : `valueMap(${sourceExpr}, ${mappingExpr}, ${fallbackExpr})`;
       break;
     }
     case 'arrayBuild': {

@@ -1,6 +1,6 @@
 # KeyRa DSL Specification
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Status:** Draft
 **Date:** 2026-04-24
 **Companion:** `specs/KEYRA-DSL-ARRAYS.md` (array semantics, published separately)
@@ -169,7 +169,7 @@ concat(source("firstName"), cast(source("age"), "string"))
 | `join(array, separator)` | Skips null elements in the array. |
 | `count(array)` | Returns `0` for null array. |
 | `contains(haystack, needle)` | Returns `false` if either argument is null. |
-| `valueMap(value, mappings, fallback)` | Null value returns `fallback` (or `null` if no fallback). |
+| `valueMap(value, mappings, fallback?, matchMode?)` | Null value returns `fallback` (or `null` if no fallback). |
 
 All other functions: **null in → null out**, and the engine emits `KEYRA-W001` (null propagation warning).
 
@@ -493,7 +493,7 @@ not(null)                                  → null
 
 ### 4.5 Lookup
 
-#### `valueMap(value: any, mappings: object, fallback?: any): any`
+#### `valueMap(value: any, mappings: object, fallback?: any, matchMode?: string): any`
 
 Look up `value` in a static mapping table. Returns the corresponding mapped value, or `fallback` if no match is found.
 
@@ -501,9 +501,12 @@ Look up `value` in a static mapping table. Returns the corresponding mapped valu
   - `value` — the value to look up (typically a string, but any type is accepted; matched by strict equality)
   - `mappings` — an object literal where keys are the possible input values and values are the desired outputs
   - `fallback` (optional) — returned if `value` does not match any key. Defaults to `null`.
+  - `matchMode` (optional) — one of: `"exact"` (default), `"ignore-case"`.
 - **Null behavior:** If `value` is null, returns `fallback` (or `null` if no fallback).
 - **Errors:** `KEYRA-E060` if `mappings` is not an object literal.
+- **Errors:** `KEYRA-E068` if `matchMode` is provided but is not `"exact"` or `"ignore-case"`.
 - **Note:** Keys in the mappings object are always strings (JSON object keys). The engine converts `value` to a string for lookup purposes when matching keys. The returned value retains its original type from the mappings object.
+- **Ignore-case contract:** In `ignore-case` mode, normalization is locale-independent and applies to string lookup keys only using `String.prototype.toLowerCase()`. No trimming, accent folding, punctuation removal, locale normalization, or cross-type coercion is applied.
 
 **Examples:**
 ```
@@ -533,6 +536,11 @@ valueMap(source("billingAddress.country"), {
   "MX": "MEX"
 })
   → "USA"
+
+valueMap(source("status"), {
+  "confirmed": "OPEN"
+}, "UNKNOWN", "ignore-case")
+  → "OPEN" (when status is `"CONFIRMED"`)
 
 valueMap(null, {"a": "b"}, "default")     → "default"
 valueMap("unknown_key", {"a": "b"})       → null (no fallback provided)
@@ -920,6 +928,7 @@ join(source("tags"), "")                   → "giftpriority"
 | Code | Severity | Message | Cause |
 |------|----------|---------|-------|
 | `KEYRA-E060` | error | `valueMap` mappings argument must be an object literal | Second argument is not a `{...}` object. |
+| `KEYRA-E068` | error | Invalid valueMap match mode: `{mode}`. Expected `exact` or `ignore-case` | Fourth `valueMap` argument is neither `exact` nor `ignore-case`. |
 
 #### Warnings (W001–W099)
 
@@ -1237,6 +1246,7 @@ No grammar changes are needed. The grammar (`functionName(args...)`) is universa
 |---------|------|---------|
 | 1.0.0 | 2026-04-23 | Initial draft. Grammar, type system, 32 functions across 9 categories, error codes, execution order. |
 | 1.1.0 | 2026-04-24 | Added: §6 Mapping Config Format (full config structure, rule format with `description` field). Added: §7 Unmapped Target Field Handling (`unmappedTargets` strategy, `nullSubtrees`, post-processing pipeline). Added: `KEYRA-W005` warning code. Added: array functions to §4.9 summary table (`find`, `get`, `array`, `merge`, `nth`, `item`, `parent`). Consolidated array error codes into §5.2. Added: §8.3 full execution pipeline. Added: §10 Changelog. |
+| 1.2.0 | 2026-07-01 | Updated `valueMap` signature to `valueMap(value, mappings, fallback?, matchMode?)` with backward compatibility for prior signatures. Added `matchMode` values (`exact`, `ignore-case`) and locale-independent ignore-case normalization contract (`String.prototype.toLowerCase()` on string lookup keys only). Added `KEYRA-E068` for invalid match mode arguments. |
 
 ---
 

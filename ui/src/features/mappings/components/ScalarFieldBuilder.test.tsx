@@ -1360,6 +1360,7 @@ describe('ScalarFieldBuilder', () => {
       onSmartApplyAction,
       valueMapProjectState: {
         scope: 'project',
+        matchMode: 'exact',
         tableId: 'vt-1',
         direction: 'a_to_b',
         pinnedRevision: 2,
@@ -1429,6 +1430,7 @@ describe('ScalarFieldBuilder', () => {
           smartHydrationOverride={{ kind: 'guided', draft: { ...draft, composition: { ...draft.composition, scope: 'inline', project: null } } }}
           valueMapProjectState={{
             scope: 'inline',
+            matchMode: 'exact',
             tableId: null,
             direction: null,
             pinnedRevision: null,
@@ -1510,6 +1512,7 @@ describe('ScalarFieldBuilder', () => {
       onValueMapProjectTableSelect,
       valueMapProjectState: {
         scope: 'project',
+        matchMode: 'exact',
         tableId: 'vt-1',
         direction: 'a_to_b',
         pinnedRevision: 2,
@@ -1565,6 +1568,7 @@ describe('ScalarFieldBuilder', () => {
         onValueMapProjectTableSelect={onValueMapProjectTableSelect}
         valueMapProjectState={{
           scope: 'project',
+          matchMode: 'exact',
           tableId: 'vt-2',
           direction: 'a_to_b',
           pinnedRevision: 3,

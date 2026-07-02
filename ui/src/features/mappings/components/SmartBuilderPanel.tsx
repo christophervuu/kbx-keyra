@@ -28,6 +28,7 @@ import type {
 } from '../lib/smart-builder-state';
 
 import type {
+  ValueMapMatchMode,
   ValueTableDirection,
   ValueTableNoMatchMode,
   ValueTablePrimitiveValue,
@@ -84,6 +85,7 @@ const ARRAY_HANDOFF_ACTION_IDS = new Set<string>([
 
 export interface ValueMapProjectUiState {
   readonly scope: ValueTableScope;
+  readonly matchMode: ValueMapMatchMode;
   readonly tableId: string | null;
   readonly direction: ValueTableDirection | null;
   readonly pinnedRevision: number | null;
@@ -170,6 +172,7 @@ interface SmartBuilderPanelProps {
   readonly onValueMapScopeChange?: (scope: ValueTableScope) => void;
   readonly onValueMapProjectTableSelect?: (tableId: string) => void;
   readonly onValueMapDirectionSelect?: (direction: ValueTableDirection) => void;
+  readonly onValueMapMatchModeChange?: (mode: ValueMapMatchMode) => void;
   readonly onValueMapNoMatchModeChange?: (mode: ValueTableNoMatchMode) => void;
   readonly onValueMapFallbackValueChange?: (value: string) => void;
   readonly onValueMapInlineMappingAdd?: () => void;
@@ -205,6 +208,7 @@ export function SmartBuilderPanel({
   onValueMapScopeChange,
   onValueMapProjectTableSelect,
   onValueMapDirectionSelect,
+  onValueMapMatchModeChange,
   onValueMapNoMatchModeChange,
   onValueMapFallbackValueChange,
   onValueMapInlineMappingAdd,
@@ -2812,8 +2816,13 @@ export function SmartBuilderPanel({
                             directInputId: input.id,
                             valueMapScope: valueMapProjectState.scope,
                             valueMapProjectSelection: valueMapComposition.project
-                              ? { ref: valueMapComposition.project.ref }
+                              ? {
+                                matchMode: valueMapComposition.project.matchMode
+                                  ?? (valueMapProjectState.matchMode === 'ignore-case' ? 'ignore-case' : 'exact'),
+                                ref: valueMapComposition.project.ref,
+                              }
                               : undefined,
+                            valueMapMatchMode: valueMapProjectState.matchMode === 'ignore-case' ? 'ignore-case' : 'exact',
                             valueMapNoMatchMode: valueMapProjectState.noMatchMode,
                             valueMapFallbackValue: valueMapProjectState.fallbackValue,
                           });
@@ -2964,7 +2973,18 @@ export function SmartBuilderPanel({
               )}
 
               <div className="mt-2" data-testid="smart-value-map-no-match">
-                <label className="text-[11px] text-slate-400" htmlFor="smart-value-map-no-match-mode">No match behavior</label>
+                <label className="text-[11px] text-slate-400" htmlFor="smart-value-map-match-mode">Match mode</label>
+                <select
+                  id="smart-value-map-match-mode"
+                  data-testid="smart-value-map-match-mode"
+                  className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                  value={valueMapProjectState.matchMode}
+                  onChange={(event) => onValueMapMatchModeChange?.(event.target.value as ValueMapMatchMode)}
+                >
+                  <option value="exact">Exact</option>
+                  <option value="ignore-case">Ignore case</option>
+                </select>
+                <label className="mt-1.5 block text-[11px] text-slate-400" htmlFor="smart-value-map-no-match-mode">No match behavior</label>
                 <select
                   id="smart-value-map-no-match-mode"
                   data-testid="smart-value-map-no-match-mode"

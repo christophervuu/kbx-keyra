@@ -7,9 +7,16 @@ import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { PageHeader } from '@/components/PageHeader';
 import { useAdapter } from '@/lib/api';
 import type {
+  AcceptProjectValueMapUpdateInput,
+  ProjectValueMapDetail,
+  ProjectValueMapLinkSummary,
   ProjectValueTable,
   ProjectValueTableRevision,
   ProjectValueTableRevisionRow,
+  ReviewProjectValueMapUpdateResult,
+  UpdateProjectValueMapOverlayInput,
+  ValueMapOverlayOperation,
+  ValueMapUsageSummary,
   ValueTableUsageEntry,
   ValueTableValueType,
 } from '@/lib/types';
@@ -31,6 +38,24 @@ interface EditorFormState {
   sideBType: ValueTableValueType;
   rows: ProjectValueTableRevisionRow[];
 }
+
+interface LinkModalState {
+  readonly open: boolean;
+  readonly selectedValueMapId: string;
+  readonly selectedRevision: number | null;
+  readonly loading: boolean;
+  readonly error: string | null;
+}
+
+interface OverlayDraftState {
+  readonly selectedRowId: string;
+  readonly action: 'override' | 'exclude' | 'add';
+  readonly sideAValue: string;
+  readonly sideBValue: string;
+  readonly description: string;
+}
+
+type ProvenanceFilter = 'all' | 'inherited' | 'override' | 'add';
 
 const DEFAULT_EDITOR_STATE: EditorFormState = {
   name: '',
@@ -172,6 +197,40 @@ export function ProjectValueMappingsPage() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorSaving, setEditorSaving] = useState(false);
 
+  const [projectValueMaps, setProjectValueMaps] = useState<ProjectValueMapLinkSummary[]>([]);
+  const [selectedProjectValueMapId, setSelectedProjectValueMapId] = useState<string | null>(null);
+  const [projectValueMapDetail, setProjectValueMapDetail] = useState<ProjectValueMapDetail | null>(null);
+  const [projectValueMapReview, setProjectValueMapReview] = useState<ReviewProjectValueMapUpdateResult | null>(null);
+  const [projectValueMapUsage, setProjectValueMapUsage] = useState<ValueMapUsageSummary | null>(null);
+  const [projectValueMapsLoading, setProjectValueMapsLoading] = useState(false);
+  const [projectValueMapsError, setProjectValueMapsError] = useState<string | null>(null);
+
+  const [linkModalState, setLinkModalState] = useState<LinkModalState>({
+    open: false,
+    selectedValueMapId: '',
+    selectedRevision: null,
+    loading: false,
+    error: null,
+  });
+  const [linkableGlobalMaps, setLinkableGlobalMaps] = useState<ProjectValueTable[]>([]);
+  const [linkableGlobalMapRevisions, setLinkableGlobalMapRevisions] = useState<ProjectValueTableRevision[]>([]);
+
+  const [overlayDraftState, setOverlayDraftState] = useState<OverlayDraftState>({
+    selectedRowId: '',
+    action: 'override',
+    sideAValue: '',
+    sideBValue: '',
+    description: '',
+  });
+  const [overlaySaving, setOverlaySaving] = useState(false);
+  const [overlayError, setOverlayError] = useState<string | null>(null);
+  const [provenanceFilter, setProvenanceFilter] = useState<ProvenanceFilter>('all');
+
+  const [acceptingUpdate, setAcceptingUpdate] = useState(false);
+  const [acceptUpdateError, setAcceptUpdateError] = useState<string | null>(null);
+  const [unlinkingMap, setUnlinkingMap] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+
   const canLoad = typeof projectId === 'string' && projectId.trim().length > 0;
   useBreadcrumbLabel(projectId ?? '', projectNameLabel);
 
@@ -223,6 +282,36 @@ export function ProjectValueMappingsPage() {
       });
     }
   }, [adapter, canLoad, projectId, query, sortBy, sortDirection, selectedTableId]);
+
+  const loadProjectValueMaps = useCallback(async () => {
+    if (!canLoad || !projectId || !adapter.listProjectValueMaps) {
+      setProjectValueMaps([]);
+      setSelectedProjectValueMapId(null);
+      setProjectValueMapDetail(null);
+      setProjectValueMapReview(null);
+      return;
+    }
+
+    setProjectValueMapsLoading(true);
+    setProjectValueMapsError(null);
+
+    try {
+      const links = await adapter.listProjectValueMaps(projectId);
+      setProjectValueMaps(links);
+      setSelectedProjectValueMapId((prev) => {
+        if (prev && links.some((link) => link.valueMapId === prev)) return prev;
+        return links[0]?.valueMapId ?? null;
+      });
+    } catch (error) {
+      setProjectValueMaps([]);
+      setSelectedProjectValueMapId(null);
+      setProjectValueMapDetail(null);
+      setProjectValueMapReview(null);
+      setProjectValueMapsError(error instanceof Error ? error.message : 'Failed to load project value maps.');
+    } finally {
+      setProjectValueMapsLoading(false);
+    }
+  }, [adapter, canLoad, projectId]);
 
   useEffect(() => {
     if (!canLoad || !projectId) {
@@ -293,6 +382,95 @@ export function ProjectValueMappingsPage() {
     };
   }, [adapter, listState.tables, selectedTableId]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadProjectValueMaps();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadProjectValueMaps]);
+
+  useEffect(() => {
+    if (!projectId || !selectedProjectValueMapId || !adapter.getProjectValueMapDetail) {
+      setProjectValueMapDetail(null);
+      setProjectValueMapReview(null);
+      setProjectValueMapUsage(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadLinkDetail() {
+      try {
+        const detail = await adapter.getProjectValueMapDetail!(projectId, selectedProjectValueMapId);
+        if (cancelled) return;
+        setProjectValueMapDetail(detail);
+
+        if (adapter.reviewProjectValueMapUpdate) {
+          const review = await adapter.reviewProjectValueMapUpdate(projectId, selectedProjectValueMapId, {
+            candidateRevision: detail.latestRevision,
+          });
+          if (cancelled) return;
+          setProjectValueMapReview(review);
+        } else {
+          setProjectValueMapReview(null);
+        }
+
+        try {
+          const usage = await adapter.getGlobalValueMapUsage(selectedProjectValueMapId);
+          if (cancelled) return;
+          setProjectValueMapUsage(usage);
+        } catch {
+          if (cancelled) return;
+          setProjectValueMapUsage(null);
+        }
+      } catch {
+        if (cancelled) return;
+        setProjectValueMapDetail(null);
+        setProjectValueMapReview(null);
+        setProjectValueMapUsage(null);
+      }
+    }
+
+    void loadLinkDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, projectId, selectedProjectValueMapId]);
+
+  useEffect(() => {
+    if (!linkModalState.open || !linkModalState.selectedValueMapId) {
+      setLinkableGlobalMapRevisions([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadRevisions() {
+      try {
+        const revisions = await adapter.listGlobalValueMapRevisions(linkModalState.selectedValueMapId);
+        if (cancelled) return;
+        setLinkableGlobalMapRevisions(revisions);
+        setLinkModalState((prev) => ({
+          ...prev,
+          selectedRevision: revisions[0]?.revision ?? null,
+        }));
+      } catch {
+        if (cancelled) return;
+        setLinkableGlobalMapRevisions([]);
+      }
+    }
+
+    void loadRevisions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, linkModalState.open, linkModalState.selectedValueMapId]);
+
   const selectedTable = useMemo(
     () => listState.tables.find((table) => table.id === selectedTableId) ?? null,
     [listState.tables, selectedTableId],
@@ -304,6 +482,41 @@ export function ProjectValueMappingsPage() {
   );
 
   const referencedCount = usageEntries.length;
+
+  const selectedProjectValueMap = useMemo(
+    () => projectValueMaps.find((entry) => entry.valueMapId === selectedProjectValueMapId) ?? null,
+    [projectValueMaps, selectedProjectValueMapId],
+  );
+
+  const filteredEffectiveRows = useMemo(() => {
+    if (!projectValueMapDetail) {
+      return [];
+    }
+
+    if (provenanceFilter === 'all') {
+      return projectValueMapDetail.effectiveRows;
+    }
+
+    return projectValueMapDetail.effectiveRows.filter((row) => row.provenance === provenanceFilter);
+  }, [projectValueMapDetail, provenanceFilter]);
+
+  const hasPotentialAddCollision = useMemo(() => {
+    if (!projectValueMapDetail || overlayDraftState.action !== 'add') {
+      return false;
+    }
+
+    const candidateA = overlayDraftState.sideAValue.trim().toLowerCase();
+    const candidateB = overlayDraftState.sideBValue.trim().toLowerCase();
+    if (!candidateA || !candidateB) {
+      return false;
+    }
+
+    return projectValueMapDetail.effectiveRows.some((row) => (
+      row.provenance === 'inherited'
+      && String(row.sideAValue).trim().toLowerCase() === candidateA
+      && String(row.sideBValue).trim().toLowerCase() === candidateB
+    ));
+  }, [overlayDraftState.action, overlayDraftState.sideAValue, overlayDraftState.sideBValue, projectValueMapDetail]);
 
   const openCreateEditor = useCallback(() => {
     setEditorState(DEFAULT_EDITOR_STATE);
@@ -478,6 +691,213 @@ export function ProjectValueMappingsPage() {
     }
   }, [adapter, loadTables, selectedTable]);
 
+  const openLinkGlobalMapModal = useCallback(async () => {
+    setLinkModalState((prev) => ({
+      ...prev,
+      open: true,
+      selectedValueMapId: '',
+      selectedRevision: null,
+      error: null,
+      loading: true,
+    }));
+
+    try {
+      const maps = await adapter.listGlobalValueMaps({ status: 'active' });
+      setLinkableGlobalMaps(maps);
+    } catch {
+      setLinkableGlobalMaps([]);
+    } finally {
+      setLinkModalState((prev) => ({ ...prev, loading: false }));
+    }
+  }, [adapter]);
+
+  const closeLinkGlobalMapModal = useCallback(() => {
+    setLinkModalState((prev) => ({ ...prev, open: false, loading: false, error: null }));
+    setLinkableGlobalMapRevisions([]);
+  }, []);
+
+  const handleLinkGlobalMap = useCallback(async () => {
+    if (!projectId || !adapter.linkProjectValueMap) {
+      return;
+    }
+
+    if (!linkModalState.selectedValueMapId || !linkModalState.selectedRevision) {
+      setLinkModalState((prev) => ({ ...prev, error: 'Select a global value map and revision.' }));
+      return;
+    }
+
+    setLinkModalState((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      await adapter.linkProjectValueMap(projectId, {
+        valueMapId: linkModalState.selectedValueMapId,
+        revision: linkModalState.selectedRevision,
+      });
+      closeLinkGlobalMapModal();
+      await loadProjectValueMaps();
+      setSelectedProjectValueMapId(linkModalState.selectedValueMapId);
+    } catch (error) {
+      setLinkModalState((prev) => ({
+        ...prev,
+        loading: false,
+        error: error instanceof Error ? error.message : 'Failed to link global value map.',
+      }));
+    }
+  }, [adapter, closeLinkGlobalMapModal, linkModalState.selectedRevision, linkModalState.selectedValueMapId, loadProjectValueMaps, projectId]);
+
+  const selectedLinkableMap = useMemo(
+    () => linkableGlobalMaps.find((map) => map.id === linkModalState.selectedValueMapId) ?? null,
+    [linkModalState.selectedValueMapId, linkableGlobalMaps],
+  );
+
+  const applyOverlayDraft = useCallback(async () => {
+    if (!projectId || !selectedProjectValueMapId || !projectValueMapDetail || !adapter.updateProjectValueMapOverlay) {
+      return;
+    }
+
+    const operations: ValueMapOverlayOperation[] = [];
+    if (overlayDraftState.action === 'exclude') {
+      if (!overlayDraftState.selectedRowId) {
+        setOverlayError('Choose an inherited row to exclude.');
+        return;
+      }
+      operations.push({
+        operationId: `op-${Date.now()}-exclude`,
+        type: 'exclude',
+        targetRowId: overlayDraftState.selectedRowId,
+      });
+    } else if (overlayDraftState.action === 'override') {
+      if (!overlayDraftState.selectedRowId) {
+        setOverlayError('Choose an inherited row to override.');
+        return;
+      }
+      operations.push({
+        operationId: `op-${Date.now()}-override`,
+        type: 'override',
+        targetRowId: overlayDraftState.selectedRowId,
+        row: {
+          id: overlayDraftState.selectedRowId,
+          sideAValue: overlayDraftState.sideAValue,
+          sideBValue: overlayDraftState.sideBValue,
+          ...(overlayDraftState.description ? { description: overlayDraftState.description } : {}),
+        },
+      });
+    } else {
+      if (hasPotentialAddCollision) {
+        setOverlayError('This addition matches an inherited row. Choose Override inherited row to edit intentionally.');
+        return;
+      }
+
+      const addRowId = `add-${Date.now()}`;
+      operations.push({
+        operationId: `op-${Date.now()}-add`,
+        type: 'add',
+        row: {
+          id: addRowId,
+          sideAValue: overlayDraftState.sideAValue,
+          sideBValue: overlayDraftState.sideBValue,
+          ...(overlayDraftState.description ? { description: overlayDraftState.description } : {}),
+        },
+      });
+    }
+
+    const payload: UpdateProjectValueMapOverlayInput = {
+      operations,
+      expectedOverlayRevision: projectValueMapDetail.overlayRevision,
+    };
+
+    setOverlaySaving(true);
+    setOverlayError(null);
+
+    try {
+      await adapter.updateProjectValueMapOverlay(projectId, selectedProjectValueMapId, payload);
+      setOverlayDraftState({
+        selectedRowId: '',
+        action: 'override',
+        sideAValue: '',
+        sideBValue: '',
+        description: '',
+      });
+      await loadProjectValueMaps();
+      const detail = await adapter.getProjectValueMapDetail?.(projectId, selectedProjectValueMapId);
+      if (detail) {
+        setProjectValueMapDetail(detail);
+      }
+      if (adapter.reviewProjectValueMapUpdate) {
+        const review = await adapter.reviewProjectValueMapUpdate(projectId, selectedProjectValueMapId, {
+          candidateRevision: detail?.latestRevision,
+        });
+        setProjectValueMapReview(review);
+      }
+    } catch (error) {
+      setOverlayError(error instanceof Error ? error.message : 'Failed to update overlay.');
+    } finally {
+      setOverlaySaving(false);
+    }
+  }, [
+    adapter,
+    loadProjectValueMaps,
+    overlayDraftState.action,
+    overlayDraftState.description,
+    overlayDraftState.selectedRowId,
+    overlayDraftState.sideAValue,
+    overlayDraftState.sideBValue,
+    hasPotentialAddCollision,
+    projectId,
+    projectValueMapDetail,
+    selectedProjectValueMapId,
+  ]);
+
+  const acceptLinkedUpdate = useCallback(async () => {
+    if (!projectId || !selectedProjectValueMapId || !projectValueMapReview || !adapter.acceptProjectValueMapUpdate) {
+      return;
+    }
+
+    const payload: AcceptProjectValueMapUpdateInput = {
+      candidateRevision: projectValueMapReview.candidateRevision,
+      resolveOrphansAsExcludes: projectValueMapReview.orphanedRowIds,
+    };
+
+    setAcceptingUpdate(true);
+    setAcceptUpdateError(null);
+
+    try {
+      const detail = await adapter.acceptProjectValueMapUpdate(projectId, selectedProjectValueMapId, payload);
+      setProjectValueMapDetail(detail);
+      await loadProjectValueMaps();
+      if (adapter.reviewProjectValueMapUpdate) {
+        const review = await adapter.reviewProjectValueMapUpdate(projectId, selectedProjectValueMapId, {
+          candidateRevision: detail.latestRevision,
+        });
+        setProjectValueMapReview(review);
+      }
+    } catch (error) {
+      setAcceptUpdateError(error instanceof Error ? error.message : 'Failed to accept update.');
+    } finally {
+      setAcceptingUpdate(false);
+    }
+  }, [adapter, loadProjectValueMaps, projectId, projectValueMapReview, selectedProjectValueMapId]);
+
+  const unlinkSelectedProjectValueMap = useCallback(async () => {
+    if (!projectId || !selectedProjectValueMapId || !adapter.unlinkProjectValueMap) {
+      return;
+    }
+
+    setUnlinkingMap(true);
+    setUnlinkError(null);
+
+    try {
+      await adapter.unlinkProjectValueMap(projectId, selectedProjectValueMapId);
+      await loadProjectValueMaps();
+      setProjectValueMapDetail(null);
+      setProjectValueMapReview(null);
+    } catch (error) {
+      setUnlinkError(error instanceof Error ? error.message : 'Failed to unlink value map.');
+    } finally {
+      setUnlinkingMap(false);
+    }
+  }, [adapter, loadProjectValueMaps, projectId, selectedProjectValueMapId]);
+
   const handleSaveEditor = useCallback(async () => {
     if (!projectId) {
       return;
@@ -566,7 +986,7 @@ export function ProjectValueMappingsPage() {
     <div className="space-y-6" data-testid="page-project-value-mappings">
       <PageHeader
         title="Value Mappings"
-        description="Manage reusable project value tables with immutable revisions."
+        description="Manage reusable project value mappings with immutable revisions and inheritance overlays."
         actions={(
           <div className="flex items-center gap-2">
             <Button
@@ -577,12 +997,260 @@ export function ProjectValueMappingsPage() {
             >
               Back to Project
             </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={openLinkGlobalMapModal}>
+              Link Global Map
+            </Button>
             <Button type="button" variant="secondary" size="sm" onClick={openCreateEditor}>
-              Create Table
+              Create Project-only Map
             </Button>
           </div>
         )}
       />
+
+      <Card title="Linked Global Value Maps" description="Inherited/customized/update states with overlay and review controls." className="p-4" data-testid="project-value-map-links-card">
+        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div>
+            {projectValueMapsLoading ? (
+              <p className="text-sm text-slate-400" role="status" data-testid="project-value-map-links-loading">Loading linked value maps…</p>
+            ) : projectValueMapsError ? (
+              <div className="space-y-2 rounded-md border border-red-800 bg-red-950/30 p-3" data-testid="project-value-map-links-error">
+                <p className="text-sm text-red-200">Failed to load linked value maps.</p>
+                <p className="text-xs text-slate-400">{projectValueMapsError}</p>
+                <Button type="button" variant="secondary" size="sm" onClick={() => void loadProjectValueMaps()}>Retry</Button>
+              </div>
+            ) : projectValueMaps.length === 0 ? (
+              <p className="text-sm text-slate-400" data-testid="project-value-map-links-empty">No linked global value maps yet.</p>
+            ) : (
+              <ul className="space-y-2" data-testid="project-value-map-links-list">
+                {projectValueMaps.map((entry) => (
+                  <li key={entry.valueMapId}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProjectValueMapId(entry.valueMapId)}
+                      className={`w-full rounded-md border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                        entry.valueMapId === selectedProjectValueMapId
+                          ? 'border-blue-600 bg-blue-950/30'
+                          : 'border-slate-700 bg-slate-950/40 hover:border-slate-600 hover:bg-slate-900'
+                      }`}
+                      data-testid={`project-value-map-link-${entry.valueMapId}`}
+                    >
+                      <p className="text-sm font-medium text-slate-100">{entry.name}</p>
+                      <p className="mt-1 text-xs text-slate-400">rev {entry.pinnedRevision} / latest {entry.latestRevision}</p>
+                      <div className="mt-2 flex flex-wrap gap-1 text-xs">
+                        <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-200">{entry.overlayRevision > 0 ? 'customized' : 'inherited'}</span>
+                        <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-200">{entry.dependencyState}</span>
+                        {entry.updateAvailable ? <span className="rounded bg-amber-900/50 px-2 py-0.5 text-amber-200">update-available</span> : null}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            {!selectedProjectValueMap ? (
+              <p className="text-sm text-slate-400" data-testid="project-value-map-link-no-selection">Select a linked value map to inspect effective rows and overlay controls.</p>
+            ) : !projectValueMapDetail ? (
+              <p className="text-sm text-slate-400" role="status">Loading linked map details…</p>
+            ) : (
+              <div className="space-y-4" data-testid="project-value-map-link-detail">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded bg-slate-800 px-2 py-1 text-slate-200">{projectValueMapDetail.overlayRevision > 0 ? 'customized' : 'inherited'}</span>
+                  <span className="rounded bg-slate-800 px-2 py-1 text-slate-200">{projectValueMapDetail.dependencyState}</span>
+                  {projectValueMapDetail.updateAvailable ? <span className="rounded bg-amber-900/50 px-2 py-1 text-amber-200">update-available</span> : null}
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">Overlay action</span>
+                    <select
+                      value={overlayDraftState.action}
+                      onChange={(event) => setOverlayDraftState((prev) => ({ ...prev, action: event.target.value as OverlayDraftState['action'] }))}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                      aria-label="Overlay action"
+                    >
+                      <option value="override">Override inherited row</option>
+                      <option value="exclude">Exclude inherited row</option>
+                      <option value="add">Add project row</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">Inherited row</span>
+                    <select
+                      value={overlayDraftState.selectedRowId}
+                      onChange={(event) => setOverlayDraftState((prev) => ({ ...prev, selectedRowId: event.target.value }))}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                      aria-label="Inherited row selection"
+                    >
+                      <option value="">Select inherited row</option>
+                      {projectValueMapDetail.effectiveRows.filter((row) => row.provenance === 'inherited').map((row) => (
+                        <option key={row.rowId} value={row.rowId}>{row.rowId}: {String(row.sideAValue)} → {String(row.sideBValue)}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {overlayDraftState.action !== 'exclude' ? (
+                  <div className="grid gap-2 md:grid-cols-3" data-testid="project-value-map-overlay-form">
+                    <input
+                      type="text"
+                      value={overlayDraftState.sideAValue}
+                      onChange={(event) => setOverlayDraftState((prev) => ({ ...prev, sideAValue: event.target.value }))}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                      aria-label="Overlay side A value"
+                      placeholder="Side A value"
+                    />
+                    <input
+                      type="text"
+                      value={overlayDraftState.sideBValue}
+                      onChange={(event) => setOverlayDraftState((prev) => ({ ...prev, sideBValue: event.target.value }))}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                      aria-label="Overlay side B value"
+                      placeholder="Side B value"
+                    />
+                    <input
+                      type="text"
+                      value={overlayDraftState.description}
+                      onChange={(event) => setOverlayDraftState((prev) => ({ ...prev, description: event.target.value }))}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                      aria-label="Overlay description"
+                      placeholder="Description"
+                    />
+                  </div>
+                ) : null}
+
+                {overlayDraftState.action === 'add' && hasPotentialAddCollision ? (
+                  <p className="text-xs text-amber-200" data-testid="project-value-map-overlay-collision-warning">
+                    Potential collision with inherited row detected. Use &quot;Override inherited row&quot; for intentional edits.
+                  </p>
+                ) : null}
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">Provenance filter</span>
+                    <select
+                      value={provenanceFilter}
+                      onChange={(event) => setProvenanceFilter(event.target.value as ProvenanceFilter)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                      aria-label="Provenance filter"
+                    >
+                      <option value="all">All rows</option>
+                      <option value="inherited">Inherited</option>
+                      <option value="override">Override</option>
+                      <option value="add">Add</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void applyOverlayDraft()}
+                    loading={overlaySaving}
+                    data-testid="project-value-map-overlay-save"
+                  >
+                    Apply overlay
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void acceptLinkedUpdate()}
+                    loading={acceptingUpdate}
+                    disabled={
+                      !projectValueMapReview
+                      || !projectValueMapDetail.updateAvailable
+                      || !projectValueMapReview.canAccept
+                    }
+                    data-testid="project-value-map-accept-update"
+                  >
+                    Review & accept update
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => void unlinkSelectedProjectValueMap()}
+                    loading={unlinkingMap}
+                    disabled={(projectValueMapUsage?.mappings.length ?? 0) > 0}
+                    data-testid="project-value-map-unlink"
+                  >
+                    Unlink
+                  </Button>
+                </div>
+
+                {overlayError ? <p className="text-sm text-red-300" data-testid="project-value-map-overlay-error">{overlayError}</p> : null}
+                {acceptUpdateError ? <p className="text-sm text-red-300" data-testid="project-value-map-accept-error">{acceptUpdateError}</p> : null}
+                {unlinkError ? <p className="text-sm text-red-300" data-testid="project-value-map-unlink-error">{unlinkError}</p> : null}
+
+                {projectValueMapReview ? (
+                  <div className="rounded-md border border-slate-700 bg-slate-950/40 p-3" data-testid="project-value-map-review-summary">
+                    <p className="text-sm text-slate-200">Candidate revision: {projectValueMapReview.candidateRevision}</p>
+                    <p className="text-sm text-slate-400">Orphaned overlays: {projectValueMapReview.orphanedRowIds.length}</p>
+                    {projectValueMapReview.conflicts.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-200" data-testid="project-value-map-review-conflicts">
+                        {projectValueMapReview.conflicts.map((conflict) => (
+                          <li key={`${conflict.type}:${conflict.rowId}`}>{conflict.message}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {!projectValueMapReview.canAccept ? (
+                      <p className="mt-1 text-xs text-amber-200">Acceptance is blocked until orphan/conflict issues are resolved.</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {projectValueMapUsage && projectValueMapUsage.mappings.length > 0 ? (
+                  <div className="rounded-md border border-amber-700 bg-amber-950/20 p-3" data-testid="project-value-map-unlink-usage-guard">
+                    <p className="text-sm text-amber-200">
+                      Unlink blocked while this map is referenced by {projectValueMapUsage.mappings.length} mapping{projectValueMapUsage.mappings.length === 1 ? '' : 's'}.
+                    </p>
+                    <ul className="mt-2 space-y-1 text-xs text-slate-300">
+                      {projectValueMapUsage.mappings.slice(0, 3).map((entry) => (
+                        <li key={`${entry.mappingId}-${entry.inputSideKey}-${entry.outputSideKey}`}>
+                          {entry.mappingName ?? entry.mappingId} · pinned rev {entry.pinnedRevision}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className="overflow-auto rounded-md border border-slate-700" data-testid="project-value-map-effective-rows">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-800/70 text-xs uppercase tracking-wide text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">Provenance</th>
+                        <th className="px-3 py-2">Side A</th>
+                        <th className="px-3 py-2">Side B</th>
+                        <th className="px-3 py-2">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredEffectiveRows.map((row) => (
+                        <tr key={row.rowId} className="border-t border-slate-800">
+                          <td className="px-3 py-2 text-slate-300">{row.provenance}</td>
+                          <td className="px-3 py-2 text-slate-100">{String(row.sideAValue)}</td>
+                          <td className="px-3 py-2 text-slate-100">{String(row.sideBValue)}</td>
+                          <td className="px-3 py-2 text-slate-400">{row.description ?? '—'}</td>
+                        </tr>
+                      ))}
+                      {filteredEffectiveRows.length === 0 ? (
+                        <tr className="border-t border-slate-800">
+                          <td colSpan={4} className="px-3 py-3 text-sm text-slate-400">No rows for selected provenance filter.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]" data-testid="project-value-mappings-layout">
         <Card title="Tables" description="Search, sort, and manage tables." className="p-4">
@@ -1082,6 +1750,108 @@ export function ProjectValueMappingsPage() {
                 data-testid="value-table-editor-save"
               >
                 Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {linkModalState.open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="presentation" data-testid="project-value-map-link-modal-overlay">
+          <div className="absolute inset-0 bg-black/60" onClick={closeLinkGlobalMapModal} aria-hidden="true" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-value-map-link-modal-title"
+            className="relative z-10 w-full max-w-2xl rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl"
+            data-testid="project-value-map-link-modal"
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="project-value-map-link-modal-title" className="text-lg font-semibold text-slate-100">Link Global Value Map</h2>
+                <p className="mt-1 text-sm text-slate-400">Choose a global map and revision to pin in this project.</p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={closeLinkGlobalMapModal} aria-label="Close link global value map modal">
+                Close
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">Global value map</span>
+                <select
+                  value={linkModalState.selectedValueMapId}
+                  onChange={(event) => {
+                    const valueMapId = event.target.value;
+                    setLinkModalState((prev) => ({
+                      ...prev,
+                      selectedValueMapId: valueMapId,
+                      selectedRevision: null,
+                      error: null,
+                    }));
+                  }}
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                  aria-label="Global value map selection"
+                >
+                  <option value="">Select global value map</option>
+                  {linkableGlobalMaps.map((valueMap) => (
+                    <option key={valueMap.id} value={valueMap.id}>
+                      {valueMap.name} ({valueMap.key})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">Revision</span>
+                <select
+                  value={linkModalState.selectedRevision ?? ''}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    setLinkModalState((prev) => ({
+                      ...prev,
+                      selectedRevision: Number.isFinite(parsed) ? parsed : null,
+                    }));
+                  }}
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                  aria-label="Global value map revision selection"
+                  disabled={!linkModalState.selectedValueMapId}
+                >
+                  <option value="">Select revision</option>
+                  {linkableGlobalMapRevisions.map((revision) => (
+                    <option key={`${revision.valueTableId}-r${revision.revision}`} value={revision.revision}>
+                      Revision {revision.revision}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedLinkableMap ? (
+                <p className="text-xs text-slate-400">
+                  Selected map: <span className="text-slate-200">{selectedLinkableMap.name}</span> · current global revision {selectedLinkableMap.currentRevision}
+                </p>
+              ) : null}
+
+              {linkModalState.error ? (
+                <p className="rounded-md border border-red-800 bg-red-950/30 px-3 py-2 text-sm text-red-200" data-testid="project-value-map-link-modal-error">
+                  {linkModalState.error}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={closeLinkGlobalMapModal}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => void handleLinkGlobalMap()}
+                loading={linkModalState.loading}
+                data-testid="project-value-map-link-modal-confirm"
+              >
+                Link map
               </Button>
             </div>
           </div>

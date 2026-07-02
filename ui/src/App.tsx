@@ -21,11 +21,15 @@ import SchemaDetail from '@/routes/pages/SchemaDetail';
 import SchemaLibrary from '@/routes/pages/SchemaLibrary';
 import Settings from '@/routes/pages/Settings';
 import TemplateLibrary from '@/routes/pages/TemplateLibrary';
+import ValueMappingDetail from '@/routes/pages/ValueMappingDetail';
+import ValueMappingsLibrary from '@/routes/pages/ValueMappingsLibrary';
 
 const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<AppLayout />}>
       <Route path="/" element={<HomeDashboard />} />
+      <Route path="/value-mappings" element={<ValueMappingsLibrary />} />
+      <Route path="/value-mappings/:valueMapId" element={<ValueMappingDetail />} />
       <Route path="/projects/new" element={<CreateProject />} />
       <Route path="/projects/:projectId" element={<ProjectOverview />} />
       <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
@@ -55,6 +59,8 @@ const router = createBrowserRouter(
     },
   },
 );
+
+export { router };
 
 export default function App() {
   return (

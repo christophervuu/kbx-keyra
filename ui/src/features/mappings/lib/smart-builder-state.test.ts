@@ -545,10 +545,64 @@ describe('smart-builder-state', () => {
     if (result.kind !== 'guided') return;
     expect(result.draft.composition?.kind).toBe('valueMap');
     if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.matchMode).toBe('exact');
     expect(result.draft.composition.scope).toBe('project');
     expect(result.draft.composition.project?.ref.valueTableId).toBe('vt-1');
+    expect(result.draft.composition.project?.matchMode).toBe('exact');
     expect(result.draft.composition.noMatchBehavior?.mode).toBe('return_input');
     expect(result.draft.expression).toBe('valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), source("status"))');
+  });
+
+  it('hydrates project value-map with ignore-case match mode from rule metadata', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'valueMap(source("status"), valueTable("exercise-1-table", "side-a", "side-b"), "UNKNOWN")',
+      targetPath: 'target.status',
+      targetType: 'string',
+      isRequired: false,
+      ruleValueTableRef: {
+        scope: 'project',
+        valueTableId: 'vt-1',
+        tableKey: 'exercise-1-table',
+        revision: 3,
+        inputSideKey: 'side-a',
+        outputSideKey: 'side-b',
+        inputType: 'string',
+        outputType: 'string',
+        matchMode: 'ignore-case',
+        resolvedEntries: [
+          { in: 'open', out: 'OPEN', rowId: 'r1' },
+        ],
+      },
+      ruleNoMatchBehavior: {
+        mode: 'fallback_value',
+        fallbackValue: 'UNKNOWN',
+      },
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition?.kind).toBe('valueMap');
+    if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.matchMode).toBe('ignore-case');
+    expect(result.draft.composition.project?.matchMode).toBe('ignore-case');
+    expect(result.draft.expression).toContain(', "ignore-case")');
+  });
+
+  it('hydrates inline value-map expression with explicit ignore-case match mode argument', () => {
+    const result = hydrateSmartBuilderFromExpression({
+      expression: 'valueMap(source("status"), {"open": "OPEN", "closed": "CLOSED"}, "UNKNOWN", "ignore-case")',
+      targetPath: 'target.status',
+      targetType: 'string',
+      isRequired: false,
+    });
+
+    expect(result.kind).toBe('guided');
+    if (result.kind !== 'guided') return;
+    expect(result.draft.composition?.kind).toBe('valueMap');
+    if (result.draft.composition?.kind !== 'valueMap') return;
+    expect(result.draft.composition.scope).toBe('inline');
+    expect(result.draft.composition.matchMode).toBe('ignore-case');
+    expect(result.draft.expression).toContain(', "ignore-case")');
   });
 
   it('hydrates project value-table valueMap expressions with multiline formatting into guided draft', () => {

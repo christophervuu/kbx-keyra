@@ -8,6 +8,7 @@ export type {
   RuleType,
   SchemaRef,
   SchemaRefType,
+  ValueMapMatchMode,
   ValueTableNoMatchMode,
   ValueTablePrimitiveValue,
   ValueTableResolvedEntry,

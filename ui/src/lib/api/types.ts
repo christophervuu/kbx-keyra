@@ -41,8 +41,22 @@ import type {
   CreateProjectValueTableInput,
   CreateProjectValueTableRevisionInput,
   DuplicateProjectValueTableInput,
+  PromoteProjectValueMapInput,
+  PromoteProjectValueMapResult,
+  CreateGlobalValueMapInput,
+  LinkProjectValueMapInput,
+  UpdateProjectValueMapOverlayInput,
+  ReviewProjectValueMapUpdateInput,
+  ReviewProjectValueMapUpdateResult,
+  AcceptProjectValueMapUpdateInput,
+  ProjectValueMapLinkSummary,
+  ProjectValueMapDetail,
   ResolveProjectValueTableReferenceInput,
   ResolveProjectValueTableReferenceResult,
+  PortableValueMapExportPayload,
+  ImportProjectValueMapPortableInput,
+  ImportProjectValueMapPortableResult,
+  ValueMapUsageSummary,
   PublishSchemaInput,
   SchemaDetail,
   SchemaMetadata,
@@ -354,6 +368,11 @@ export interface ApiAdapter {
     input: CreateProjectValueTableRevisionInput,
   ): Promise<ProjectValueTableRevision>;
   duplicateProjectValueTable(input: DuplicateProjectValueTableInput): Promise<ProjectValueTable>;
+  promoteProjectValueMap(
+    projectId: string,
+    valueMapId: string,
+    input?: PromoteProjectValueMapInput,
+  ): Promise<PromoteProjectValueMapResult>;
   archiveProjectValueTable(valueTableId: string): Promise<ProjectValueTable>;
   deleteProjectValueTable(valueTableId: string): Promise<void>;
   listProjectValueTableUsage(valueTableId: string): Promise<ValueTableUsageEntry[]>;
@@ -363,13 +382,55 @@ export interface ApiAdapter {
     toRevision: number,
     options?: { cursor?: string; pageSize?: number },
   ): Promise<ValueTableDiffPage>;
-  exportProjectValueTableCsv(valueTableId: string, revision?: number): Promise<string>;
+  exportProjectValueTableCsv(
+    valueTableId: string,
+    revision?: number,
+    options?: { portable?: boolean },
+  ): Promise<string | PortableValueMapExportPayload>;
   importProjectValueTableCsv(
     projectId: string,
     csv: string,
     options?: { name?: string; key?: string },
   ): Promise<ProjectValueTableRevision>;
+  importProjectValueMapPortable(
+    projectId: string,
+    input: ImportProjectValueMapPortableInput,
+  ): Promise<ImportProjectValueMapPortableResult>;
   resolveProjectValueTableReference(
     input: ResolveProjectValueTableReferenceInput,
   ): Promise<ResolveProjectValueTableReferenceResult>;
+
+  // Global value maps (FS-102)
+  listGlobalValueMaps(options?: ValueTableListOptions): Promise<ProjectValueTable[]>;
+  createGlobalValueMap(input: CreateGlobalValueMapInput): Promise<ProjectValueTable>;
+  getGlobalValueMap(valueMapId: string): Promise<ProjectValueTable>;
+  listGlobalValueMapRevisions(valueMapId: string): Promise<ProjectValueTableRevision[]>;
+  createGlobalValueMapRevision(
+    valueMapId: string,
+    input: CreateProjectValueTableRevisionInput,
+  ): Promise<ProjectValueTableRevision>;
+  getGlobalValueMapRevision(valueMapId: string, revision: number): Promise<ProjectValueTableRevision>;
+  archiveGlobalValueMap(valueMapId: string): Promise<ProjectValueTable>;
+  getGlobalValueMapUsage(valueMapId: string): Promise<ValueMapUsageSummary>;
+
+  // Project value-map link/overlay/update-review (FS-102)
+  listProjectValueMaps?(projectId: string): Promise<ProjectValueMapLinkSummary[]>;
+  linkProjectValueMap?(projectId: string, input: LinkProjectValueMapInput): Promise<ProjectValueMapDetail>;
+  getProjectValueMapDetail?(projectId: string, valueMapId: string): Promise<ProjectValueMapDetail>;
+  updateProjectValueMapOverlay?(
+    projectId: string,
+    valueMapId: string,
+    input: UpdateProjectValueMapOverlayInput,
+  ): Promise<ProjectValueMapDetail>;
+  reviewProjectValueMapUpdate?(
+    projectId: string,
+    valueMapId: string,
+    input?: ReviewProjectValueMapUpdateInput,
+  ): Promise<ReviewProjectValueMapUpdateResult>;
+  acceptProjectValueMapUpdate?(
+    projectId: string,
+    valueMapId: string,
+    input: AcceptProjectValueMapUpdateInput,
+  ): Promise<ProjectValueMapDetail>;
+  unlinkProjectValueMap?(projectId: string, valueMapId: string): Promise<void>;
 }

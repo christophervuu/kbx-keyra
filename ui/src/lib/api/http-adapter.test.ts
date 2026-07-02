@@ -534,6 +534,26 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('promoteProjectValueMap maps to POST /projects/:id/value-maps/:valueMapId/promote', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ promoted: { id: 'vm-2' } });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      key: 'order-status-global',
+      name: 'Order Status Global',
+      relink: true,
+    };
+
+    await adapter.promoteProjectValueMap('p-1', 'vt-1', input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-maps/vt-1/promote',
+      method: 'POST',
+      body: input,
+    });
+  });
+
   it('archiveProjectValueTable maps to POST /value-tables/:id/archive', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vt-1', status: 'archived' });
     const adapter = new HttpAdapter(API_URL);
@@ -587,6 +607,19 @@ describe('HttpAdapter (CRUD)', () => {
     });
   });
 
+  it('exportProjectValueTableCsv maps portable option to portable=true query', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ format: 'value-map-portable-v1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.exportProjectValueTableCsv('vt-1', 2, { portable: true });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-tables/vt-1/export.csv?revision=2&portable=true',
+      method: 'GET',
+    });
+  });
+
   it('importProjectValueTableCsv maps to POST /projects/:id/value-tables/import-csv', async () => {
     vi.mocked(httpRequest).mockResolvedValueOnce({ valueTableId: 'vt-1', revision: 1 });
     const adapter = new HttpAdapter(API_URL);
@@ -605,6 +638,42 @@ describe('HttpAdapter (CRUD)', () => {
         name: 'Imported table',
         key: 'imported-table',
       },
+    });
+  });
+
+  it('importProjectValueMapPortable maps to POST /projects/:id/value-tables/import-csv', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ importStatus: 'detached-project-copy' });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      portablePayload: {
+        format: 'value-map-portable-v1' as const,
+        exportedAt: '2026-07-02T00:00:00.000Z',
+        valueMap: {
+          valueMapId: 'vm-1',
+          key: 'order-status',
+          name: 'Order Status',
+          sideA: { key: 'oms', label: 'OMS', type: 'string' as const },
+          sideB: { key: 'cdm', label: 'CDM', type: 'string' as const },
+          scope: 'project' as const,
+          overlayRevision: 0,
+          overlayOperations: [],
+          effectiveRows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+        },
+        usageBindings: [],
+      },
+      resolution: { action: 'project-copy' as const },
+      key: 'order-status-imported',
+      name: 'Order Status Imported',
+    };
+
+    await adapter.importProjectValueMapPortable('p-1', input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/projects/p-1/value-tables/import-csv',
+      method: 'POST',
+      body: input,
     });
   });
 
@@ -710,6 +779,137 @@ describe('HttpAdapter (CRUD)', () => {
     expect(httpRequest).toHaveBeenCalledWith({
       baseUrl: API_URL,
       path: '/value-tables/vt-1/diff?fromRevision=1&toRevision=2&cursor=0&pageSize=100',
+      method: 'GET',
+    });
+  });
+
+  it('listGlobalValueMaps maps to GET /value-maps with query options', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listGlobalValueMaps({
+      query: 'order',
+      status: 'active',
+      sortBy: 'updatedAt',
+      sortDirection: 'desc',
+    });
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps?query=order&status=active&sortBy=updatedAt&sortDirection=desc',
+      method: 'GET',
+    });
+  });
+
+  it('createGlobalValueMap maps to POST /value-maps', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vm-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      key: 'order-status',
+      name: 'Order Status',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' as const },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' as const },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    };
+
+    await adapter.createGlobalValueMap(input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('getGlobalValueMap maps to GET /value-maps/:id', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vm-1' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.getGlobalValueMap('vm-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps/vm-1',
+      method: 'GET',
+    });
+  });
+
+  it('listGlobalValueMapRevisions maps to GET /value-maps/:id/revisions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce([]);
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.listGlobalValueMapRevisions('vm-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps/vm-1/revisions',
+      method: 'GET',
+    });
+  });
+
+  it('createGlobalValueMapRevision maps to POST /value-maps/:id/revisions', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ valueTableId: 'vm-1', revision: 2 });
+    const adapter = new HttpAdapter(API_URL);
+
+    const input = {
+      valueTableId: 'vm-1',
+      sideA: { key: 'oms', label: 'OMS', type: 'string' as const },
+      sideB: { key: 'cdm', label: 'CDM', type: 'string' as const },
+      rows: [{ id: 'r1', sideAValue: 'confirmed', sideBValue: 'OPEN' }],
+    };
+
+    await adapter.createGlobalValueMapRevision('vm-1', input);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps/vm-1/revisions',
+      method: 'POST',
+      body: input,
+    });
+  });
+
+  it('getGlobalValueMapRevision maps to GET /value-maps/:id/revisions/:revision', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ valueTableId: 'vm-1', revision: 2 });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.getGlobalValueMapRevision('vm-1', 2);
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps/vm-1/revisions/2',
+      method: 'GET',
+    });
+  });
+
+  it('archiveGlobalValueMap maps to POST /value-maps/:id/archive', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({ id: 'vm-1', status: 'archived' });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.archiveGlobalValueMap('vm-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps/vm-1/archive',
+      method: 'POST',
+      body: {},
+    });
+  });
+
+  it('getGlobalValueMapUsage maps to GET /value-maps/:id/usage', async () => {
+    vi.mocked(httpRequest).mockResolvedValueOnce({
+      mappings: [],
+      linkedProjects: [],
+      counts: { mappings: 0, linkedProjects: 0 },
+    });
+    const adapter = new HttpAdapter(API_URL);
+
+    await adapter.getGlobalValueMapUsage('vm-1');
+
+    expect(httpRequest).toHaveBeenCalledWith({
+      baseUrl: API_URL,
+      path: '/value-maps/vm-1/usage',
       method: 'GET',
     });
   });

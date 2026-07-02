@@ -110,6 +110,8 @@ export type SchemaRefType = 'github' | 'local' | 'published';
 
 export type ValueTableValueType = 'string' | 'number' | 'boolean';
 
+export type ValueMapMatchMode = 'exact' | 'ignore-case';
+
 export type ValueTablePrimitiveValue = string | number | boolean;
 
 export type ValueTableStatus = 'active' | 'archived';
@@ -130,6 +132,8 @@ export interface ProjectValueTable {
   readonly key: string;
   readonly name: string;
   readonly description?: string;
+  readonly defaultMatchMode?: 'exact' | 'ignore-case';
+  readonly currentRowCount?: number;
   readonly sideA: ValueTableSideDefinition;
   readonly sideB: ValueTableSideDefinition;
   readonly currentRevision: number;
@@ -186,6 +190,7 @@ export interface MappingRuleProjectValueTableRef {
   readonly outputSideKey: string;
   readonly inputType: ValueTableValueType;
   readonly outputType: ValueTableValueType;
+  readonly matchMode?: ValueMapMatchMode;
   readonly resolvedEntries: readonly ValueTableResolvedEntry[];
   readonly sourceMeta?: ValueTableRefSourceMeta;
 }
@@ -283,6 +288,15 @@ export interface DuplicateProjectValueTableInput {
   readonly valueTableId: string;
   readonly name: string;
   readonly key?: string;
+  readonly sourceProjectId?: string;
+  readonly mode?: 'detached-copy' | 'preserve-link';
+}
+
+export interface PromoteProjectValueMapInput {
+  readonly key?: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly relink?: boolean;
 }
 
 export interface ResolveProjectValueTableReferenceInput {
@@ -296,6 +310,171 @@ export interface ResolveProjectValueTableReferenceInput {
 
 export interface ResolveProjectValueTableReferenceResult {
   readonly ref: MappingRuleProjectValueTableRef;
+}
+
+export interface ValueMapUsageSummary {
+  readonly mappings: readonly ValueTableUsageEntry[];
+  readonly linkedProjects: readonly {
+    readonly projectId: string;
+    readonly projectName?: string;
+  }[];
+  readonly counts: {
+    readonly mappings: number;
+    readonly linkedProjects: number;
+  };
+}
+
+export type ValueMapDependencyState = 'current' | 'needs-review' | 'invalid';
+
+export interface ProjectValueMapLinkSummary {
+  readonly projectId: string;
+  readonly valueMapId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly pinnedRevision: number;
+  readonly latestRevision: number;
+  readonly overlayRevision: number;
+  readonly updateAvailable: boolean;
+  readonly dependencyState: ValueMapDependencyState;
+  readonly status: ValueTableStatus;
+}
+
+export interface ProjectValueMapEffectiveRow {
+  readonly rowId: string;
+  readonly sideAValue: ValueTablePrimitiveValue;
+  readonly sideBValue: ValueTablePrimitiveValue;
+  readonly description?: string;
+  readonly provenance: 'inherited' | 'override' | 'add';
+}
+
+export interface ProjectValueMapDetail {
+  readonly projectId: string;
+  readonly valueMapId: string;
+  readonly key: string;
+  readonly name: string;
+  readonly pinnedRevision: number;
+  readonly latestRevision: number;
+  readonly overlayRevision: number;
+  readonly updateAvailable: boolean;
+  readonly dependencyState: ValueMapDependencyState;
+  readonly effectiveRows: readonly ProjectValueMapEffectiveRow[];
+}
+
+export type ValueMapOverlayOperationType = 'override' | 'add' | 'exclude';
+
+export interface ValueMapOverlayOperation {
+  readonly operationId: string;
+  readonly type: ValueMapOverlayOperationType;
+  readonly targetRowId?: string;
+  readonly row?: ProjectValueTableRevisionRow;
+}
+
+export interface LinkProjectValueMapInput {
+  readonly valueMapId: string;
+  readonly revision: number;
+}
+
+export interface UpdateProjectValueMapOverlayInput {
+  readonly operations: readonly ValueMapOverlayOperation[];
+  readonly expectedOverlayRevision?: number;
+}
+
+export interface ReviewProjectValueMapUpdateInput {
+  readonly candidateRevision?: number;
+}
+
+export interface ReviewProjectValueMapUpdateResult {
+  readonly projectId: string;
+  readonly valueMapId: string;
+  readonly currentPinnedRevision: number;
+  readonly candidateRevision: number;
+  readonly updateAvailable: boolean;
+  readonly conflicts: ReadonlyArray<{
+    readonly type: 'orphan';
+    readonly rowId: string;
+    readonly message: string;
+  }>;
+  readonly orphanedRowIds: readonly string[];
+  readonly canAccept: boolean;
+}
+
+export interface AcceptProjectValueMapUpdateInput {
+  readonly candidateRevision: number;
+  readonly resolveOrphansAsExcludes?: readonly string[];
+}
+
+export interface PortableValueMapRuleBinding {
+  readonly mappingId: string;
+  readonly mappingName?: string;
+  readonly mappingRevision?: number;
+  readonly ruleIndex: number;
+  readonly target?: string;
+  readonly pinnedRevision: number;
+  readonly inputSideKey: string;
+  readonly outputSideKey: string;
+  readonly matchMode: 'exact' | 'ignore-case';
+  readonly noMatchBehaviorMode?: 'return_null' | 'return_input' | 'fallback_value';
+  readonly fallbackValue?: ValueTablePrimitiveValue;
+}
+
+export interface PortableValueMapExportPayload {
+  readonly format: 'value-map-portable-v1';
+  readonly exportedAt: ISODateString;
+  readonly projectId?: string;
+  readonly valueMap: {
+    readonly valueMapId: string;
+    readonly key: string;
+    readonly name: string;
+    readonly description?: string;
+    readonly sideA: ValueTableSideDefinition;
+    readonly sideB: ValueTableSideDefinition;
+    readonly defaultMatchMode?: ValueMapMatchMode;
+    readonly scope: 'project' | 'global';
+    readonly sourceProjectId?: string;
+    readonly pinnedGlobal?: {
+      readonly valueMapId: string;
+      readonly revision: number;
+      readonly key: string;
+      readonly name: string;
+    };
+    readonly overlayRevision: number;
+    readonly overlayOperations: readonly ValueMapOverlayOperation[];
+    readonly effectiveRows: readonly ProjectValueTableRevisionRow[];
+  };
+  readonly usageBindings: readonly PortableValueMapRuleBinding[];
+}
+
+export interface ImportPortableValueMapResolution {
+  readonly action: 'project-copy' | 'choose-global' | 'cancel';
+  readonly selectedValueMapId?: string;
+  readonly selectedRevision?: number;
+}
+
+export interface ImportProjectValueMapPortableInput {
+  readonly portablePayload: PortableValueMapExportPayload;
+  readonly resolution?: ImportPortableValueMapResolution;
+  readonly key?: string;
+  readonly name?: string;
+}
+
+export interface PromoteProjectValueMapResult {
+  readonly promoted: ProjectValueTable;
+  readonly relinked?: ProjectValueMapDetail;
+}
+
+export interface ImportProjectValueMapPortableResult {
+  readonly importStatus: 'linked' | 'linked-via-resolution' | 'detached-project-copy';
+  readonly detail?: ProjectValueMapDetail;
+  readonly table?: ProjectValueTable;
+}
+
+export interface CreateGlobalValueMapInput {
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sideA: ValueTableSideDefinition;
+  readonly sideB: ValueTableSideDefinition;
+  readonly rows: readonly ProjectValueTableRevisionRow[];
 }
 
 export interface SchemaRef {

@@ -2211,6 +2211,7 @@ describe('applySmartActionToDraft', () => {
     };
 
     const projectSelection = {
+      matchMode: 'exact' as const,
       ref: {
         scope: 'project' as const,
         valueTableId: 'vt-1',
@@ -2218,6 +2219,7 @@ describe('applySmartActionToDraft', () => {
         revision: 3,
         inputSideKey: 'code',
         outputSideKey: 'label',
+        matchMode: 'exact' as const,
       },
       tableName: 'Status Codes',
       tableStatus: 'active' as const,
@@ -2234,6 +2236,7 @@ describe('applySmartActionToDraft', () => {
     expect(withReturnInput.composition?.kind).toBe('valueMap');
     if (withReturnInput.composition?.kind !== 'valueMap') return;
     expect(withReturnInput.composition.scope).toBe('project');
+    expect(withReturnInput.composition.matchMode).toBe('exact');
     expect(withReturnInput.composition.project?.ref.valueTableId).toBe('vt-1');
     expect(withReturnInput.composition.noMatchBehavior).toEqual({ mode: 'return_input' });
 
@@ -2251,6 +2254,20 @@ describe('applySmartActionToDraft', () => {
       fallbackValue: 'UNKNOWN',
     });
     expect(withFallbackValue.expression).toContain('valueTable(');
+
+    const withIgnoreCase = applySmartActionToDraft(draft, 'lookup.valueMap', {
+      valueMapScope: 'project',
+      valueMapProjectSelection: projectSelection,
+      valueMapMatchMode: 'ignore-case',
+      valueMapNoMatchMode: 'fallback_value',
+      valueMapFallbackValue: 'UNKNOWN',
+    });
+    expect(withIgnoreCase.composition?.kind).toBe('valueMap');
+    if (withIgnoreCase.composition?.kind !== 'valueMap') return;
+    expect(withIgnoreCase.composition.matchMode).toBe('ignore-case');
+    expect(withIgnoreCase.composition.project?.matchMode).toBe('ignore-case');
+    expect(withIgnoreCase.composition.project?.ref.matchMode).toBe('ignore-case');
+    expect(withIgnoreCase.expression).toContain(', "ignore-case")');
   });
 
   it('AE-21: supports value-map explicit lookup input selection with extra tray inputs', () => {
@@ -2332,8 +2349,10 @@ describe('applySmartActionToDraft', () => {
       composition: {
         kind: 'valueMap' as const,
         inputId: 'status',
+        matchMode: 'exact' as const,
         scope: 'project' as const,
         project: {
+          matchMode: 'exact' as const,
           ref: {
             scope: 'project' as const,
             valueTableId: 'vt-1',
@@ -2341,6 +2360,7 @@ describe('applySmartActionToDraft', () => {
             revision: 7,
             inputSideKey: 'code',
             outputSideKey: 'label',
+            matchMode: 'exact' as const,
           },
           tableName: 'Status Codes',
           tableStatus: 'active' as const,
@@ -2363,6 +2383,7 @@ describe('applySmartActionToDraft', () => {
     expect(next.composition.inputId).toBe('alt');
     expect(next.composition.scope).toBe('project');
     expect(next.composition.project).toEqual(draft.composition.project);
+    expect(next.composition.matchMode).toBe('exact');
   });
 
   it('normalizes value-map fallback value by numeric target type', () => {
