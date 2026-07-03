@@ -1,11 +1,13 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { useMappingEditor } from './use-mapping-editor';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
+import { queryKeys } from '@/lib/query';
 import type { MappingConfig, MappingConfigOptions, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -172,8 +174,13 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
 }
 
 function createWrapper(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
   return function Wrapper({ children }: { children: ReactNode }) {
-    return <AdapterProvider adapter={adapter}>{children}</AdapterProvider>;
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AdapterProvider adapter={adapter}>{children}</AdapterProvider>
+      </QueryClientProvider>
+    );
   };
 }
 
@@ -409,6 +416,19 @@ describe('useMappingEditor', () => {
 
       expect(result.current.mappingName).toBe('Test Mapping');
     });
+
+    it('exposes non-blocking refresh metadata when cached mapping data exists', async () => {
+      const adapter = createMockAdapter();
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      expect(result.current.lastUpdatedAt).not.toBeNull();
+    });
   });
 
   describe('Save', () => {
@@ -515,8 +535,11 @@ describe('useMappingEditor', () => {
         pendingSave = result.current.actions.save();
       });
 
-      // Optimistic save applies merged rules immediately.
-      expect(result.current.rules).toHaveLength(3);
+      // Save path awaits query cancellation before optimistic update.
+      await waitFor(() => {
+        expect(result.current.saveStatus).toBe('saving');
+        expect(result.current.rules).toHaveLength(3);
+      });
 
       await act(async () => {
         rejectUpdate(new Error('Save failed'));
@@ -578,6 +601,145 @@ describe('useMappingEditor', () => {
       expect(adapter.deployMapping).not.toHaveBeenCalled();
       expect(adapter.promoteDeployment).not.toHaveBeenCalled();
       expect(adapter.rollbackDeployment).not.toHaveBeenCalled();
+    });
+
+    it('metadata-only save response invalidates canonical detail instead of speculative merge', async () => {
+      const adapter = createMockAdapter({
+        getMapping: vi
+          .fn()
+          .mockResolvedValueOnce(MOCK_CONFIG)
+          .mockResolvedValueOnce({
+            ...MOCK_CONFIG,
+            version: 4,
+            rules: [
+              ...MOCK_CONFIG.rules,
+              { target: 'A.D', type: 'string', expression: 'source("server")' },
+            ],
+          }),
+        saveMapping: vi.fn().mockResolvedValue({ revision: 4, noChange: false }),
+      });
+
+      const queryClient = createQueryClient();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          <AdapterProvider adapter={adapter}>{children}</AdapterProvider>
+        </QueryClientProvider>
+      );
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), { wrapper });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('A.B', 'static("local-draft")');
+      });
+
+      await act(async () => {
+        await result.current.actions.save();
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.mappings.detail('mapping-1') });
+
+      await waitFor(() => {
+        expect(adapter.getMapping).toHaveBeenCalledTimes(2);
+      });
+
+      await act(async () => {
+        await result.current.actions.refreshToLatestSaved();
+      });
+
+      expect(result.current.rules).toEqual([
+        ...MOCK_CONFIG.rules,
+        { target: 'A.D', type: 'string', expression: 'source("server")' },
+      ]);
+      expect(result.current.rules.find((rule) => rule.target === 'A.B')?.expression).toBe('source("x")');
+
+      invalidateSpy.mockRestore();
+    });
+
+    it('refreshToLatestSaved applies latest canonical server mapping and clears unsaved draft state', async () => {
+      const adapter = createMockAdapter({
+        getMapping: vi
+          .fn()
+          .mockResolvedValueOnce(MOCK_CONFIG)
+          .mockResolvedValueOnce({
+            ...MOCK_CONFIG,
+            version: 4,
+            rules: [
+              ...MOCK_CONFIG.rules,
+              { target: 'A.D', type: 'string', expression: 'source("server")' },
+            ],
+          }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('A.B', 'static("local-draft")');
+      });
+      expect(result.current.hasUnsavedChanges).toBe(true);
+
+      await act(async () => {
+        await result.current.actions.refreshToLatestSaved();
+      });
+
+      await waitFor(() => {
+        expect(result.current.currentRevision).toBe(4);
+      });
+
+      expect(result.current.rules).toEqual([
+        ...MOCK_CONFIG.rules,
+        { target: 'A.D', type: 'string', expression: 'source("server")' },
+      ]);
+      expect(result.current.draftRules.size).toBe(0);
+      expect(result.current.hasUnsavedChanges).toBe(false);
+    });
+
+    it('marks hasNewerSavedRevision when refresh returns newer server revision while dirty', async () => {
+      const adapter = createMockAdapter({
+        getMapping: vi
+          .fn()
+          .mockResolvedValueOnce(MOCK_CONFIG)
+          .mockResolvedValueOnce({
+            ...MOCK_CONFIG,
+            version: 5,
+          }),
+      });
+
+      const { result } = renderHook(() => useMappingEditor('mapping-1'), {
+        wrapper: createWrapper(adapter),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loadState).toBe('loaded');
+      });
+
+      act(() => {
+        result.current.actions.updateDraft('A.B', 'static("local-only")');
+      });
+
+      await act(async () => {
+        result.current.actions.retry();
+      });
+
+      await waitFor(() => {
+        expect(result.current.latestSavedRevision).toBe(5);
+      });
+
+      expect(result.current.currentRevision).toBe(3);
+      expect(result.current.hasUnsavedChanges).toBe(true);
+      expect(result.current.hasNewerSavedRevision).toBe(true);
+      expect(result.current.draftRules.get('A.B')).toBe('static("local-only")');
     });
   });
 
@@ -960,6 +1122,10 @@ describe('useMappingEditor', () => {
 
       // Should be saving
       expect(result.current.saveStatus).toBe('saving');
+
+      await waitFor(() => {
+        expect(typeof resolveUpdate).toBe('function');
+      });
 
       // Resolve
       await act(async () => {

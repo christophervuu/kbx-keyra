@@ -1,10 +1,11 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { saveAutoMapSuggestions } from '@/features/mappings/lib';
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingConfig, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 import MappingEditor from '@/routes/pages/MappingEditor';
@@ -151,6 +152,27 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     querySchemaNodes: vi.fn(),
     listActivity: vi.fn(),
     previewOnServer: vi.fn(),
+    listProjectValueTables: vi.fn().mockResolvedValue([]),
+    getProjectValueTable: vi.fn(),
+    getProjectValueTableRevision: vi.fn(),
+    createProjectValueTable: vi.fn(),
+    createProjectValueTableRevision: vi.fn(),
+    duplicateProjectValueTable: vi.fn(),
+    archiveProjectValueTable: vi.fn(),
+    deleteProjectValueTable: vi.fn(),
+    listProjectValueTableUsage: vi.fn(),
+    getProjectValueTableRevisionDiff: vi.fn(),
+    exportProjectValueTableCsv: vi.fn(),
+    importProjectValueTableCsv: vi.fn(),
+    resolveProjectValueTableReference: vi.fn(),
+    listGlobalValueMaps: vi.fn().mockResolvedValue([]),
+    createGlobalValueMap: vi.fn(),
+    getGlobalValueMap: vi.fn(),
+    listGlobalValueMapRevisions: vi.fn(),
+    createGlobalValueMapRevision: vi.fn(),
+    getGlobalValueMapRevision: vi.fn(),
+    archiveGlobalValueMap: vi.fn(),
+    getGlobalValueMapUsage: vi.fn(),
     listMappingVersions: vi.fn().mockResolvedValue([]),
     getMappingVersion: vi.fn(),
     listVersions: vi.fn().mockResolvedValue([]),
@@ -175,6 +197,7 @@ function renderEditor(
       state?: Record<string, unknown>;
     } = '/projects/project-1/mappings/mapping-1',
 ) {
+  const queryClient = createQueryClient();
   const router = createMemoryRouter(
     [
       {
@@ -192,18 +215,21 @@ function renderEditor(
   );
 
   const rendered = render(
-    <AdapterProvider adapter={adapter}>
-      <RouterProvider
-        router={router}
-        future={{
-          v7_startTransition: true,
-        }}
-      />
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <RouterProvider
+          router={router}
+          future={{
+            v7_startTransition: true,
+          }}
+        />
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 
   return {
     router,
+    queryClient,
     ...rendered,
   };
 }
@@ -295,7 +321,7 @@ describe('MappingEditor auto-map handoff contract', () => {
     });
     const adapter = createMockAdapter({ autoMapSection });
 
-    const { router, rerender } = renderEditor(
+    const { router, queryClient, rerender } = renderEditor(
       adapter,
       {
         pathname: '/projects/project-1/mappings/mapping-1',
@@ -321,14 +347,16 @@ describe('MappingEditor auto-map handoff contract', () => {
     });
 
     rerender(
-      <AdapterProvider adapter={adapter}>
-        <RouterProvider
-          router={router}
-          future={{
-            v7_startTransition: true,
-          }}
-        />
-      </AdapterProvider>,
+      <QueryClientProvider client={queryClient}>
+        <AdapterProvider adapter={adapter}>
+          <RouterProvider
+            router={router}
+            future={{
+              v7_startTransition: true,
+            }}
+          />
+        </AdapterProvider>
+      </QueryClientProvider>,
     );
 
     await waitFor(() => {

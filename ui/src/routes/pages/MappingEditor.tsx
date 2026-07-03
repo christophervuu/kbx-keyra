@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -67,6 +68,7 @@ import { resolveFieldTestValue } from '@/features/mappings/lib/source-field-disp
 import type { EditorView } from '@/features/mappings/types';
 import { useAdapter } from '@/lib/api';
 import { executeMapping } from '@/lib/engine';
+import { queryKeys, queryPolicies } from '@/lib/query';
 import type {
   MappingRuleProjectValueTableRef,
   ValueMapMatchMode,
@@ -541,6 +543,10 @@ interface ValueMapAdoptionPromptState {
   readonly tableId: string;
   readonly fromRevision: number;
   readonly toRevision: number;
+}
+
+interface ProjectValueTableCatalogData {
+  readonly entries: readonly ProjectValueMapCatalogEntry[];
 }
 
 interface SmartMethodSwitchPromptState {
@@ -2160,7 +2166,6 @@ export default function MappingEditor() {
   const [selectedSampleId, setSelectedSampleId] = useState<string | null | undefined>(undefined);
   const [samplePayloadCache, setSamplePayloadCache] = useState<Record<string, { raw: string; parsed: unknown | null }>>({});
   const [localSamplePayloadsBySchema, setLocalSamplePayloadsBySchema] = useState<Record<string, readonly SchemaSamplePayloadMetadata[]>>({});
-  const [projectName, setProjectName] = useState<string>('Project');
   const {
     panelLayout: editorPanelLayout,
     setPanelLayout: setEditorPanelLayout,
@@ -2185,6 +2190,48 @@ export default function MappingEditor() {
   const sourceSchemaMetadata = editor.sourceSchemaDetail?.metadata ?? null;
   const sourceSchemaId = sourceSchemaMetadata?.schemaId ?? null;
   const sourceSchemaDataFormat = sourceSchemaMetadata?.dataFormat ?? 'json';
+
+  const valueTableListQueryOptions = useMemo(() => ({
+    status: 'active',
+    sortBy: 'updatedAt',
+    sortDirection: 'desc',
+  }) as const, []);
+
+  const projectQuery = useQuery({
+    queryKey: queryKeys.projects.detail(projectId),
+    enabled: projectId.length > 0,
+    staleTime: queryPolicies.projectDetail.staleTime,
+    gcTime: queryPolicies.projectDetail.gcTime,
+    retry: false,
+    queryFn: async () => adapter.getProject(projectId),
+  });
+
+  const projectName = projectQuery.data?.name ?? 'Project';
+
+  const projectValueTableCatalogQuery = useQuery<ProjectValueTableCatalogData>({
+    queryKey: queryKeys.valueTables.list(projectId, valueTableListQueryOptions),
+    enabled: projectId.length > 0,
+    staleTime: queryPolicies.projectMappingsList.staleTime,
+    gcTime: queryPolicies.projectMappingsList.gcTime,
+    retry: false,
+    queryFn: async () => {
+      const tables = await adapter.listProjectValueTables(projectId, valueTableListQueryOptions);
+
+      const entries = await Promise.all(
+        tables.map(async (table) => {
+          const [revision, usage] = await Promise.all([
+            adapter.getProjectValueTableRevision(table.id, table.currentRevision),
+            adapter.listProjectValueTableUsage(table.id),
+          ]);
+          return { table, revision, usageCount: usage.length } as ProjectValueMapCatalogEntry;
+        }),
+      );
+
+      return { entries };
+    },
+  });
+
+  const projectValueTableCatalog = projectValueTableCatalogQuery.data?.entries ?? [];
 
   const sourceSamples = useMemo(() => {
     const base = sourceSchemaMetadata?.samplePayloads ?? [];
@@ -2224,14 +2271,6 @@ export default function MappingEditor() {
     () => sourceSamples.find((sample) => sample.sampleId === resolvedSelectedSampleId) ?? null,
     [resolvedSelectedSampleId, sourceSamples],
   );
-  useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    adapter.getProject(projectId).then((detail) => {
-      if (!cancelled) setProjectName(detail.name);
-    }).catch(() => { /* silently fall back to 'Project' */ });
-    return () => { cancelled = true; };
-  }, [adapter, projectId]);
 
   const selectedSamplePayload = useMemo(() => {
     if (!resolvedSelectedSampleId) return null;
@@ -2914,11 +2953,11 @@ export default function MappingEditor() {
   const smartDraftByTargetRef = useRef(new Map<string, ReturnType<typeof createEmptySmartBuilderDraft>>());
   const [smartDraftByTargetState, setSmartDraftByTargetState] = useState<Record<string, SmartBuilderDraft>>({});
   const [smartActionMetaByTarget, setSmartActionMetaByTarget] = useState<Record<string, SmartActionMeta>>({});
-  const [projectValueTableCatalog, setProjectValueTableCatalog] = useState<readonly ProjectValueMapCatalogEntry[]>([]);
   const [valueMapProjectSelectionByTarget, setValueMapProjectSelectionByTarget] = useState<Record<string, ValueMapProjectSelectionState>>({});
   const [valueMapConversionPrompt, setValueMapConversionPrompt] = useState<ValueMapConversionPromptState | null>(null);
   const [valueMapAdoptionPrompt, setValueMapAdoptionPrompt] = useState<ValueMapAdoptionPromptState | null>(null);
   const [smartMethodSwitchPrompt, setSmartMethodSwitchPrompt] = useState<SmartMethodSwitchPromptState | null>(null);
+  const [isLatestSavedNoticeDismissed, setIsLatestSavedNoticeDismissed] = useState(false);
 
   const sourceValueTypeByPath = useMemo<Readonly<Record<string, SmartBuilderDraft['targetType']>>>(() => {
     return Object.fromEntries(
@@ -2975,43 +3014,6 @@ export default function MappingEditor() {
     setSmartDraftForTarget(targetPath, restored);
     return restored;
   }, [mappingId, setSmartDraftForTarget]);
-
-  useEffect(() => {
-    if (!projectId) return;
-
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const tables = await adapter.listProjectValueTables(projectId, {
-          status: 'active',
-          sortBy: 'updatedAt',
-          sortDirection: 'desc',
-        });
-
-        const details = await Promise.all(
-          tables.map(async (table) => {
-            const [revision, usage] = await Promise.all([
-              adapter.getProjectValueTableRevision(table.id, table.currentRevision),
-              adapter.listProjectValueTableUsage(table.id),
-            ]);
-            return { table, revision, usageCount: usage.length } as ProjectValueMapCatalogEntry;
-          }),
-        );
-
-        if (cancelled) return;
-        setProjectValueTableCatalog(details);
-      } catch (error) {
-        if (cancelled) return;
-        void error;
-        setProjectValueTableCatalog([]);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [adapter, projectId]);
 
   const handleSmartFocusedSlotChange = useCallback((targetPath: string, slotId: string | null) => {
     const targetSessionKey = buildSmartTargetSessionKey(mappingId, targetPath);
@@ -3213,6 +3215,16 @@ export default function MappingEditor() {
   }, [editor.validation, selectedRuleIndexForSmartFix]);
 
   const selectedTargetFieldType = selectedNode ? toTargetFieldType(selectedNode.type) : 'string';
+
+  const showLatestSavedRevisionNotice =
+    editor.hasNewerSavedRevision
+    && !isLatestSavedNoticeDismissed;
+
+  useEffect(() => {
+    if (!editor.hasNewerSavedRevision) {
+      setIsLatestSavedNoticeDismissed(false);
+    }
+  }, [editor.hasNewerSavedRevision]);
 
   useEffect(() => {
     debugRuleTypeLog('selected target snapshot', {
@@ -4185,7 +4197,7 @@ export default function MappingEditor() {
         parsedTargetSchema={editor.parsedTargetSchema ?? null}
         updateDraft={editor.actions.updateDraft}
         getDraftExpression={editor.actions.getDraftExpression}
-        savedRules={editor.rules}
+        savedRules={editor.savedRules}
         className="h-full"
       />
     ) : (
@@ -4713,7 +4725,7 @@ export default function MappingEditor() {
           setSelectedTargetPath(nextPath);
         }}
         smartHydrationOverride={selectedNodeSmartHydration}
-        savedRules={editor.rules}
+        savedRules={editor.savedRules}
         className="h-full"
       />
     );
@@ -4841,6 +4853,38 @@ export default function MappingEditor() {
         onHideSourcePanel={panelMode === 'overview' ? undefined : handleHideSourcePanel}
         onHideBuilderPanel={panelMode !== 'row-editing' ? undefined : handleHideBuilderPanel}
       />
+
+      {showLatestSavedRevisionNotice && (
+        <div
+          className="fixed bottom-6 left-6 z-50 max-w-md rounded-md border border-blue-700/60 bg-slate-900/95 px-4 py-3 text-sm text-blue-100 shadow-lg"
+          role="status"
+          data-testid="mapping-newer-saved-notice"
+        >
+          <div className="space-y-2">
+            <p>
+              A newer saved revision is available on the server. Your unsaved local draft is preserved.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { void editor.actions.refreshToLatestSaved(); }}
+                className="rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-500"
+                data-testid="mapping-newer-saved-refresh"
+              >
+                Load latest saved
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsLatestSavedNoticeDismissed(true)}
+                className="rounded border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                data-testid="mapping-newer-saved-dismiss"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {issueOverlay}
 

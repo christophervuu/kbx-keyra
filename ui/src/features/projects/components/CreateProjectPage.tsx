@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { useAdapter } from '@/lib/api';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { PageHeader } from '@/components/PageHeader';
+import { useAdapter } from '@/lib/api';
+import { invalidateProjectSummaries } from '@/lib/query';
 import { PATHS } from '@/routes/paths';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +39,7 @@ function parseTags(raw: string): string[] {
 export function CreateProjectPage() {
   const navigate = useNavigate();
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -45,7 +48,7 @@ export function CreateProjectPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
     // Validate
@@ -67,6 +70,8 @@ export function CreateProjectPage() {
         tags: parseTags(tagsRaw),
         schemaRefs: [],
       });
+
+      invalidateProjectSummaries(queryClient);
       navigate(PATHS.PROJECT_OVERVIEW.replace(':projectId', result.projectId));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';

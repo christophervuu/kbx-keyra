@@ -116,6 +116,18 @@ describe('ProjectCard', () => {
     expect(onClick).toHaveBeenCalledWith('p-1');
   });
 
+  it('calls onIntent with hover and focus reasons', () => {
+    const onIntent = vi.fn();
+    render(<ProjectCard project={makeProject()} onClick={vi.fn()} onIntent={onIntent} />);
+
+    const card = screen.getByRole('article');
+    fireEvent.mouseEnter(card);
+    fireEvent.focus(card);
+
+    expect(onIntent).toHaveBeenCalledWith('p-1', 'hover');
+    expect(onIntent).toHaveBeenCalledWith('p-1', 'focus');
+  });
+
   it('calls onClick when Enter key is pressed', () => {
     const onClick = vi.fn();
     render(<ProjectCard project={makeProject()} onClick={onClick} />);

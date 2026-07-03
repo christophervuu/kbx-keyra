@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, GitBranch, History, Package, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
@@ -15,7 +16,15 @@ import { Button } from '@/components/Button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { PageHeader } from '@/components/PageHeader';
+import {
+  buildTargetTypeByPathFromSchema,
+  getErrorInfo,
+  normalizeRuleTypesByTargetSchema,
+  tryParseSchema,
+} from '@/features/mappings/hooks/use-mapping-editor';
+import { useAdapter } from '@/lib/api';
 import type { DeploymentRecord } from '@/lib/api/types';
+import { prefetchMappingEditorByIntent } from '@/lib/query';
 import type { RuntimeEnvironment } from '@/lib/types';
 import { PATHS } from '@/routes/paths';
 
@@ -40,6 +49,13 @@ interface ReadinessCheck {
   readonly passed: boolean;
 }
 
+interface DeploymentCandidate {
+  readonly version: number;
+  readonly revisionNumber: number;
+  readonly createdAt: string;
+  readonly createdBy: string;
+}
+
 type PrimaryActionState =
   | {
     readonly label: string;
@@ -62,6 +78,18 @@ type PrimaryActionState =
     readonly reason: string;
     readonly kind: 'none';
   };
+
+function getDeploymentCandidate(versions: readonly { version: number; revisionNumber: number; createdAt: string; createdBy: string }[]): DeploymentCandidate | null {
+  const first = versions[0];
+  if (!first) return null;
+
+  return {
+    version: first.version,
+    revisionNumber: first.revisionNumber,
+    createdAt: first.createdAt,
+    createdBy: first.createdBy,
+  };
+}
 
 interface FeedbackBannerProps {
   feedback:
@@ -263,6 +291,8 @@ export interface DeploymentPageProps {
 }
 
 export function DeploymentPage({ mappingId, projectId, mappingName }: DeploymentPageProps) {
+  const queryClient = useQueryClient();
+  const adapter = useAdapter();
   const {
     environment,
     setEnvironment,
@@ -273,12 +303,16 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
     historyError,
     isLoading,
     error,
+    isRefreshing,
+    refreshError,
+    lastUpdatedAt,
     isDeploying,
     deployFeedback,
     clearDeployFeedback,
     deploy,
     promote,
     rollback,
+    refresh,
   } = useDeploymentPage(mappingId);
 
   const [pendingPrimary, setPendingPrimary] = useState<PrimaryActionState | null>(null);
@@ -287,14 +321,17 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
 
   const editorPath = PATHS.MAPPING_EDITOR.replace(':projectId', projectId).replace(':mappingId', mappingId);
 
-  const candidate = versions.length > 0
-    ? {
-      version: versions[0]?.version ?? 0,
-      revisionNumber: versions[0]?.revisionNumber ?? 0,
-      createdAt: versions[0]?.createdAt ?? '',
-      createdBy: versions[0]?.createdBy ?? '',
-    }
-    : null;
+  const handleEditorIntent = (reason: 'hover' | 'focus') => {
+    void prefetchMappingEditorByIntent(queryClient, adapter, mappingId, {
+      parseTargetSchema: tryParseSchema,
+      buildTargetTypeByPathFromSchema,
+      normalizeRuleTypesByTargetSchema,
+      getErrorInfo,
+      debugRuleTypeLog: () => undefined,
+    }, reason).catch(() => undefined);
+  };
+
+  const candidate = useMemo(() => getDeploymentCandidate(versions), [versions]);
 
   const snapshots = useMemo<Record<PipelineEnvironment, EnvironmentSnapshot>>(() => {
     const dev = currentDeployments?.DEV?.deployment ?? null;
@@ -502,6 +539,8 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
         actions={
           <Link
             to={editorPath}
+            onMouseEnter={() => handleEditorIntent('hover')}
+            onFocus={() => handleEditorIntent('focus')}
             className="rounded text-sm text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             data-testid="back-to-editor-link"
           >
@@ -524,6 +563,36 @@ export function DeploymentPage({ mappingId, projectId, mappingName }: Deployment
               Request ID: <span className="font-mono">{error.requestId}</span>
             </p>
           )}
+        </div>
+      )}
+
+      {!isLoading && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
+          <span data-testid="deployment-refresh-status">
+            {isRefreshing
+              ? 'Refreshing deployment data…'
+              : lastUpdatedAt
+                ? `Last updated ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+                : 'Loaded'}
+          </span>
+          <button
+            type="button"
+            onClick={refresh}
+            className="rounded border border-slate-700 px-2 py-0.5 text-slate-200 hover:bg-slate-800"
+            data-testid="deployment-refresh-button"
+          >
+            Refresh
+          </button>
+        </div>
+      )}
+
+      {!isLoading && refreshError && (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-amber-800 bg-amber-950/20 px-3 py-2 text-sm text-amber-200"
+          data-testid="deployment-refresh-warning"
+        >
+          Could not refresh deployment data. Showing cached results.
         </div>
       )}
 

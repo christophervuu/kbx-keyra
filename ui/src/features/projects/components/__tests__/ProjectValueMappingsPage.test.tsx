@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -5,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectValueMappingsPage } from '../ProjectValueMappingsPage';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type {
   MappingConfig,
@@ -334,15 +335,19 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function renderPage(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
+
   return render(
-    <AdapterProvider adapter={adapter}>
-      <MemoryRouter initialEntries={['/projects/p-1/value-mappings']}>
-        <Routes>
-          <Route path="/projects/:projectId/value-mappings" element={<ProjectValueMappingsPage />} />
-          <Route path="/projects/:projectId" element={<div data-testid="project-overview-page">Project overview</div>} />
-        </Routes>
-      </MemoryRouter>
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <MemoryRouter initialEntries={['/projects/p-1/value-mappings']}>
+          <Routes>
+            <Route path="/projects/:projectId/value-mappings" element={<ProjectValueMappingsPage />} />
+            <Route path="/projects/:projectId" element={<div data-testid="project-overview-page">Project overview</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 

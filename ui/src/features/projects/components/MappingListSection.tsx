@@ -157,6 +157,10 @@ export interface MappingListSectionProps {
   onCreateMapping: () => void;
   onDuplicate: (mappingId: string) => Promise<void>;
   onDelete: (mappingId: string) => Promise<void>;
+  onMappingIntent?: (
+    input: { projectId: string; mappingId: string },
+    reason: 'hover' | 'focus',
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +181,7 @@ export function MappingListSection({
   onCreateMapping,
   onDuplicate,
   onDelete,
+  onMappingIntent,
 }: MappingListSectionProps) {
   const [sortCol, setSortCol] = useState<SortColumn>('updatedAt');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -303,6 +308,7 @@ export function MappingListSection({
                   projectId={projectId}
                   onDuplicate={(id) => void onDuplicate(id)}
                   onDelete={(id) => setDeleteTarget(mappings.find((m) => m.mappingId === id) ?? null)}
+                  onMappingIntent={onMappingIntent}
                 />
               ))}
               {sorted.length === 0 && (

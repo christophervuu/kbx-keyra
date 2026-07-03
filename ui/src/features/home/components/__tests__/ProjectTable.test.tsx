@@ -1,9 +1,9 @@
-import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ProjectTable } from '../ProjectTable';
 import type { ProjectListItem } from '../../types';
+import { ProjectTable } from '../ProjectTable';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -114,6 +114,24 @@ describe('ProjectTable', () => {
     render(<ProjectTable projects={[makeProject({ projectId: 'p-42' })]} onProjectClick={onProjectClick} />);
     fireEvent.click(screen.getByRole('row', { name: /alpha project/i }));
     expect(onProjectClick).toHaveBeenCalledWith('p-42');
+  });
+
+  it('calls onProjectIntent for hover and focus', () => {
+    const onProjectIntent = vi.fn();
+    render(
+      <ProjectTable
+        projects={[makeProject({ projectId: 'p-42' })]}
+        onProjectClick={vi.fn()}
+        onProjectIntent={onProjectIntent}
+      />,
+    );
+
+    const row = screen.getByRole('row', { name: /alpha project/i });
+    fireEvent.mouseEnter(row);
+    fireEvent.focus(row);
+
+    expect(onProjectIntent).toHaveBeenCalledWith('p-42', 'hover');
+    expect(onProjectIntent).toHaveBeenCalledWith('p-42', 'focus');
   });
 
   it('calls onProjectClick when Enter key pressed on row', () => {

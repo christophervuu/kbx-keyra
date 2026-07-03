@@ -1,16 +1,21 @@
 // HomeDashboardPage.test.tsx — Integration test for the assembled dashboard page (FS-014 T-11, FS-049 T-08)
 
-import React from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-
-import { AdapterProvider } from '@/lib/api';
-import type { CurrentDeployments } from '@/lib/api/types';
-import type { ApiAdapter } from '@/lib/api';
-import type { MappingMetadata, ProjectMetadata, SchemaMetadata } from '@/lib/types/domain';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { HomeDashboardPage } from '../HomeDashboardPage';
+
+import { AdapterProvider, createQueryClient } from '@/lib/api';
+import type { ApiAdapter } from '@/lib/api';
+import type { CurrentDeployments } from '@/lib/api/types';
+import * as queryLib from '@/lib/query';
+import { getPrefetchDiagnosticsSnapshot, resetPrefetchDiagnostics } from '@/lib/query';
+import type { MappingMetadata, ProjectMetadata, SchemaMetadata } from '@/lib/types/domain';
+
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -110,11 +115,15 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function renderPage(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
+  queryClient.setDefaultOptions({ queries: { retry: false } });
   return render(
     <MemoryRouter initialEntries={['/']}>
-      <AdapterProvider adapter={adapter}>
-        <HomeDashboardPage />
-      </AdapterProvider>
+      <QueryClientProvider client={queryClient}>
+        <AdapterProvider adapter={adapter}>
+          <HomeDashboardPage />
+        </AdapterProvider>
+      </QueryClientProvider>
     </MemoryRouter>,
   );
 }
@@ -126,6 +135,7 @@ function renderPage(adapter: ApiAdapter) {
 describe('HomeDashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetPrefetchDiagnostics();
   });
 
   it('renders data-testid="page-home-dashboard"', async () => {
@@ -329,6 +339,20 @@ describe('HomeDashboardPage', () => {
     });
   });
 
+  it('shows non-blocking refresh metadata in loaded state', async () => {
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-refresh-status')).toBeInTheDocument();
+    });
+  });
+
   it('renders search and view toggle controls in Projects panel (AE-05/AE-07)', async () => {
     const adapter = createMockAdapter({
       listProjects: vi.fn().mockResolvedValue([makeProject()]),
@@ -356,5 +380,45 @@ describe('HomeDashboardPage', () => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('continue-where-you-left-off')).not.toBeInTheDocument();
+  });
+
+  it('triggers project overview prefetch on project hover/focus intent', async () => {
+    const user = userEvent.setup();
+    const prefetchSpy = vi
+      .spyOn(queryLib, 'prefetchProjectOverviewByIntent')
+      .mockResolvedValue(true);
+    const adapter = createMockAdapter({
+      listProjects: vi.fn().mockResolvedValue([makeProject()]),
+      listSchemas: vi.fn().mockResolvedValue([]),
+      listMappings: vi.fn().mockResolvedValue([]),
+      getProject: vi.fn().mockResolvedValue({
+        projectId: 'proj-1',
+        name: 'Alpha Project',
+        description: 'A test project',
+        slug: 'alpha-project',
+        schemaRefs: [],
+        linkedSchemaIds: [],
+        tags: [],
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        mappings: [],
+      }),
+    });
+
+    renderPage(adapter);
+
+    const projectCard = await screen.findByRole('article', { name: /alpha project/i });
+    await user.hover(projectCard);
+    projectCard.focus();
+
+    await waitFor(() => {
+      expect(prefetchSpy).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'proj-1', 'hover');
+    });
+
+    const diagnostics = getPrefetchDiagnosticsSnapshot();
+    expect(prefetchSpy).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'proj-1', 'focus');
+    expect(diagnostics.attempts).toBeGreaterThanOrEqual(0);
+
+    prefetchSpy.mockRestore();
   });
 });

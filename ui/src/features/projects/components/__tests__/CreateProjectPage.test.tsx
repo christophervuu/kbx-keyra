@@ -1,13 +1,14 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AdapterProvider } from '@/lib/api';
+import { CreateProjectPage } from '../CreateProjectPage';
+
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { ProjectDetail } from '@/lib/types/domain';
-
-import { CreateProjectPage } from '../CreateProjectPage';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -68,19 +69,23 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 // ---------------------------------------------------------------------------
 
 function renderPage(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
+
   return render(
-    <AdapterProvider adapter={adapter}>
-      <MemoryRouter initialEntries={['/projects/new']}>
-        <Routes>
-          <Route path="/projects/new" element={<CreateProjectPage />} />
-          <Route
-            path="/projects/:projectId"
-            element={<div data-testid="project-overview-page">Overview</div>}
-          />
-          <Route path="/" element={<div data-testid="home-page">Home</div>} />
-        </Routes>
-      </MemoryRouter>
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <MemoryRouter initialEntries={['/projects/new']}>
+          <Routes>
+            <Route path="/projects/new" element={<CreateProjectPage />} />
+            <Route
+              path="/projects/:projectId"
+              element={<div data-testid="project-overview-page">Overview</div>}
+            />
+            <Route path="/" element={<div data-testid="home-page">Home</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 

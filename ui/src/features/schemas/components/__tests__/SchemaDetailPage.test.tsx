@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -8,7 +9,7 @@ import { SchemaDetailPage } from '../SchemaDetailPage';
 
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaDetail, SchemaSamplePayloadContent } from '@/lib/types/domain';
 
@@ -204,23 +205,26 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 // ---------------------------------------------------------------------------
 
 function renderPage(adapter: ApiAdapter, schemaId = 'schema-uploaded-1') {
+  const queryClient = createQueryClient();
   return render(
-    <MemoryRouter initialEntries={[`/schemas/${schemaId}`]}>
-      <BreadcrumbProvider>
-        <Breadcrumbs />
-        <AdapterProvider adapter={adapter}>
-          <Routes>
-            <Route
-              path="/schemas/:schemaId"
-              element={<SchemaDetailPage schemaId={schemaId} />}
-            />
-            <Route path="/schemas" element={<div data-testid="schema-library-page">Library</div>} />
-            <Route path="/projects/:projectId" element={<div data-testid="project-overview-page">Project</div>} />
-            <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page">Mapping</div>} />
-          </Routes>
-        </AdapterProvider>
-      </BreadcrumbProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[`/schemas/${schemaId}`]}>
+        <BreadcrumbProvider>
+          <Breadcrumbs />
+          <AdapterProvider adapter={adapter}>
+            <Routes>
+              <Route
+                path="/schemas/:schemaId"
+                element={<SchemaDetailPage schemaId={schemaId} />}
+              />
+              <Route path="/schemas" element={<div data-testid="schema-library-page">Library</div>} />
+              <Route path="/projects/:projectId" element={<div data-testid="project-overview-page">Project</div>} />
+              <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page">Mapping</div>} />
+            </Routes>
+          </AdapterProvider>
+        </BreadcrumbProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -411,13 +415,13 @@ describe('SchemaDetailPage', () => {
     renderPage(adapter);
 
     await waitFor(() => {
-      expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
+      const nav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+      const currentCrumb = nav.querySelector('[aria-current="page"]');
+      expect(currentCrumb).not.toBeNull();
+      expect(currentCrumb).toHaveTextContent('My Uploaded Schema');
     });
 
     const nav = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    const currentCrumb = nav.querySelector('[aria-current="page"]');
-    expect(currentCrumb).not.toBeNull();
-    expect(currentCrumb).toHaveTextContent('My Uploaded Schema');
     expect(nav).not.toHaveTextContent('schema-uploaded-1');
   });
 
@@ -433,6 +437,14 @@ describe('SchemaDetailPage', () => {
     expect(screen.getByTestId('schema-detail-usage-link')).toHaveTextContent(/used by/i);
     expect(screen.getByTestId('schema-detail-created-at')).toBeInTheDocument();
     expect(screen.getByTestId('schema-detail-updated-at')).toBeInTheDocument();
+  });
+
+  it('shows non-blocking refresh metadata in loaded state', async () => {
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-detail-refresh-status')).toBeInTheDocument();
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -728,10 +728,88 @@ FS-102 finalized adapter/workflow compatibility notes (T-12 alignment):
 
 ### Phase 0 Rules
 
-- No Redux/Zustand (or other external state management library)
-- No TanStack Query (or other external data-fetching library)
-- React Context + `useReducer` for shared/global state surfaces
-- Local `useState` for component-local state
+- Historical baseline (FS-008 Phase 0): no Redux/Zustand and no external query library.
+- Current architecture (FS-103+): TanStack Query is the canonical browser query/cache layer for backend-backed resources.
+- React Context + `useReducer` remain valid for non-server shared UI state.
+- Local `useState` remains valid for component-local state.
+
+### FS-103 query/cache architecture addendum
+
+FS-103 establishes a shared browser query/cache layer between React features and `ApiAdapter`.
+
+Canonical layering:
+
+```text
+React components/hooks
+  -> TanStack Query (query/cache + invalidation + dedupe)
+  -> ApiAdapter contract
+  -> HttpAdapter | LocalStorageAdapter
+  -> backend API | browser local storage
+```
+
+Boundaries:
+
+- `ApiAdapter` remains the transport + persistence boundary; query lifecycle concepts are not moved into adapter interfaces.
+- Query definitions and loaders are centralized under `ui/src/lib/query/` and feature `*-query-data.ts` modules.
+- Backend-backed page resources use typed canonical query definitions; ad-hoc key arrays are non-canonical.
+
+Key + policy conventions:
+
+- Query keys come from typed key factory helpers (`queryKeys.*`) and are deterministic by domain/identity.
+- Transport identity (adapter mode / base URL) is handled via backend-context reset semantics, not by embedding base URL into every key.
+- Environment discriminators are included only for genuinely environment-scoped resources.
+- Freshness/retention defaults are centralized by resource family in `query-policies.ts` (no one-size global timing).
+
+Invalidation + mutation handling conventions:
+
+- Mutation fanout is centralized in shared mutation-impact/invalidation helpers.
+- In-flight reads for impacted keys are cancelled before mutation cache updates to prevent stale overwrite races.
+- Complete canonical mutation responses may update detail cache directly.
+- Metadata-only/incomplete responses default to invalidate+refetch of canonical detail/dependents (no speculative merge).
+- Deletions remove exact detail/dependent keys and invalidate affected collections/summaries.
+
+Stale-while-revalidate UX contract:
+
+- Return navigation renders cached content immediately when present.
+- Stale entries revalidate in the background without replacing visible content with full-page skeletons.
+- Refresh failure with cached data is non-blocking (warning + retry affordance), distinct from initial no-data error rendering.
+
+Request deduplication + Strict Mode:
+
+- Concurrent consumers of the same canonical key share a single in-flight request.
+- React Strict Mode remount behavior must not create concurrent duplicate adapter requests for the same key.
+
+Mapping Editor saved-vs-draft boundary:
+
+- Query cache stores canonical saved mapping state only.
+- Unsaved working changes remain editor-owned draft state (`draftRules` + persisted draft key).
+- Background refresh does not overwrite unsaved drafts; newer-saved detection is non-destructive and user-mediated.
+
+Sensitive-data exclusions from shared query cache:
+
+- sample payload bodies,
+- expected-output test payloads,
+- preview execution outputs,
+- trace outputs,
+- AI prompts/responses,
+- draft-only editor working state.
+
+Cache-clear / identity reset behavior:
+
+- Recreate/reset query cache on adapter mode or backend base URL identity changes.
+- Incompatible data from prior backend context must never render after rebootstrap.
+- Cache clears also apply to explicit developer reset flows and future sign-out/tenant boundaries.
+
+Polling boundary contract:
+
+- Generic query definitions remain interval-free.
+- Deployment active-operation polling is owned by dedicated deployment workflow hooks only, with terminal stop conditions.
+- Focus-based stale revalidation for deployment-sensitive families is allowed; global interval polling is non-canonical.
+
+Activity-feed deferment contract:
+
+- `ApiAdapter.listActivity()` behavior remains unchanged in FS-103.
+- Activity feed is intentionally deferred from shared query caching until canonical ownership/merge semantics are defined.
 
 ### AsyncState Pattern
 

@@ -81,9 +81,10 @@ function WorstStatusBadge({ status }: WorstStatusBadgeProps) {
 export interface ProjectCardProps {
   project: ProjectListItem;
   onClick: (id: string) => void;
+  onIntent?: (id: string, reason: 'hover' | 'focus') => void;
 }
 
-export function ProjectCard({ project, onClick }: ProjectCardProps) {
+export function ProjectCard({ project, onClick, onIntent }: ProjectCardProps) {
   const mappingLabel =
     project.mappingCount === 1 ? '1 mapping' : `${project.mappingCount} mappings`;
   const schemaCount = project.schemaCount ?? 0;
@@ -103,6 +104,8 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
       role="article"
       aria-label={project.name}
       onClick={() => onClick(project.projectId)}
+      onMouseEnter={() => onIntent?.(project.projectId, 'hover')}
+      onFocus={() => onIntent?.(project.projectId, 'focus')}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -181,9 +184,14 @@ export function ProjectCard({ project, onClick }: ProjectCardProps) {
 export interface ProjectCardGridProps {
   projects: ProjectListItem[];
   onProjectClick: (id: string) => void;
+  onProjectIntent?: (id: string, reason: 'hover' | 'focus') => void;
 }
 
-export function ProjectCardGrid({ projects, onProjectClick }: ProjectCardGridProps) {
+export function ProjectCardGrid({
+  projects,
+  onProjectClick,
+  onProjectIntent,
+}: ProjectCardGridProps) {
   return (
     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
       {projects.map((project) => (
@@ -191,6 +199,7 @@ export function ProjectCardGrid({ projects, onProjectClick }: ProjectCardGridPro
           key={project.projectId}
           project={project}
           onClick={onProjectClick}
+          onIntent={onProjectIntent}
         />
       ))}
     </div>

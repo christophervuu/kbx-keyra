@@ -201,3 +201,29 @@ Canonical E2E expectations in this slice:
 Contract boundary reminder:
 
 - E2E verifies user-visible async review behavior and adapter parity invariants; it does not assert provider/model internals.
+
+---
+
+## FS-103 query/cache parity verification addendum
+
+FS-103 extends parity architecture expectations from CRUD-only correctness to cache lifecycle and stale-while-revalidate behavior across both adapter modes.
+
+Canonical E2E expectations in this slice:
+
+- Adapter-parity cache semantics must hold in both `localStorage` and `httpBackend` projects:
+  - first-visit initial load path,
+  - cached return-navigation with no full initial-skeleton regression,
+  - stale background revalidation behavior,
+  - non-blocking refresh-failure rendering when cached content exists.
+- Backend-context/adapter identity switches must not render stale data from prior context.
+- Equivalent user-visible behavior is expected regardless of adapter implementation details.
+
+Request dedupe posture:
+
+- E2E asserts user-visible parity outcomes; exact concurrent request-count guarantees are primarily validated at unit/integration level with request spies.
+- Parity suite still serves as regression guard for obvious duplicate-load UX regressions on high-traffic routes.
+
+Suite composition note:
+
+- Cache-parity coverage is represented by dedicated parity specs and by cache-aware assertions added to core CRUD/navigation specs.
+- FS-103 parity checks run under the same dual-project CI gate (`pnpm test:e2e:parity`) and are required to pass in both projects.

@@ -242,7 +242,8 @@ ui/
             VersionDeploySection.tsx   Legacy version list deploy section (retained for compatibility during FS-100 deployment UX migration)
           hooks/            Deployment hooks
             index.ts                 Hooks barrel
-            use-deployment-page.ts   Data-fetching hook: SANDBOX-first deploy-context bootstrap, versions/current/history load, and normalized mutation error technical-details mapping (FS-100 T-08)
+            deployment-query-data.ts Deployment page query loader (deploy-context bootstrap + versions/current/history normalization) reused by canonical query and prefetch definitions (FS-103 T-07)
+            use-deployment-page.ts   Query-backed deployment page hook: SANDBOX-first deploy-context bootstrap, cached versions/current/history loading, window-focus refresh for deployment-sensitive data, normalized mutation error technical-details mapping, and editor prefetch intent wiring (FS-100 T-08, FS-103 T-04/T-07)
             use-deployment-page.test.tsx Hook tests for SANDBOX-default bootstrap, deploy-context structured error details, and deploy mutation technical-details mapping (FS-100 T-08)
         schemas/            Schema Library, Schema Detail, and schema tree components (FS-009)
         index.ts          Feature barrel (re-exports shared types + parsers + hooks + components)
@@ -295,10 +296,11 @@ ui/
           use-flattened-tree.test.ts  Hook unit tests (7 tests)
           use-tree-keyboard-nav.ts    Keyboard navigation hook (arrow keys, Home/End, Enter/Space, aria-activedescendant)
           use-tree-search.ts          Search state management (debounce, filter, expand preservation)
-          use-schema-detail.ts        Loads schema by ID, parses content, exposes loading/error/not-found/updateMetadata/setParsedSchema (FS-015 T-02)
+          use-schema-detail.ts        Query-backed schema-detail loader by ID with parsed-content derivation and cached-return refresh semantics; exposes loading/error/not-found/updateMetadata/setParsedSchema (FS-015 T-02, FS-103 T-04)
           use-schema-editor.ts        Edit-mode state + all tree operations + save flow wired to adapter (FS-015 T-05)
-          use-schema-usage.ts         Derives referencing projects and mappings for a schema; returns UsageProject[], UsageMapping[], isLoading (FS-015 T-06)
-          use-schema-library.ts       Loads all schemas+projects, enriches into SchemaLibraryItem[], exposes filter/sort state and actions (FS-016 T-01)
+          use-schema-usage.ts         Query-backed derivation of referencing projects + mappings for a schema; returns UsageProject[], UsageMapping[], and cache-aware loading/error state (FS-015 T-06, FS-103 T-04)
+          use-schema-library.ts       Query-backed schema library loader with enrichment into SchemaLibraryItem[] and local filter/sort/view state/actions (FS-016 T-01, FS-103 T-04)
+          schema-query-data.ts        Shared query data loaders/normalizers for schema library/detail/usage resources (FS-103 T-04)
           use-ingestion-polling.ts    Polls getSchema every 2s after 202 response; returns status (polling/ready/error/timeout/idle), schema, error; cleans up on unmount (FS-059 T-07)
           __tests__/
             use-schema-library.test.ts  Hook tests: loading/success/error states, enrichment, project usage counts, sync status derivation, filter/sort state updates (FS-016 T-01)
@@ -354,7 +356,8 @@ ui/
             ViewToggle.test.tsx   Component tests (6 tests: button rendering, aria-pressed active/inactive, onChange grid/table/re-click)
         hooks/
           index.ts        Hooks barrel
-          use-dashboard-data.ts  Loads projects/schemas/mappings, computes DashboardMetrics (no deployedCount), builds ProjectListItem[], retry support (FS-014 T-02, FS-049 T-04)
+          dashboard-query-data.ts  Dashboard query loader + pure aggregation helpers (worst-status/deploy summaries/metrics) reused by canonical query + prefetch definitions (FS-103 T-07)
+          use-dashboard-data.ts  Query-backed dashboard hook using shared loader; computes loaded/error/refresh metadata and retry support (FS-014 T-02, FS-049 T-04, FS-103 T-07)
           use-view-mode.ts       localStorage-persisted ViewMode hook; invalid value defaults to grid (FS-014 T-07)
           use-recent-activity.ts localStorage-backed recent activity hook; key=keyra:recent-activity; max 10 entries; dedup by type+id; getRecentItems()/recordActivity() (FS-049 T-03)
           __tests__/
@@ -412,7 +415,8 @@ ui/
             ProjectSummaryRow.test.tsx          Component tests (11 tests: AE-05 counts, AE-18 neutral error styling, scaffold placeholders, deployments link)
         hooks/
           index.ts        Hooks barrel
-          use-project-overview.ts   Orchestration hook: load project + schemas + mappings, inline editing, schema/mapping/project actions (FS-013 T-03)
+          project-overview-query-data.ts Shared project-overview query loader (project + linked schemas + mappings + deployment summaries) reused by canonical query + prefetch definitions (FS-103 T-07)
+          use-project-overview.ts   Orchestration hook: load project + schemas + mappings, inline editing, schema/mapping/project actions, and mapping/deployment prefetch intent integration (FS-013 T-03, FS-103 T-07)
           __tests__/
             use-project-overview.test.ts  Hook unit tests (10 tests: load states, updateName, removeSchema, deleteMappingAction, duplicateMappingAction, deleteProjectAction, retry, schemasReferencingMapping)
         lib/
@@ -630,7 +634,8 @@ ui/
           use-builder-validation.test.ts FS-040 T-01 unit tests (structural checks per mode, Editor mode bypass, output type inference, canApply/canSave derivation)
           use-unsaved-diff.ts            FS-040 T-05 per-target unsaved diff hook: compares current draft expression vs last-saved rule baseline; returns UnsavedDiffState with status (no-mapping/new/unchanged/modified/removed) and hasUnsavedChanges
           use-unsaved-diff.test.ts       FS-040 T-05 unit tests (all 5 status branches, whitespace trimming, currentExpression passthrough, empty savedRules)
-          use-mapping-editor.ts          Orchestration hook: load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection, applyRule(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback (FS-021 T-02)
+          mapping-editor-query-data.ts   Shared Mapping Editor canonical loader (mapping + source/target/enrichment schema hydration, rule-type normalization, warning derivation) reused by canonical query + prefetch definitions (FS-103 T-07)
+          use-mapping-editor.ts          Orchestration hook: query-backed load/save config+schemas, local rules state, Ctrl+S, beforeunload, unsaved detection, applyRule(), unsavedRuleCount, canNavigateAway(), onRuleApplied callback; exports target-type normalization helpers for canonical prefetch loader reuse (FS-021 T-02, FS-103 T-07)
           use-mapping-editor.test.tsx    Hook unit tests (26 tests: loading, save, unsaved detection, keyboard, beforeunload, actions)
           use-array-builder-state.ts     FS-043 T-04/T-10/T-11/T-12 array builder state hook: manages ArrayBuilderState, hydrates from expression, exposes all actions through T-08 + T-10 nested navigation + T-11 validationState (deriveArrayValidation computed from state+schema) + T-12 setCustomExpression + isFromUnrecognized flag; accepts optional parsedSourceSchema + targetArrayNode for validation
           use-preview-execution.ts       Preview execution lifecycle hook: manual run(), auto-run (500ms debounce), 2s timeout guard, trace toggle, publishes to PreviewContext (FS-012 T-04)
@@ -754,6 +759,23 @@ ui/
       use-optimistic-mutation.ts Shared optimistic mutation utility: snapshot capture, optimistic apply, rollback on failure, mutation-id guard for stale completion safety, surfaced AppError state (FS-059 T-06)
       use-optimistic-mutation.test.ts Unit tests: success confirmation, rollback + error surfacing, latest-only rollback under rapid overlapping mutations (FS-059 T-06)
     lib/
+      query-client.ts       FS-103 shared TanStack Query client factory and reset utility (memory-only baseline defaults; no persistence)
+      query-client.test.ts  Unit tests for query client baseline defaults and deterministic cache reset behavior
+      query/                FS-103 shared query conventions module (typed keys, cache policies, invalidation scopes, backend-context reset semantics)
+        index.ts            Barrel exports for query keys/policies/invalidation/context helpers
+        query-keys.ts       Central typed query-key factory with deterministic stable params and environment-specific key dimensions only where required
+        query-keys.test.ts  Unit tests for key determinism, identifier coverage, and environment key semantics
+        query-policies.ts   Exact FS-103 Rev 2 staleTime/gcTime baseline policy constants per resource family
+        query-policies.test.ts Unit tests for exact policy defaults
+        prefetch.ts         Bounded prefetch utility with cooldown + fresh-data/in-flight guards to prevent hover/focus traffic spikes (FS-103 T-07)
+        prefetch-definitions.ts Canonical destination prefetch definitions (dashboard/project-overview/mapping-editor/deployment), intent wrappers, and dev-only diagnostics counters (FS-103 T-07)
+        prefetch-definitions.test.ts Unit tests for canonical prefetch warm/skip behavior and diagnostics snapshot accounting (FS-103 T-07)
+        query-invalidation.ts Targeted invalidation key helpers (family/list/detail) by domain
+        query-invalidation.test.ts Unit tests for invalidation-scope helper coverage
+        mutation-impact.ts   FS-103 mutation cache impact helpers: in-flight read cancellation, targeted invalidation fanout, delete-cache removal, and backend-context clear wrapper
+        mutation-impact.test.ts Unit tests for mutation cache impact helper behavior (cancel/invalidate/remove/clear)
+        query-context.ts    Backend/adapter identity derivation and QueryClient reset decision helpers
+        query-context.test.ts Unit tests for identity derivation and reset decision behavior
       api/                ApiAdapter interface + LocalStorageAdapter + HttpAdapter + deprecated HybridAdapter + AI API client helpers
                           types.ts              ApiAdapter contract (includes explicit mapping import summary/issue types)
                           local-storage-adapter.ts  Phase 0 localStorage implementation + explicit local-mapping import entrypoint used in backend mode

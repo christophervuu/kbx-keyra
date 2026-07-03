@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -31,7 +32,7 @@ vi.mock('../SchemaUploadDialog', () => ({
 
 import { __testables, CreateMappingPage } from '../CreateMappingPage';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingEnrichmentSource, MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 
@@ -279,17 +280,21 @@ function EditorStateProbe() {
 }
 
 function renderPage(adapter: ApiAdapter = createMockAdapter(), projectId = 'proj-1') {
+  const queryClient = createQueryClient();
+
   return render(
-    <AdapterProvider adapter={adapter}>
-      <MemoryRouter initialEntries={[`/projects/${projectId}/mappings/new`]}>
-        <Routes>
-          <Route path="/projects/:projectId/mappings/new" element={<CreateMappingPage />} />
-          <Route path="/projects/:projectId/mappings/:mappingId" element={<EditorStateProbe />} />
-          <Route path="/projects/:projectId" element={<div data-testid="project-overview-page">Overview</div>} />
-          <Route path="/" element={<div data-testid="home-page">Home</div>} />
-        </Routes>
-      </MemoryRouter>
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <MemoryRouter initialEntries={[`/projects/${projectId}/mappings/new`]}>
+          <Routes>
+            <Route path="/projects/:projectId/mappings/new" element={<CreateMappingPage />} />
+            <Route path="/projects/:projectId/mappings/:mappingId" element={<EditorStateProbe />} />
+            <Route path="/projects/:projectId" element={<div data-testid="project-overview-page">Overview</div>} />
+            <Route path="/" element={<div data-testid="home-page">Home</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 

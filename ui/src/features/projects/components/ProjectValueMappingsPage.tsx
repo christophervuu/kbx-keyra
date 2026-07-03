@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -6,6 +7,12 @@ import { Card } from '@/components/Card';
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { PageHeader } from '@/components/PageHeader';
 import { useAdapter } from '@/lib/api';
+import {
+  cancelProjectDetailReads,
+  invalidateMappingDependents,
+  invalidateProjectDetailDependents,
+  invalidateValueTableDependents,
+} from '@/lib/query';
 import type {
   AcceptProjectValueMapUpdateInput,
   ProjectValueMapDetail,
@@ -176,6 +183,7 @@ function directionDiagnostics(rows: readonly ProjectValueTableRevisionRow[]) {
 export function ProjectValueMappingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   const [listState, setListState] = useState<ListState>({
@@ -729,6 +737,7 @@ export function ProjectValueMappingsPage() {
     setLinkModalState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
+      await cancelProjectDetailReads(queryClient, projectId);
       await adapter.linkProjectValueMap(projectId, {
         valueMapId: linkModalState.selectedValueMapId,
         revision: linkModalState.selectedRevision,
@@ -736,6 +745,8 @@ export function ProjectValueMappingsPage() {
       closeLinkGlobalMapModal();
       await loadProjectValueMaps();
       setSelectedProjectValueMapId(linkModalState.selectedValueMapId);
+      invalidateValueTableDependents(queryClient, projectId);
+      invalidateProjectDetailDependents(queryClient, projectId);
     } catch (error) {
       setLinkModalState((prev) => ({
         ...prev,
@@ -743,7 +754,15 @@ export function ProjectValueMappingsPage() {
         error: error instanceof Error ? error.message : 'Failed to link global value map.',
       }));
     }
-  }, [adapter, closeLinkGlobalMapModal, linkModalState.selectedRevision, linkModalState.selectedValueMapId, loadProjectValueMaps, projectId]);
+  }, [
+    adapter,
+    closeLinkGlobalMapModal,
+    linkModalState.selectedRevision,
+    linkModalState.selectedValueMapId,
+    loadProjectValueMaps,
+    projectId,
+    queryClient,
+  ]);
 
   const selectedLinkableMap = useMemo(
     () => linkableGlobalMaps.find((map) => map.id === linkModalState.selectedValueMapId) ?? null,
@@ -810,6 +829,7 @@ export function ProjectValueMappingsPage() {
     setOverlayError(null);
 
     try {
+      await cancelProjectDetailReads(queryClient, projectId);
       await adapter.updateProjectValueMapOverlay(projectId, selectedProjectValueMapId, payload);
       setOverlayDraftState({
         selectedRowId: '',
@@ -829,6 +849,9 @@ export function ProjectValueMappingsPage() {
         });
         setProjectValueMapReview(review);
       }
+      invalidateValueTableDependents(queryClient, projectId);
+      invalidateProjectDetailDependents(queryClient, projectId);
+      invalidateMappingDependents(queryClient, projectId, undefined);
     } catch (error) {
       setOverlayError(error instanceof Error ? error.message : 'Failed to update overlay.');
     } finally {
@@ -846,6 +869,7 @@ export function ProjectValueMappingsPage() {
     projectId,
     projectValueMapDetail,
     selectedProjectValueMapId,
+    queryClient,
   ]);
 
   const acceptLinkedUpdate = useCallback(async () => {
@@ -862,6 +886,7 @@ export function ProjectValueMappingsPage() {
     setAcceptUpdateError(null);
 
     try {
+      await cancelProjectDetailReads(queryClient, projectId);
       const detail = await adapter.acceptProjectValueMapUpdate(projectId, selectedProjectValueMapId, payload);
       setProjectValueMapDetail(detail);
       await loadProjectValueMaps();
@@ -871,12 +896,15 @@ export function ProjectValueMappingsPage() {
         });
         setProjectValueMapReview(review);
       }
+      invalidateValueTableDependents(queryClient, projectId);
+      invalidateProjectDetailDependents(queryClient, projectId);
+      invalidateMappingDependents(queryClient, projectId, undefined);
     } catch (error) {
       setAcceptUpdateError(error instanceof Error ? error.message : 'Failed to accept update.');
     } finally {
       setAcceptingUpdate(false);
     }
-  }, [adapter, loadProjectValueMaps, projectId, projectValueMapReview, selectedProjectValueMapId]);
+  }, [adapter, loadProjectValueMaps, projectId, projectValueMapReview, queryClient, selectedProjectValueMapId]);
 
   const unlinkSelectedProjectValueMap = useCallback(async () => {
     if (!projectId || !selectedProjectValueMapId || !adapter.unlinkProjectValueMap) {
@@ -887,16 +915,19 @@ export function ProjectValueMappingsPage() {
     setUnlinkError(null);
 
     try {
+      await cancelProjectDetailReads(queryClient, projectId);
       await adapter.unlinkProjectValueMap(projectId, selectedProjectValueMapId);
       await loadProjectValueMaps();
       setProjectValueMapDetail(null);
       setProjectValueMapReview(null);
+      invalidateValueTableDependents(queryClient, projectId);
+      invalidateProjectDetailDependents(queryClient, projectId);
     } catch (error) {
       setUnlinkError(error instanceof Error ? error.message : 'Failed to unlink value map.');
     } finally {
       setUnlinkingMap(false);
     }
-  }, [adapter, loadProjectValueMaps, projectId, selectedProjectValueMapId]);
+  }, [adapter, loadProjectValueMaps, projectId, queryClient, selectedProjectValueMapId]);
 
   const handleSaveEditor = useCallback(async () => {
     if (!projectId) {
@@ -926,6 +957,7 @@ export function ProjectValueMappingsPage() {
       const sideBKey = toSlugKey(editorState.sideBName, 'side-b');
 
       if (editorState.tableId) {
+        await cancelProjectDetailReads(queryClient, projectId);
         await adapter.createProjectValueTableRevision(editorState.tableId, {
           valueTableId: editorState.tableId,
           sideA: {
@@ -941,6 +973,7 @@ export function ProjectValueMappingsPage() {
           rows: editorState.rows,
         });
       } else {
+        await cancelProjectDetailReads(queryClient, projectId);
         await adapter.createProjectValueTable({
           projectId,
           key: toSlugKey(editorState.name, 'value-table'),
@@ -962,6 +995,9 @@ export function ProjectValueMappingsPage() {
 
       closeEditor();
       await loadTables();
+      invalidateValueTableDependents(queryClient, projectId);
+      invalidateProjectDetailDependents(queryClient, projectId);
+      invalidateMappingDependents(queryClient, projectId, undefined);
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Failed to save value table.');
       setEditorSaving(false);
@@ -972,6 +1008,7 @@ export function ProjectValueMappingsPage() {
     editorState,
     loadTables,
     projectId,
+    queryClient,
   ]);
 
   if (!projectId) {

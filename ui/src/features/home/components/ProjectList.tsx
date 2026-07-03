@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from 'react';
 
-import { filterProjects } from '../lib/filter-sort';
-import { useViewMode } from '../hooks/use-view-mode';
-import type { ProjectListItem } from '../types';
 import { ProjectCardGrid } from './ProjectCard';
 import { ProjectTable } from './ProjectTable';
 import { ViewToggle } from './ViewToggle';
+import { useViewMode } from '../hooks/use-view-mode';
+import { filterProjects } from '../lib/filter-sort';
+import type { ProjectListItem } from '../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -16,13 +16,14 @@ import { ViewToggle } from './ViewToggle';
 export interface ProjectListProps {
   projects: ProjectListItem[];
   onProjectClick: (id: string) => void;
+  onProjectIntent?: (id: string, reason: 'hover' | 'focus') => void;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ProjectList({ projects, onProjectClick }: ProjectListProps) {
+export function ProjectList({ projects, onProjectClick, onProjectIntent }: ProjectListProps) {
   const [search, setSearch] = useState('');
   const { viewMode, setViewMode } = useViewMode();
 
@@ -79,9 +80,17 @@ export function ProjectList({ projects, onProjectClick }: ProjectListProps) {
           No projects match your search or filter.
         </p>
       ) : viewMode === 'grid' ? (
-        <ProjectCardGrid projects={displayed} onProjectClick={onProjectClick} />
+        <ProjectCardGrid
+          projects={displayed}
+          onProjectClick={onProjectClick}
+          onProjectIntent={onProjectIntent}
+        />
       ) : (
-        <ProjectTable projects={displayed} onProjectClick={onProjectClick} />
+        <ProjectTable
+          projects={displayed}
+          onProjectClick={onProjectClick}
+          onProjectIntent={onProjectIntent}
+        />
       )}
     </section>
   );

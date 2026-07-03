@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+
+import { loadSchemaUsageData } from './schema-query-data';
 
 import { useAdapter } from '@/lib/api';
-
-// ---------------------------------------------------------------------------
-// Public types (also consumed by T-07 Remove action)
-// ---------------------------------------------------------------------------
+import { queryKeys, queryPolicies } from '@/lib/query';
 
 export interface UsageProject {
   readonly projectId: string;
@@ -26,108 +25,32 @@ export interface UseSchemaUsageResult {
   readonly isLoading: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 /**
- * Derives which projects and mappings reference the given schema.
- *
- * Algorithm (Phase 0 — acceptable for small localStorage datasets):
- * 1. `listProjects()` → ProjectMetadata[]
- * 2. `getProject(id)` for each to obtain full Project (with schemaRefs)
- * 3. Filter projects whose schemaRefs contain schemaId
- * 4. For each referencing project, `listMappings(projectId)`
- * 5. Filter mappings where sourceSchemaId or targetSchemaId matches schemaId
- *
- * NOTE: This is a read-only scan; future optimisation can add an index.
+ * Query-backed usage derivation for a schema.
+ * Errors are non-blocking for the Schema Detail page usage section.
  */
 export function useSchemaUsage(schemaId: string): UseSchemaUsageResult {
   const adapter = useAdapter();
 
-  const [projects, setProjects] = useState<UsageProject[]>([]);
-  const [mappings, setMappings] = useState<UsageMapping[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const usageQuery = useQuery({
+    queryKey: queryKeys.schemas.usage(schemaId),
+    staleTime: queryPolicies.schemaUsage.staleTime,
+    gcTime: queryPolicies.schemaUsage.gcTime,
+    retry: false,
+    queryFn: () => loadSchemaUsageData(adapter, schemaId),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setIsLoading(true);
-      try {
-        const projectMetas = await adapter.listProjects();
-
-        // Fetch full project details to access schemaRefs
-        const fullProjects = await Promise.all(
-          projectMetas.map((pm) => adapter.getProject(pm.projectId)),
-        );
-
-        const referencingProjects = fullProjects.filter((p) =>
-          p.schemaRefs.some((ref) => ref.schemaId === schemaId),
-        );
-
-        if (cancelled) return;
-
-        const usageProjects: UsageProject[] = referencingProjects.map((p) => ({
-          projectId: p.projectId,
-          name: p.name,
-        }));
-
-        // Fetch mappings for each referencing project in parallel
-        const mappingArrays = await Promise.all(
-          referencingProjects.map((p) => adapter.listMappings(p.projectId)),
-        );
-
-        if (cancelled) return;
-
-        const projectNameById = new Map(
-          referencingProjects.map((p) => [p.projectId, p.name] as const),
-        );
-
-        const usageMappings: UsageMapping[] = [];
-        mappingArrays.forEach((mappings) => {
-          for (const m of mappings) {
-            if (m.sourceSchemaId === schemaId) {
-              usageMappings.push({
-                mappingId: m.mappingId,
-                projectId: m.projectId,
-                projectName: projectNameById.get(m.projectId) ?? m.projectId,
-                name: m.name,
-                role: 'source',
-                updatedAt: m.updatedAt,
-              });
-            } else if (m.targetSchemaId === schemaId) {
-              usageMappings.push({
-                mappingId: m.mappingId,
-                projectId: m.projectId,
-                projectName: projectNameById.get(m.projectId) ?? m.projectId,
-                name: m.name,
-                role: 'target',
-                updatedAt: m.updatedAt,
-              });
-            }
-          }
-        });
-
-        setProjects(usageProjects);
-        setMappings(usageMappings);
-      } catch {
-        // Non-critical — usage section fails gracefully with empty lists
-        if (!cancelled) {
-          setProjects([]);
-          setMappings([]);
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    }
-
-    void load();
-
-    return () => {
-      cancelled = true;
+  if (usageQuery.isError && !usageQuery.data) {
+    return {
+      projects: [],
+      mappings: [],
+      isLoading: usageQuery.isPending,
     };
-  }, [adapter, schemaId]);
+  }
 
-  return { projects, mappings, isLoading };
+  return {
+    projects: usageQuery.data?.projects ?? [],
+    mappings: usageQuery.data?.mappings ?? [],
+    isLoading: usageQuery.isPending,
+  };
 }

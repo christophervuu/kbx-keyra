@@ -16,6 +16,9 @@ export class ProjectListPage {
   }
 
   getProjectOverviewLink(projectName: string): Locator {
-    return this.page.getByRole('button', { name: new RegExp(`open project ${projectName}`, 'i') });
+    return this.page
+      .locator('[data-testid^="project-card-"]')
+      .filter({ hasText: projectName })
+      .first();
   }
 }

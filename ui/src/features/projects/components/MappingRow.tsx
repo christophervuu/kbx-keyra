@@ -63,6 +63,10 @@ export interface MappingRowProps {
   projectId: string;
   onDuplicate: (mappingId: string) => void;
   onDelete: (mappingId: string) => void;
+  onMappingIntent?: (
+    input: { projectId: string; mappingId: string },
+    reason: 'hover' | 'focus',
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +84,13 @@ export interface MappingRowProps {
  * - Deploy icon is always visible
  * - Deploy icon is enabled for ready mappings and disabled otherwise
  */
-export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: MappingRowProps) {
+export function MappingRow({
+  mapping,
+  projectId,
+  onDuplicate,
+  onDelete,
+  onMappingIntent,
+}: MappingRowProps) {
   const navigate = useNavigate();
   const [showInputDetails, setShowInputDetails] = useState(false);
   const detailsId = useId();
@@ -122,6 +132,8 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
       <td className="px-3 py-2.5">
         <Link
           to={editorPath}
+          onMouseEnter={() => onMappingIntent?.({ projectId, mappingId: mapping.mappingId }, 'hover')}
+          onFocus={() => onMappingIntent?.({ projectId, mappingId: mapping.mappingId }, 'focus')}
           className="rounded font-medium text-blue-400 hover:text-blue-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           {mapping.name}
@@ -205,6 +217,8 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
       <td className="px-3 py-2.5 text-center" data-testid="deployment-cell">
         <Link
           to={deployPath}
+          onMouseEnter={() => onMappingIntent?.({ projectId, mappingId: mapping.mappingId }, 'hover')}
+          onFocus={() => onMappingIntent?.({ projectId, mappingId: mapping.mappingId }, 'focus')}
           aria-label={`Deployment state: ${deploymentDisplay}`}
           className="rounded whitespace-nowrap text-xs text-slate-300 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
@@ -224,6 +238,8 @@ export function MappingRow({ mapping, projectId, onDuplicate, onDelete }: Mappin
         <div className="flex items-center gap-1">
           <Link
             to={testLabPath}
+            onMouseEnter={() => onMappingIntent?.({ projectId, mappingId: mapping.mappingId }, 'hover')}
+            onFocus={() => onMappingIntent?.({ projectId, mappingId: mapping.mappingId }, 'focus')}
             aria-label={`Test mapping ${mapping.name} in Test Lab`}
             className="inline-flex items-center justify-center rounded px-1.5 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             data-testid={`test-lab-link-${mapping.mappingId}`}

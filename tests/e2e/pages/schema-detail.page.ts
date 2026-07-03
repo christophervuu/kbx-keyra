@@ -12,7 +12,7 @@ export class SchemaDetailPage {
   }
 
   getMetadataSection(): Locator {
-    return this.page.getByTestId('schema-detail-metadata');
+    return this.page.getByTestId('schema-detail-header');
   }
 
   getTreeSection(): Locator {

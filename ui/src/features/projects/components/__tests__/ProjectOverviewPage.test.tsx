@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -7,8 +8,10 @@ import { ProjectOverviewPage } from '../ProjectOverviewPage';
 
 import { BreadcrumbProvider } from '@/components/layout/BreadcrumbContext';
 import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
+import * as queryLib from '@/lib/query';
+import { resetPrefetchDiagnostics } from '@/lib/query';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -178,23 +181,26 @@ function renderPage(
   initialPath = `/projects/${projectId}`,
   { withBreadcrumbs = false }: { withBreadcrumbs?: boolean } = {},
 ) {
+  const queryClient = createQueryClient();
   return render(
-    <AdapterProvider adapter={adapter}>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <BreadcrumbProvider>
-          {withBreadcrumbs && <Breadcrumbs />}
-          <Routes>
-            <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
-            <Route path="/" element={<div data-testid="home-page">Home</div>} />
-            <Route path="/projects/:projectId/mappings/new" element={<div data-testid="create-mapping-page" />} />
-            <Route path="/projects/:projectId/deployments" element={<div data-testid="project-deployments-page" />} />
-            <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page" />} />
-            <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div data-testid="mapping-deployment-page" />} />
-            <Route path="/projects/:projectId/value-mappings" element={<div data-testid="project-value-mappings-page" />} />
-          </Routes>
-        </BreadcrumbProvider>
-      </MemoryRouter>
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <BreadcrumbProvider>
+            {withBreadcrumbs && <Breadcrumbs />}
+            <Routes>
+              <Route path="/projects/:projectId" element={<ProjectOverviewPage />} />
+              <Route path="/" element={<div data-testid="home-page">Home</div>} />
+              <Route path="/projects/:projectId/mappings/new" element={<div data-testid="create-mapping-page" />} />
+              <Route path="/projects/:projectId/deployments" element={<div data-testid="project-deployments-page" />} />
+              <Route path="/projects/:projectId/mappings/:mappingId" element={<div data-testid="mapping-editor-page" />} />
+              <Route path="/projects/:projectId/mappings/:mappingId/deploy" element={<div data-testid="mapping-deployment-page" />} />
+              <Route path="/projects/:projectId/value-mappings" element={<div data-testid="project-value-mappings-page" />} />
+            </Routes>
+          </BreadcrumbProvider>
+        </MemoryRouter>
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -207,6 +213,7 @@ describe('ProjectOverviewPage', () => {
 
   beforeEach(() => {
     adapter = createMockAdapter();
+    resetPrefetchDiagnostics();
   });
 
   it('preserves data-testid on root element', async () => {
@@ -243,6 +250,7 @@ describe('ProjectOverviewPage', () => {
 
     // Header — overflow menu trigger (replaces ProjectActionsSection)
     expect(screen.getByRole('button', { name: /more project actions/i })).toBeInTheDocument();
+    expect(screen.getByTestId('project-overview-refresh-status')).toBeInTheDocument();
   });
 
   it('not-found state shows message and home link', async () => {
@@ -572,6 +580,55 @@ describe('ProjectOverviewPage', () => {
     await user.click(metric);
     expect(screen.getByTestId('project-value-mappings-page')).toBeInTheDocument();
   });
+
+  it('prefetches mapping destinations on mapping link hover/focus intent', async () => {
+    const user = userEvent.setup();
+    const mappingPrefetchSpy = vi
+      .spyOn(queryLib, 'prefetchMappingEditorByIntent')
+      .mockResolvedValue(true);
+    const deploymentPrefetchSpy = vi
+      .spyOn(queryLib, 'prefetchDeploymentPageByIntent')
+      .mockResolvedValue(true);
+
+    renderPage(adapter);
+
+    const mappingLink = await screen.findByRole('link', { name: 'Mapping One' });
+    await user.hover(mappingLink);
+    mappingLink.focus();
+
+    await waitFor(() => {
+      expect(mappingPrefetchSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'mapping-1',
+        expect.anything(),
+        'hover',
+      );
+      expect(deploymentPrefetchSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'mapping-1',
+        'hover',
+      );
+    });
+
+    expect(mappingPrefetchSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'mapping-1',
+      expect.anything(),
+      'focus',
+    );
+    expect(deploymentPrefetchSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'mapping-1',
+      'focus',
+    );
+
+    mappingPrefetchSpy.mockRestore();
+    deploymentPrefetchSpy.mockRestore();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -665,7 +722,7 @@ describe('ProjectOverviewPage — layout checks', () => {
     await waitFor(() => {
       expect(unlinkAdapter.updateProject).toHaveBeenCalledWith('proj-1', { linkedSchemaIds: ['schema-1'] });
     });
-    expect(screen.queryByTestId('linked-schema-row-schema-2')).not.toBeInTheDocument();
+    expect(screen.getByTestId('linked-schema-row-schema-2')).toBeInTheDocument();
   });
 
   it('AE-02: header shows compact summary line and hides tag UI', async () => {

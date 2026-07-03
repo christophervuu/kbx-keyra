@@ -1,20 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
 import type { MappingRowData, ProjectLoadState, SchemaCardData } from '../types';
+import {
+  loadProjectOverviewQueryData,
+  type ProjectOverviewQueryData,
+} from './project-overview-query-data';
 
 import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
 import type { CurrentDeployments } from '@/lib/api/types';
+import {
+  cancelProjectDetailReads,
+  invalidateMappingDependents,
+  invalidateProjectDetailDependents,
+  invalidateProjectSummaries,
+  queryKeys,
+  queryPolicies,
+  removeMappingCaches,
+  removeProjectCaches,
+} from '@/lib/query';
 import type { AppError } from '@/lib/state/app-error';
 import { toAppError } from '@/lib/state/app-error';
 import type {
   DeployStatus,
   MappingMetadata,
-  ProjectDetail,
   SchemaDetail,
   SchemaRef,
 } from '@/lib/types/domain';
-import { normalizeProjectLinkedSchemaIds } from '@/lib/types/domain';
+import { normalizeProjectLinkedSchemaIds, type ProjectDetail } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
 // Deployment status helpers
@@ -95,6 +109,9 @@ function buildMappingRowData(
 
 export interface UseProjectOverviewResult {
   loadState: ProjectLoadState;
+  isRefreshing: boolean;
+  refreshError: AppError | null;
+  lastUpdatedAt: string | null;
   project: ProjectDetail | null;
   schemas: SchemaCardData[];
   mappings: MappingRowData[];
@@ -119,106 +136,68 @@ export interface UseProjectOverviewResult {
   schemasReferencingMapping: (schemaId: string) => string[];
 }
 
+const EMPTY_SCHEMA_DETAILS: SchemaDetail[] = [];
+const EMPTY_MAPPINGS_META: MappingMetadata[] = [];
+const EMPTY_DEPLOYMENTS_MAP = new Map<string, CurrentDeployments | null>();
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
 export function useProjectOverview(projectId: string): UseProjectOverviewResult {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
 
-  const [loadState, setLoadState] = useState<ProjectLoadState>('loading');
-  const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [schemaDetails, setSchemaDetails] = useState<SchemaDetail[]>([]);
-  const [mappingsMeta, setMappingsMeta] = useState<MappingMetadata[]>([]);
-  const [deploymentsMap, setDeploymentsMap] = useState<Map<string, CurrentDeployments | null>>(new Map());
+  const overviewQueryKey = queryKeys.projects.detail(projectId);
 
-  // Incremented by retry() to trigger re-fetch
-  const [fetchKey, setFetchKey] = useState(0);
+  const overviewQuery = useQuery<ProjectOverviewQueryData>({
+    queryKey: overviewQueryKey,
+    staleTime: queryPolicies.projectDetail.staleTime,
+    gcTime: queryPolicies.projectDetail.gcTime,
+    retry: false,
+    queryFn: () => loadProjectOverviewQueryData(adapter, projectId),
+  });
 
-  // Stable ref so action callbacks always see current project
-  const projectRef = useRef<ProjectDetail | null>(null);
-  useEffect(() => {
-    projectRef.current = project;
-  }, [project]);
+  const project = overviewQuery.data?.project ?? null;
+  const schemaDetails = overviewQuery.data?.schemaDetails ?? EMPTY_SCHEMA_DETAILS;
+  const mappingsMeta = overviewQuery.data?.mappingsMeta ?? EMPTY_MAPPINGS_META;
+  const deploymentsMap = overviewQuery.data?.deploymentsMap ?? EMPTY_DEPLOYMENTS_MAP;
 
-  const mappingsMetaRef = useRef<MappingMetadata[]>([]);
-  useEffect(() => {
-    mappingsMetaRef.current = mappingsMeta;
-  }, [mappingsMeta]);
-
-  // ---------------------------------------------------------------------------
-  // Load
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoadState('loading');
-      setProject(null);
-      setSchemaDetails([]);
-      setMappingsMeta([]);
-      setDeploymentsMap(new Map());
-
-      try {
-        const detail = await adapter.getProject(projectId);
-
-        if (cancelled) return;
-
-        // Load schemas and current deployments in parallel (best-effort)
-        const linkedSchemaIds = normalizeProjectLinkedSchemaIds(detail);
-
-        const [schemaResults, deploymentResults] = await Promise.all([
-          Promise.allSettled(
-            linkedSchemaIds.map((schemaId) => adapter.getSchema(schemaId)),
-          ),
-          Promise.allSettled(
-            detail.mappings.map((m) => adapter.getCurrentDeployments(m.mappingId)),
-          ),
-        ]);
-
-        if (cancelled) return;
-
-        const loaded = schemaResults
-          .filter((r): r is PromiseFulfilledResult<SchemaDetail> => r.status === 'fulfilled')
-          .map((r) => r.value);
-
-        // Build mappingId → CurrentDeployments lookup (null for failed fetches)
-        const deploymentsMap = new Map<string, CurrentDeployments | null>(
-          detail.mappings.map((m, i) => [
-            m.mappingId,
-            deploymentResults[i]?.status === 'fulfilled'
-              ? (deploymentResults[i] as PromiseFulfilledResult<CurrentDeployments>).value
-              : null,
-          ]),
-        );
-
-        setProject({
-          ...detail,
-          linkedSchemaIds,
-        });
-        setSchemaDetails(loaded);
-        setMappingsMeta([...detail.mappings]);
-        setDeploymentsMap(deploymentsMap);
-        setLoadState('loaded');
-      } catch (err: unknown) {
-        if (cancelled) return;
-
-        // Treat 404-like errors as not-found
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('not found') || msg.includes('404')) {
-          setLoadState('not-found');
-        } else {
-          setLoadState('error');
+  const patchOverviewData = useCallback(
+    (updater: (current: ProjectOverviewQueryData) => ProjectOverviewQueryData) => {
+      queryClient.setQueryData<ProjectOverviewQueryData | undefined>(overviewQueryKey, (current) => {
+        if (!current) {
+          return current;
         }
-      }
+
+        return updater(current);
+      });
+    },
+    [queryClient, overviewQueryKey],
+  );
+
+  const loadState: ProjectLoadState = (() => {
+    if (!overviewQuery.data && overviewQuery.isPending) {
+      return 'loading';
     }
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [adapter, projectId, fetchKey]);
+    if (overviewQuery.isError && !overviewQuery.data) {
+      const msg = overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error);
+      if (msg.includes('not found') || msg.includes('404')) {
+        return 'not-found';
+      }
+
+      return 'error';
+    }
+
+    return 'loaded';
+  })();
+
+  const isRefreshing = overviewQuery.isFetching && Boolean(overviewQuery.data);
+  const refreshError = overviewQuery.error && overviewQuery.data ? toAppError(overviewQuery.error) : null;
+  const lastUpdatedAt = overviewQuery.dataUpdatedAt
+    ? new Date(overviewQuery.dataUpdatedAt).toISOString()
+    : null;
 
   // ---------------------------------------------------------------------------
   // Derived view models
@@ -238,30 +217,48 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
   // ---------------------------------------------------------------------------
 
   const nameMutation = useOptimisticMutation<string, string, Awaited<ReturnType<typeof adapter.updateProject>>>({
-    captureSnapshot: () => projectRef.current?.name ?? '',
+    captureSnapshot: () => project?.name ?? '',
     applyOptimistic: (name) => {
-      setProject((prev) => (prev ? { ...prev, name } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, name },
+      }));
     },
     rollback: (snapshot) => {
-      setProject((prev) => (prev ? { ...prev, name: snapshot } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, name: snapshot },
+      }));
     },
     mutate: (name) => adapter.updateProject(projectId, { name }),
     onSuccess: (updated) => {
-      setProject((prev) => (prev ? { ...prev, name: updated.name } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, name: updated.name },
+      }));
     },
   });
 
   const descriptionMutation = useOptimisticMutation<string, string, Awaited<ReturnType<typeof adapter.updateProject>>>({
-    captureSnapshot: () => projectRef.current?.description ?? '',
+    captureSnapshot: () => project?.description ?? '',
     applyOptimistic: (description) => {
-      setProject((prev) => (prev ? { ...prev, description } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, description },
+      }));
     },
     rollback: (snapshot) => {
-      setProject((prev) => (prev ? { ...prev, description: snapshot } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, description: snapshot },
+      }));
     },
     mutate: (description) => adapter.updateProject(projectId, { description }),
     onSuccess: (updated) => {
-      setProject((prev) => (prev ? { ...prev, description: updated.description } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, description: updated.description },
+      }));
     },
   });
 
@@ -274,28 +271,33 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   const updateName = useCallback(
     async (name: string) => {
-      if (!projectRef.current) return;
+      if (!project) return;
       await nameMutation.run(name);
     },
-    [nameMutation],
+    [nameMutation, project],
   );
 
   const updateDescription = useCallback(
     async (description: string) => {
-      if (!projectRef.current) return;
+      if (!project) return;
       await descriptionMutation.run(description);
     },
-    [descriptionMutation],
+    [descriptionMutation, project],
   );
 
   const updateTags = useCallback(
     async (tags: string[]) => {
-      if (!projectRef.current) return;
+      if (!project) return;
+      await cancelProjectDetailReads(queryClient, projectId);
       const updated = await adapter.updateProject(projectId, { tags });
       void updated; // returned ProjectMetadata does not carry tags; use input value
-      setProject((prev) => (prev ? { ...prev, tags } : prev));
+      patchOverviewData((current) => ({
+        ...current,
+        project: { ...current.project, tags },
+      }));
+      invalidateProjectDetailDependents(queryClient, projectId);
     },
-    [adapter, projectId],
+    [adapter, patchOverviewData, project, projectId, queryClient],
   );
 
   // ---------------------------------------------------------------------------
@@ -304,31 +306,32 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   const removeSchema = useCallback(
     async (schemaId: string) => {
-      const current = projectRef.current;
+      const current = project;
       if (!current) return;
 
       const currentLinkedSchemaIds = normalizeProjectLinkedSchemaIds(current);
       const nextLinkedSchemaIds = currentLinkedSchemaIds.filter((id) => id !== schemaId);
       const nextSchemaRefs = current.schemaRefs.filter((r) => r.schemaId !== schemaId);
 
+      await cancelProjectDetailReads(queryClient, projectId);
       await adapter.updateProject(projectId, { linkedSchemaIds: nextLinkedSchemaIds });
-      setProject((prev) =>
-        prev
-          ? {
-              ...prev,
-              linkedSchemaIds: nextLinkedSchemaIds,
-              schemaRefs: nextSchemaRefs,
-            }
-          : prev,
-      );
-      setSchemaDetails((prev) => prev.filter((d) => d.metadata.schemaId !== schemaId));
+      patchOverviewData((currentData) => ({
+        ...currentData,
+        project: {
+          ...currentData.project,
+          linkedSchemaIds: nextLinkedSchemaIds,
+          schemaRefs: nextSchemaRefs,
+        },
+        schemaDetails: currentData.schemaDetails.filter((d) => d.metadata.schemaId !== schemaId),
+      }));
+      invalidateProjectDetailDependents(queryClient, projectId);
     },
-    [adapter, projectId],
+    [adapter, patchOverviewData, project, projectId, queryClient],
   );
 
   const addSchemaRef = useCallback(
     async (ref: SchemaRef) => {
-      const current = projectRef.current;
+      const current = project;
       if (!current) return;
 
       const currentLinkedSchemaIds = normalizeProjectLinkedSchemaIds(current);
@@ -339,36 +342,39 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
         ? current.schemaRefs
         : [...current.schemaRefs, ref];
 
+      await cancelProjectDetailReads(queryClient, projectId);
       await adapter.updateProject(projectId, { linkedSchemaIds: nextLinkedSchemaIds });
       const detail = await adapter.getSchema(ref.schemaId);
-      setProject((prev) =>
-        prev
-          ? {
-              ...prev,
-              linkedSchemaIds: nextLinkedSchemaIds,
-              schemaRefs: nextSchemaRefs,
-            }
-          : prev,
-      );
-      setSchemaDetails((prev) => [...prev, detail]);
+      patchOverviewData((currentData) => ({
+        ...currentData,
+        project: {
+          ...currentData.project,
+          linkedSchemaIds: nextLinkedSchemaIds,
+          schemaRefs: nextSchemaRefs,
+        },
+        schemaDetails: [...currentData.schemaDetails, detail],
+      }));
+      invalidateProjectDetailDependents(queryClient, projectId);
     },
-    [adapter, projectId],
+    [adapter, patchOverviewData, project, projectId, queryClient],
   );
 
   const resyncSchema = useCallback(
     async (schemaId: string): Promise<{ message: string }> => {
       const result = await adapter.syncCdmSchema(schemaId);
       const refreshed = await adapter.getSchema(schemaId);
-      setSchemaDetails((prev) =>
-        prev.map((detail) =>
+      patchOverviewData((current) => ({
+        ...current,
+        schemaDetails: current.schemaDetails.map((detail) =>
           detail.metadata.schemaId === schemaId ? refreshed : detail,
         ),
-      );
+      }));
+      invalidateProjectDetailDependents(queryClient, projectId);
       return {
         message: result.message || 'Schema re-synced from CDM source.',
       };
     },
-    [adapter],
+    [adapter, patchOverviewData, projectId, queryClient],
   );
 
   // ---------------------------------------------------------------------------
@@ -377,16 +383,21 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   const deleteMappingAction = useCallback(
     async (mappingId: string) => {
-      const currentMappings = mappingsMetaRef.current;
+      const currentMappings = mappingsMeta;
       const removedIndex = currentMappings.findIndex((m) => m.mappingId === mappingId);
       const removedMapping = removedIndex >= 0 ? currentMappings[removedIndex] : null;
 
       if (removedIndex >= 0) {
-        setMappingsMeta((prev) => prev.filter((m) => m.mappingId !== mappingId));
+        patchOverviewData((current) => ({
+          ...current,
+          mappingsMeta: current.mappingsMeta.filter((m) => m.mappingId !== mappingId),
+        }));
       }
 
       try {
+        removeMappingCaches(queryClient, mappingId);
         await adapter.deleteMapping(mappingId);
+        invalidateMappingDependents(queryClient, projectId, mappingId);
       } catch (error: unknown) {
         const appError = toAppError(error);
 
@@ -408,20 +419,23 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
         }
 
         if (removedMapping && removedIndex >= 0) {
-          setMappingsMeta((prev) => {
-            const alreadyRestored = prev.some((m) => m.mappingId === mappingId);
-            if (alreadyRestored) return prev;
-            const next = [...prev];
+          patchOverviewData((current) => {
+            const alreadyRestored = current.mappingsMeta.some((m) => m.mappingId === mappingId);
+            if (alreadyRestored) return current;
+            const next = [...current.mappingsMeta];
             const insertIndex = Math.min(Math.max(removedIndex, 0), next.length);
             next.splice(insertIndex, 0, removedMapping);
-            return next;
+            return {
+              ...current,
+              mappingsMeta: next,
+            };
           });
         }
 
         throw error;
       }
     },
-    [adapter],
+    [adapter, mappingsMeta, patchOverviewData, projectId, queryClient],
   );
 
   const duplicateMappingAction = useCallback(
@@ -429,9 +443,14 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
       const original = mappingsMeta.find((m) => m.mappingId === mappingId);
       const newName = original ? `${original.name} (Copy)` : 'Copy';
       const copy = await adapter.duplicateMapping(mappingId, newName);
-      setMappingsMeta((prev) => [...prev, copy]);
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects.detail(projectId) });
+      patchOverviewData((current) => ({
+        ...current,
+        mappingsMeta: [...current.mappingsMeta, copy],
+      }));
+      invalidateMappingDependents(queryClient, projectId, copy.mappingId);
     },
-    [adapter, mappingsMeta],
+    [adapter, mappingsMeta, patchOverviewData, projectId, queryClient],
   );
 
   // ---------------------------------------------------------------------------
@@ -440,12 +459,15 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   const deleteProjectAction = useCallback(async () => {
     // Delete all project mappings first
+    const mappingIds = mappingsMeta.map((m) => m.mappingId);
     await Promise.all(mappingsMeta.map((m) => adapter.deleteMapping(m.mappingId)));
+    mappingIds.forEach((mappingId) => removeMappingCaches(queryClient, mappingId));
     await adapter.deleteProject(projectId);
-  }, [adapter, projectId, mappingsMeta]);
+    removeProjectCaches(queryClient, projectId, mappingIds);
+  }, [adapter, mappingsMeta, projectId, queryClient]);
 
   const duplicateProjectAction = useCallback(async (): Promise<{ projectId: string }> => {
-    const current = projectRef.current;
+    const current = project;
     if (!current) throw new Error('Project not loaded');
 
     // Create the duplicate project
@@ -464,16 +486,18 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
       mappingsMeta.map((m) => adapter.duplicateMapping(m.mappingId, m.name)),
     );
 
+    invalidateProjectSummaries(queryClient);
+
     return { projectId: newProject.projectId };
-  }, [adapter, mappingsMeta]);
+  }, [adapter, mappingsMeta, project, queryClient]);
 
   // ---------------------------------------------------------------------------
   // Utility
   // ---------------------------------------------------------------------------
 
   const retry = useCallback(() => {
-    setFetchKey((k) => k + 1);
-  }, []);
+    void overviewQuery.refetch();
+  }, [overviewQuery]);
 
   const schemasReferencingMapping = useCallback(
     (schemaId: string): string[] => {
@@ -490,6 +514,9 @@ export function useProjectOverview(projectId: string): UseProjectOverviewResult 
 
   return {
     loadState,
+    isRefreshing,
+    refreshError,
+    lastUpdatedAt,
     project,
     schemas,
     mappings,

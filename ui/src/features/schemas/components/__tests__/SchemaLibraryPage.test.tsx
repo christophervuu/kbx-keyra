@@ -1,5 +1,6 @@
 // SchemaLibraryPage.test.tsx — Integration tests for the assembled Schema Library page (FS-016 T-04)
 
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
@@ -8,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SchemaLibraryPage } from '../SchemaLibraryPage';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { ProjectDetail, SchemaMetadata } from '@/lib/types/domain';
 
@@ -120,11 +121,14 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function renderPage(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
   return render(
     <MemoryRouter initialEntries={['/schemas']}>
-      <AdapterProvider adapter={adapter}>
-        <SchemaLibraryPage />
-      </AdapterProvider>
+      <QueryClientProvider client={queryClient}>
+        <AdapterProvider adapter={adapter}>
+          <SchemaLibraryPage />
+        </AdapterProvider>
+      </QueryClientProvider>
     </MemoryRouter>,
   );
 }
@@ -253,6 +257,21 @@ describe('SchemaLibraryPage', () => {
       expect(screen.getByRole('heading', { name: /schema library \(2 schemas\)/i })).toBeInTheDocument();
     });
     expect(screen.getByText('Your schema management hub for CDM and user schemas')).toBeInTheDocument();
+  });
+
+  it('shows refresh metadata in success state', async () => {
+    const adapter = createMockAdapter({
+      listSchemas: vi.fn().mockResolvedValue([
+        makeSchemaMeta({ schemaId: 's-1', name: 'Schema One' }),
+      ]),
+      listProjects: vi.fn().mockResolvedValue([]),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schema-library-refresh-status')).toBeInTheDocument();
+    });
   });
 
   it('renders top-right Sync CDM Models and Add Schema buttons', async () => {

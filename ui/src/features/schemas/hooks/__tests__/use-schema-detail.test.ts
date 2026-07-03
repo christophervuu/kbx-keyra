@@ -1,12 +1,13 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useSchemaDetail } from '../use-schema-detail';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
-import type { SchemaDetail, SchemaMetadata } from '@/lib/types/domain';
+import type { SchemaDetail } from '@/lib/types/domain';
 
 const SCHEMA_DETAIL: SchemaDetail = {
   metadata: {
@@ -74,21 +75,20 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function makeWrapper(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
   return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(AdapterProvider, { adapter }, children);
+    return React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(AdapterProvider, { adapter }, children),
+    );
   };
 }
 
-describe('useSchemaDetail optimistic metadata updates', () => {
-  it('optimistically updates metadata and keeps value on success', async () => {
-    let resolveUpdate!: (value: SchemaMetadata) => void;
+describe('useSchemaDetail metadata mutation cache behavior', () => {
+  it('invalidates/refetches detail after metadata update success', async () => {
     const adapter = createMockAdapter({
-      updateSchema: vi.fn().mockImplementation(
-        () =>
-          new Promise<SchemaMetadata>((resolve) => {
-            resolveUpdate = resolve;
-          }),
-      ),
+      updateSchema: vi.fn().mockResolvedValue({ ...SCHEMA_DETAIL.metadata, name: 'Schema Updated' }),
     });
 
     const { result } = renderHook(() => useSchemaDetail('schema-1'), {
@@ -98,20 +98,14 @@ describe('useSchemaDetail optimistic metadata updates', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.schema?.metadata.name).toBe('Schema One');
 
-    let pending!: Promise<void>;
-    act(() => {
-      pending = result.current.updateMetadata({ name: 'Schema Updated' });
-    });
-
-    // Optimistic render before request resolves
-    expect(result.current.schema?.metadata.name).toBe('Schema Updated');
-
     await act(async () => {
-      resolveUpdate({ ...SCHEMA_DETAIL.metadata, name: 'Schema Updated' });
-      await pending;
+      await result.current.updateMetadata({ name: 'Schema Updated' });
     });
 
-    expect(result.current.schema?.metadata.name).toBe('Schema Updated');
+    expect(adapter.updateSchema).toHaveBeenCalledWith('schema-1', { name: 'Schema Updated' });
+
+    // metadata-only response path invalidates canonical detail instead of speculative merge
+    expect(result.current.schema?.metadata.name).toBe('Schema One');
     expect(result.current.mutationError).toBeNull();
   });
 

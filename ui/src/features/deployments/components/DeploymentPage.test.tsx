@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -5,10 +6,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeploymentPage } from './DeploymentPage';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import { HttpClientError } from '@/lib/api/http-client';
 import type { CurrentDeployments, DeploymentRecord } from '@/lib/api/types';
+import * as queryLib from '@/lib/query';
 import type { MappingVersion } from '@/lib/types';
 import type {
   ActivityEntry,
@@ -264,18 +266,21 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function renderPage(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
   return render(
-    <AdapterProvider adapter={adapter}>
-      <MemoryRouter initialEntries={['/projects/proj-1/mappings/map-1/deploy']}>
-        <Routes>
-          <Route
-            path="/projects/:projectId/mappings/:mappingId/deploy"
-            element={<DeploymentPage mappingId="map-1" projectId="proj-1" mappingName="Test Mapping" />}
-          />
-          <Route path="/projects/:projectId/mappings/:mappingId" element={<div>Editor</div>} />
-        </Routes>
-      </MemoryRouter>
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <MemoryRouter initialEntries={['/projects/proj-1/mappings/map-1/deploy']}>
+          <Routes>
+            <Route
+              path="/projects/:projectId/mappings/:mappingId/deploy"
+              element={<DeploymentPage mappingId="map-1" projectId="proj-1" mappingName="Test Mapping" />}
+            />
+            <Route path="/projects/:projectId/mappings/:mappingId" element={<div>Editor</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -300,6 +305,21 @@ describe('DeploymentPage (FS-100 T-08)', () => {
     expect(cards[2]?.textContent).toContain('Preprod');
     expect(cards[3]?.textContent).toContain('PROD');
     expect(screen.getByTestId('pipeline-card-SANDBOX').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('renders refresh status and refresh action without blanking content', async () => {
+    const user = userEvent.setup();
+    renderPage(createMockAdapter());
+
+    await waitFor(() => screen.getByTestId('deployment-pipeline-cards'));
+
+    expect(screen.getByTestId('deployment-refresh-status')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('deployment-refresh-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('deployment-pipeline-cards')).toBeInTheDocument();
+    });
   });
 
   it('changes primary action label by selected environment stage', async () => {
@@ -513,5 +533,38 @@ describe('DeploymentPage (FS-100 T-08)', () => {
 
     const targetCta = screen.getByTestId('cdm-remediation-cta-target-schema-target');
     expect(targetCta.getAttribute('href')).toBe('/schemas');
+  });
+
+  it('prefetches mapping editor query from Back to editor hover/focus intent', async () => {
+    const user = userEvent.setup();
+    const prefetchSpy = vi
+      .spyOn(queryLib, 'prefetchMappingEditorByIntent')
+      .mockResolvedValue(true);
+
+    renderPage(createMockAdapter());
+    const backLink = await screen.findByTestId('back-to-editor-link');
+
+    await user.hover(backLink);
+    backLink.focus();
+
+    await waitFor(() => {
+      expect(prefetchSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'map-1',
+        expect.anything(),
+        'hover',
+      );
+    });
+
+    expect(prefetchSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'map-1',
+      expect.anything(),
+      'focus',
+    );
+
+    prefetchSpy.mockRestore();
   });
 });

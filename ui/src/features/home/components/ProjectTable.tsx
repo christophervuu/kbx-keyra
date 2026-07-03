@@ -1,9 +1,9 @@
 // ProjectTable — Semantic table view for the project list (FS-014 T-06, FS-049 T-06)
 // FS-049 T-06: condensed deploy columns when all environments are 'not-deployed'
 
-import { StatusBadge } from '@/components/StatusBadge';
-
 import type { ProjectListItem, ProjectWorstStatus } from '../types';
+
+import { StatusBadge } from '@/components/StatusBadge';
 
 // ---------------------------------------------------------------------------
 // Date helper (shared logic with ProjectCard)
@@ -67,9 +67,10 @@ function WorstStatusBadge({ status }: WorstStatusBadgeProps) {
 export interface ProjectTableProps {
   projects: ProjectListItem[];
   onProjectClick: (id: string) => void;
+  onProjectIntent?: (id: string, reason: 'hover' | 'focus') => void;
 }
 
-export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
+export function ProjectTable({ projects, onProjectClick, onProjectIntent }: ProjectTableProps) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-700">
       <table className="w-full text-sm" aria-label="Projects table">
@@ -116,6 +117,8 @@ export function ProjectTable({ projects, onProjectClick }: ProjectTableProps) {
             <tr
               key={project.projectId}
               onClick={() => onProjectClick(project.projectId)}
+              onMouseEnter={() => onProjectIntent?.(project.projectId, 'hover')}
+              onFocus={() => onProjectIntent?.(project.projectId, 'focus')}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();

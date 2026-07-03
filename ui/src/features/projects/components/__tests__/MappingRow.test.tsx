@@ -150,6 +150,52 @@ describe('MappingRow', () => {
     expect(link).toHaveAttribute('href', '/projects/proj-1/mappings/mapping-1/deploy');
   });
 
+  it('emits mapping intent for editor/deploy/test-lab links on hover and focus', async () => {
+    const user = userEvent.setup();
+    const onMappingIntent = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <table>
+          <tbody>
+            <MappingRow
+              mapping={MAPPING}
+              projectId="proj-1"
+              onDuplicate={vi.fn()}
+              onDelete={vi.fn()}
+              onMappingIntent={onMappingIntent}
+            />
+          </tbody>
+        </table>
+      </MemoryRouter>,
+    );
+
+    const editorLink = screen.getByRole('link', { name: 'My Mapping' });
+    const deployLink = screen.getByRole('link', { name: /deployment state:/i });
+    const testLabLink = screen.getByRole('link', { name: /test mapping my mapping in test lab/i });
+
+    await user.hover(editorLink);
+    await user.unhover(editorLink);
+    editorLink.focus();
+
+    await user.hover(deployLink);
+    await user.unhover(deployLink);
+    deployLink.focus();
+
+    await user.hover(testLabLink);
+    await user.unhover(testLabLink);
+    testLabLink.focus();
+
+    expect(onMappingIntent).toHaveBeenCalledWith(
+      { projectId: 'proj-1', mappingId: 'mapping-1' },
+      'hover',
+    );
+    expect(onMappingIntent).toHaveBeenCalledWith(
+      { projectId: 'proj-1', mappingId: 'mapping-1' },
+      'focus',
+    );
+  });
+
   it('normalizes stale to "Changed since deploy" in deployment column', () => {
     renderRow({ ...MAPPING, devDeploy: 'deployed', preprodDeploy: 'not-deployed', prodDeploy: 'not-deployed' });
     expect(screen.getByText('DEV deployed')).toBeInTheDocument();

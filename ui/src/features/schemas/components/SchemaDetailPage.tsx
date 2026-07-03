@@ -11,9 +11,9 @@ import { useSchemaEditor } from '../hooks/use-schema-editor';
 import { useSchemaUsage, type UsageMapping } from '../hooks/use-schema-usage';
 
 import { Button } from '@/components/Button';
-import { getTypeBadge } from '@/features/mappings/lib/source-field-display';
 import { InlineEditableText } from '@/components/InlineEditableText';
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
+import { getTypeBadge } from '@/features/mappings/lib/source-field-display';
 import type { ParsedSchema, SchemaMetadata, SchemaTreeNode } from '@/lib/types';
 import { PATHS } from '@/routes/paths';
 
@@ -600,6 +600,12 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
     getSamplePayload,
   } = useSchemaDetail(schemaId);
 
+  const detailRefreshMeta = !isLoading && !error && !notFound ? (
+    <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300" data-testid="schema-detail-refresh-status">
+      Cached schema content is shown immediately when available; refresh runs in the background.
+    </div>
+  ) : null;
+
   const handleSaved = useCallback(
     (refreshed: ParsedSchema) => {
       setParsedSchema(refreshed);
@@ -718,6 +724,8 @@ export function SchemaDetailPage({ schemaId }: SchemaDetailPageProps) {
           />
         )}
       />
+
+      {detailRefreshMeta}
 
       <div
         data-testid="schema-detail-layout-grid"

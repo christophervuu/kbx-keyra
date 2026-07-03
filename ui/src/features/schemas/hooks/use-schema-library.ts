@@ -1,13 +1,12 @@
-// Hook: useSchemaLibrary (FS-016 T-01)
-// Loads all schemas and projects, enriches into SchemaLibraryItem[], and
-// exposes filter/sort state with actions. Follows the pattern from use-dashboard-data.ts.
+// Hook: useSchemaLibrary (FS-016 T-01, FS-103 T-04)
+// Loads schemas through shared TanStack Query and exposes local filter/sort/view controls.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useState } from 'react';
 
-import { parseInferredSchema, parseJsonSchema, parseXsd } from '../lib';
+import { loadSchemaLibraryData } from './schema-query-data';
 import { filterSchemas, sortSchemas } from '../lib/schema-filters';
 import type {
-  DisplayFormat,
   FilterDataFormat,
   FilterOwnership,
   FilterStatus,
@@ -17,68 +16,10 @@ import type {
   SchemaLibraryViewMode,
   SortDirection,
   SortField,
-  SyncStatus,
 } from '../types';
 
 import { useAdapter } from '@/lib/api';
-import {
-  normalizeSchemaOwnership,
-  normalizeSchemaStatus,
-  schemaDataFormatFromSourceKind,
-  type SchemaMetadata,
-} from '@/lib/types/domain';
-
-// ---------------------------------------------------------------------------
-// Derivation helpers
-// ---------------------------------------------------------------------------
-
-function deriveSyncStatus(schema: SchemaMetadata): SyncStatus {
-  if (schema.inferred === true) return 'inferred';
-  if (schema.source.type === 'github') {
-    return schema.syncStatus ?? 'synced';
-  }
-  // source.type === 'upload'
-  return 'local';
-}
-
-function deriveDisplayFormat(schema: SchemaMetadata): DisplayFormat {
-  if (schema.inferred === true) return 'Inferred';
-  if (schema.format === 'xsd') return 'XSD';
-  return 'JSON';
-}
-
-function deriveDataFormat(schema: SchemaMetadata): FilterDataFormat {
-  if (schema.dataFormat != null) {
-    return schema.dataFormat.toUpperCase() as FilterDataFormat;
-  }
-
-  const sourceKind = schema.sourceKind
-    ?? (schema.inferred ? (schema.format === 'xsd' ? 'inferred_from_xml' : 'inferred_from_json') : undefined)
-    ?? (schema.format === 'xsd' ? 'xsd' : 'json_schema');
-
-  return schemaDataFormatFromSourceKind(sourceKind).toUpperCase() as FilterDataFormat;
-}
-
-function deriveOwnership(schema: SchemaMetadata): FilterOwnership {
-  return normalizeSchemaOwnership({
-    ownership: schema.ownership,
-    origin: schema.origin,
-  });
-}
-
-function deriveStatus(schema: SchemaMetadata): FilterStatus {
-  const normalized = normalizeSchemaStatus({
-    status: schema.status,
-    inferred: schema.inferred,
-    reviewedAt: schema.reviewedAt,
-  });
-
-  if (normalized === 'processing' || normalized === 'needs_review' || normalized === 'error') {
-    return normalized;
-  }
-
-  return 'ready';
-}
+import { queryKeys, queryPolicies } from '@/lib/query';
 
 const VIEW_MODE_STORAGE_KEY = 'keyra.schemas.viewMode';
 
@@ -95,10 +36,6 @@ function readStoredViewMode(): SchemaLibraryViewMode {
   return 'card';
 }
 
-// ---------------------------------------------------------------------------
-// Defaults
-// ---------------------------------------------------------------------------
-
 const DEFAULT_FILTERS: SchemaLibraryFilters = {
   search: '',
   ownerships: [],
@@ -111,14 +48,10 @@ const DEFAULT_SORT: SchemaLibrarySort = {
   direction: 'asc',
 };
 
-// ---------------------------------------------------------------------------
-// Return type
-// ---------------------------------------------------------------------------
+const EMPTY_ITEMS: SchemaLibraryItem[] = [];
 
 export interface UseSchemaLibraryResult {
-  /** Full enriched list before filtering */
   items: SchemaLibraryItem[];
-  /** Filtered + sorted list for display */
   filteredItems: SchemaLibraryItem[];
   status: 'loading' | 'success' | 'error';
   error: string | null;
@@ -129,7 +62,6 @@ export interface UseSchemaLibraryResult {
   toggleOwnershipFilter: (ownership: FilterOwnership) => void;
   toggleDataFormatFilter: (format: FilterDataFormat) => void;
   toggleStatusFilter: (status: FilterStatus) => void;
-  /** If direction is omitted and the same field is already selected, toggles direction. */
   setSort: (field: SortField, direction?: SortDirection) => void;
   viewMode: SchemaLibraryViewMode;
   setViewMode: (mode: SchemaLibraryViewMode) => void;
@@ -137,151 +69,33 @@ export interface UseSchemaLibraryResult {
   retry: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 export function useSchemaLibrary(): UseSchemaLibraryResult {
   const adapter = useAdapter();
 
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<SchemaLibraryItem[]>([]);
   const [filters, setFilters] = useState<SchemaLibraryFilters>(DEFAULT_FILTERS);
   const [sort, setSort_] = useState<SchemaLibrarySort>(DEFAULT_SORT);
   const [viewMode, setViewModeState] = useState<SchemaLibraryViewMode>(readStoredViewMode);
-  const [fetchKey, setFetchKey] = useState(0);
 
-  // ---------------------------------------------------------------------------
-  // Data loading
-  // ---------------------------------------------------------------------------
+  const schemasQuery = useQuery({
+    queryKey: queryKeys.schemas.all(),
+    staleTime: queryPolicies.schemasList.staleTime,
+    gcTime: queryPolicies.schemasList.gcTime,
+    retry: false,
+    queryFn: () => loadSchemaLibraryData(adapter),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
+  const items = schemasQuery.data?.items ?? EMPTY_ITEMS;
 
-    async function load() {
-      setStatus('loading');
-      setError(null);
-      setItems([]);
+  const status: 'loading' | 'success' | 'error' =
+    !schemasQuery.data && schemasQuery.isPending
+      ? 'loading'
+      : schemasQuery.isError && !schemasQuery.data
+        ? 'error'
+        : 'success';
 
-      try {
-        // Parallel load of schemas + projects
-        const [schemas, projectList] = await Promise.all([
-          adapter.listSchemas(),
-          adapter.listProjects(),
-        ]);
+  const error = schemasQuery.error instanceof Error ? schemasQuery.error.message : null;
 
-        if (cancelled) return;
-
-        // N+1: fetch full project details to access schemaRefs
-        const projectDetails = await Promise.all(
-          projectList.map((p) => adapter.getProject(p.projectId)),
-        );
-
-        if (cancelled) return;
-
-        // Build a map: schemaId → { count, names }
-        const usageMap = new Map<string, { count: number; names: string[] }>();
-        for (const project of projectDetails) {
-          for (const ref of project.schemaRefs) {
-            const existing = usageMap.get(ref.schemaId);
-            if (existing) {
-              existing.count += 1;
-              existing.names.push(project.name);
-            } else {
-              usageMap.set(ref.schemaId, { count: 1, names: [project.name] });
-            }
-          }
-        }
-
-        // Best-effort field-count backfill for schemas whose list metadata is stale.
-        // This keeps Schema Library counts aligned with Schema Detail for ready/reviewed schemas.
-        const parsedCountBySchemaId = new Map<string, number>();
-        const countBackfillCandidates = schemas.filter((schema) => {
-          const metadataFieldCount = schema.fieldCount > 0
-            ? schema.fieldCount
-            : (schema as { totalFieldCount?: number }).totalFieldCount ?? 0;
-          const normalizedStatus = deriveStatus(schema);
-          return metadataFieldCount <= 0 && normalizedStatus !== 'processing';
-        });
-
-        await Promise.all(
-          countBackfillCandidates.map(async (schema) => {
-            try {
-              const detail = await adapter.getSchema(schema.schemaId);
-              const content = detail.content;
-
-              const parsed = schema.inferred
-                ? parseInferredSchema(
-                  typeof content === 'string' ? content : JSON.stringify(content),
-                  schema.format === 'xsd' ? 'xml' : 'json',
-                )
-                : schema.format === 'xsd'
-                  ? parseXsd(typeof content === 'string' ? content : JSON.stringify(content))
-                  : parseJsonSchema(content);
-
-              if (parsed.totalFieldCount > 0) {
-                parsedCountBySchemaId.set(schema.schemaId, parsed.totalFieldCount);
-              }
-            } catch {
-              // Non-fatal: keep metadata fallback when parse/load fails.
-            }
-          }),
-        );
-
-        // Enrich each schema into a SchemaLibraryItem
-        const enriched: SchemaLibraryItem[] = schemas.map((schema) => {
-          const usage = usageMap.get(schema.schemaId);
-          return {
-            schemaId: schema.schemaId,
-            name: schema.name,
-            description: schema.description,
-            disambiguator: schema.disambiguator,
-            origin: schema.origin,
-            ownership: deriveOwnership(schema),
-            dataFormat: deriveDataFormat(schema),
-            status: deriveStatus(schema),
-            format: schema.format,
-            displayFormat: deriveDisplayFormat(schema),
-            fieldCount: parsedCountBySchemaId.get(schema.schemaId)
-              ?? (schema.fieldCount > 0
-                ? schema.fieldCount
-                : (schema as { totalFieldCount?: number }).totalFieldCount ?? 0),
-            syncStatus: deriveSyncStatus(schema),
-            projectCount: usage?.count ?? 0,
-            projectNames: usage?.names ?? [],
-            updatedAt: schema.updatedAt,
-            createdAt: schema.createdAt,
-          };
-        });
-
-        setItems(enriched);
-        setStatus('success');
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load schemas');
-        setStatus('error');
-      }
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [adapter, fetchKey]);
-
-  // ---------------------------------------------------------------------------
-  // Derived: filtered + sorted
-  // ---------------------------------------------------------------------------
-
-  const filteredItems = useMemo(
-    () => sortSchemas(filterSchemas(items, filters), sort),
-    [items, filters, sort],
-  );
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
+  const filteredItems = useMemo(() => sortSchemas(filterSchemas(items, filters), sort), [items, filters, sort]);
 
   const setSearch = useCallback((term: string) => {
     setFilters((f) => ({ ...f, search: term }));
@@ -305,12 +119,12 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
     }));
   }, []);
 
-  const toggleStatusFilter = useCallback((status: FilterStatus) => {
+  const toggleStatusFilter = useCallback((statusValue: FilterStatus) => {
     setFilters((f) => ({
       ...f,
-      statuses: f.statuses.includes(status)
-        ? f.statuses.filter((value) => value !== status)
-        : [...f.statuses, status],
+      statuses: f.statuses.includes(statusValue)
+        ? f.statuses.filter((value) => value !== statusValue)
+        : [...f.statuses, statusValue],
     }));
   }, []);
 
@@ -319,10 +133,11 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
       if (direction != null) {
         return { field, direction };
       }
-      // Toggle direction if same field; default asc for new field
+
       if (current.field === field) {
         return { field, direction: current.direction === 'asc' ? 'desc' : 'asc' };
       }
+
       return { field, direction: 'asc' };
     });
   }, []);
@@ -342,8 +157,8 @@ export function useSchemaLibrary(): UseSchemaLibraryResult {
   }, []);
 
   const retry = useCallback(() => {
-    setFetchKey((k) => k + 1);
-  }, []);
+    void schemasQuery.refetch();
+  }, [schemasQuery]);
 
   return {
     items,

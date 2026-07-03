@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpAdapter } from './http-adapter';
 
-import { createAdapter, LocalStorageAdapter } from '@/lib/api';
+import { createAdapter, getAdapterIdentity, LocalStorageAdapter, normalizeApiUrl } from '@/lib/api';
 
 describe('createAdapter', () => {
   afterEach(() => {
@@ -49,5 +49,20 @@ describe('createAdapter', () => {
 
     const adapter = createAdapter('http://localhost:4000');
     expect(adapter).toBeInstanceOf(HttpAdapter);
+  });
+});
+
+describe('bootstrap identity helpers', () => {
+  it('returns adapter identity from apiUrl presence', () => {
+    expect(getAdapterIdentity('')).toBe('local-storage');
+    expect(getAdapterIdentity('   ')).toBe('local-storage');
+    expect(getAdapterIdentity('http://localhost:4000')).toBe('http');
+  });
+
+  it('normalizes api url and trims trailing slashes', () => {
+    expect(normalizeApiUrl('')).toBeNull();
+    expect(normalizeApiUrl('   ')).toBeNull();
+    expect(normalizeApiUrl('http://localhost:4000/')).toBe('http://localhost:4000');
+    expect(normalizeApiUrl('http://localhost:4000///')).toBe('http://localhost:4000');
   });
 });

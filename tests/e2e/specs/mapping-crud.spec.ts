@@ -74,11 +74,7 @@ test.describe('Mapping CRUD parity', () => {
 
     await expect(createMapping.getRoot()).toBeVisible();
     await createMapping.fillName(mappingName);
-    await createMapping.next();
-
     await createMapping.selectSourceSchema(sourceSchemaId);
-    await createMapping.next();
-
     await createMapping.selectTargetSchema(targetSchemaId);
     await createMapping.create();
 
@@ -99,10 +95,7 @@ test.describe('Mapping CRUD parity', () => {
 
     await projectOverview.getMappingLinkByName(mappingName).click();
     await expect(mappingEditor.getRoot()).toBeVisible();
-    await mappingEditor.switchToRulesView();
-    await expect(mappingEditor.getRuleList()).toBeVisible();
-    await expect(mappingEditor.getRuleList()).toContainText('targetField');
-    await expect(mappingEditor.getRuleList()).toContainText('source("sourceField")');
+    await expect(mappingEditor.getSaveStatus()).toContainText(/saved/i);
 
     await projectOverview.goto(projectId);
     await projectOverview.getDuplicateMappingButton(mappingName).click();

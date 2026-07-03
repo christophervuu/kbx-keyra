@@ -1,13 +1,12 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  resetEditorPanelLayoutPreference,
-} from '@/features/mappings/lib';
-import { AdapterProvider } from '@/lib/api';
+import { resetEditorPanelLayoutPreference } from '@/features/mappings/lib/editor-preferences';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { ValidationResult as EngineValidationResult } from '@/lib/engine';
 import type { MappingConfig, SchemaDetail } from '@/lib/types/domain';
@@ -294,6 +293,27 @@ function createMockAdapter(overrides?: Partial<ApiAdapter>): ApiAdapter {
     querySchemaNodes: vi.fn(),
     listActivity: vi.fn(),
     previewOnServer: vi.fn(),
+    listProjectValueTables: vi.fn().mockResolvedValue([]),
+    getProjectValueTable: vi.fn(),
+    getProjectValueTableRevision: vi.fn(),
+    createProjectValueTable: vi.fn(),
+    createProjectValueTableRevision: vi.fn(),
+    duplicateProjectValueTable: vi.fn(),
+    archiveProjectValueTable: vi.fn(),
+    deleteProjectValueTable: vi.fn(),
+    listProjectValueTableUsage: vi.fn(),
+    getProjectValueTableRevisionDiff: vi.fn(),
+    exportProjectValueTableCsv: vi.fn(),
+    importProjectValueTableCsv: vi.fn(),
+    resolveProjectValueTableReference: vi.fn(),
+    listGlobalValueMaps: vi.fn().mockResolvedValue([]),
+    createGlobalValueMap: vi.fn(),
+    getGlobalValueMap: vi.fn(),
+    listGlobalValueMapRevisions: vi.fn(),
+    createGlobalValueMapRevision: vi.fn(),
+    getGlobalValueMapRevision: vi.fn(),
+    archiveGlobalValueMap: vi.fn(),
+    getGlobalValueMapUsage: vi.fn(),
     listMappingVersions: vi.fn().mockResolvedValue([]),
     getMappingVersion: vi.fn(),
     listVersions: vi.fn().mockResolvedValue([]),
@@ -323,6 +343,8 @@ function renderWithRouter(
   routes: Array<{ path: string; element: ReactNode }>,
   initialEntries: string[] = ['/projects/project-1/mappings/mapping-1'],
 ) {
+  const queryClient = createQueryClient();
+  activeQueryClients.push(queryClient);
   const router = createMemoryRouter(routes, {
     initialEntries,
     future: {
@@ -332,18 +354,22 @@ function renderWithRouter(
   });
 
   const rendered = render(
-    <AdapterProvider adapter={adapter}>
-      <RouterProvider
-        router={router}
-        future={{
-          v7_startTransition: true,
-        }}
-      />
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <RouterProvider
+          router={router}
+          future={{
+            v7_startTransition: true,
+          }}
+        />
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 
   return { ...rendered, router };
 }
+
+const activeQueryClients: ReturnType<typeof createQueryClient>[] = [];
 
 function createValidationErrorResult(targetPath: string): EngineValidationResult {
   return {
@@ -362,7 +388,16 @@ function createValidationErrorResult(targetPath: string): EngineValidationResult
 
 describe('MappingEditor AI Validation integration', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    for (const queryClient of activeQueryClients) {
+      queryClient.clear();
+    }
+    activeQueryClients.length = 0;
   });
 
   it('changes layout from editor More menu, persists preference, and preserves row-editing panels', async () => {
@@ -1031,6 +1066,111 @@ describe('MappingEditor AI Validation integration', () => {
     expect(screen.getByTestId('output-test-lab-handoff-note')).toHaveTextContent(
       'Open Test Lab. It may load saved or default context instead of this exact Output state.',
     );
+  });
+
+  it('shows non-destructive newer-saved notice while dirty and can load latest saved revision on demand', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ...MOCK_CONFIG,
+          rules: [],
+          version: 3,
+        })
+        .mockResolvedValueOnce({
+          ...MOCK_CONFIG,
+          rules: [{ target: 'orderId', type: 'string', expression: 'source("orderId")' }],
+          version: 4,
+        })
+        .mockResolvedValueOnce({
+          ...MOCK_CONFIG,
+          rules: [{ target: 'orderId', type: 'string', expression: 'source("orderId")' }],
+          version: 4,
+        }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-orderId'));
+    fireEvent.click(screen.getByTestId('source-field-orderId'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('save-button')).toHaveTextContent('Save *');
+    });
+
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-none'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mapping-newer-saved-notice')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mapping-newer-saved-refresh'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mapping-newer-saved-notice')).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-button')).toHaveTextContent('Save');
+    });
+  });
+
+  it('allows dismissing newer-saved notice while preserving local unsaved draft', async () => {
+    const adapter = createMockAdapter({
+      getMapping: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ...MOCK_CONFIG,
+          rules: [],
+          version: 3,
+        })
+        .mockResolvedValueOnce({
+          ...MOCK_CONFIG,
+          rules: [{ target: 'orderId', type: 'string', expression: 'source("orderId")' }],
+          version: 4,
+        }),
+      getSchema: vi.fn().mockImplementation((id: string) => {
+        if (id === 'source-schema-1') return Promise.resolve(SIMPLE_SOURCE_SCHEMA);
+        if (id === 'target-schema-1') return Promise.resolve(SIMPLE_TARGET_SCHEMA);
+        return Promise.reject(new Error(`Schema ${id} not found`));
+      }),
+    });
+
+    renderPage(adapter);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('editor-loading')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('target-field-row-orderId'));
+    fireEvent.click(screen.getByTestId('source-field-orderId'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('save-button')).toHaveTextContent('Save *');
+    });
+
+    fireEvent.click(screen.getByTestId('sample-picker-trigger'));
+    fireEvent.click(screen.getByTestId('sample-picker-option-none'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mapping-newer-saved-notice')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mapping-newer-saved-dismiss'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mapping-newer-saved-notice')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('save-button')).toHaveTextContent('Save *');
   });
 
 });

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -11,8 +12,18 @@ import { useProjectOverview } from '../hooks/use-project-overview';
 
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { useRecentActivity } from '@/features/home/hooks/use-recent-activity';
+import {
+  buildTargetTypeByPathFromSchema,
+  getErrorInfo,
+  normalizeRuleTypesByTargetSchema,
+  tryParseSchema,
+} from '@/features/mappings/hooks/use-mapping-editor';
 import { useAdapter } from '@/lib/api';
 import type { MappingImportSummary } from '@/lib/api/types';
+import {
+  prefetchDeploymentPageByIntent,
+  prefetchMappingEditorByIntent,
+} from '@/lib/query';
 import { PATHS } from '@/routes/paths';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +32,7 @@ import { PATHS } from '@/routes/paths';
 
 function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [showLinkedSchemasDialog, setShowLinkedSchemasDialog] = useState(false);
   const [unlinkingSchemaId, setUnlinkingSchemaId] = useState<string | null>(null);
@@ -37,6 +49,9 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
 
   const {
     loadState,
+    isRefreshing,
+    refreshError,
+    lastUpdatedAt,
     project,
     schemas,
     mappings,
@@ -199,6 +214,48 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
     return acc;
   }, {});
 
+  const refreshMeta = (
+    <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300" data-testid="project-overview-refresh-status">
+      {isRefreshing
+        ? 'Refreshing project overview…'
+        : lastUpdatedAt
+          ? `Last updated ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+          : 'Loaded'}
+    </div>
+  );
+
+  const refreshWarning = refreshError ? (
+    <div
+      role="status"
+      className="rounded-md border border-amber-800 bg-amber-950/20 px-3 py-2 text-sm text-amber-200"
+      data-testid="project-overview-refresh-warning"
+    >
+      Could not refresh the latest project data. Showing cached content.
+      <button
+        type="button"
+        className="ml-2 rounded border border-amber-700/60 px-2 py-0.5 text-xs text-amber-200 hover:bg-amber-900/30"
+        onClick={retry}
+      >
+        Retry refresh
+      </button>
+    </div>
+  ) : null;
+
+  const handleMappingIntent = (
+    input: { projectId: string; mappingId: string },
+    reason: 'hover' | 'focus',
+  ) => {
+    const { mappingId } = input;
+    void prefetchMappingEditorByIntent(queryClient, adapter, mappingId, {
+      parseTargetSchema: tryParseSchema,
+      buildTargetTypeByPathFromSchema,
+      normalizeRuleTypesByTargetSchema,
+      getErrorInfo,
+      debugRuleTypeLog: () => undefined,
+    }, reason).catch(() => undefined);
+    void prefetchDeploymentPageByIntent(queryClient, adapter, mappingId, reason).catch(() => undefined);
+  };
+
   return (
     <div data-testid="page-project-overview">
       <div className="flex flex-col gap-6">
@@ -220,6 +277,9 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
           onImportMappings={canImportMappings ? handleImportMappings : undefined}
           isImportingMappings={isImportingMappings}
         />
+
+        {refreshMeta}
+        {refreshWarning}
 
         {mappingImportSummary ? (
           <div
@@ -250,6 +310,7 @@ function ProjectOverviewPageInner({ projectId }: { projectId: string }) {
             onCreateMapping={handleCreateMapping}
             onDuplicate={duplicateMappingAction}
             onDelete={deleteMappingAction}
+            onMappingIntent={handleMappingIntent}
           />
         </div>
       </div>

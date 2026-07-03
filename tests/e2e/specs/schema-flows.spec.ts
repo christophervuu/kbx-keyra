@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '../fixtures/base';
+import { CreateMappingPage } from '../pages/create-mapping.page';
 import { ProjectOverviewPage } from '../pages/project-overview.page';
 import { SchemaDetailPage } from '../pages/schema-detail.page';
 import { SchemaUploadPage } from '../pages/schema-upload.page';
@@ -31,6 +32,7 @@ test.describe('Schema upload/load parity', () => {
     });
 
     const projectOverview = new ProjectOverviewPage(page);
+    const createMapping = new CreateMappingPage(page);
     const schemaUpload = new SchemaUploadPage(page);
     const schemaDetail = new SchemaDetailPage(page);
 
@@ -41,7 +43,10 @@ test.describe('Schema upload/load parity', () => {
     await expect(projectOverview.getRoot()).toBeVisible();
     await expect(projectOverview.getSchemaEmptyState()).toBeVisible();
 
-    await projectOverview.openSchemaUpload();
+    await projectOverview.getCreateMappingButton().click();
+    await expect(createMapping.getRoot()).toBeVisible();
+
+    await page.getByTestId('add-source-schema-button').click();
     await expect(schemaUpload.getDialog()).toBeVisible();
 
     const fixturePath = path.resolve(
@@ -53,9 +58,10 @@ test.describe('Schema upload/load parity', () => {
     await schemaUpload.submit();
 
     await expect(schemaUpload.getDialog()).toHaveCount(0);
-    await expect(projectOverview.getSchemaViewButton(uploadedSchemaName)).toBeVisible();
+    await expect(page.getByTestId('schema-select-source-schema')).toHaveValue(/.+/);
 
-    await projectOverview.getSchemaViewButton(uploadedSchemaName).click();
+    await page.goto('/schemas');
+    await page.getByTestId('schema-library-card').filter({ hasText: uploadedSchemaName }).first().click();
     await expect(schemaDetail.getRoot()).toBeVisible();
     await expect(schemaDetail.getMetadataSection()).toContainText(uploadedSchemaName);
     await expect(schemaDetail.getTreeSection()).toBeVisible();
@@ -64,6 +70,7 @@ test.describe('Schema upload/load parity', () => {
 
     await projectOverview.goto(projectId);
     await expect(projectOverview.getRoot()).toBeVisible();
-    await expect(projectOverview.getSchemaViewButton(uploadedSchemaName)).toBeVisible();
+    await projectOverview.openSchemaUpload();
+    await expect(projectOverview.getSchemaCardByName(uploadedSchemaName)).toBeVisible();
   });
 });

@@ -1,12 +1,15 @@
+import { QueryClientProvider } from '@tanstack/react-query';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import { AdapterProvider } from '@/lib/api';
+import { deriveWorstStatus } from '../dashboard-query-data';
+import { useDashboardData } from '../use-dashboard-data';
+
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectMetadata, SchemaMetadata } from '@/lib/types/domain';
 
-import { deriveWorstStatus, useDashboardData } from '../use-dashboard-data';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -49,6 +52,14 @@ function makeSchemaMetadata(id: string): SchemaMetadata {
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +110,13 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function makeWrapper(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
   return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(AdapterProvider, { adapter }, children);
+    return React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(AdapterProvider, { adapter }, children),
+    );
   };
 }
 
@@ -392,5 +408,111 @@ describe('useDashboardData', () => {
     expect(listMappings).toHaveBeenCalledWith('p-1');
     expect(listMappings).toHaveBeenCalledWith('p-2');
     expect(listMappings).toHaveBeenCalledWith('p-3');
+  });
+
+  it('dedupes concurrent identical dashboard consumers to one adapter request', async () => {
+    const listProjects = vi.fn().mockResolvedValue([makeProjectMeta({ projectId: 'p-1' })]);
+    const listSchemas = vi.fn().mockResolvedValue([]);
+    const listMappings = vi.fn().mockResolvedValue([]);
+
+    const adapter = createMockAdapter({
+      listProjects,
+      listSchemas,
+      listMappings,
+    });
+
+    const queryClient = createQueryClient();
+    function SharedWrapper({ children }: { children: React.ReactNode }) {
+      return React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(AdapterProvider, { adapter }, children),
+      );
+    }
+
+    const first = renderHook(() => useDashboardData(), { wrapper: SharedWrapper });
+    const second = renderHook(() => useDashboardData(), { wrapper: SharedWrapper });
+
+    await waitFor(() => {
+      expect(first.result.current.loadState).toBe('loaded');
+      expect(second.result.current.loadState).toBe('loaded');
+    });
+
+    expect(listProjects).toHaveBeenCalledTimes(1);
+    expect(listSchemas).toHaveBeenCalledTimes(1);
+    expect(listMappings).toHaveBeenCalledTimes(1);
+  });
+
+  it('Strict Mode does not create concurrent duplicate dashboard requests for same key', async () => {
+    const projectsDeferred = createDeferred<ProjectMetadata[]>();
+    const schemasDeferred = createDeferred<SchemaMetadata[]>();
+
+    let projectsInFlight = 0;
+    let maxProjectsInFlight = 0;
+    let schemasInFlight = 0;
+    let maxSchemasInFlight = 0;
+
+    const listProjects = vi.fn().mockImplementation(async () => {
+      projectsInFlight += 1;
+      maxProjectsInFlight = Math.max(maxProjectsInFlight, projectsInFlight);
+      try {
+        return await projectsDeferred.promise;
+      } finally {
+        projectsInFlight -= 1;
+      }
+    });
+
+    const listSchemas = vi.fn().mockImplementation(async () => {
+      schemasInFlight += 1;
+      maxSchemasInFlight = Math.max(maxSchemasInFlight, schemasInFlight);
+      try {
+        return await schemasDeferred.promise;
+      } finally {
+        schemasInFlight -= 1;
+      }
+    });
+
+    const adapter = createMockAdapter({
+      listProjects,
+      listSchemas,
+      listMappings: vi.fn().mockResolvedValue([]),
+    });
+
+    const queryClient = createQueryClient();
+
+    function Consumer() {
+      useDashboardData();
+      return null;
+    }
+
+    render(
+      React.createElement(
+        React.StrictMode,
+        undefined,
+        React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          React.createElement(
+            AdapterProvider,
+            { adapter },
+            React.createElement(Consumer),
+            React.createElement(Consumer),
+          ),
+        ),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(listProjects).toHaveBeenCalledTimes(1);
+      expect(listSchemas).toHaveBeenCalledTimes(1);
+    });
+
+    projectsDeferred.resolve([]);
+    schemasDeferred.resolve([]);
+
+    await waitFor(() => {
+      expect(maxProjectsInFlight).toBe(1);
+      expect(maxSchemasInFlight).toBe(1);
+    });
   });
 });

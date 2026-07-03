@@ -1,5 +1,10 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  loadMappingEditorServerData,
+  type MappingEditorServerData,
+} from './mapping-editor-query-data';
 import { useAiValidation } from './use-ai-validation';
 import type { AiValidationState } from './use-ai-validation';
 import { useEngineValidation } from './use-engine-validation';
@@ -9,6 +14,11 @@ import type { UnsavedChangeSummary } from '../types';
 
 import { parseInferredSchema, parseJsonSchema, parseXsd, treeToJsonSchema } from '@/features/schemas';
 import { useAdapter } from '@/lib/api';
+import {
+  cancelMappingDetailReads,
+  queryKeys,
+  queryPolicies,
+} from '@/lib/query';
 import type { MappingConfig, MappingConfigOptions, MappingRule, MappingVersionEntry, ParsedSchema, SchemaDetail } from '@/lib/types/domain';
 import type { ValidationSampleDataInput } from '@/lib/types/domain';
 
@@ -136,6 +146,8 @@ export interface MappingEditorActions {
   discardDraftRestore: () => void;
   /** Retry a failed load */
   retry: () => void;
+  /** Explicitly reconcile local state to latest saved server mapping. */
+  refreshToLatestSaved: () => Promise<void>;
   /**
    * Returns whether the editor can navigate away without data loss.
    * `reason` is null when navigation is safe.
@@ -157,6 +169,12 @@ export interface UseMappingEditorResult {
   loadState: EditorLoadState;
   /** Error message when loadState is 'error' */
   loadError: string | null;
+  /** True when a background saved-mapping refresh is currently running with cached data present. */
+  isRefreshing: boolean;
+  /** Non-blocking refresh error when cached mapping exists. */
+  refreshError: string | null;
+  /** Last successful canonical mapping refresh timestamp (ISO). */
+  lastUpdatedAt: string | null;
 
   /** Mapping display name */
   mappingName: string;
@@ -169,6 +187,8 @@ export interface UseMappingEditorResult {
 
   /** Current rules array (local, mutable) */
   rules: readonly MappingRule[];
+  /** Last-saved canonical rules snapshot used for unsaved-diff overlays. */
+  savedRules: readonly MappingRule[];
 
   /** Current config options (local, mutable — potentially unsaved) */
   configOptions: MappingConfigOptions;
@@ -217,6 +237,10 @@ export interface UseMappingEditorResult {
    * Updated after each successful save.
    */
   currentRevision: number;
+  /** Latest canonical server revision observed from mapping detail query. */
+  latestSavedRevision: number | null;
+  /** True when server has newer saved revision while local unsaved draft exists. */
+  hasNewerSavedRevision: boolean;
   /**
    * The latest version (milestone) number for this mapping, or null if no version has been created.
    * Updated after a successful createVersion() call.
@@ -316,7 +340,7 @@ function debugRuleTypeLog(message: string, payload?: unknown): void {
  * Try parsing a schema's content into a ParsedSchema for tree display.
  * Returns null if parsing fails (graceful degradation per AE-10).
  */
-function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
+export function tryParseSchema(schema: SchemaDetail): ParsedSchema | null {
   try {
     if (schema.metadata.inferred) {
       const contentStr =
@@ -408,7 +432,7 @@ function parseJsonContentIfString(content: unknown): unknown {
   }
 }
 
-function getErrorInfo(error: unknown): { message: string; code?: string; statusCode?: number } {
+export function getErrorInfo(error: unknown): { message: string; code?: string; statusCode?: number } {
   const fallback = { message: 'Schema load failed' };
 
   if (error instanceof Error) {
@@ -466,7 +490,7 @@ function collectParsedTargetNodeTypes(
   }
 }
 
-function buildTargetTypeByPathFromSchema(
+export function buildTargetTypeByPathFromSchema(
   parsedTargetSchema: ParsedSchema | null,
   targetSchema: SchemaDetail | null,
 ): ReadonlyMap<string, MappingRule['type']> {
@@ -520,7 +544,7 @@ function resolveTargetType(
   return targetTypeByPath.get(targetPath) ?? canonicalTargetTypeByPath.get(canonicalizeTargetPath(targetPath));
 }
 
-function normalizeRuleTypesByTargetSchema(
+export function normalizeRuleTypesByTargetSchema(
   rules: readonly MappingRule[],
   targetTypeByPath: ReadonlyMap<string, MappingRule['type']>,
 ): readonly MappingRule[] {
@@ -654,16 +678,13 @@ export function useMappingEditor(
   onRuleApplied?: () => void,
 ): UseMappingEditorResult {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
   const {
     state: aiValidationState,
     run: runAiValidationInternal,
     retry: retryAiValidationInternal,
     reset: resetAiValidationInternal,
   } = useAiValidation();
-
-  // Load states
-  const [loadState, setLoadState] = useState<EditorLoadState>('loading');
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Loaded data
   const [config, setConfig] = useState<MappingConfig | null>(null);
@@ -697,6 +718,28 @@ export function useMappingEditor(
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaveBlocked, setIsSaveBlocked] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- deliberate state reset on mappingId switch */
+  useEffect(() => {
+    setConfig(null);
+    setSourceSchema(null);
+    setTargetSchema(null);
+    setEnrichmentSchemasByAlias({});
+    setSchemaLoadWarnings([]);
+    setRules([]);
+    setLastSavedRules([]);
+    setConfigOptions({});
+    setLastSavedConfigOptions({});
+    setVersion(1);
+    setCurrentRevision(0);
+    setCurrentVersion(null);
+    setDraftRules(new Map());
+    setHasDraft(false);
+    setDraftRestoreState({ status: 'none' });
+    setSaveState('idle');
+    setSaveError(null);
+  }, [mappingId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   // Keep onRuleApplied callback in a ref so applyRule doesn't need it as a dep
   const onRuleAppliedRef = useRef<(() => void) | undefined>(onRuleApplied);
   useEffect(() => {
@@ -707,209 +750,149 @@ export function useMappingEditor(
   const saveInProgressRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // ---------------------------------------------------------------------------
-  // Load mapping config and schemas on mount
-  // ---------------------------------------------------------------------------
-
-  const loadData = useCallback(async () => {
-    setLoadState('loading');
-    setLoadError(null);
-
-    try {
-      const mappingConfig = await adapter.getMapping(mappingId);
-      debugRuleTypeLog('mapping config schema refs snapshot', {
-        sourceSchemaRef: mappingConfig.sourceSchemaRef ?? null,
-        targetSchemaRef: mappingConfig.targetSchemaRef ?? null,
-        enrichmentSources: mappingConfig.enrichmentSources ?? [],
-      });
-
-      if (!mountedRef.current) return;
-
-      // Check for a local autosaved draft (FS-063 Q4/Q5)
-      try {
-        const storedDraftRaw = localStorage.getItem(`keyra:draft:${mappingId}`);
-        if (storedDraftRaw) {
-          const stored = JSON.parse(storedDraftRaw) as StoredDraft;
-          setHasDraft(true);
-          if (stored.baseRevision >= mappingConfig.version) {
-            setDraftRestoreState({ status: 'same-revision', draft: stored.config });
-          } else {
-            setDraftRestoreState({
-              status: 'stale-revision',
-              draft: stored.config,
-              serverRevision: mappingConfig.version,
-            });
-          }
-        } else {
-          setHasDraft(false);
-          setDraftRestoreState({ status: 'none' });
-        }
-      } catch {
-        // If draft parsing fails, ignore silently
-        setHasDraft(false);
-        setDraftRestoreState({ status: 'none' });
-      }
-
-      // Load schemas in parallel (graceful failure per AE-10)
-      // Explicitly skip getSchema() when schemaRef is undefined (schema-optional mappings)
-      const schemaPromises = [
-        mappingConfig.sourceSchemaRef
-          ? adapter.getSchema(mappingConfig.sourceSchemaRef.schemaId)
-          : Promise.reject('no source schema'),
-        mappingConfig.targetSchemaRef
-          ? adapter.getSchema(mappingConfig.targetSchemaRef.schemaId)
-          : Promise.reject('no target schema'),
-      ];
-      const [sourceResult, targetResult] = await Promise.allSettled(schemaPromises);
-
-      if (!mountedRef.current) return;
-
-      const nextSchemaLoadWarnings: UseMappingEditorResult['schemaLoadWarnings'] = [];
-
-      const resolvedSourceSchema = sourceResult.status === 'fulfilled'
-        ? sourceResult.value
-        : null;
-      const resolvedTargetSchema = targetResult.status === 'fulfilled'
-        ? targetResult.value
-        : null;
-      if (sourceResult.status === 'rejected' && mappingConfig.sourceSchemaRef) {
-        const info = getErrorInfo(sourceResult.reason);
-        nextSchemaLoadWarnings.push({
-          role: 'source',
-          schemaId: mappingConfig.sourceSchemaRef.schemaId,
-          code: info.code,
-          statusCode: info.statusCode,
-          message: info.message,
-        });
-        debugRuleTypeLog('source schema load failed', {
-          schemaId: mappingConfig.sourceSchemaRef.schemaId,
-          ...info,
-        });
-      }
-      if (targetResult.status === 'rejected' && mappingConfig.targetSchemaRef) {
-        const info = getErrorInfo(targetResult.reason);
-        nextSchemaLoadWarnings.push({
-          role: 'target',
-          schemaId: mappingConfig.targetSchemaRef.schemaId,
-          code: info.code,
-          statusCode: info.statusCode,
-          message: info.message,
-        });
-        debugRuleTypeLog('target schema load failed', {
-          schemaId: mappingConfig.targetSchemaRef.schemaId,
-          ...info,
-        });
-      }
-      debugRuleTypeLog('loaded target schema detail', {
-        schemaId: resolvedTargetSchema?.metadata.schemaId,
-        format: resolvedTargetSchema?.metadata.format,
-        contentType: typeof resolvedTargetSchema?.content,
-        contentPreview:
-          typeof resolvedTargetSchema?.content === 'string'
-            ? resolvedTargetSchema.content.slice(0, 140)
-            : undefined,
-      });
-      const normalizedRules = normalizeRuleTypesByTargetSchema(
-        mappingConfig.rules,
-        buildTargetTypeByPathFromSchema(
-          resolvedTargetSchema ? tryParseSchema(resolvedTargetSchema) : null,
-          resolvedTargetSchema,
-        ),
-      );
-      const normalizedConfig: MappingConfig = normalizedRules === mappingConfig.rules
-        ? mappingConfig
-        : {
-          ...mappingConfig,
-          rules: normalizedRules,
-        };
-
-      setConfig(normalizedConfig);
-      setRules(normalizedRules);
-      setLastSavedRules(normalizedRules);
-      setConfigOptions(normalizedConfig.config);
-      setLastSavedConfigOptions(normalizedConfig.config);
-      setVersion(normalizedConfig.version);
-      setCurrentRevision(normalizedConfig.version);
-      // Clear any stale drafts on reload
-      setDraftRules(new Map());
-      setEnrichmentSchemasByAlias({});
-      setSchemaLoadWarnings(nextSchemaLoadWarnings);
-
-      setSourceSchema(resolvedSourceSchema);
-      setTargetSchema(resolvedTargetSchema);
-
-      // Load enrichment schemas for alias-scoped input browsing (best-effort).
-      const enrichmentDefs = mappingConfig.enrichmentSources ?? [];
-      const enrichmentSchemaPromises = enrichmentDefs
-        .filter((entry) => typeof entry.schemaId === 'string' && entry.schemaId.trim().length > 0)
-        .map(async (entry) => {
-          try {
-            const schema = await adapter.getSchema(entry.schemaId!);
-            return {
-              alias: entry.alias,
-              schemaId: entry.schemaId!,
-              status: 'fulfilled' as const,
-              schema,
-            };
-          } catch (error) {
-            return {
-              alias: entry.alias,
-              schemaId: entry.schemaId!,
-              status: 'rejected' as const,
-              error,
-            };
-          }
-        });
-
-      if (enrichmentSchemaPromises.length > 0) {
-        const enrichmentResults = await Promise.all(enrichmentSchemaPromises);
-        if (!mountedRef.current) return;
-
-        const next: Record<string, SchemaDetail | null> = {};
-        for (const entry of enrichmentDefs) {
-          next[entry.alias] = null;
-        }
-        for (const result of enrichmentResults) {
-          if (result.status === 'fulfilled') {
-            next[result.alias] = result.schema;
-          } else {
-            const info = getErrorInfo(result.error);
-            nextSchemaLoadWarnings.push({
-              role: 'enrichment',
-              alias: result.alias,
-              schemaId: result.schemaId,
-              code: info.code,
-              statusCode: info.statusCode,
-              message: info.message,
-            });
-            debugRuleTypeLog('enrichment schema load failed', {
-              alias: result.alias,
-              schemaId: result.schemaId,
-              ...info,
-            });
-          }
-        }
-        setEnrichmentSchemasByAlias(next);
-        setSchemaLoadWarnings([...nextSchemaLoadWarnings]);
-      }
-
-      setLoadState('loaded');
-    } catch (err) {
-      if (!mountedRef.current) return;
-      setLoadState('error');
-      setLoadError(err instanceof Error ? err.message : 'Failed to load mapping');
-      setSchemaLoadWarnings([]);
-    }
+  const loadEditorServerData = useCallback(async (): Promise<MappingEditorServerData> => {
+    return loadMappingEditorServerData(adapter, mappingId, {
+      parseTargetSchema: tryParseSchema,
+      buildTargetTypeByPathFromSchema,
+      normalizeRuleTypesByTargetSchema,
+      getErrorInfo,
+      debugRuleTypeLog,
+    });
   }, [adapter, mappingId]);
+
+  const mappingDetailQuery = useQuery<MappingEditorServerData>({
+    queryKey: queryKeys.mappings.detail(mappingId),
+    staleTime: queryPolicies.savedMappingConfig.staleTime,
+    gcTime: queryPolicies.savedMappingConfig.gcTime,
+    retry: false,
+    queryFn: loadEditorServerData,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Unsaved changes detection
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Count of draft entries that differ from their saved state.
+   * A draft entry is "changed" if it differs from the saved rule expression,
+   * or if it's a new addition (no saved rule), or if it's a deletion (empty expr).
+   */
+  const unsavedChangeCount = useMemo(() => {
+    let count = 0;
+    for (const [targetPath, expression] of draftRules) {
+      if (isDraftChanged(targetPath, expression, lastSavedRules)) {
+        count++;
+      }
+    }
+    return count;
+  }, [draftRules, lastSavedRules]);
+
+  const hasUnsavedChanges =
+    unsavedChangeCount > 0
+    || !rulesEqual(rules, lastSavedRules)
+    || !configOptionsEqual(configOptions, lastSavedConfigOptions);
+
+  const applyServerData = useCallback((serverData: MappingEditorServerData, options?: { force?: boolean }) => {
+    const force = options?.force ?? false;
+    const incomingConfig = serverData.mappingConfig;
+    const shouldPreserveDraft = !force && hasUnsavedChanges && incomingConfig.version > currentRevision;
+
+    setSourceSchema(serverData.sourceSchema);
+    setTargetSchema(serverData.targetSchema);
+    setEnrichmentSchemasByAlias(serverData.enrichmentSchemasByAlias);
+    setSchemaLoadWarnings(serverData.schemaLoadWarnings);
+
+    if (shouldPreserveDraft) {
+      return;
+    }
+
+    setConfig(incomingConfig);
+    setRules(incomingConfig.rules);
+    setLastSavedRules(incomingConfig.rules);
+    setConfigOptions(incomingConfig.config);
+    setLastSavedConfigOptions(incomingConfig.config);
+    setVersion(incomingConfig.version);
+    setCurrentRevision(incomingConfig.version);
+    setDraftRules(new Map());
+  }, [
+    currentRevision,
+    hasUnsavedChanges,
+  ]);
 
   useEffect(() => {
     mountedRef.current = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadData intentionally kicks off async request lifecycle on mount
-    void loadData();
     return () => {
       mountedRef.current = false;
     };
-  }, [loadData]);
+  }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- hydrates editor state from canonical query data */
+  useEffect(() => {
+    const data = mappingDetailQuery.data;
+    if (!data || !mountedRef.current) return;
+
+    const incomingRevision = data.mappingConfig.version;
+    const shouldHydrateInitial = config === null;
+    const shouldSyncCleanState = !hasUnsavedChanges && incomingRevision > currentRevision;
+
+    if (shouldHydrateInitial || shouldSyncCleanState) {
+      applyServerData(data);
+    }
+  }, [
+    applyServerData,
+    config,
+    currentRevision,
+    hasUnsavedChanges,
+    mappingDetailQuery.data,
+  ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  /* eslint-disable react-hooks/set-state-in-effect -- draft restore state is derived from persisted localStorage payload */
+  useEffect(() => {
+    const data = mappingDetailQuery.data;
+    if (!data || !mountedRef.current) return;
+
+    try {
+      const storedDraftRaw = localStorage.getItem(`keyra:draft:${mappingId}`);
+      if (storedDraftRaw) {
+        const stored = JSON.parse(storedDraftRaw) as StoredDraft;
+        setHasDraft(true);
+        if (stored.baseRevision >= data.mappingConfig.version) {
+          setDraftRestoreState({ status: 'same-revision', draft: stored.config });
+        } else {
+          setDraftRestoreState({
+            status: 'stale-revision',
+            draft: stored.config,
+            serverRevision: data.mappingConfig.version,
+          });
+        }
+      } else {
+        setHasDraft(false);
+        setDraftRestoreState({ status: 'none' });
+      }
+    } catch {
+      setHasDraft(false);
+      setDraftRestoreState({ status: 'none' });
+    }
+  }, [mappingDetailQuery.data, mappingId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const loadState: EditorLoadState =
+    !mappingDetailQuery.data && mappingDetailQuery.isPending
+      ? 'loading'
+      : (mappingDetailQuery.isError && !mappingDetailQuery.data ? 'error' : 'loaded');
+
+  const loadError = mappingDetailQuery.isError && !mappingDetailQuery.data
+    ? (mappingDetailQuery.error instanceof Error ? mappingDetailQuery.error.message : 'Failed to load mapping')
+    : null;
+
+  const isRefreshing = mappingDetailQuery.isFetching && Boolean(mappingDetailQuery.data);
+  const refreshError = mappingDetailQuery.isError && mappingDetailQuery.data
+    ? (mappingDetailQuery.error instanceof Error ? mappingDetailQuery.error.message : 'Failed to refresh mapping')
+    : null;
+  const lastUpdatedAt = mappingDetailQuery.dataUpdatedAt
+    ? new Date(mappingDetailQuery.dataUpdatedAt).toISOString()
+    : null;
 
   // ---------------------------------------------------------------------------
   // Parsed schemas for UI tree display (memoized)
@@ -999,35 +982,6 @@ export function useMappingEditor(
   );
 
   // ---------------------------------------------------------------------------
-  // Unsaved changes detection
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Count of draft entries that differ from their saved state.
-   * A draft entry is "changed" if it differs from the saved rule expression,
-   * or if it's a new addition (no saved rule), or if it's a deletion (empty expr).
-   */
-  const unsavedChangeCount = useMemo(() => {
-    let count = 0;
-    for (const [targetPath, expression] of draftRules) {
-      if (isDraftChanged(targetPath, expression, lastSavedRules)) {
-        count++;
-      }
-    }
-    return count;
-  }, [draftRules, lastSavedRules]);
-
-  const hasUnsavedChanges = useMemo(() => {
-    // Draft rules that differ from saved state
-    if (unsavedChangeCount > 0) return true;
-    // Direct rule mutations (addRule, updateRule, deleteRule, etc.)
-    if (!rulesEqual(rules, lastSavedRules)) return true;
-    // Config option changes
-    if (!configOptionsEqual(configOptions, lastSavedConfigOptions)) return true;
-    return false;
-  }, [unsavedChangeCount, rules, lastSavedRules, configOptions, lastSavedConfigOptions]);
-
-  // ---------------------------------------------------------------------------
   // Autosave draft to localStorage (FS-063 AE-06)
   // Debounce 5 s after any change; clears on successful save.
   // ---------------------------------------------------------------------------
@@ -1099,6 +1053,8 @@ export function useMappingEditor(
     setSaveState('saving');
     setSaveError(null);
 
+    await cancelMappingDetailReads(queryClient, mappingId);
+
     // Snapshot before optimistic application so failed saves can rollback.
     const snapshot = {
       config,
@@ -1154,7 +1110,7 @@ export function useMappingEditor(
       setConfig(persistedConfig);
       setCurrentRevision(finalRevision);
       setVersion(finalRevision);
-      setLastSavedRules(normalizedMergedRules);
+      setLastSavedRules(persistedConfig.rules);
       setLastSavedConfigOptions(configOptions);
       setSaveState('saved');
       // Clear all drafts — they've been committed to saved rules
@@ -1181,6 +1137,8 @@ export function useMappingEditor(
         });
       }
 
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mappings.detail(mappingId) });
+
       return { noChange: saveResult.noChange };
     } catch (err) {
       if (!mountedRef.current) return undefined;
@@ -1200,7 +1158,21 @@ export function useMappingEditor(
     } finally {
       saveInProgressRef.current = false;
     }
-  }, [config, version, currentRevision, rules, draftRules, configOptions, hasUnsavedChanges, isSaveBlocked, adapter, mappingId, draftKey, targetTypeByPath]);
+  }, [
+    adapter,
+    config,
+    configOptions,
+    currentRevision,
+    draftKey,
+    draftRules,
+    hasUnsavedChanges,
+    isSaveBlocked,
+    mappingId,
+    queryClient,
+    rules,
+    targetTypeByPath,
+    version,
+  ]);
 
   // Keep ref up to date for keyboard handler
   useEffect(() => {
@@ -1440,8 +1412,14 @@ export function useMappingEditor(
   }, [config, version, adapter, mappingId, draftKey, targetTypeByPath]);
 
   const retry = useCallback(() => {
-    void loadData();
-  }, [loadData]);
+    void mappingDetailQuery.refetch();
+  }, [mappingDetailQuery]);
+
+  const refreshToLatestSaved = useCallback(async () => {
+    const refreshed = await mappingDetailQuery.refetch();
+    if (!refreshed.data) return;
+    applyServerData(refreshed.data, { force: true });
+  }, [applyServerData, mappingDetailQuery]);
 
   const setSaveBlocked = useCallback((blocked: boolean) => {
     setIsSaveBlocked(blocked);
@@ -1464,6 +1442,12 @@ export function useMappingEditor(
   const resetAiValidation = useCallback(() => {
     resetAiValidationInternal();
   }, [resetAiValidationInternal]);
+
+  const latestSavedRevision = mappingDetailQuery.data?.mappingConfig.version ?? null;
+  const hasNewerSavedRevision =
+    hasUnsavedChanges
+    && latestSavedRevision !== null
+    && latestSavedRevision > currentRevision;
 
   useEffect(() => {
     resetAiValidationInternal();
@@ -1617,6 +1601,7 @@ export function useMappingEditor(
       acceptDraftRestore,
       discardDraftRestore,
       retry,
+      refreshToLatestSaved,
       canNavigateAway,
       setSaveBlocked,
       runAiValidation,
@@ -1628,7 +1613,7 @@ export function useMappingEditor(
       bulkDelete, bulkDuplicate, pasteRules, updateConfig, restore,
       updateDraft, commitDraft, revertDraft, revertAllDrafts, getDraftExpression,
       getUnsavedChangeSummary, applyRule, save, createVersion, acceptDraftRestore,
-      discardDraftRestore, retry, canNavigateAway,
+      discardDraftRestore, retry, refreshToLatestSaved, canNavigateAway,
       setSaveBlocked, runAiValidation, retryAiValidation, resetAiValidation,
     ],
   );
@@ -1644,9 +1629,14 @@ export function useMappingEditor(
   return {
     loadState,
     loadError,
+    isRefreshing,
+    refreshError,
+    lastUpdatedAt,
     mappingName,
     version,
     currentRevision,
+    latestSavedRevision,
+    hasNewerSavedRevision,
     currentVersion,
     sourceSchemaName,
     targetSchemaName,

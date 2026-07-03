@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 
@@ -8,6 +9,7 @@ import { Button } from '@/components/Button';
 import { parseInferredSchema, parseJsonSchema, parseXsd } from '@/features/schemas';
 import { useIngestionPolling } from '@/features/schemas/hooks/use-ingestion-polling';
 import { useAdapter } from '@/lib/api';
+import { invalidateSchemaDependents } from '@/lib/query';
 import type { SchemaRef } from '@/lib/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -229,6 +231,7 @@ function ContentInfoPanel({ info, testIdPrefix = '' }: ContentInfoPanelProps) {
  */
 export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUploadDialogProps) {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDivElement>(null);
   const prevFocusRef = useRef<HTMLElement | null>(null);
 
@@ -483,6 +486,8 @@ export function SchemaUploadDialog({ open, onClose, onSchemaCreated }: SchemaUpl
         inferred: activeInfo.isInferredFlag,
         source: { type: 'upload' },
       });
+
+      invalidateSchemaDependents(queryClient, created.schemaId);
 
       if (created.status === 'ingesting') {
         // 202 async ingestion path — start polling

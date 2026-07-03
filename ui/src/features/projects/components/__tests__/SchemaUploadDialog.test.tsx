@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -5,7 +6,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { SchemaUploadDialog } from '../SchemaUploadDialog';
 
 import * as ingestionPollingHook from '@/features/schemas/hooks/use-ingestion-polling';
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { SchemaMetadata, SchemaRef } from '@/lib/types/domain';
 
@@ -136,14 +137,18 @@ function renderDialog(
     onSchemaCreated?: (ref: SchemaRef) => Promise<void>;
   } = {},
 ) {
+  const queryClient = createQueryClient();
+
   return render(
-    <AdapterProvider adapter={adapter}>
-      <SchemaUploadDialog
-        open={opts.open ?? true}
-        onClose={opts.onClose ?? vi.fn()}
-        onSchemaCreated={opts.onSchemaCreated ?? vi.fn().mockResolvedValue(undefined)}
-      />
-    </AdapterProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AdapterProvider adapter={adapter}>
+        <SchemaUploadDialog
+          open={opts.open ?? true}
+          onClose={opts.onClose ?? vi.fn()}
+          onSchemaCreated={opts.onSchemaCreated ?? vi.fn().mockResolvedValue(undefined)}
+        />
+      </AdapterProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -847,6 +852,7 @@ describe('SchemaUploadDialog — schema name field', () => {
     await user.click(screen.getByTestId('upload-button'));
 
     await waitFor(() => {
+      expect(createSchema).toHaveBeenCalled();
       expect(createSchema).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'Order Response Schema' }),
       );

@@ -1,7 +1,7 @@
 // SchemaLibraryPage — Assembled Schema Library page (FS-016 T-04)
 
-import { useState } from 'react';
 import { Loader2, Plus } from 'lucide-react';
+import { useState } from 'react';
 
 import { ActiveFilterChips } from './ActiveFilterChips';
 import { SchemaLibraryCard } from './SchemaLibraryCard';
@@ -42,6 +42,12 @@ export function SchemaLibraryPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [addSchemaOpen, setAddSchemaOpen] = useState(false);
+
+  const cachedRefreshMeta = status === 'success' ? (
+    <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300" data-testid="schema-library-refresh-status">
+      Showing cached schemas with background refresh support.
+    </div>
+  ) : null;
 
   async function handleSyncAllCdm() {
     setSyncNotice(null);
@@ -217,6 +223,8 @@ export function SchemaLibraryPage() {
         description="Your schema management hub for CDM and user schemas"
         actions={headerActions}
       />
+
+      {cachedRefreshMeta}
 
       {syncNotice && (
         <div

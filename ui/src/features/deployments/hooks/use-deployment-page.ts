@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo, useState } from 'react';
+
+import {
+  loadDeploymentPageQueryData,
+  type DeploymentPageQueryData,
+} from './deployment-query-data';
 
 import { useAdapter } from '@/lib/api';
 import type {
@@ -7,6 +13,12 @@ import type {
   DeploymentRecord,
   DeploymentSourceType,
 } from '@/lib/api/types';
+import {
+  cancelDeploymentContextReads,
+  invalidateDeploymentDependents,
+  queryKeys,
+  queryPolicies,
+} from '@/lib/query';
 import { toAppError } from '@/lib/state/app-error';
 import type { Environment, MappingVersion } from '@/lib/types';
 
@@ -32,31 +44,24 @@ export interface DeployInput {
 }
 
 export interface UseDeploymentPageResult {
-  /** Selected environment tab */
   environment: DeployTarget;
-  /** Set the active environment */
   setEnvironment: (env: DeployTarget) => void;
 
-  /** Version list — sorted descending */
   versions: readonly MappingVersion[];
-  /** Current deployments per environment, or null while loading */
   currentDeployments: CurrentDeployments | null;
 
-  /** Deployment history for the selected environment */
   deploymentHistory: readonly DeploymentRecord[];
-  /** True while history is loading */
   isHistoryLoading: boolean;
-  /** History load error, or null */
   historyError: DeploymentUiErrorDetails | null;
 
-  /** True while initial data is loading */
   isLoading: boolean;
-  /** Error message, or null */
   error: DeploymentUiErrorDetails | null;
 
-  /** Whether a deploy/promote/rollback action is in progress */
+  isRefreshing: boolean;
+  refreshError: DeploymentUiErrorDetails | null;
+  lastUpdatedAt: string | null;
+
   isDeploying: boolean;
-  /** Feedback message after a deploy/promote/rollback (success or error) */
   deployFeedback:
     | {
       kind: 'success';
@@ -74,17 +79,12 @@ export interface UseDeploymentPageResult {
       artifact?: DeploymentActionArtifactDetails;
     }
     | null;
-  /** Clear the deploy feedback banner */
   clearDeployFeedback: () => void;
 
-  /** Execute a deploy */
   deploy: (input: DeployInput) => Promise<void>;
-  /** Promote the current deployment of fromEnvironment to toEnvironment */
   promote: (fromEnvironment: Environment, toEnvironment: Environment) => Promise<void>;
-  /** Rollback environment to a previous deployment snapshot */
   rollback: (environment: Environment, deploymentSK: string) => Promise<void>;
 
-  /** Refresh all data */
   refresh: () => void;
 }
 
@@ -120,6 +120,9 @@ export interface DeploymentActionArtifactDetails {
   readonly artifactId?: string;
   readonly artifactHash?: string;
 }
+
+const EMPTY_VERSIONS: readonly MappingVersion[] = [];
+const EMPTY_DEPLOYMENT_HISTORY: readonly DeploymentRecord[] = [];
 
 interface OrchestrationErrorDetails {
   readonly orchestrationId?: unknown;
@@ -262,124 +265,85 @@ function parseCdmDeployBlockIssues(error: unknown): readonly CdmDeployBlockUiIss
   return parsed;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
 
   const [environment, setEnvironmentState] = useState<DeployTarget>('SANDBOX');
-  const [versions, setVersions] = useState<readonly MappingVersion[]>([]);
-  const [currentDeployments, setCurrentDeployments] = useState<CurrentDeployments | null>(null);
-  const [deploymentHistory, setDeploymentHistory] = useState<readonly DeploymentRecord[]>([]);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<DeploymentUiErrorDetails | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<DeploymentUiErrorDetails | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployFeedback, setDeployFeedback] = useState<UseDeploymentPageResult['deployFeedback']>(null);
 
-  const mountedRef = useRef(true);
+  const deploymentQueryKey = queryKeys.deployments.context(mappingId);
 
-  // ---------------------------------------------------------------------------
-  // Load history
-  // ---------------------------------------------------------------------------
+  const deploymentQuery = useQuery<DeploymentPageQueryData>({
+    queryKey: deploymentQueryKey,
+    staleTime: queryPolicies.deploymentSummaryContext.staleTime,
+    gcTime: queryPolicies.deploymentSummaryContext.gcTime,
+    retry: false,
+    refetchOnWindowFocus: true,
+    queryFn: () => loadDeploymentPageQueryData(adapter, mappingId),
+  });
 
-  const loadHistory = useCallback(
-    async (env: Environment) => {
-      setIsHistoryLoading(true);
-      setHistoryError(null);
-      try {
-        void env;
-        const records = await adapter.listDeployments(mappingId);
-        if (!mountedRef.current) return;
-        // Sort descending by deployedAt
-        const sorted = [...records].sort(
-          (a, b) => new Date(b.deployedAt).getTime() - new Date(a.deployedAt).getTime(),
-        );
-        setDeploymentHistory(sorted);
-      } catch (err) {
-        if (!mountedRef.current) return;
-        setHistoryError(toDeploymentUiError(err, 'Failed to load history'));
-        setDeploymentHistory([]);
-      } finally {
-        if (mountedRef.current) {
-          setIsHistoryLoading(false);
+  const patchDeploymentData = useCallback(
+    (updater: (current: DeploymentPageQueryData) => DeploymentPageQueryData) => {
+      queryClient.setQueryData<DeploymentPageQueryData | undefined>(deploymentQueryKey, (current) => {
+        if (!current) {
+          return current;
         }
-      }
+
+        return updater(current);
+      });
     },
-    [adapter, mappingId],
+    [deploymentQueryKey, queryClient],
   );
 
-  // ---------------------------------------------------------------------------
-  // Load initial data
-  // ---------------------------------------------------------------------------
+  const isLoading = !deploymentQuery.data && deploymentQuery.isPending;
+  const loadError = deploymentQuery.isError ? toDeploymentUiError(deploymentQuery.error, 'Failed to load deployment data') : null;
+  const error = loadError && !deploymentQuery.data ? loadError : null;
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await adapter.getDeploymentContext(mappingId);
+  const isRefreshing = deploymentQuery.isFetching && Boolean(deploymentQuery.data);
+  const refreshError = loadError && deploymentQuery.data ? loadError : null;
+  const lastUpdatedAt = deploymentQuery.dataUpdatedAt
+    ? new Date(deploymentQuery.dataUpdatedAt).toISOString()
+    : null;
 
-      const [versionList, deployments] = await Promise.all([
-        adapter.listVersions(mappingId),
-        adapter.getCurrentDeployments(mappingId),
-      ]);
-      if (!mountedRef.current) return;
-      setVersions([...versionList].sort((a, b) => b.version - a.version));
-      setCurrentDeployments(deployments);
-    } catch (err) {
-      if (!mountedRef.current) return;
-      setError(toDeploymentUiError(err, 'Failed to load deployment data'));
-    } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
-      }
-    }
-  }, [adapter, mappingId]);
+  const versions = deploymentQuery.data?.versions ?? EMPTY_VERSIONS;
+  const currentDeployments = deploymentQuery.data?.currentDeployments ?? null;
+  const deploymentHistory = deploymentQuery.data?.deploymentHistory ?? EMPTY_DEPLOYMENT_HISTORY;
 
-  useEffect(() => {
-    mountedRef.current = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [load]);
-
-  // Reload history whenever the selected environment changes
-  const setEnvironment = useCallback(
-    (env: Environment) => {
-      setEnvironmentState(env);
-    },
-    [],
-  );
-
-  // Load initial history for DEV on mount
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadHistory('DEV');
-    // Only run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Refresh current deployments (used after mutating actions)
-  // ---------------------------------------------------------------------------
+  const isHistoryLoading = isLoading;
+  const historyError = error;
 
   const refreshCurrentDeployments = useCallback(async () => {
     try {
       const updated = await adapter.getCurrentDeployments(mappingId);
-      if (mountedRef.current) setCurrentDeployments(updated);
+      patchDeploymentData((current) => ({
+        ...current,
+        currentDeployments: updated,
+      }));
     } catch {
       // non-critical
     }
-  }, [adapter, mappingId]);
+  }, [adapter, mappingId, patchDeploymentData]);
 
-  // ---------------------------------------------------------------------------
-  // Deploy
-  // ---------------------------------------------------------------------------
+  const refreshHistory = useCallback(async () => {
+    try {
+      const records = await adapter.listDeployments(mappingId);
+      const sortedHistory = [...records].sort(
+        (a, b) => new Date(b.deployedAt).getTime() - new Date(a.deployedAt).getTime(),
+      );
+      patchDeploymentData((current) => ({
+        ...current,
+        deploymentHistory: sortedHistory,
+      }));
+    } catch {
+      // non-critical
+    }
+  }, [adapter, mappingId, patchDeploymentData]);
+
+  const setEnvironment = useCallback((env: Environment) => {
+    setEnvironmentState(env);
+  }, []);
 
   const deploy = useCallback(
     async (input: DeployInput): Promise<void> => {
@@ -387,7 +351,6 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
       setDeployFeedback(null);
       try {
         const record: DeploymentRecord = await adapter.deployMapping(mappingId, input);
-        if (!mountedRef.current) return;
         const label =
           record.sourceType === 'revision'
             ? `Rev ${record.sourceNumber}`
@@ -404,10 +367,11 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
             artifactHash: record.artifactHash,
           },
         });
-        await refreshCurrentDeployments();
-        void loadHistory(input.environment);
+
+        await cancelDeploymentContextReads(queryClient, mappingId);
+        await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
+        invalidateDeploymentDependents(queryClient, mappingId);
       } catch (err) {
-        if (!mountedRef.current) return;
         const cdmBlockIssues = parseCdmDeployBlockIssues(err);
         const technicalDetails = toDeploymentUiError(err, 'Deploy failed');
         const message = formatErrorMessage(err, 'Deploy failed');
@@ -421,17 +385,17 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           ...details,
         });
       } finally {
-        if (mountedRef.current) {
-          setIsDeploying(false);
-        }
+        setIsDeploying(false);
       }
     },
-    [adapter, mappingId, refreshCurrentDeployments, loadHistory],
+    [
+      adapter,
+      mappingId,
+      queryClient,
+      refreshCurrentDeployments,
+      refreshHistory,
+    ],
   );
-
-  // ---------------------------------------------------------------------------
-  // Promote
-  // ---------------------------------------------------------------------------
 
   const promote = useCallback(
     async (fromEnvironment: Environment, toEnvironment: Environment): Promise<void> => {
@@ -442,7 +406,6 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           fromEnvironment,
           toEnvironment,
         });
-        if (!mountedRef.current) return;
         const label = `v${record.sourceNumber}`;
         setDeployFeedback({
           kind: 'success',
@@ -456,10 +419,11 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
             artifactHash: record.artifactHash,
           },
         });
-        await refreshCurrentDeployments();
-        void loadHistory(toEnvironment);
+
+        await cancelDeploymentContextReads(queryClient, mappingId);
+        await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
+        invalidateDeploymentDependents(queryClient, mappingId);
       } catch (err) {
-        if (!mountedRef.current) return;
         const cdmBlockIssues = parseCdmDeployBlockIssues(err);
         const technicalDetails = toDeploymentUiError(err, 'Promote failed');
         const message = formatErrorMessage(err, 'Promote failed');
@@ -473,17 +437,11 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           ...details,
         });
       } finally {
-        if (mountedRef.current) {
-          setIsDeploying(false);
-        }
+        setIsDeploying(false);
       }
     },
-    [adapter, mappingId, refreshCurrentDeployments, loadHistory],
+    [adapter, mappingId, queryClient, refreshCurrentDeployments, refreshHistory],
   );
-
-  // ---------------------------------------------------------------------------
-  // Rollback
-  // ---------------------------------------------------------------------------
 
   const rollback = useCallback(
     async (env: Environment, deploymentSK: string): Promise<void> => {
@@ -494,7 +452,6 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           environment: env,
           deploymentSK,
         });
-        if (!mountedRef.current) return;
         const label =
           record.sourceType === 'revision'
             ? `Rev ${record.sourceNumber}`
@@ -511,10 +468,11 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
             artifactHash: record.artifactHash,
           },
         });
-        await refreshCurrentDeployments();
-        void loadHistory(env);
+
+        await cancelDeploymentContextReads(queryClient, mappingId);
+        await Promise.all([refreshCurrentDeployments(), refreshHistory()]);
+        invalidateDeploymentDependents(queryClient, mappingId);
       } catch (err) {
-        if (!mountedRef.current) return;
         const technicalDetails = toDeploymentUiError(err, 'Rollback failed');
         const message = formatErrorMessage(err, 'Rollback failed');
         const details = parseOrchestrationDetails(err);
@@ -526,37 +484,62 @@ export function useDeploymentPage(mappingId: string): UseDeploymentPageResult {
           ...details,
         });
       } finally {
-        if (mountedRef.current) {
-          setIsDeploying(false);
-        }
+        setIsDeploying(false);
       }
     },
-    [adapter, mappingId, refreshCurrentDeployments, loadHistory],
+    [adapter, mappingId, queryClient, refreshCurrentDeployments, refreshHistory],
   );
 
   const clearDeployFeedback = useCallback(() => setDeployFeedback(null), []);
 
   const refresh = useCallback(() => {
-    void load();
-    void loadHistory('DEV');
-  }, [load, loadHistory]);
+    void deploymentQuery.refetch();
+  }, [deploymentQuery]);
 
-  return {
-    environment,
-    setEnvironment,
-    versions,
-    currentDeployments,
-    deploymentHistory,
-    isHistoryLoading,
-    historyError,
-    isLoading,
-    error,
-    isDeploying,
-    deployFeedback,
-    clearDeployFeedback,
-    deploy,
-    promote,
-    rollback,
-    refresh,
-  };
+  const result = useMemo<UseDeploymentPageResult>(
+    () => ({
+      environment,
+      setEnvironment,
+      versions,
+      currentDeployments,
+      deploymentHistory,
+      isHistoryLoading,
+      historyError,
+      isLoading,
+      error,
+      isRefreshing,
+      refreshError,
+      lastUpdatedAt,
+      isDeploying,
+      deployFeedback,
+      clearDeployFeedback,
+      deploy,
+      promote,
+      rollback,
+      refresh,
+    }),
+    [
+      clearDeployFeedback,
+      currentDeployments,
+      deploy,
+      deployFeedback,
+      deploymentHistory,
+      environment,
+      error,
+      historyError,
+      isDeploying,
+      isHistoryLoading,
+      isLoading,
+      isRefreshing,
+      lastUpdatedAt,
+      promote,
+      refresh,
+      refreshError,
+      rollback,
+      setEnvironment,
+      versions,
+    ],
+  );
+
+  return result;
 }

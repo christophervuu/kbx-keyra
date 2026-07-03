@@ -77,7 +77,7 @@ export class MappingEditorPage {
 
   getSourceFieldButton(fieldPath: string): Locator {
     return this.page.getByRole('button', {
-      name: new RegExp(`stage source field ${fieldPath}`, 'i'),
+      name: new RegExp(`stage input field ${fieldPath}`, 'i'),
     });
   }
 

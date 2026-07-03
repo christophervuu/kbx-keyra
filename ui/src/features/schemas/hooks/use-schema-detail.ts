@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
-import { parseInferredSchema, parseJsonSchema, parseXsd } from '../lib';
+import { loadSchemaDetailData } from './schema-query-data';
 
 import { useOptimisticMutation } from '@/hooks';
 import { useAdapter } from '@/lib/api';
+import {
+  cancelSchemaDetailReads,
+  invalidateSchemaDependents,
+  queryKeys,
+  queryPolicies,
+} from '@/lib/query';
 import type { AppError } from '@/lib/state/app-error';
 import { toAppError } from '@/lib/state/app-error';
 import type {
@@ -15,14 +22,9 @@ import type {
   UpdateSchemaInput,
 } from '@/lib/types';
 
-// ---------------------------------------------------------------------------
-// Return type
-// ---------------------------------------------------------------------------
-
 export interface UseSchemaDetailResult {
   schema: SchemaDetail | null;
   parsedSchema: ParsedSchema | null;
-  /** Allows external callers (e.g. after a save) to push a refreshed ParsedSchema. */
   setParsedSchema: (parsed: ParsedSchema) => void;
   isLoading: boolean;
   error: AppError | null;
@@ -37,100 +39,55 @@ export interface UseSchemaDetailResult {
   getSamplePayload: (sampleId: string) => Promise<SchemaSamplePayloadContent>;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+interface SchemaDetailQueryData {
+  schema: SchemaDetail;
+  parsedSchema: ParsedSchema | null;
+}
 
-/**
- * Loads a schema by ID, parses its content, and exposes loading/error/not-found
- * states and an `updateMetadata` action for inline editing.
- *
- * Race-condition safe: cancels in-flight fetches when schemaId changes or the
- * component unmounts.
- */
 export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
 
-  const [schema, setSchema] = useState<SchemaDetail | null>(null);
-  const [parsedSchema, setParsedSchema] = useState<ParsedSchema | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<AppError | null>(null);
-  const [notFound, setNotFound] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
+  const detailQueryKey = queryKeys.schemas.detail(schemaId);
 
-  const cancelledRef = useRef(false);
+  const detailQuery = useQuery<SchemaDetailQueryData>({
+    queryKey: detailQueryKey,
+    staleTime: queryPolicies.schemaDetail.staleTime,
+    gcTime: queryPolicies.schemaDetail.gcTime,
+    retry: false,
+    queryFn: () => loadSchemaDetailData(adapter, schemaId),
+  });
 
-  useEffect(() => {
-    cancelledRef.current = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset/load state is intentionally synchronized at effect start before async fetch
-    setIsLoading(true);
-    setError(null);
-    setNotFound(false);
-    setSchema(null);
-    setParsedSchema(null);
-
-    void (async () => {
-      try {
-        const detail = await adapter.getSchema(schemaId);
-        if (cancelledRef.current) return;
-
-        // Parse content (non-fatal — tree view simply won't render on failure)
-        let parsed: ParsedSchema | null = null;
-        try {
-          const { format, inferred } = detail.metadata;
-          const content = detail.content;
-          if (inferred) {
-            const contentStr =
-              typeof content === 'string' ? content : JSON.stringify(content);
-            const inferredFmt = format === 'xsd' ? 'xml' : 'json';
-            parsed = parseInferredSchema(contentStr, inferredFmt);
-          } else if (format === 'json-schema') {
-            parsed = parseJsonSchema(content);
-          } else if (format === 'xsd') {
-            const xsdStr =
-              typeof content === 'string' ? content : JSON.stringify(content);
-            parsed = parseXsd(xsdStr);
-          }
-        } catch {
-          // Non-fatal — parsedSchema stays null
+  const patchDetailData = useCallback(
+    (updater: (current: SchemaDetailQueryData) => SchemaDetailQueryData) => {
+      queryClient.setQueryData<SchemaDetailQueryData | undefined>(detailQueryKey, (current) => {
+        if (!current) {
+          return current;
         }
 
-        let resolvedDetail = detail;
+        return updater(current);
+      });
+    },
+    [detailQueryKey, queryClient],
+  );
 
-        // Best-effort lightweight CDM status refresh (FS-076 T-06):
-        // surface update-available/sync-failed without content mutation.
-        if (detail.metadata.origin === 'cdm') {
-          try {
-            await adapter.syncCdmSchema(schemaId, { statusOnly: true });
-            resolvedDetail = await adapter.getSchema(schemaId);
-          } catch {
-            // Non-fatal. Keep the initially loaded detail.
-          }
-        }
+  const schema = detailQuery.data?.schema ?? null;
+  const parsedSchema = detailQuery.data?.parsedSchema ?? null;
 
-        setSchema(resolvedDetail);
-        setParsedSchema(parsed);
-      } catch (err) {
-        if (cancelledRef.current) return;
-        const appErr = toAppError(err);
-        if (appErr.code === 'NOT_FOUND' || appErr.statusCode === 404) {
-          setNotFound(true);
-        } else {
-          setError(appErr);
-        }
-      } finally {
-        if (!cancelledRef.current) {
-          setIsLoading(false);
-        }
-      }
-    })();
+  const isLoading = !detailQuery.data && detailQuery.isPending;
+  const appError = detailQuery.isError ? toAppError(detailQuery.error) : null;
+  const notFound = Boolean(appError && (appError.code === 'NOT_FOUND' || appError.statusCode === 404));
+  const error = appError && !notFound ? appError : null;
 
-    return () => {
-      cancelledRef.current = true;
-    };
-  }, [schemaId, retryCount, adapter]);
-
-  const retry = useCallback(() => setRetryCount((c) => c + 1), []);
+  const setParsedSchema = useCallback(
+    (parsed: ParsedSchema) => {
+      patchDetailData((current) => ({
+        ...current,
+        parsedSchema: parsed,
+      }));
+    },
+    [patchDetailData],
+  );
 
   const metadataMutation = useOptimisticMutation<
     Partial<UpdateSchemaInput>,
@@ -139,15 +96,30 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
   >({
     captureSnapshot: () => schema?.metadata ?? null,
     applyOptimistic: (input) => {
-      setSchema((prev) => (prev ? { ...prev, metadata: { ...prev.metadata, ...input } } : prev));
+      patchDetailData((current) => ({
+        ...current,
+        schema: {
+          ...current.schema,
+          metadata: { ...current.schema.metadata, ...input },
+        },
+      }));
     },
     rollback: (snapshot) => {
       if (!snapshot) return;
-      setSchema((prev) => (prev ? { ...prev, metadata: snapshot } : prev));
+      patchDetailData((current) => ({
+        ...current,
+        schema: {
+          ...current.schema,
+          metadata: snapshot,
+        },
+      }));
     },
-    mutate: (input) => adapter.updateSchema(schemaId, input as UpdateSchemaInput),
-    onSuccess: (updated) => {
-      setSchema((prev) => (prev ? { ...prev, metadata: updated } : prev));
+    mutate: async (input) => {
+      await cancelSchemaDetailReads(queryClient, schemaId);
+      return adapter.updateSchema(schemaId, input as UpdateSchemaInput);
+    },
+    onSuccess: () => {
+      invalidateSchemaDependents(queryClient, schemaId);
     },
   });
 
@@ -160,8 +132,16 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
 
   const markReviewed = useCallback(async () => {
     if (typeof adapter.markSchemaReviewed === 'function') {
+      await cancelSchemaDetailReads(queryClient, schemaId);
       const updated = await adapter.markSchemaReviewed(schemaId);
-      setSchema((prev) => (prev ? { ...prev, metadata: updated } : prev));
+      patchDetailData((current) => ({
+        ...current,
+        schema: {
+          ...current.schema,
+          metadata: updated,
+        },
+      }));
+      invalidateSchemaDependents(queryClient, schemaId);
       return;
     }
 
@@ -169,38 +149,28 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
       status: 'ready',
       reviewedAt: new Date().toISOString(),
     });
-  }, [adapter, schemaId, metadataMutation]);
+  }, [adapter, metadataMutation, patchDetailData, queryClient, schemaId]);
 
   const addSample = useCallback(async (input: AddSchemaSampleInput) => {
     if (typeof adapter.addSchemaSample !== 'function') {
       throw new Error('Adding schema samples is not available in this mode.');
     }
 
+    await cancelSchemaDetailReads(queryClient, schemaId);
     const result = await adapter.addSchemaSample(schemaId, input);
-    setSchema((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        metadata: result.metadata,
-      };
-    });
+    invalidateSchemaDependents(queryClient, schemaId);
     return result;
-  }, [adapter, schemaId]);
+  }, [adapter, queryClient, schemaId]);
 
   const deleteSample = useCallback(async (sampleId: string) => {
     if (typeof adapter.deleteSchemaSample !== 'function') {
       throw new Error('Deleting schema samples is not available in this mode.');
     }
 
-    const metadata = await adapter.deleteSchemaSample(schemaId, sampleId);
-    setSchema((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        metadata,
-      };
-    });
-  }, [adapter, schemaId]);
+    await cancelSchemaDetailReads(queryClient, schemaId);
+    await adapter.deleteSchemaSample(schemaId, sampleId);
+    invalidateSchemaDependents(queryClient, schemaId);
+  }, [adapter, queryClient, schemaId]);
 
   const getSamplePayload = useCallback(async (sampleId: string) => {
     if (typeof adapter.getSchemaSamplePayload !== 'function') {
@@ -209,6 +179,10 @@ export function useSchemaDetail(schemaId: string): UseSchemaDetailResult {
 
     return adapter.getSchemaSamplePayload(schemaId, sampleId);
   }, [adapter, schemaId]);
+
+  const retry = useCallback(() => {
+    void detailQuery.refetch();
+  }, [detailQuery]);
 
   return {
     schema,

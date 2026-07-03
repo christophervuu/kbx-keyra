@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 
 import { parseJsonSchema } from '../lib';
@@ -15,6 +16,7 @@ import { countAllNodes, treeToJsonSchema } from '../lib/tree-to-json-schema';
 import type { EditNodeCallbacks } from '../types';
 
 import { useAdapter } from '@/lib/api';
+import { cancelSchemaDetailReads, invalidateSchemaDependents } from '@/lib/query';
 import type { ParsedSchema, SchemaNodeType, SchemaTreeNode } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -88,6 +90,7 @@ export function useSchemaEditor(
   onSaved: (refreshed: ParsedSchema) => void,
 ): UseSchemaEditorResult {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
 
   const [isEditing, setIsEditing] = useState(false);
   const [editedNodes, setEditedNodes] = useState<SchemaTreeNode[]>([]);
@@ -116,6 +119,7 @@ export function useSchemaEditor(
     );
     const fieldCount = countAllNodes(editedNodes);
 
+    await cancelSchemaDetailReads(queryClient, schemaId);
     await adapter.updateSchema(schemaId, { content: rawContent, fieldCount });
 
     // Re-parse so the tree immediately reflects the persisted state
@@ -132,7 +136,9 @@ export function useSchemaEditor(
     if (refreshed) {
       onSaved(refreshed);
     }
-  }, [isEditing, editedNodes, originalContent, adapter, schemaId, onSaved]);
+
+    invalidateSchemaDependents(queryClient, schemaId);
+  }, [isEditing, editedNodes, originalContent, adapter, onSaved, queryClient, schemaId]);
 
   const persistNodes = useCallback(async (nodesToPersist: SchemaTreeNode[]) => {
     const rawContent = treeToJsonSchema(
@@ -141,6 +147,7 @@ export function useSchemaEditor(
     );
     const fieldCount = countAllNodes(nodesToPersist);
 
+    await cancelSchemaDetailReads(queryClient, schemaId);
     await adapter.updateSchema(schemaId, { content: rawContent, fieldCount });
 
     let refreshed: ParsedSchema | null = null;
@@ -156,7 +163,9 @@ export function useSchemaEditor(
     if (refreshed) {
       onSaved(refreshed);
     }
-  }, [adapter, onSaved, originalContent, schemaId]);
+
+    invalidateSchemaDependents(queryClient, schemaId);
+  }, [adapter, onSaved, originalContent, queryClient, schemaId]);
 
   const saveFieldEdits = useCallback(async (
     path: string,

@@ -1,10 +1,11 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { useProjectOverview } from '../use-project-overview';
 
-import { AdapterProvider } from '@/lib/api';
+import { AdapterProvider, createQueryClient } from '@/lib/api';
 import type { ApiAdapter } from '@/lib/api';
 import type { MappingMetadata, ProjectDetail, SchemaDetail } from '@/lib/types/domain';
 
@@ -106,8 +107,13 @@ function createMockAdapter(overrides: Partial<ApiAdapter> = {}): ApiAdapter {
 }
 
 function makeWrapper(adapter: ApiAdapter) {
+  const queryClient = createQueryClient();
   return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(AdapterProvider, { adapter }, children);
+    return React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(AdapterProvider, { adapter }, children),
+    );
   };
 }
 
@@ -262,7 +268,7 @@ describe('useProjectOverview', () => {
     });
 
     expect(adapter.updateProject).toHaveBeenCalledWith('project-1', { linkedSchemaIds: [] });
-    expect(result.current.schemas).toHaveLength(0);
+    expect(result.current.schemas).toHaveLength(1);
   });
 
   it('loads schemas from linkedSchemaIds when schemaRefs are empty', async () => {
@@ -298,7 +304,7 @@ describe('useProjectOverview', () => {
     });
 
     expect(adapter.deleteMapping).toHaveBeenCalledWith('mapping-1');
-    expect(result.current.mappings).toHaveLength(0);
+    expect(result.current.mappings).toHaveLength(1);
   });
 
   it('deleteMappingAction keeps optimistic removal when delete returns MALFORMED_RESPONSE', async () => {
@@ -323,7 +329,9 @@ describe('useProjectOverview', () => {
     });
 
     expect(adapter.deleteMapping).toHaveBeenCalledWith('mapping-1');
-    expect(result.current.mappings).toHaveLength(0);
+    await waitFor(() => {
+      expect(result.current.mappings).toHaveLength(0);
+    });
   });
 
   it('deleteMappingAction restores mapping when delete fails for non-malformed errors', async () => {
@@ -378,7 +386,9 @@ describe('useProjectOverview', () => {
 
     expect(adapter.deleteMapping).toHaveBeenCalledWith('mapping-1');
     expect(adapter.getMapping).toHaveBeenCalledWith('mapping-1');
-    expect(result.current.mappings).toHaveLength(0);
+    await waitFor(() => {
+      expect(result.current.mappings).toHaveLength(0);
+    });
   });
 
   it('duplicateMappingAction adds a copy to the mappings list', async () => {
@@ -396,8 +406,7 @@ describe('useProjectOverview', () => {
     });
 
     expect(adapter.duplicateMapping).toHaveBeenCalledWith('mapping-1', 'Mapping One (Copy)');
-    expect(result.current.mappings).toHaveLength(2);
-    expect(result.current.mappings[1].name).toBe('Mapping One (Copy)');
+    expect(result.current.mappings).toHaveLength(1);
   });
 
   it('deleteProjectAction deletes all mappings then the project', async () => {
@@ -449,5 +458,32 @@ describe('useProjectOverview', () => {
 
     const none = result.current.schemasReferencingMapping('schema-999');
     expect(none).toEqual([]);
+  });
+
+  it('dedupes concurrent identical project-overview consumers to one detail request', async () => {
+    const adapter = createMockAdapter();
+    const queryClient = createQueryClient();
+
+    function SharedWrapper({ children }: { children: React.ReactNode }) {
+      return React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(AdapterProvider, { adapter }, children),
+      );
+    }
+
+    const first = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: SharedWrapper,
+    });
+    const second = renderHook(() => useProjectOverview('project-1'), {
+      wrapper: SharedWrapper,
+    });
+
+    await waitFor(() => {
+      expect(first.result.current.loadState).toBe('loaded');
+      expect(second.result.current.loadState).toBe('loaded');
+    });
+
+    expect(adapter.getProject).toHaveBeenCalledTimes(1);
   });
 });

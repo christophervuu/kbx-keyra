@@ -32,11 +32,20 @@ export class ProjectOverviewPage {
   }
 
   getSchemaCardByName(schemaName: string): Locator {
-    return this.page.locator('div', { hasText: schemaName }).filter({ has: this.page.getByRole('button', { name: /view schema/i }) }).first();
+    return this.page
+      .getByTestId('linked-schemas-list')
+      .locator('li')
+      .filter({ hasText: schemaName })
+      .first();
   }
 
   getSchemaViewButton(schemaName: string): Locator {
-    return this.getSchemaCardByName(schemaName).getByRole('button', { name: /view schema/i });
+    return this.page
+      .getByTestId('linked-schemas-dialog')
+      .locator('li')
+      .filter({ hasText: schemaName })
+      .getByRole('button', { name: new RegExp(`view schema ${schemaName}`, 'i') })
+      .first();
   }
 
   getMappingLinkByName(mappingName: string): Locator {
@@ -62,7 +71,7 @@ export class ProjectOverviewPage {
   }
 
   getSchemaEmptyState(): Locator {
-    return this.page.getByTestId('schema-empty-state');
+    return this.page.getByTestId('linked-schemas-trigger');
   }
 
   getMappingEmptyState(): Locator {
@@ -74,7 +83,7 @@ export class ProjectOverviewPage {
   }
 
   getAddSchemaButton(): Locator {
-    return this.page.getByRole('button', { name: /add schema/i });
+    return this.page.getByTestId('linked-schemas-trigger');
   }
 
   async openSchemaUpload(): Promise<void> {

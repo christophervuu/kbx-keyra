@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -8,6 +9,11 @@ import { Card } from '@/components/Card';
 import { useBreadcrumbLabel } from '@/components/layout/BreadcrumbContext';
 import { PageHeader } from '@/components/PageHeader';
 import { useAdapter } from '@/lib/api';
+import {
+  cancelProjectDetailReads,
+  invalidateMappingDependents,
+  invalidateProjectDetailDependents,
+} from '@/lib/query';
 import type {
   MappingEnrichmentSource,
   SchemaMetadata,
@@ -50,6 +56,7 @@ export function CreateMappingPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState('');
   const [sourceSchemaId, setSourceSchemaId] = useState<string | null>(null);
@@ -245,8 +252,10 @@ export function CreateMappingPage() {
       if (missingLinked.length > 0) {
         try {
           const nextLinked = [...new Set([...linkedSchemaIds, ...missingLinked])];
+          await cancelProjectDetailReads(queryClient, projectId);
           await adapter.updateProject(projectId, { linkedSchemaIds: nextLinked });
           setLinkedSchemaIds(nextLinked);
+          invalidateProjectDetailDependents(queryClient, projectId);
         } catch {
           // Best-effort relevance update only; explicit mapping refs remain canonical.
         }
@@ -259,6 +268,8 @@ export function CreateMappingPage() {
         targetSchemaRef,
         ...(enrichmentSources.length > 0 ? { enrichmentSources } : {}),
       });
+
+      invalidateMappingDependents(queryClient, projectId, mapping.mappingId);
 
       if (startMode === 'auto-map') {
         let navigationNotice: string | null = null;
@@ -385,7 +396,9 @@ export function CreateMappingPage() {
       const nextLinked = [...new Set([...linkedSchemaIds, ref.schemaId])];
 
       try {
+        await cancelProjectDetailReads(queryClient, projectId);
         await adapter.updateProject(projectId, { linkedSchemaIds: nextLinked });
+        invalidateProjectDetailDependents(queryClient, projectId);
       } catch {
         // Best effort relevance update only.
       }
