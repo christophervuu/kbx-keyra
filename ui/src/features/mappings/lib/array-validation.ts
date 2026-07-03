@@ -24,6 +24,7 @@ import type {
   ItemFieldMapping,
   ItemTemplateState,
   MergeBranch,
+  ObjectFieldsCollectionState,
 } from './array-builder-state';
 import { flattenSchemaPaths } from './autocomplete-utils';
 
@@ -94,6 +95,71 @@ function findTargetNode(
     if (found) return found;
   }
   return null;
+}
+
+function findSchemaNode(
+  nodes: readonly SchemaTreeNode[],
+  path: string,
+): SchemaTreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = findSchemaNode(node.children, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+function validateObjectFieldsCollection(
+  collectionState: ObjectFieldsCollectionState,
+  parsedSourceSchema: ParsedSchema | null,
+): ArrayValidationEntry[] {
+  const entries: ArrayValidationEntry[] = [];
+  const parentPath = collectionState.parent.objectPath.trim();
+
+  if (!parentPath) {
+    entries.push(entry('collection', '', 'No parent object selected.', 'incomplete'));
+    return entries;
+  }
+
+  if (collectionState.orderedChildKeys.length === 0) {
+    entries.push(entry('collection', '', 'No object fields selected.', 'incomplete'));
+  }
+
+  const deduped = new Set(collectionState.orderedChildKeys);
+  if (deduped.size !== collectionState.orderedChildKeys.length) {
+    entries.push(entry('collection', '', 'Object field selection contains duplicates.', 'error'));
+  }
+
+  if (!parsedSourceSchema) return entries;
+
+  if (collectionState.parent.input.kind === 'primary') {
+    const parentType = getSourcePathType(parsedSourceSchema, parentPath);
+    if (parentType !== null && parentType !== 'object' && parentType !== 'any') {
+      entries.push(entry(
+        'collection',
+        '',
+        `Parent path "${parentPath}" is not an object (found: ${parentType}).`,
+        'error',
+      ));
+      return entries;
+    }
+
+    const parentNode = findSchemaNode(parsedSourceSchema.nodes, parentPath);
+    if (!parentNode) return entries;
+
+    const validChildren = new Set(parentNode.children.map((child) => child.fieldName));
+    for (const key of collectionState.orderedChildKeys) {
+      if (validChildren.has(key)) continue;
+      entries.push(entry(
+        'collection',
+        '',
+        `Selected object field "${key}" is no longer present under "${parentPath}".`,
+        'warning',
+      ));
+    }
+  }
+
+  return entries;
 }
 
 /**
@@ -214,6 +280,11 @@ function validateCollection(
       if (!collectionState.rawExpression.trim()) {
         entries.push(entry('collection', '', 'Custom expression is empty.', 'incomplete'));
       }
+      break;
+    }
+
+    case 'objectFields': {
+      entries.push(...validateObjectFieldsCollection(collectionState, parsedSourceSchema));
       break;
     }
   }

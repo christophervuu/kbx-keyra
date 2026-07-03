@@ -30,13 +30,14 @@ export type { ChainState, StaticValueBranch };
 // ---------------------------------------------------------------------------
 
 /**
- * The five entry modes for the Array Builder.
+ * The guided entry modes for the Array Builder.
  *
  * - 'map'                — Transform each element of a source array
  * - 'filterMap'          — Filter, then transform a source array
  * - 'splitString'        — Build an array by splitting a source string
  * - 'buildFromValues'    — Construct array entries from individual fields/statics
  * - 'mergeArrayBranches' — Combine multiple source arrays via merge()
+ * - 'objectFields'       — Build array items from selected object child fields
  * - 'customExpression'   — Internal/legacy backing store for Editor mode (FS-051 T-01).
  *                          Not exposed as a selectable card in ArrayModeSelector.
  *                          Used by the Builder/Editor toggle in the ArrayBuilder header.
@@ -47,7 +48,28 @@ export type ArrayBuilderMode =
   | 'splitString'
   | 'buildFromValues'
   | 'mergeArrayBranches'
+  | 'objectFields'
   | 'customExpression';
+
+// ---------------------------------------------------------------------------
+// Object fields mode
+// ---------------------------------------------------------------------------
+
+export interface ObjectFieldsParentReference {
+  readonly input:
+    | { readonly kind: 'primary' }
+    | { readonly kind: 'enrichment'; readonly alias: string };
+  readonly objectPath: string;
+}
+
+/** Collection state for Build from Object Fields mode. */
+export interface ObjectFieldsCollectionState {
+  readonly mode: 'objectFields';
+  readonly parent: ObjectFieldsParentReference;
+  readonly orderedChildKeys: readonly string[];
+  readonly missingBehavior: 'skip-null-or-absent';
+  readonly inclusionPredicate?: FilterPredicateState;
+}
 
 // ---------------------------------------------------------------------------
 // Filter predicate state (Q2: simplified boolean-focused builder)
@@ -250,6 +272,7 @@ export type CollectionState =
   | SplitStringCollectionState
   | BuildFromValuesCollectionState
   | MergeBranchesCollectionState
+  | ObjectFieldsCollectionState
   | CustomExpressionCollectionState;
 
 // ---------------------------------------------------------------------------
@@ -544,6 +567,11 @@ function isCollectionSourceConfigured(state: CollectionState): boolean {
       return state.entries.length > 0;
     case 'mergeArrayBranches':
       return state.branches.length >= 2;
+    case 'objectFields':
+      return (
+        state.parent.objectPath.trim().length > 0
+        && state.orderedChildKeys.length > 0
+      );
     case 'customExpression':
       return state.rawExpression.trim().length > 0;
   }
@@ -578,6 +606,16 @@ function hasCollectionErrors(state: CollectionState): boolean {
     case 'mergeArrayBranches':
       // More than 10 branches is a structural error (should not happen via UI)
       return state.branches.length > 10;
+    case 'objectFields': {
+      if (
+        state.parent.input.kind === 'enrichment'
+        && state.parent.input.alias.trim().length === 0
+      ) {
+        return true;
+      }
+      const deduped = new Set(state.orderedChildKeys);
+      return deduped.size !== state.orderedChildKeys.length;
+    }
     case 'customExpression':
       return false;
   }
@@ -775,6 +813,16 @@ export function createCollectionStateForMode(mode: ArrayBuilderMode): Collection
         // Initialize with 2 empty branches (minimum required)
         branches: [createEmptyMergeBranch(), createEmptyMergeBranch()],
       };
+    case 'objectFields':
+      return {
+        mode: 'objectFields',
+        parent: {
+          input: { kind: 'primary' },
+          objectPath: '',
+        },
+        orderedChildKeys: [],
+        missingBehavior: 'skip-null-or-absent',
+      };
     case 'customExpression':
       return { mode: 'customExpression', rawExpression: '' };
   }
@@ -846,6 +894,12 @@ export function isCustomExpressionCollectionState(
   s: CollectionState,
 ): s is CustomExpressionCollectionState {
   return s.mode === 'customExpression';
+}
+
+export function isObjectFieldsCollectionState(
+  s: CollectionState,
+): s is ObjectFieldsCollectionState {
+  return s.mode === 'objectFields';
 }
 
 export function isStructuredFilterPredicate(

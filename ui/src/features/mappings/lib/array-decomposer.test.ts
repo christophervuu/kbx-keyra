@@ -25,6 +25,7 @@ import type {
   FilterMapCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
+  ObjectFieldsCollectionState,
 } from './array-builder-state';
 import { decomposeArrayExpression } from './array-decomposer';
 import { generateArrayExpression } from './array-expression-generator';
@@ -334,6 +335,80 @@ describe('decomposeArrayExpression — Nested arrays', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Object fields mode
+// ---------------------------------------------------------------------------
+
+describe('decomposeArrayExpression — Object fields mode', () => {
+  it('decomposes canonical mandatory-filter objectFields expression', () => {
+    const expr =
+      'map(filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "beginTime": item("value.BeginTime")})';
+
+    const state = assertSuccess(expr);
+    expect(state.mode).toBe('objectFields');
+    const cs = state.collectionState as ObjectFieldsCollectionState;
+    expect(cs.parent).toEqual({ input: { kind: 'primary' }, objectPath: 'DeliveryWeeklyOperation' });
+    expect(cs.orderedChildKeys).toEqual(['Sunday', 'Monday']);
+    expect(cs.missingBehavior).toBe('skip-null-or-absent');
+    expect(cs.inclusionPredicate).toBeUndefined();
+
+    expect(state.itemTemplate.fields).toHaveLength(2);
+    expect(state.itemTemplate.fields[0]?.targetFieldPath).toBe('operationDayValue');
+    expect(state.itemTemplate.fields[1]?.targetFieldPath).toBe('beginTime');
+  });
+
+  it('decomposes canonical objectFields expression with additional inclusion predicate', () => {
+    const expr =
+      'map(filter(filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), eq(item("value.IsOpen"), true)), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen")})';
+
+    const state = assertSuccess(expr);
+    expect(state.mode).toBe('objectFields');
+
+    const cs = state.collectionState as ObjectFieldsCollectionState;
+    expect(cs.orderedChildKeys).toEqual(['Sunday', 'Monday']);
+    expect(cs.inclusionPredicate).toEqual({
+      kind: 'structured',
+      left: { kind: 'itemField', fieldPath: 'value.IsOpen' },
+      operator: 'eq',
+      right: { kind: 'static', value: 'true' },
+    });
+  });
+
+  it('decomposes enrichment-backed objectFields parent selection', () => {
+    const expr =
+      'map(filter(map(array("Sunday"), {"day": item(""), "value": get(get(external("hours"), "DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day")})';
+
+    const state = assertSuccess(expr);
+    const cs = state.collectionState as ObjectFieldsCollectionState;
+    expect(cs.parent).toEqual({
+      input: { kind: 'enrichment', alias: 'hours' },
+      objectPath: 'DeliveryWeeklyOperation',
+    });
+  });
+
+  it('restores fixed/static and complex item-template expressions losslessly', () => {
+    const expr =
+      'map(filter(map(array("Sunday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "sourceType": "WEEKLY", "timezone": get(external("shiftMeta"), "timezone")})';
+
+    const state = assertSuccess(expr);
+    const sourceType = state.itemTemplate.fields.find((f) => f.targetFieldPath === 'sourceType');
+    expect(sourceType?.kind).toBe('chain');
+
+    const timezone = state.itemTemplate.fields.find((f) => f.targetFieldPath === 'timezone');
+    expect(timezone?.kind).toBe('expression');
+    if (timezone?.kind === 'expression') {
+      expect(timezone.dsl).toBe('get(external("shiftMeta"), "timezone")');
+    }
+  });
+
+  it('falls back for non-canonical merged-predicate variant', () => {
+    const result = assertFailure(
+      'map(filter(map(array("Sunday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), and(not(isNull(item("value"))), eq(item("value.IsOpen"), true))), {"operationDayValue": item("day")})',
+    );
+    expect(result.rawExpression).toContain('and(not(isNull(item("value")))');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Unrecognized patterns
 // ---------------------------------------------------------------------------
 
@@ -434,6 +509,18 @@ describe('decomposeArrayExpression — Round-trip fidelity', () => {
 
   it('round-trips cross-array lookup', () => {
     roundTrip('map(source("orders"), {"taxAmount": default(get(find(source("taxLines"), eq(item("lineRef"), item("id"))), "taxAmount"), 0)})');
+  });
+
+  it('round-trips objectFields mode without optional inclusion predicate', () => {
+    roundTrip(
+      'map(filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "beginTime": item("value.BeginTime")})',
+    );
+  });
+
+  it('round-trips objectFields mode with optional inclusion predicate', () => {
+    roundTrip(
+      'map(filter(filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), eq(item("value.IsOpen"), true)), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen")})',
+    );
   });
 });
 

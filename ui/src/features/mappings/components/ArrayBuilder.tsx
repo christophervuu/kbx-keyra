@@ -68,25 +68,21 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, CheckCircle2, Circle, History, Layers, MoreVertical, RotateCcw, Undo2, XCircle, ArrowLeft } from 'lucide-react';
 
-import { BuilderFeedbackArea } from './BuilderFeedbackArea';
 import { ArrayModeSelector } from './ArrayModeSelector';
 import { MapCollectionEditor } from './MapCollectionEditor';
 import { FilterMapCollectionEditor } from './FilterMapCollectionEditor';
 import { BuildFromValuesEditor } from './BuildFromValuesEditor';
+import { ObjectFieldsCollectionEditor } from './ObjectFieldsCollectionEditor';
 import type { BuildFromValuesTargetField } from './BuildFromValuesEditor';
 import { MergeBranchesEditor } from './MergeBranchesEditor';
 import { ItemTemplateEditor } from './ItemTemplateEditor';
 import { ModeSwitchConfirmDialog } from './ModeSwitchConfirmDialog';
-import { ArrayResultPreview } from './ArrayResultPreview';
 import { RawDslEditor } from './RawDslEditor';
-import { ValidationSummaryRow } from './ValidationSummaryRow';
-import { useExpressionPreview } from '../hooks/use-expression-preview';
 import { useDslValidation } from '../hooks/use-dsl-validation';
 import { useDslAutocomplete } from '../hooks/use-dsl-autocomplete';
 import { flattenSchemaPaths } from '../lib/autocomplete-utils';
 import type { TargetFieldStatus } from './TargetFieldRow';
 import { useArrayBuilderState } from '../hooks/use-array-builder-state';
-import { useBuilderValidation } from '../hooks/use-builder-validation';
 import { PreviewContext } from '../context/preview-context';
 import type {
   ArrayBuilderMode,
@@ -94,6 +90,7 @@ import type {
   BuildFromValuesCollectionState,
   ItemFieldMapping,
   MergeBranchesCollectionState,
+  ObjectFieldsCollectionState,
   SplitStringCollectionState,
 } from '../lib/array-builder-state';
 import { generateArrayExpression } from '../lib/array-expression-generator';
@@ -370,6 +367,11 @@ function ParseStatusBadge({
   );
 }
 
+function getLastPathSegment(path: string): string {
+  const segments = path.split('.').filter(Boolean);
+  return segments[segments.length - 1] ?? path;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -461,6 +463,7 @@ function CollectionEditorSlot({
   filterPredicate,
   splitStringState,
   buildFromValuesState,
+  objectFieldsState,
   mergeBranchesState,
   targetArrayNode,
   validationState,
@@ -474,6 +477,7 @@ function CollectionEditorSlot({
   onFilterPredicateChange,
   onSplitStringStateChange,
   onBuildFromValuesStateChange,
+  onObjectFieldsStateChange,
   onMergeBranchesStateChange,
   onCustomExpressionChange,
   onResetToStructured,
@@ -484,6 +488,7 @@ function CollectionEditorSlot({
   filterPredicate: import('../lib/array-builder-state').FilterPredicateState | null;
   splitStringState: SplitStringCollectionState | null;
   buildFromValuesState: BuildFromValuesCollectionState | null;
+  objectFieldsState: ObjectFieldsCollectionState | null;
   mergeBranchesState: MergeBranchesCollectionState | null;
   targetArrayNode: SchemaTreeNode | null;
   validationState: ArrayValidationState;
@@ -497,6 +502,7 @@ function CollectionEditorSlot({
   onFilterPredicateChange: (p: import('../lib/array-builder-state').FilterPredicateState) => void;
   onSplitStringStateChange: (s: SplitStringCollectionState) => void;
   onBuildFromValuesStateChange: (s: BuildFromValuesCollectionState) => void;
+  onObjectFieldsStateChange: (s: ObjectFieldsCollectionState) => void;
   onMergeBranchesStateChange: (s: MergeBranchesCollectionState) => void;
   onCustomExpressionChange: (expr: string) => void;
   onResetToStructured: () => void;
@@ -564,6 +570,22 @@ function CollectionEditorSlot({
           validationState={validationState}
           nestingDepth={nestingDepth}
           onCollectionStateChange={onMergeBranchesStateChange}
+        />
+      );
+
+    case 'objectFields':
+      return (
+        <ObjectFieldsCollectionEditor
+          collectionState={
+            objectFieldsState ?? {
+              mode: 'objectFields',
+              parent: { input: { kind: 'primary' }, objectPath: '' },
+              orderedChildKeys: [],
+              missingBehavior: 'skip-null-or-absent',
+            }
+          }
+          parsedSourceSchema={parsedSourceSchema}
+          onCollectionStateChange={onObjectFieldsStateChange}
         />
       );
 
@@ -816,6 +838,7 @@ export function ArrayBuilder({
     setFilterPredicate,
     setSplitStringState,
     setBuildFromValuesState,
+    setObjectFieldsState,
     setMergeBranchesState,
     setFieldMapping,
     switchMode,
@@ -932,21 +955,6 @@ export function ArrayBuilder({
   const previewCtx = useContext(PreviewContext);
   const sourceData = previewCtx?.sourceData ?? null;
 
-  const builderValidationState = useBuilderValidation({
-    builderState: null,
-    expression,
-    targetType: 'array',
-    mode: 'builder',
-    parseResult: parseResult ?? null,
-    isParseValid,
-  });
-
-  // T-13: Array result preview
-  const arrayPreview = useExpressionPreview({
-    expression,
-    sourceData,
-  });
-
   // Derive source array path for the collection editor
   const sourceArrayPath =
     state.collectionState.mode === 'map' || state.collectionState.mode === 'filterMap'
@@ -982,6 +990,11 @@ export function ArrayBuilder({
       ? state.collectionState
       : null;
 
+  const objectFieldsState =
+    state.collectionState.mode === 'objectFields'
+      ? state.collectionState
+      : null;
+
   // T-12: "Reset to structured mode" — switch to map (mode selector will be shown)
   const handleResetToStructured = useCallback(() => {
     switchMode('map');
@@ -990,7 +1003,34 @@ export function ArrayBuilder({
   // Item template is shown for map, filterMap, and mergeArrayBranches modes
   const showItemTemplate =
     state.mode === 'map' ||
-    state.mode === 'filterMap';
+    state.mode === 'filterMap' ||
+    state.mode === 'objectFields';
+
+  const objectFieldsItemContextPaths = useMemo(() => {
+    if (!objectFieldsState || !parsedSourceSchema) return [] as string[];
+
+    const parentPath = objectFieldsState.parent.objectPath.trim();
+    if (!parentPath) return ['day', 'value'];
+
+    const contextPaths = new Set<string>(['day', 'value']);
+    const schemaPaths = flattenSchemaPaths(parsedSourceSchema).map((entry) => entry.path);
+
+    for (const childKey of objectFieldsState.orderedChildKeys) {
+      const childBase = `${parentPath}.${childKey}`;
+      for (const schemaPath of schemaPaths) {
+        if (schemaPath === childBase) {
+          contextPaths.add('value');
+          continue;
+        }
+        if (!schemaPath.startsWith(`${childBase}.`)) continue;
+        const relative = schemaPath.slice(childBase.length + 1);
+        if (!relative) continue;
+        contextPaths.add(`value.${relative}`);
+      }
+    }
+
+    return Array.from(contextPaths);
+  }, [objectFieldsState, parsedSourceSchema]);
 
   const buildFromValuesTargetItemFields = useMemo(() => {
     if (!targetArrayNode) return [] as BuildFromValuesTargetField[];
@@ -1007,6 +1047,7 @@ export function ArrayBuilder({
   const isDirty = getDraftExpression(selectedTargetPath) !== null;
   const canResetDraft = expression.trim().length > 0;
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const targetFieldName = getLastPathSegment(selectedTargetPath);
 
   const handleResetDraftRequest = useCallback(() => {
     // For arrays, any non-empty expression requires confirmation
@@ -1076,7 +1117,7 @@ export function ArrayBuilder({
       {/* ------------------------------------------------------------------ */}
       {/* Header                                                              */}
       {/* ------------------------------------------------------------------ */}
-      <div className="shrink-0 border-b border-slate-700 px-4 py-3">
+      <div className="shrink-0 border-b border-slate-700 px-3 py-2.5">
         <div className="flex items-center gap-2">
           {/* Mapping status icon */}
           <span className={STATUS_CLASSES[currentStatus]} data-testid="header-status-icon">
@@ -1091,14 +1132,18 @@ export function ArrayBuilder({
             array
           </span>
 
-          {/* Target path */}
-          <span
-            className="min-w-0 flex-1 truncate font-mono text-sm text-slate-100"
-            title={selectedTargetPath}
-            data-testid="header-target-path"
-          >
-            {selectedTargetPath}
-          </span>
+          <div className="min-w-0 flex-1">
+            <span
+              className="truncate font-mono text-base font-semibold text-slate-100"
+              title={targetFieldName}
+              data-testid="header-target-name"
+            >
+              {targetFieldName}
+            </span>
+            {selectedTargetRequired && (
+              <span className="ml-1 text-sm font-semibold text-red-400" data-testid="header-required-asterisk">*</span>
+            )}
+          </div>
 
           <button
             type="button"
@@ -1106,7 +1151,7 @@ export function ArrayBuilder({
             onClick={handleDiscard}
             aria-label={`Undo changes for ${selectedTargetPath}`}
             disabled={!isDirty}
-            className="flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-xs text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 transition-colors hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Undo2 size={12} aria-hidden="true" />
             Undo
@@ -1121,50 +1166,14 @@ export function ArrayBuilder({
           />
         </div>
 
-        <div className="mt-1 flex items-center gap-3">
-          {/* Required */}
-          {selectedTargetRequired && (
-            <span
-              className="text-xs text-red-400"
-              data-testid="header-required-label"
-            >
-              Required
-            </span>
-          )}
+        <div
+          className="mt-0.5 truncate font-mono text-[11px] text-slate-500"
+          title={selectedTargetPath}
+          data-testid="header-target-path"
+        >
+          {selectedTargetPath}
         </div>
       </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Feedback Area (pinned)                                              */}
-      {/* ------------------------------------------------------------------ */}
-      <BuilderFeedbackArea
-        expression={expression}
-        sourceData={sourceData}
-        validationState={builderValidationState}
-        mode="builder"
-        compact={true}
-        collapsible={true}
-        defaultCollapsed={true}
-        hideValidation={true}
-        resultSlot={
-          <ArrayResultPreview
-            result={arrayPreview.result}
-            error={arrayPreview.error}
-            isEvaluating={arrayPreview.isEvaluating}
-            sourceData={sourceData}
-            mode={state.mode}
-            expression={expression}
-          />
-        }
-      />
-
-      {/* T-11: Validation summary row */}
-      <ValidationSummaryRow
-        errorCount={validationState.errorCount}
-        warningCount={validationState.warningCount}
-        incompleteCount={validationState.incompleteCount}
-        testId="array-validation-summary"
-      />
 
       {/* ------------------------------------------------------------------ */}
       {/* Scrollable content                                                  */}
@@ -1296,6 +1305,7 @@ export function ArrayBuilder({
                   filterPredicate={filterPredicate}
                   splitStringState={splitStringState}
                   buildFromValuesState={buildFromValuesState}
+                  objectFieldsState={objectFieldsState}
                   mergeBranchesState={mergeBranchesState}
                   targetArrayNode={targetArrayNode}
                   validationState={validationState}
@@ -1309,6 +1319,7 @@ export function ArrayBuilder({
                   onFilterPredicateChange={setFilterPredicate}
                   onSplitStringStateChange={setSplitStringState}
                   onBuildFromValuesStateChange={setBuildFromValuesState}
+                  onObjectFieldsStateChange={setObjectFieldsState}
                   onMergeBranchesStateChange={setMergeBranchesState}
                   onCustomExpressionChange={setCustomExpression}
                   onResetToStructured={handleResetToStructured}
@@ -1324,6 +1335,9 @@ export function ArrayBuilder({
                       targetArrayNode={targetArrayNode}
                       parsedSourceSchema={parsedSourceSchema}
                       sourceArrayPath={sourceArrayPath}
+                      itemContextFieldPaths={
+                        state.mode === 'objectFields' ? objectFieldsItemContextPaths : undefined
+                      }
                       nestingDepth={nestingDepth}
                       nestedArrayStates={state.itemTemplate.nestedArrays}
                       validationState={validationState}

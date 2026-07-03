@@ -27,6 +27,7 @@ describe('ArrayModeSelector', () => {
     expect(screen.getByTestId('mode-card-filterMap')).toBeInTheDocument();
     expect(screen.getByTestId('mode-card-splitString')).toBeInTheDocument();
     expect(screen.getByTestId('mode-card-buildFromValues')).toBeInTheDocument();
+    expect(screen.getByTestId('mode-card-objectFields')).toBeInTheDocument();
     expect(screen.getByTestId('mode-card-mergeArrayBranches')).toBeInTheDocument();
   });
 

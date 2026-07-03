@@ -874,6 +874,19 @@ It does not include `'null'` or `'any'`.
 - **Schema-agnostic** — the engine receives resolved schemas; it does not fetch or parse them from storage.
 - **Deterministic** — given the same config + data, the engine always produces the same output.
 
+### FS-104 objectFields canonical-expression compatibility addendum
+
+FS-104 adds a new Array Builder authoring mode (`objectFields`) at the UI layer, while preserving engine/runtime boundaries.
+
+Engine constraints for FS-104:
+- No new DSL/runtime functions are introduced for objectFields.
+- Canonical objectFields expressions are composed from existing functions only: `array`, `map`, `filter`, `get`, `source`, `external`, `item`, `not`, `isNull`.
+- Mandatory existence filtering and optional user filtering must remain sequential (`filter(filter(...), ...)` when optional predicate exists); they are not semantically merged by engine-specific behavior.
+- Guided reopen/decomposition strictness is a UI concern; engine executes any syntactically valid expression without objectFields-specific special-casing.
+
+Parity requirement:
+- Because engine execution is pure and shared, canonical objectFields expressions must evaluate identically in browser preview and Lambda runtime for identical mapping config + input payload + external source inputs.
+
 ---
 
 ## Error Handling Philosophy

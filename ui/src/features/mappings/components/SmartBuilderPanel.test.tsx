@@ -330,6 +330,38 @@ describe('SmartBuilderPanel', () => {
     expect(onStageField).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expression' }));
   });
 
+  it('keeps Build Output hidden and shows fixed value starter input when fixed value is selected but not configured', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.code',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      composition: {
+        kind: 'direct' as const,
+        inputId: 'fixed-input',
+        value: { kind: 'static' as const, value: '' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.code"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-builder-empty-state')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-fixed-value-starter')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('smart-fixed-value-starter-input'), { target: { value: 'CAD' } });
+    expect(onApplyAction).toHaveBeenCalledWith('base.fixed', { fixedValue: 'CAD' });
+  });
+
   it('renders editable fixed value input for base.fixed composition', () => {
     const onApplyAction = vi.fn();
     const draft = {

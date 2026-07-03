@@ -59,6 +59,14 @@ function parseConstantNameFromExpression(expression: string): string | null {
   return match?.[1] ?? null;
 }
 
+function isConfiguredStaticValue(value: unknown): boolean {
+  if (typeof value === 'string') return value.length > 0;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (value === null) return true;
+  return false;
+}
+
 interface ValueMapProjectTableOption {
   readonly tableId: string;
   readonly label: string;
@@ -1051,7 +1059,15 @@ export function SmartBuilderPanel({
     const hasInputId = (inputId: string) => hydration.draft.inputs.some((input) => input.id === inputId);
 
     if (composition.kind === 'direct') {
-      if (composition.value && composition.value.kind !== 'input') return true;
+      if (composition.value?.kind === 'input') {
+        return hasInputId(composition.value.inputId);
+      }
+      if (composition.value?.kind === 'static') {
+        return isConfiguredStaticValue(composition.value.value);
+      }
+      if (composition.value?.kind === 'expression') {
+        return composition.value.expression.trim().length > 0;
+      }
       return hasInputId(composition.inputId);
     }
 
@@ -1066,6 +1082,13 @@ export function SmartBuilderPanel({
     return true;
   })();
   const showInitialStartGuidance = hydration.draft.inputs.length === 0 && !showBuildOutput;
+  const fixedValueStarter = (() => {
+    const composition = hydration.draft.composition;
+    if (composition?.kind !== 'direct') return null;
+    if (composition.value?.kind !== 'static') return null;
+    if (isConfiguredStaticValue(composition.value.value)) return null;
+    return composition.value.value;
+  })();
 
   const effectivePickerMode = pickerMode ?? (isMethodNeedsAction ? 'base' : null);
   const activePickerActions =
@@ -1749,6 +1772,55 @@ export function SmartBuilderPanel({
             showBuilderEmptyGuidance={showInitialStartGuidance}
             onUseFixedValue={() => onApplyAction?.('base.fixed', { fixedValue: '' })}
           />
+
+          {fixedValueStarter !== null && (
+            <div
+              className="mt-2 rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2"
+              data-testid="smart-fixed-value-starter"
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Set fixed value</p>
+              {(targetType === 'number' || targetType === 'integer') ? (
+                <input
+                  type="number"
+                  data-testid="smart-fixed-value-starter-input"
+                  className="mt-2 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                  value={typeof fixedValueStarter === 'number' ? String(fixedValueStarter) : ''}
+                  placeholder="Enter fixed value"
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    const next = raw === '' ? '' : Number(raw);
+                    onApplyAction?.('base.fixed', { fixedValue: next });
+                  }}
+                />
+              ) : targetType === 'boolean' ? (
+                <select
+                  data-testid="smart-fixed-value-starter-boolean"
+                  className="mt-2 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                  value={typeof fixedValueStarter === 'boolean' ? (fixedValueStarter ? 'true' : 'false') : ''}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    const next = raw === 'true' ? true : raw === 'false' ? false : '';
+                    onApplyAction?.('base.fixed', { fixedValue: next });
+                  }}
+                >
+                  <option value="">Select fixed value</option>
+                  <option value="true">True</option>
+                  <option value="false">False</option>
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  data-testid="smart-fixed-value-starter-input"
+                  className="mt-2 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
+                  value={typeof fixedValueStarter === 'string' ? fixedValueStarter : ''}
+                  placeholder="Enter fixed value"
+                  onChange={(event) => {
+                    onApplyAction?.('base.fixed', { fixedValue: event.target.value });
+                  }}
+                />
+              )}
+            </div>
+          )}
 
           <div className="mt-2" data-testid="smart-add-input-section">
             {showAddInput && (

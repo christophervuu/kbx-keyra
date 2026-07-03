@@ -449,4 +449,46 @@ describe('ItemTemplateEditor hydration fallback', () => {
       },
     );
   });
+
+  it('uses provided itemContextFieldPaths for objectFields item recipe context', async () => {
+    const user = userEvent.setup();
+    const onFieldMappingChange = vi.fn();
+
+    const itemTemplate: ItemTemplateState = {
+      fields: [],
+      nestedArrays: new Map(),
+    };
+
+    render(
+      <ItemTemplateEditor
+        itemTemplate={itemTemplate}
+        targetArrayNode={createNestedTargetArrayNode()}
+        parsedSourceSchema={createNestedSourceSchemaWithDepartmentName()}
+        sourceArrayPath=""
+        itemContextFieldPaths={['day', 'value.BeginTime', 'value.IsOpen']}
+        onFieldMappingChange={onFieldMappingChange}
+      />,
+    );
+
+    await user.click(screen.getByTestId('item-field-toggle-divisions.staff.personId'));
+    await user.click(screen.getByTestId('field-search-divisions.staff.personId'));
+
+    expect(screen.getByTestId('field-option-divisions.staff.personId-item-day')).toBeInTheDocument();
+    expect(screen.getByTestId('field-option-divisions.staff.personId-item-value.BeginTime')).toBeInTheDocument();
+    expect(screen.getByTestId('field-option-divisions.staff.personId-item-value.IsOpen')).toBeInTheDocument();
+    expect(screen.getByTestId('field-option-divisions.staff.personId-source-departments.name')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('field-option-divisions.staff.personId-item-day'));
+    expect(onFieldMappingChange).toHaveBeenLastCalledWith(
+      'divisions.staff.personId',
+      {
+        kind: 'chain',
+        targetFieldPath: 'divisions.staff.personId',
+        chainState: {
+          source: { kind: 'field', path: '__item__:day' },
+          steps: [],
+        },
+      },
+    );
+  });
 });

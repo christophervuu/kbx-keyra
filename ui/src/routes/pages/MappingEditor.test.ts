@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSmartTargetSessionKey,
   buildSampleOutputByTargetPath,
+  buildLocationHref,
   applySmartActionToDraft,
   applyStagedInputToSmartDraft,
   hydrateUnknownPrimaryInputTypes,
@@ -99,6 +100,15 @@ describe('buildSampleOutputByTargetPath', () => {
     expect(sampleOutput['transaction']).toContain('{"id":"tx-1001"');
     expect(sampleOutput['transaction.id']).toBe('"tx-1001"');
     expect(sampleOutput['transaction.createdDate']).toBe('"2026-06-19"');
+  });
+});
+
+describe('buildLocationHref', () => {
+  it('builds a stable href from pathname + optional search/hash', () => {
+    expect(buildLocationHref({ pathname: '/projects/p1/mappings/m1' })).toBe('/projects/p1/mappings/m1');
+    expect(buildLocationHref({ pathname: '/projects/p1', search: '?tab=details' })).toBe('/projects/p1?tab=details');
+    expect(buildLocationHref({ pathname: '/projects/p1', hash: '#section-2' })).toBe('/projects/p1#section-2');
+    expect(buildLocationHref({ pathname: '/projects/p1', search: '?tab=details', hash: '#section-2' })).toBe('/projects/p1?tab=details#section-2');
   });
 });
 

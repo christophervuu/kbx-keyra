@@ -168,6 +168,14 @@ export function buildSampleOutputByTargetPath(
   return next;
 }
 
+export function buildLocationHref(locationLike: {
+  readonly pathname: string;
+  readonly search?: string;
+  readonly hash?: string;
+}): string {
+  return `${locationLike.pathname}${locationLike.search ?? ''}${locationLike.hash ?? ''}`;
+}
+
 function WorkspaceNoSourceDataSlot() {
   const { sourceData } = usePreviewContext();
   return sourceData === null ? <WorkspaceNoSourceDataCallout /> : null;
@@ -3778,12 +3786,10 @@ export default function MappingEditor() {
     Object.values(smartDraftByTargetState).some((draft) => isSmartBuilderDraftSaveBlocked(draft))
   ), [smartDraftByTargetState]);
 
+  const setEditorSaveBlocked = editor.actions.setSaveBlocked;
   useEffect(() => {
-    editor.actions.setSaveBlocked(hasIncompleteSmartDraftBlockingSave);
-    return () => {
-      editor.actions.setSaveBlocked(false);
-    };
-  }, [editor.actions, hasIncompleteSmartDraftBlockingSave]);
+    setEditorSaveBlocked(hasIncompleteSmartDraftBlockingSave);
+  }, [hasIncompleteSmartDraftBlockingSave, setEditorSaveBlocked]);
 
   const canFillCurrentValue = Boolean(
     selectedTargetPath
@@ -3854,15 +3860,40 @@ export default function MappingEditor() {
   // useBlocker must be called unconditionally (Rules of Hooks)
   // ---------------------------------------------------------------------------
   const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      currentLocation.pathname !== nextLocation.pathname &&
-      editor.hasUnsavedChanges,
+    editor.hasUnsavedChanges
+      ? ({ currentLocation, nextLocation }) => currentLocation.pathname !== nextLocation.pathname
+      : false,
   );
+
+  useEffect(() => {
+    if (!editor.hasUnsavedChanges && blocker.state === 'blocked') {
+      blocker.reset?.();
+    }
+  }, [blocker.state, blocker.reset, editor.hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const routerHref = buildLocationHref(location);
+    const browserHref = buildLocationHref(window.location);
+
+    if (browserHref !== routerHref) {
+      window.history.replaceState(window.history.state, '', routerHref);
+    }
+  }, [blocker.state, location]);
 
   // "Discard & Leave" — clear all drafts then proceed
   const handleBlockerDiscard = useCallback(() => {
     editor.actions.revertAllDrafts();
-    blocker.proceed?.();
+    queueMicrotask(() => {
+      blocker.proceed?.();
+    });
   }, [editor.actions, blocker]);
 
   // "Cancel" — stay and preserve drafts

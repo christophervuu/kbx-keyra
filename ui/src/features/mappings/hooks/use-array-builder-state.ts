@@ -39,6 +39,7 @@ import type {
   FilterPredicateState,
   ItemFieldMapping,
   MergeBranch,
+  ObjectFieldsCollectionState,
   ValueEntry,
 } from '../lib/array-builder-state';
 import { decomposeArrayExpression } from '../lib/array-decomposer';
@@ -116,6 +117,8 @@ export interface UseArrayBuilderStateResult {
   readonly setMergeBranchesState: (state: import('../lib/array-builder-state').MergeBranchesCollectionState) => void;
   /** Update the entire SplitString collection state at once. */
   readonly setSplitStringState: (state: import('../lib/array-builder-state').SplitStringCollectionState) => void;
+  /** Update the entire ObjectFields collection state at once. */
+  readonly setObjectFieldsState: (state: ObjectFieldsCollectionState) => void;
   /** Set or update the mapping for an item field. */
   readonly setFieldMapping: (targetFieldPath: string, mapping: ItemFieldMapping) => void;
   /** Clear the mapping for an item field (resets to empty). */
@@ -469,6 +472,14 @@ export function useArrayBuilderState({
     },
     [],
   );
+
+  const setObjectFieldsState = useCallback((newCollectionState: ObjectFieldsCollectionState) => {
+    setState((prev) => {
+      if (prev.collectionState.mode !== 'objectFields') return prev;
+      const partial = { ...prev, collectionState: newCollectionState };
+      return { ...partial, completionStatus: deriveCompletionStatus(partial) };
+    });
+  }, []);
 
   const setFilterPredicate = useCallback((predicate: FilterPredicateState) => {
     setState((prev) => {
@@ -946,6 +957,7 @@ export function useArrayBuilderState({
     updateBranch,
     setMergeBranchesState,
     setSplitStringState,
+    setObjectFieldsState,
     setFieldMapping,
     removeFieldMapping,
     pendingModeSwitch,

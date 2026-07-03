@@ -47,6 +47,8 @@ export interface ItemTemplateEditorProps {
    * Used to derive item-level field paths from the source schema.
    */
   readonly sourceArrayPath: string;
+  /** Optional item-context override paths (e.g. objectFields mode: day, value.*). */
+  readonly itemContextFieldPaths?: readonly string[];
   /** Parent array source path (if nested context) for parent-scope field selection. */
   readonly parentSourceArrayPath?: string;
   /** Fires when a field mapping changes. */
@@ -326,6 +328,7 @@ export function ItemTemplateEditor({
   targetArrayNode,
   parsedSourceSchema,
   sourceArrayPath,
+  itemContextFieldPaths,
   parentSourceArrayPath = '',
   onFieldMappingChange,
   onEnterNestedArray,
@@ -349,10 +352,12 @@ export function ItemTemplateEditor({
     [itemFields, objectGroupPathSet],
   );
 
-  const itemFieldPaths = useMemo(
-    () => deriveItemFieldPaths(parsedSourceSchema, sourceArrayPath),
-    [parsedSourceSchema, sourceArrayPath],
-  );
+  const itemFieldPaths = useMemo(() => {
+    if (itemContextFieldPaths !== undefined && itemContextFieldPaths.length > 0) {
+      return [...new Set(itemContextFieldPaths.map((path) => path.trim()).filter((path) => path.length > 0))];
+    }
+    return deriveItemFieldPaths(parsedSourceSchema, sourceArrayPath);
+  }, [itemContextFieldPaths, parsedSourceSchema, sourceArrayPath]);
 
   const parentFieldPaths = useMemo(
     () => deriveParentFieldPaths(parsedSourceSchema, parentSourceArrayPath),

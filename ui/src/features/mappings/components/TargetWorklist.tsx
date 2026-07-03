@@ -1,5 +1,5 @@
 import { ChevronDown, Search, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { TargetFieldRow } from './TargetFieldRow';
@@ -657,6 +657,7 @@ export function TargetWorklist({
 }: TargetWorklistProps) {
   void targetSchemaName;
 
+  const lastVisibleScopeSignatureRef = useRef<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilterTab, setActiveFilterTab] = useState<TargetFilterTab>('all');
@@ -754,7 +755,18 @@ export function TargetWorklist({
   ]);
 
   useEffect(() => {
-    onVisibleScopeChange?.({
+    if (!onVisibleScopeChange) {
+      return;
+    }
+
+    const signature = visibleTargetPaths.join('\u0000');
+    if (lastVisibleScopeSignatureRef.current === signature) {
+      return;
+    }
+
+    lastVisibleScopeSignatureRef.current = signature;
+
+    onVisibleScopeChange({
       visibleTargetPaths,
       count: visibleTargetPaths.length,
     });

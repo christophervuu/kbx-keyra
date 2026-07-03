@@ -29,6 +29,7 @@ import {
   isBuildFromValuesCollectionState,
   isSplitStringCollectionState,
   isMergeBranchesCollectionState,
+  isObjectFieldsCollectionState,
   isCustomExpressionCollectionState,
   isStructuredFilterPredicate,
   isRawFilterPredicate,
@@ -49,6 +50,7 @@ import type {
   FilterMapCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
+  ObjectFieldsCollectionState,
   CustomExpressionCollectionState,
 } from './array-builder-state';
 import { createEmptyChain } from './chain-builder-state';
@@ -115,6 +117,21 @@ describe('deriveCompletionStatus', () => {
       const state = createEmptyArrayBuilderState('customExpression');
       expect(state.completionStatus).toBe('notStarted');
     });
+
+    it('returns notStarted for objectFields mode with no parent object path', () => {
+      const state = createEmptyArrayBuilderState('objectFields');
+      expect(state.completionStatus).toBe('notStarted');
+    });
+
+    it('returns notStarted for objectFields mode with parent object path but no selected child keys', () => {
+      const state = makeState('objectFields', {
+        mode: 'objectFields',
+        parent: { input: { kind: 'primary' }, objectPath: 'DeliveryWeeklyOperation' },
+        orderedChildKeys: [],
+        missingBehavior: 'skip-null-or-absent',
+      } as ObjectFieldsCollectionState);
+      expect(state.completionStatus).toBe('notStarted');
+    });
   });
 
   describe('inProgress', () => {
@@ -165,6 +182,16 @@ describe('deriveCompletionStatus', () => {
         mode: 'mergeArrayBranches',
         branches: [createEmptyMergeBranch(), createEmptyMergeBranch()],
       } as MergeBranchesCollectionState);
+      expect(state.completionStatus).toBe('inProgress');
+    });
+
+    it('returns inProgress for objectFields mode with parent + selected keys but no item fields', () => {
+      const state = makeState('objectFields', {
+        mode: 'objectFields',
+        parent: { input: { kind: 'primary' }, objectPath: 'DeliveryWeeklyOperation' },
+        orderedChildKeys: ['Sunday'],
+        missingBehavior: 'skip-null-or-absent',
+      } as ObjectFieldsCollectionState);
       expect(state.completionStatus).toBe('inProgress');
     });
 
@@ -359,6 +386,40 @@ describe('deriveCompletionStatus', () => {
       } as CollectionState);
       expect(state.completionStatus).toBe('hasErrors');
     });
+
+    it('returns hasErrors for objectFields mode with duplicate selected child keys', () => {
+      const state = makeState(
+        'objectFields',
+        {
+          mode: 'objectFields',
+          parent: { input: { kind: 'primary' }, objectPath: 'DeliveryWeeklyOperation' },
+          orderedChildKeys: ['Sunday', 'Sunday'],
+          missingBehavior: 'skip-null-or-absent',
+        } as ObjectFieldsCollectionState,
+        {
+          fields: [{ kind: 'chain', targetFieldPath: 'isOpen', chainState: createEmptyChain() }],
+          nestedArrays: new Map(),
+        },
+      );
+      expect(state.completionStatus).toBe('hasErrors');
+    });
+
+    it('returns hasErrors for objectFields mode with enrichment parent and empty alias', () => {
+      const state = makeState(
+        'objectFields',
+        {
+          mode: 'objectFields',
+          parent: { input: { kind: 'enrichment', alias: '' }, objectPath: 'DeliveryWeeklyOperation' },
+          orderedChildKeys: ['Sunday'],
+          missingBehavior: 'skip-null-or-absent',
+        } as ObjectFieldsCollectionState,
+        {
+          fields: [{ kind: 'chain', targetFieldPath: 'isOpen', chainState: createEmptyChain() }],
+          nestedArrays: new Map(),
+        },
+      );
+      expect(state.completionStatus).toBe('hasErrors');
+    });
   });
 });
 
@@ -373,6 +434,7 @@ describe('isCompatibleModeSwitch', () => {
       'filterMap',
       'splitString',
       'buildFromValues',
+      'objectFields',
       'customExpression',
     ];
     for (const mode of modes) {
@@ -459,6 +521,18 @@ describe('isCompatibleModeSwitch', () => {
   it('returns false for customExpression → mergeArrayBranches', () => {
     expect(isCompatibleModeSwitch('customExpression', 'mergeArrayBranches')).toBe(false);
   });
+
+  it('returns false for objectFields → map', () => {
+    expect(isCompatibleModeSwitch('objectFields', 'map')).toBe(false);
+  });
+
+  it('returns false for map → objectFields', () => {
+    expect(isCompatibleModeSwitch('map', 'objectFields')).toBe(false);
+  });
+
+  it('returns false for objectFields → customExpression', () => {
+    expect(isCompatibleModeSwitch('objectFields', 'customExpression')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -530,6 +604,16 @@ describe('getModePreservationRules', () => {
     expect(rules.requiresConfirmation).toBe(true);
   });
 
+  it('objectFields → map: requires confirmation', () => {
+    const rules = getModePreservationRules('objectFields', 'map');
+    expect(rules.requiresConfirmation).toBe(true);
+  });
+
+  it('map → objectFields: requires confirmation', () => {
+    const rules = getModePreservationRules('map', 'objectFields');
+    expect(rules.requiresConfirmation).toBe(true);
+  });
+
   it('any structured → customExpression: no confirmation, structured draft preserved', () => {
     for (const from of ['map', 'filterMap', 'splitString', 'buildFromValues', 'mergeArrayBranches'] as ArrayBuilderMode[]) {
       const rules = getModePreservationRules(from, 'customExpression');
@@ -539,7 +623,7 @@ describe('getModePreservationRules', () => {
   });
 
   it('customExpression → any structured: requires confirmation', () => {
-    for (const to of ['map', 'filterMap', 'splitString', 'buildFromValues', 'mergeArrayBranches'] as ArrayBuilderMode[]) {
+    for (const to of ['map', 'filterMap', 'splitString', 'buildFromValues', 'mergeArrayBranches', 'objectFields'] as ArrayBuilderMode[]) {
       const rules = getModePreservationRules('customExpression', to);
       expect(rules.requiresConfirmation).toBe(true);
     }
@@ -662,6 +746,18 @@ describe('createCollectionStateForMode', () => {
     }
   });
 
+  it('creates objectFields collection state with primary parent and empty keys', () => {
+    const s = createCollectionStateForMode('objectFields');
+    expect(s.mode).toBe('objectFields');
+    if (s.mode === 'objectFields') {
+      expect(s.parent.input.kind).toBe('primary');
+      expect(s.parent.objectPath).toBe('');
+      expect(s.orderedChildKeys).toHaveLength(0);
+      expect(s.missingBehavior).toBe('skip-null-or-absent');
+      expect(s.inclusionPredicate).toBeUndefined();
+    }
+  });
+
   it('creates customExpression collection state with empty raw expression', () => {
     const s = createCollectionStateForMode('customExpression');
     expect(s.mode).toBe('customExpression');
@@ -685,6 +781,7 @@ describe('createEmptyArrayBuilderState', () => {
       'filterMap',
       'splitString',
       'buildFromValues',
+      'objectFields',
       'customExpression',
     ];
     for (const mode of modes) {
@@ -735,6 +832,11 @@ describe('type guards', () => {
   it('isCustomExpressionCollectionState', () => {
     expect(isCustomExpressionCollectionState(createCollectionStateForMode('customExpression'))).toBe(true);
     expect(isCustomExpressionCollectionState(createCollectionStateForMode('map'))).toBe(false);
+  });
+
+  it('isObjectFieldsCollectionState', () => {
+    expect(isObjectFieldsCollectionState(createCollectionStateForMode('objectFields'))).toBe(true);
+    expect(isObjectFieldsCollectionState(createCollectionStateForMode('map'))).toBe(false);
   });
 
   it('isStructuredFilterPredicate', () => {

@@ -175,6 +175,8 @@ export { FilterPredicateEditor } from './FilterPredicateEditor';
 export type { FilterPredicateEditorProps } from './FilterPredicateEditor';
 export { BuildFromValuesEditor } from './BuildFromValuesEditor';
 export type { BuildFromValuesEditorProps } from './BuildFromValuesEditor';
+export { ObjectFieldsCollectionEditor } from './ObjectFieldsCollectionEditor';
+export type { ObjectFieldsCollectionEditorProps } from './ObjectFieldsCollectionEditor';
 export { ValueEntryEditor } from './ValueEntryEditor';
 export type { ValueEntryEditorProps } from './ValueEntryEditor';
 export { MergeBranchEditor } from './MergeBranchEditor';

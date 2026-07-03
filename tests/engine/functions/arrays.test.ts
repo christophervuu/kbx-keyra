@@ -5,16 +5,18 @@ import { parse } from '../../../src/engine/dsl/index.js';
 import { registerArrayFunctions } from '../../../src/engine/functions/arrays.js';
 import { registerConditionalFunctions } from '../../../src/engine/functions/conditional.js';
 import { registerMathFunctions } from '../../../src/engine/functions/math.js';
+import { registerNullHandlingFunctions } from '../../../src/engine/functions/null-handling.js';
 import { registerSourceAccessFunctions } from '../../../src/engine/functions/source-access.js';
 import { registerStringFunctions } from '../../../src/engine/functions/string.js';
 import { createRegistry } from '../../../src/engine/registry/function-registry.js';
 import type { EvaluationContext } from '../../../src/engine/dsl/types.js';
 
-function createContext(sourceData: unknown): EvaluationContext {
+function createContext(sourceData: unknown, externalSources: Readonly<Record<string, unknown>> = {}): EvaluationContext {
   const registry = createRegistry();
   registerSourceAccessFunctions(registry);
   registerArrayFunctions(registry);
   registerConditionalFunctions(registry);
+  registerNullHandlingFunctions(registry);
   registerMathFunctions(registry);
   registerStringFunctions(registry);
 
@@ -22,7 +24,7 @@ function createContext(sourceData: unknown): EvaluationContext {
     sourceData,
     scopeStack: [],
     constants: {},
-    externalSources: {},
+    externalSources,
     registry,
     options: {},
     evaluate,
@@ -38,8 +40,8 @@ function createContext(sourceData: unknown): EvaluationContext {
   return context;
 }
 
-function evalExpression(expression: string, sourceData: unknown) {
-  const context = createContext(sourceData);
+function evalExpression(expression: string, sourceData: unknown, externalSources: Readonly<Record<string, unknown>> = {}) {
+  const context = createContext(sourceData, externalSources);
   const parsed = parse(expression, { registry: context.registry });
 
   expect(parsed.success).toBe(true);
@@ -47,6 +49,22 @@ function evalExpression(expression: string, sourceData: unknown) {
 
   return evaluate(parsed.ast!, context);
 }
+
+const OBJECT_FIELDS_PRIMARY_EXPRESSION =
+  'map(filter(map(array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen"), "beginTime": item("value.BeginTime")})';
+
+const OBJECT_FIELDS_ENRICHMENT_EXPRESSION =
+  'map(filter(map(array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), {"day": item(""), "value": get(get(external("hours"), "DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen"), "beginTime": item("value.BeginTime")})';
+
+const WEEKLY_OBJECT = {
+  Sunday: { BeginTime: '09:00', IsOpen: true },
+  Monday: { BeginTime: '10:00', IsOpen: false },
+  Tuesday: { BeginTime: '11:00', IsOpen: true },
+  Wednesday: { BeginTime: '12:00', IsOpen: true },
+  Thursday: { BeginTime: '13:00', IsOpen: true },
+  Friday: { BeginTime: '14:00', IsOpen: true },
+  Saturday: { BeginTime: '15:00', IsOpen: true },
+};
 
 describe('array functions - map()', () => {
   it('AE-01: maps array using object template mode', () => {
@@ -527,6 +545,70 @@ describe('array functions - array/merge/flatten/first/nth', () => {
     });
 
     expect(result.value).toBeNull();
+  });
+});
+
+describe('array functions - objectFields canonical parity scenarios', () => {
+  it('returns seven ordered outputs and keeps IsOpen:false entries for primary source parent', () => {
+    const result = evalExpression(OBJECT_FIELDS_PRIMARY_EXPRESSION, {
+      DeliveryWeeklyOperation: WEEKLY_OBJECT,
+    });
+
+    expect(result.value).toEqual([
+      { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+      { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+      { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+      { operationDayValue: 'Wednesday', isOpen: true, beginTime: '12:00' },
+      { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+      { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+      { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+    ]);
+  });
+
+  it('returns six outputs when one configured day is null/missing', () => {
+    const result = evalExpression(OBJECT_FIELDS_PRIMARY_EXPRESSION, {
+      DeliveryWeeklyOperation: {
+        ...WEEKLY_OBJECT,
+        Wednesday: null,
+      },
+    });
+
+    expect(result.value).toEqual([
+      { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+      { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+      { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+      { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+      { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+      { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+    ]);
+  });
+
+  it('returns empty array when parent object is missing or null', () => {
+    const missingParent = evalExpression(OBJECT_FIELDS_PRIMARY_EXPRESSION, {});
+    const nullParent = evalExpression(OBJECT_FIELDS_PRIMARY_EXPRESSION, {
+      DeliveryWeeklyOperation: null,
+    });
+
+    expect(missingParent.value).toEqual([]);
+    expect(nullParent.value).toEqual([]);
+  });
+
+  it('supports enrichment-backed parent reference with equivalent output', () => {
+    const result = evalExpression(OBJECT_FIELDS_ENRICHMENT_EXPRESSION, {}, {
+      hours: {
+        DeliveryWeeklyOperation: WEEKLY_OBJECT,
+      },
+    });
+
+    expect(result.value).toEqual([
+      { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+      { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+      { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+      { operationDayValue: 'Wednesday', isOpen: true, beginTime: '12:00' },
+      { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+      { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+      { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+    ]);
   });
 });
 

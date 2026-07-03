@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "forge/active/FS-103/tasks/T-09.md",
+                "file": "forge/active/FS-104/tasks/T-08.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "T-09"
+              "title": "T-08"
             }
           }
         ]
@@ -180,31 +180,44 @@
       "bases:Create new base": false
     }
   },
-  "active": "6f9518702ec634e2",
+  "active": "524501cf2aa1bd9f",
   "lastOpenFiles": [
+    "ui/dist/index.html",
+    "ui/dist/assets/index-HknDgbRM.css",
+    "ui/dist/assets/index-B16uwn_N.js",
+    "ui/dist/assets",
+    "ui/node_modules/@tanstack/query-core/LICENSE",
+    "ui/node_modules/@tanstack/query-core/build/modern/utils.d.ts",
+    "ui/node_modules/@tanstack/query-core/build/legacy/utils.d.ts",
+    "ui/node_modules/@tanstack/query-core/build/modern/types.d.ts",
+    "ui/node_modules/@tanstack/query-core/build/legacy/types.d.ts",
+    "ui/node_modules/@tanstack/query-core/build/modern/timeoutManager.d.ts",
+    "ui/node_modules/@tanstack/query-core/build/legacy/timeoutManager.d.ts",
+    "ui/node_modules/@tanstack/react-query/README.md",
+    "ui/node_modules/@tanstack/react-query/build/codemods/src/v5/keep-previous-data/README.md",
+    "forge/active/FS-104/tasks/T-07.md",
+    "forge/active/FS-104/tasks/T-06.md",
+    "forge/active/FS-104/tasks/T-08.md",
+    "forge/active/FS-104/tasks/T-05.md",
+    "forge/active/FS-104/tasks/T-04.md",
+    "forge/active/FS-104/tasks/T-03.md",
+    "forge/active/FS-104/tasks/T-02.md",
+    "forge/active/FS-104/tasks/T-01.md",
+    "forge/active/FS-104/spec.md",
+    "forge/active/FS-103/tasks/T-09.md",
     "forge/active/FS-103/tasks/T-08.md",
-    "tests/e2e/test-results",
     "tests/e2e/playwright-report/data/455d6ec8e1d0bbd3dc881deb4d7abe04cd9e71fc.md",
-    "tests/e2e/playwright-report/data/8021f133b5bf08ab0c84844e79350879299c15d9.webm",
     "tests/e2e/playwright-report/data/e17f754d823011e3cec084f4fe5704cf466c8745.png",
-    "tests/e2e/playwright-report/data/c4f36e0df6e3b00f58d0b1f9be64bc4fae0b4d0f.webm",
     "tests/e2e/playwright-report/data/1379980fcfb1fd8ef128bcde75ec451ad4b7cf9b.png",
     "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-httpBackend/error-context.md",
-    "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-httpBackend/video.webm",
     "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-httpBackend/test-failed-1.png",
-    "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-httpBackend",
     "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-localStorage/error-context.md",
-    "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-localStorage/video.webm",
     "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-localStorage/test-failed-1.png",
-    "tests/e2e/test-results/schema-flows-Schema-upload-7fb54-ee-and-reference-in-project-localStorage",
     "tests/e2e/playwright-report/data/0c2a9d63296b5b5a80aa2abd2f4b78ca532d01cc.md",
-    "tests/e2e/playwright-report/data/6c16367af961d5538774146590919046065a4ff3.webm",
     "tests/e2e/playwright-report/data/3b7c533a0954ba944ccb15c28ee6bb55e9402a0f.png",
     "tests/e2e/playwright-report/data/6e0963dc9d63bff15aa63b90dd86e4b887a1c670.md",
-    "tests/e2e/playwright-report/data/10b7cfa2e8072b3f6c7390f977054fcfa39dd552.webm",
     "tests/e2e/playwright-report/data/ba7302e5fcee0337abef557338410a1adb6dff7f.png",
     "tests/e2e/playwright-report/data/c2adc55e6da39d6b34045cb8c45d913fbd24c8c1.md",
-    "tests/e2e/playwright-report/data/480e77dab9d598a703b9329c7c3f374b794e2cf8.webm",
     "tests/e2e/playwright-report/data/a9e53c6096cda9722c21ae43afa47b83f09fcb40.png",
     "tests/e2e/test-results/mapping-crud-Mapping-CRUD--7a431-mapping-and-delete-original-httpBackend/error-context.md",
     "tests/e2e/test-results/mapping-crud-Mapping-CRUD--7a431-mapping-and-delete-original-httpBackend/test-failed-1.png",
@@ -214,19 +227,6 @@
     "tests/e2e/playwright-report/data/292a6d6ce39031857e099f6878b24b9c18c017e6.png",
     "tests/e2e/playwright-report/data/0b1c815e824a1086e33e120ac09d8767381baaea.md",
     "tests/e2e/playwright-report/data/b2d1e46264045c4c42fdc6ebc4854ba49293d5e4.md",
-    "tests/e2e/playwright-report/data/2c944f607e6dc84fde43bc46acb95165aa51d6e9.md",
-    "tests/e2e/playwright-report/data/ce2329786ff386bcaf742d85218e37fda9037c15.md",
-    "tests/e2e/playwright-report/data/ad3ecf0c3cf4f24926f8bc90f4052fdc71548127.md",
-    "tests/e2e/test-results/project-crud-Project-CRUD--f5833-update-and-delete-a-project-httpBackend/error-context.md",
-    "tests/e2e/test-results/project-crud-Project-CRUD--f5833-update-and-delete-a-project-localStorage/error-context.md",
-    "tests/e2e/playwright-report/data/c717adabc9e913bb68581ba6f2a52f4df86cb1c8.md",
-    "tests/e2e/playwright-report/data/c6707e7574d58d9c0fdd07b65bcdca49e1c57cac.md",
-    "tests/e2e/playwright-report/data/5cd1851128f4d8672779dd38bd4dfb8de6f52b8d.md",
-    "tests/e2e/playwright-report/data/0c27104a70240e12bf6a00d89bb649cd89831904.md",
-    "tests/e2e/playwright-report/data/adefb3f6663e803064a7ecf036cbd6498a09bc00.md",
-    "tests/e2e/playwright-report/data/5810790e282155f4c9d59ef617fa07f1a2fd8786.md",
-    "tests/e2e/playwright-report/data/2f8ca6b126331c2f2b1417343736bb19478b9716.md",
-    "tests/e2e/playwright-report/data/097de0e499f0bf7d92df7e2ed34e9d8bdb1f4633.md",
-    "tests/e2e/playwright-report/data/830b6a4fbdd16ec1d968add6dbd9b320ea2d0d09.md"
+    "tests/e2e/playwright-report/data/2c944f607e6dc84fde43bc46acb95165aa51d6e9.md"
   ]
 }

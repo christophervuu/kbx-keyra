@@ -1,4 +1,46 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { execute as executeEngine } from '../../../src/engine/execute.js';
+import { registerAllFunctions } from '../../../src/engine/functions/index.js';
+import { defaultRegistry, hasFunction } from '../../../src/engine/registry/function-registry.js';
+
+const OBJECT_FIELDS_PRIMARY_EXPRESSION =
+  'map(filter(map(array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen"), "beginTime": item("value.BeginTime")})';
+
+const OBJECT_FIELDS_ENRICHMENT_EXPRESSION =
+  'map(filter(map(array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), {"day": item(""), "value": get(get(external("hours"), "DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen"), "beginTime": item("value.BeginTime")})';
+
+const WEEKLY_OBJECT = {
+  Sunday: { BeginTime: '09:00', IsOpen: true },
+  Monday: { BeginTime: '10:00', IsOpen: false },
+  Tuesday: { BeginTime: '11:00', IsOpen: true },
+  Wednesday: { BeginTime: '12:00', IsOpen: true },
+  Thursday: { BeginTime: '13:00', IsOpen: true },
+  Friday: { BeginTime: '14:00', IsOpen: true },
+  Saturday: { BeginTime: '15:00', IsOpen: true },
+};
+
+function objectFieldsMappingConfig(expression: string): Parameters<typeof executeEngine>[0] {
+  return {
+    name: 'ObjectFieldsParity',
+    version: 1,
+    engineVersion: '1.0.0',
+    sourceSchemaRef: {
+      schemaId: 'schema-source',
+      type: 'local',
+    },
+    targetSchemaRef: {
+      schemaId: 'schema-target',
+      type: 'local',
+    },
+    config: {
+      unmappedTargets: 'omit',
+      nullSubtrees: [],
+      constants: {},
+      externalSources: [],
+    },
+    rules: [{ target: 'WeeklyOperations', type: 'array', expression }],
+  };
+}
 
 const sharedMocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
@@ -53,6 +95,9 @@ async function importStatusHandler() {
 
 describe('runtime execute/status handlers', () => {
   beforeEach(() => {
+    if (!hasFunction('source')) {
+      registerAllFunctions(defaultRegistry);
+    }
     vi.resetModules();
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -336,6 +381,168 @@ describe('runtime execute/status handlers', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('"eventType":"execute-error"'));
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('"phase":"execute-runtime-snapshot"'));
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('"message":"engine exploded"'));
+  });
+
+  describe('canonical objectFields browser/lambda parity', () => {
+    it('matches browser engine output for full weekly input (7 ordered outputs, IsOpen:false retained)', async () => {
+      const mappingConfig = objectFieldsMappingConfig(OBJECT_FIELDS_PRIMARY_EXPRESSION);
+      const sourceData = {
+        DeliveryWeeklyOperation: WEEKLY_OBJECT,
+      };
+
+      sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({ mappingConfig }));
+      sharedMocks.parseBody.mockReturnValue({
+        mappingId: 'map-1',
+        sourceData,
+      });
+      engineMocks.execute.mockImplementation((...args) => executeEngine(...(args as Parameters<typeof executeEngine>)));
+
+      const expected = executeEngine(mappingConfig, sourceData, null, null, {
+        externalSources: {},
+        trace: false,
+      });
+
+      const { handler } = await importExecuteHandler();
+      const result = await handler({ body: '{}', pathParameters: {} });
+
+      expect(result.statusCode).toBe(200);
+      const parsed = JSON.parse(result.body) as { output: unknown };
+      expect(parsed.output).toEqual(expected.output);
+      expect(parsed.output).toEqual({
+        WeeklyOperations: [
+          { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+          { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+          { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+          { operationDayValue: 'Wednesday', isOpen: true, beginTime: '12:00' },
+          { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+          { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+          { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+        ],
+      });
+    });
+
+    it('matches browser engine output when one configured child key is null/missing (6 outputs)', async () => {
+      const mappingConfig = objectFieldsMappingConfig(OBJECT_FIELDS_PRIMARY_EXPRESSION);
+      const sourceData = {
+        DeliveryWeeklyOperation: {
+          ...WEEKLY_OBJECT,
+          Wednesday: null,
+        },
+      };
+
+      sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({ mappingConfig }));
+      sharedMocks.parseBody.mockReturnValue({
+        mappingId: 'map-1',
+        sourceData,
+      });
+      engineMocks.execute.mockImplementation((...args) => executeEngine(...(args as Parameters<typeof executeEngine>)));
+
+      const expected = executeEngine(mappingConfig, sourceData, null, null, {
+        externalSources: {},
+        trace: false,
+      });
+
+      const { handler } = await importExecuteHandler();
+      const result = await handler({ body: '{}', pathParameters: {} });
+
+      expect(result.statusCode).toBe(200);
+      const parsed = JSON.parse(result.body) as { output: unknown };
+      expect(parsed.output).toEqual(expected.output);
+      expect(parsed.output).toEqual({
+        WeeklyOperations: [
+          { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+          { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+          { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+          { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+          { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+          { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+        ],
+      });
+    });
+
+    it('matches browser engine output when parent object is missing/null (empty array)', async () => {
+      const mappingConfig = objectFieldsMappingConfig(OBJECT_FIELDS_PRIMARY_EXPRESSION);
+      sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({ mappingConfig }));
+      sharedMocks.parseBody.mockReturnValue({
+        mappingId: 'map-1',
+        sourceData: {},
+      });
+      engineMocks.execute.mockImplementation((...args) => executeEngine(...(args as Parameters<typeof executeEngine>)));
+
+      const expected = executeEngine(mappingConfig, {}, null, null, {
+        externalSources: {},
+        trace: false,
+      });
+
+      const { handler } = await importExecuteHandler();
+      const result = await handler({ body: '{}', pathParameters: {} });
+
+      expect(result.statusCode).toBe(200);
+      const parsed = JSON.parse(result.body) as { output: unknown };
+      expect(parsed.output).toEqual(expected.output);
+      expect(parsed.output).toEqual({ WeeklyOperations: [] });
+
+      sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({ mappingConfig }));
+      sharedMocks.parseBody.mockReturnValue({
+        mappingId: 'map-1',
+        sourceData: { DeliveryWeeklyOperation: null },
+      });
+
+      const expectedNullParent = executeEngine(
+        mappingConfig,
+        { DeliveryWeeklyOperation: null },
+        null,
+        null,
+        { externalSources: {}, trace: false },
+      );
+      const nullResult = await handler({ body: '{}', pathParameters: {} });
+
+      expect(nullResult.statusCode).toBe(200);
+      const parsedNull = JSON.parse(nullResult.body) as { output: unknown };
+      expect(parsedNull.output).toEqual(expectedNullParent.output);
+      expect(parsedNull.output).toEqual({ WeeklyOperations: [] });
+    });
+
+    it('matches browser engine output for enrichment-backed canonical objectFields expression', async () => {
+      const mappingConfig = objectFieldsMappingConfig(OBJECT_FIELDS_ENRICHMENT_EXPRESSION);
+      const sourceData = {};
+      const enrichmentInputs = {
+        hours: {
+          DeliveryWeeklyOperation: WEEKLY_OBJECT,
+        },
+      };
+
+      sharedMocks.getObject.mockResolvedValueOnce(JSON.stringify({ mappingConfig }));
+      sharedMocks.parseBody.mockReturnValue({
+        mappingId: 'map-1',
+        sourceData,
+        enrichmentInputs,
+      });
+      engineMocks.execute.mockImplementation((...args) => executeEngine(...(args as Parameters<typeof executeEngine>)));
+
+      const expected = executeEngine(mappingConfig, sourceData, null, null, {
+        externalSources: enrichmentInputs,
+        trace: false,
+      });
+
+      const { handler } = await importExecuteHandler();
+      const result = await handler({ body: '{}', pathParameters: {} });
+
+      expect(result.statusCode).toBe(200);
+      const parsed = JSON.parse(result.body) as { output: unknown };
+      expect(parsed.output).toEqual(expected.output);
+      expect(parsed.output).toEqual({
+        WeeklyOperations: [
+          { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+          { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+          { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+          { operationDayValue: 'Wednesday', isOpen: true, beginTime: '12:00' },
+          { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+          { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+          { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+        ],
+      });
+    });
   });
 
   it('returns status not-deployed shape when pointer is missing', async () => {

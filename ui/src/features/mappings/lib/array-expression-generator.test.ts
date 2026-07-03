@@ -24,6 +24,7 @@ import type {
   SplitStringCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
+  ObjectFieldsCollectionState,
   CustomExpressionCollectionState,
   ItemTemplateState,
   ItemFieldMapping,
@@ -152,6 +153,34 @@ function makeCustomState(rawExpression: string): ArrayBuilderState {
   };
 }
 
+function makeObjectFieldsState(
+  orderedChildKeys: readonly string[],
+  fields: ItemFieldMapping[] = [],
+  overrides?: {
+    readonly parentInput?: ObjectFieldsCollectionState['parent']['input'];
+    readonly parentObjectPath?: string;
+    readonly inclusionPredicate?: FilterPredicateState;
+  },
+): ArrayBuilderState {
+  const collectionState: ObjectFieldsCollectionState = {
+    mode: 'objectFields',
+    parent: {
+      input: overrides?.parentInput ?? { kind: 'primary' },
+      objectPath: overrides?.parentObjectPath ?? 'DeliveryWeeklyOperation',
+    },
+    orderedChildKeys,
+    missingBehavior: 'skip-null-or-absent',
+    inclusionPredicate: overrides?.inclusionPredicate,
+  };
+  const itemTemplate: ItemTemplateState = { fields, nestedArrays: new Map() };
+  return {
+    mode: 'objectFields',
+    collectionState,
+    itemTemplate,
+    completionStatus: 'inProgress',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // AE-01 — Map source array with item transforms
 // ---------------------------------------------------------------------------
@@ -266,6 +295,199 @@ describe('Split string mode', () => {
     const result = generateArrayExpression(makeSplitStringState('tags', ',', true, true));
     expect(result).toBe('filter(map(split(source("tags"), ","), trim(item(""))), neq(item(""), ""))');
     assertParses(result);
+  });
+});
+
+describe('Object fields mode', () => {
+  it('generates canonical expression for one ordered key', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'operationDayValue',
+        chainState: {
+          source: { kind: 'field', path: '__item__:day' },
+          steps: [],
+        },
+      },
+      {
+        kind: 'chain',
+        targetFieldPath: 'isOpen',
+        chainState: {
+          source: { kind: 'field', path: '__item__:value.IsOpen' },
+          steps: [],
+        },
+      },
+    ];
+
+    const result = generateArrayExpression(makeObjectFieldsState(['Sunday'], fields));
+
+    expect(result).toBe(
+      'map(filter(map(array("Sunday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen")})',
+    );
+    assertParses(result);
+  });
+
+  it('preserves configured seven-key order exactly', () => {
+    const result = generateArrayExpression(
+      makeObjectFieldsState([
+        'Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+      ]),
+    );
+
+    expect(result).toContain('array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")');
+    assertParses(result);
+  });
+
+  it('always applies mandatory not(isNull(item("value"))) filter before item template mapping', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'beginTime',
+        chainState: {
+          source: { kind: 'field', path: '__item__:value.BeginTime' },
+          steps: [],
+        },
+      },
+    ];
+
+    const result = generateArrayExpression(makeObjectFieldsState(['Sunday', 'Monday'], fields));
+
+    expect(result).toContain('filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value"))))');
+    expect(result).toContain('"beginTime": item("value.BeginTime")');
+    assertParses(result);
+  });
+
+  it('keeps IsOpen false semantics by mapping value field directly without truthy filtering', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'isOpen',
+        chainState: {
+          source: { kind: 'field', path: '__item__:value.IsOpen' },
+          steps: [],
+        },
+      },
+    ];
+
+    const result = generateArrayExpression(makeObjectFieldsState(['Sunday'], fields));
+
+    expect(result).toContain('"isOpen": item("value.IsOpen")');
+    expect(result).not.toContain('eq(item("value.IsOpen"), true)');
+    assertParses(result);
+  });
+
+  it('supports fixed values and root/enrichment references in reusable item template', () => {
+    const fields: ItemFieldMapping[] = [
+      {
+        kind: 'chain',
+        targetFieldPath: 'operationDayValue',
+        chainState: {
+          source: { kind: 'field', path: '__item__:day' },
+          steps: [],
+        },
+      },
+      {
+        kind: 'chain',
+        targetFieldPath: 'orderId',
+        chainState: {
+          source: { kind: 'field', path: '__source__:orderId' },
+          steps: [],
+        },
+      },
+      {
+        kind: 'expression',
+        targetFieldPath: 'timezone',
+        dsl: 'get(external("shiftMeta"), "timezone")',
+      },
+      {
+        kind: 'chain',
+        targetFieldPath: 'sourceType',
+        chainState: {
+          source: { kind: 'static', value: { type: 'string', value: 'WEEKLY' } },
+          steps: [],
+        },
+      },
+    ];
+
+    const result = generateArrayExpression(makeObjectFieldsState(['Sunday'], fields));
+
+    expect(result).toContain('"operationDayValue": item("day")');
+    expect(result).toContain('"orderId": source("orderId")');
+    expect(result).toContain('"timezone": get(external("shiftMeta"), "timezone")');
+    expect(result).toContain('"sourceType": "WEEKLY"');
+    assertParses(result);
+  });
+
+  it('supports enrichment-backed parent expression', () => {
+    const result = generateArrayExpression(
+      makeObjectFieldsState(['Sunday'], [], {
+        parentInput: { kind: 'enrichment', alias: 'hours' },
+        parentObjectPath: 'DeliveryWeeklyOperation',
+      }),
+    );
+
+    expect(result).toContain('get(get(external("hours"), "DeliveryWeeklyOperation"), item(""))');
+    assertParses(result);
+  });
+
+  it('supports additional inclusion predicate as second sequential filter', () => {
+    const result = generateArrayExpression(
+      makeObjectFieldsState(['Sunday', 'Monday'], [], {
+        inclusionPredicate: {
+          kind: 'structured',
+          left: { kind: 'itemField', fieldPath: 'value.IsOpen' },
+          operator: 'eq',
+          right: { kind: 'static', value: 'true' },
+        },
+      }),
+    );
+
+    expect(result).toContain(
+      'filter(filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), eq(item("value.IsOpen"), true))',
+    );
+    assertParses(result);
+  });
+
+  it('keeps mandatory canonical expression when optional inclusion predicate is incomplete', () => {
+    const result = generateArrayExpression(
+      makeObjectFieldsState(['Sunday', 'Monday'], [], {
+        inclusionPredicate: {
+          kind: 'structured',
+          left: { kind: 'itemField', fieldPath: '' },
+          operator: 'eq',
+          right: { kind: 'none' },
+        },
+      }),
+    );
+
+    expect(result).toBe(
+      'map(filter(map(array("Sunday", "Monday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {})',
+    );
+    assertParses(result);
+  });
+
+  it('is deterministic for equivalent objectFields state input', () => {
+    const state = makeObjectFieldsState(['Sunday', 'Monday'], [
+      {
+        kind: 'chain',
+        targetFieldPath: 'operationDayValue',
+        chainState: {
+          source: { kind: 'field', path: '__item__:day' },
+          steps: [],
+        },
+      },
+    ]);
+
+    const first = generateArrayExpression(state);
+    const second = generateArrayExpression(state);
+    expect(first).toBe(second);
+    assertParses(first);
   });
 });
 

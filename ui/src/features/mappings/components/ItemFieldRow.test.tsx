@@ -183,6 +183,49 @@ describe('ItemFieldRow', () => {
       },
     });
   });
+
+  it('supports objectFields property-name and property-value item contexts', async () => {
+    const user = userEvent.setup();
+    const { onMappingChange } = renderRow({
+      itemFieldPaths: ['day', 'value.BeginTime'],
+    });
+
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    expect(screen.getByTestId('field-option-hasDiscount-item-day')).toBeInTheDocument();
+    expect(screen.getByTestId('field-option-hasDiscount-item-value.BeginTime')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('field-option-hasDiscount-item-day'));
+    expect(lastMappingCall(onMappingChange)).toEqual({
+      kind: 'chain',
+      targetFieldPath: 'hasDiscount',
+      chainState: {
+        source: { kind: 'field', path: '__item__:day' },
+        steps: [],
+      },
+    });
+
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    await user.clear(screen.getByTestId('field-search-hasDiscount'));
+    await user.click(screen.getByTestId('field-option-hasDiscount-item-value.BeginTime'));
+    expect(lastMappingCall(onMappingChange)).toEqual({
+      kind: 'chain',
+      targetFieldPath: 'hasDiscount',
+      chainState: {
+        source: { kind: 'field', path: '__item__:value.BeginTime' },
+        steps: [],
+      },
+    });
+  });
+
+  it('keeps root source options available alongside objectFields contexts', async () => {
+    const user = userEvent.setup();
+    renderRow({
+      itemFieldPaths: ['day', 'value.IsOpen'],
+    });
+
+    await user.click(screen.getByTestId('field-search-hasDiscount'));
+    expect(screen.getByTestId('field-option-hasDiscount-source-orderId')).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -239,7 +282,7 @@ describe('ItemFieldRow — FS-052 T-04 SourceFieldOptionRow', () => {
     const user = userEvent.setup();
     renderRowWithContext({}, { orderId: 'ORD-42' });
     await user.click(screen.getByTestId('field-search-hasDiscount'));
-    expect(screen.getByText('"ORD-42"')).toBeInTheDocument();
+    expect(screen.getAllByText('"ORD-42"').length).toBeGreaterThan(0);
   });
 
   it('does not render test value when sourceData is null', async () => {

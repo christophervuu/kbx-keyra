@@ -27,6 +27,7 @@ import type {
   SplitStringCollectionState,
   BuildFromValuesCollectionState,
   MergeBranchesCollectionState,
+  ObjectFieldsCollectionState,
   ItemTemplateState,
   ItemFieldMapping,
   FilterPredicateState,
@@ -514,6 +515,69 @@ function generateMergeBranchesExpression(collection: MergeBranchesCollectionStat
   return `merge(${branchExprs.join(', ')})`;
 }
 
+function generateObjectFieldsParentExpression(collection: ObjectFieldsCollectionState): string {
+  const objectPath = collection.parent.objectPath.trim();
+
+  if (collection.parent.input.kind === 'primary') {
+    if (!objectPath) return '';
+    return `source(${quoteString(objectPath)})`;
+  }
+
+  const alias = collection.parent.input.alias.trim();
+  if (!alias) return '';
+  const base = `external(${quoteString(alias)})`;
+  if (!objectPath) return base;
+  return `get(${base}, ${quoteString(objectPath)})`;
+}
+
+/**
+ * Generates DSL for Object Fields mode.
+ *
+ * Canonical pattern (without optional inclusion predicate):
+ *   map(
+ *     filter(
+ *       map(array("k1", ...), {"day": item(""), "value": get(<parent>, item(""))}),
+ *       not(isNull(item("value")))
+ *     ),
+ *     <objectTemplate>
+ *   )
+ *
+ * With optional inclusion predicate, applies a second filter layer after the
+ * mandatory null/absent value filter.
+ */
+function generateObjectFieldsExpression(
+  collection: ObjectFieldsCollectionState,
+  template: ItemTemplateState,
+): string {
+  const orderedKeys = collection.orderedChildKeys
+    .map((key) => key.trim())
+    .filter((key) => key.length > 0);
+  if (orderedKeys.length === 0) return '';
+
+  const parentExpr = generateObjectFieldsParentExpression(collection);
+  if (!parentExpr) return '';
+
+  const keyArrayExpr = `array(${orderedKeys.map(quoteString).join(', ')})`;
+  const candidateTemplate = `{"day": item(""), "value": get(${parentExpr}, item(""))}`;
+  const candidateMapExpr = `map(${keyArrayExpr}, ${candidateTemplate})`;
+  const mandatoryFilterExpr = `filter(${candidateMapExpr}, not(isNull(item("value"))))`;
+
+  let filteredCandidatesExpr = mandatoryFilterExpr;
+  if (collection.inclusionPredicate !== undefined) {
+    const inclusionPredicateExpr = generateFilterPredicate(collection.inclusionPredicate);
+    // Optional inclusion predicate should not invalidate the whole objectFields
+    // expression while the user is still editing an incomplete condition.
+    // Keep the mandatory canonical non-null filter active and apply the extra
+    // filter only once the predicate is valid/non-empty.
+    if (inclusionPredicateExpr) {
+      filteredCandidatesExpr = `filter(${filteredCandidatesExpr}, ${inclusionPredicateExpr})`;
+    }
+  }
+
+  const objectTemplate = generateObjectTemplate(template);
+  return `map(${filteredCandidatesExpr}, ${objectTemplate})`;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -553,6 +617,12 @@ export function generateArrayExpression(state: ArrayBuilderState): string {
 
     case 'mergeArrayBranches':
       return generateMergeBranchesExpression(collectionState as MergeBranchesCollectionState);
+
+    case 'objectFields':
+      return generateObjectFieldsExpression(
+        collectionState as ObjectFieldsCollectionState,
+        itemTemplate,
+      );
 
     case 'customExpression': {
       const cs = collectionState as { mode: 'customExpression'; rawExpression: string };

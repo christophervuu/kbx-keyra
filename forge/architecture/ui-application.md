@@ -121,7 +121,7 @@ ui/src/
         WorkspaceSuggestionPreview.tsx FS-048 optional per-suggestion preview section (current vs suggested output) + no-source-data callout
         ObjectSummaryPanel.tsx Right panel: object node coverage + child status; clickable child rows navigate to child field; empty state when no children
         ArrayBuilder.tsx      Right panel: chain-aligned two-layer array builder (FS-043, updated FS-051); header row: status icon + type badge + target path + Builder/Editor ModeToggle + ⋮ HeaderOverflowMenu; Builder mode: ArrayModeSelector + CollectionEditorSlot + ItemTemplateEditor; Editor mode: RawDslEditor + parse status + error list + restore/reset actions; nested focused panel (NestedArrayPanel) with "Back to parent" navigation; ValidationSummaryRow pinned between feedback area and content; action row: Reset draft + Discard changes (no AI buttons — intentionally omitted)
-        ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / mergeArrayBranches (4 cards only; customExpression removed as mode card in FS-051 T-01 — raw DSL now accessed via Builder/Editor toggle in header)
+        ArrayModeSelector.tsx Array mode cards: map / filterMap / buildFromValues / objectFields / mergeArrayBranches (5 cards; customExpression removed as mode card in FS-051 T-01 — raw DSL now accessed via Builder/Editor toggle in header)
         ValidationSummaryRow.tsx Shared pinned bar showing error/warning/incomplete counts; renders null when all counts are zero; used by both ArrayBuilder (testId="array-validation-summary") and ScalarFieldBuilder (testId="scalar-validation-summary") (FS-051 T-04)
         MapCollectionEditor.tsx Collection editor for map mode (source array selection)
         FilterMapCollectionEditor.tsx Collection editor for filter+map mode (source selection + filter predicate)
@@ -1154,6 +1154,32 @@ Legend: vertical `││` separators are draggable resize handles between panels
 **Slot props on `MappingEditorPage`:**
 - `sourceContent` — `SourceSchemaPanel` (left panel, internal search)
 - `builderContent` — center authoring panel (`BuilderEmptyState`/`ScalarFieldBuilder`/`ObjectSummaryPanel`/`ArrayBuilder`/`ExpressionBuilderPanel`/`AutoMapWorkspace`)
+
+#### FS-104 objectFields canonical array-mode addendum
+
+FS-104 extends Array Builder with `objectFields` as a collection mode for schema-defined named child properties under one selected parent object reference.
+
+Canonical collection contract:
+- Parent reference is one of:
+  - primary source object path (`source("...")`)
+  - enrichment alias object root/path (`external("alias")` or `get(external("alias"), "...")`)
+- Candidate generation is deterministic ordered-key driven and uses existing DSL functions only.
+- Canonical expression shape is deterministic and must preserve sequential filtering semantics:
+  - mandatory first filter: `not(isNull(item("value")))`
+  - optional user inclusion predicate in a second filter stage (never merged into one predicate)
+- Item template mapping remains reusable and mode-agnostic at item layer; collection semantics stay collection-layer only.
+
+Guided reopen boundary (safety contract):
+- Builder hydration for `objectFields` is intentionally limited to KeyRa canonical generated patterns.
+- Structurally equivalent but non-canonical edits remain in Editor mode (`customExpression`) with warning banner and no destructive rewrite.
+
+Preview/validation addendum:
+- `ArrayResultPreview` for `objectFields` shows configured/present/missing/excluded/generated counts plus output order summary.
+- Missing parent object is non-fatal (`[]`) and surfaces parent-missing summary messaging in preview/feedback surfaces.
+
+Engine/runtime compatibility boundary:
+- FS-104 introduces no new DSL/runtime functions and no cloud-specific execution branch.
+- Browser preview and Lambda runtime are expected to produce identical outputs for canonical `objectFields` expressions given identical inputs.
 - `targetWorklistContent` — right panel (`TargetWorklist` in target view, `RuleList` in rules view)
 - `bottomContent` — `ConnectedInlinePreviewStrip` (Target View) or `BottomArea` (Rules View)
 
@@ -1229,7 +1255,7 @@ When a target field is selected in Target View, the center builder panel renders
 
 FS-043 replaces the legacy 4-step array wizard with a chain-aligned **two-layer builder model**:
 
-- **Collection layer:** chooses and configures array production strategy (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`)
+- **Collection layer:** chooses and configures array production strategy (`map`, `filterMap`, `buildFromValues`, `objectFields`, `mergeArrayBranches`)
 - **Item layer:** maps item fields using leaf-level chain-compatible expressions plus guided helpers
 
 > **FS-051 update:** `customExpression` is no longer a selectable mode card in `ArrayModeSelector`. Raw DSL editing is accessed via the **Builder/Editor toggle** in the ArrayBuilder header (same pattern as ScalarFieldBuilder). `customExpression` remains as an internal backing store in `ArrayBuilderMode` and `useArrayBuilderState` — it is used when the user switches to Editor mode or when a saved expression cannot be decomposed into a structured mode.
@@ -1267,6 +1293,7 @@ Preview model summary:
 - Array result preview renders array-shaped results with truncation and expand behavior
 - Empty/null states provide contextual hints
 - Merge branch contribution summary is best-effort and may be estimated when exact derivation is impractical
+- FS-104 `objectFields` preview includes deterministic order + summary counts (configured, missing/null, present, excluded by optional predicate, generated) and a parent-missing empty-array hint
 
 ### Unified Builder Visual Shell (FS-051)
 
@@ -1606,7 +1633,7 @@ Location: `ui/src/features/mappings/hooks/use-array-builder-state.ts`
 
 Manages the FS-043 chain-aligned array builder state for `ArrayBuilder` using a two-layer model:
 
-1. **Collection layer** — how the array is produced (`map`, `filterMap`, `buildFromValues`, `mergeArrayBranches`; `customExpression` is an internal backing store for Editor mode — not a selectable mode card)
+1. **Collection layer** — how the array is produced (`map`, `filterMap`, `buildFromValues`, `objectFields`, `mergeArrayBranches`; `customExpression` is an internal backing store for Editor mode — not a selectable mode card)
 2. **Item layer** — how each mapped item field is produced (`itemTemplate` with leaf mappings + nested arrays)
 
 Primary inputs:
@@ -1646,6 +1673,7 @@ State model summary:
   - `MapCollectionState`
   - `FilterMapCollectionState`
   - `BuildFromValuesCollectionState`
+  - `ObjectFieldsCollectionState`
   - `MergeBranchesCollectionState`
   - `CustomExpressionCollectionState` (internal — backing store for Editor mode; not a selectable mode card)
 - **`ItemTemplateState`**
@@ -1659,6 +1687,9 @@ Mode-switch behavior (architecture level):
 - Incompatible transitions stage `pendingModeSwitch` and require explicit confirmation
 - Builder → Editor (via header toggle): calls `switchMode('customExpression')` to store current expression; sets `builderEditorMode = 'editor'`
 - Editor → Builder (via header toggle): attempts `decomposeArrayExpression()`; on success hydrates structured state; on failure shows warning banner and stays in Editor
+- For FS-104 `objectFields`, guided reopen support is intentionally strict to KeyRa canonical generated patterns only:
+  - `map(filter(map(array(...), candidateTemplate), not(isNull(item("value")))), itemTemplate)`
+  - `map(filter(filter(map(array(...), candidateTemplate), not(isNull(item("value")))), <userPredicate>), itemTemplate)`
 - Unrecognized saved expression: `isFromUnrecognized` flag causes `builderEditorMode` to default to `'editor'` on mount
 
 Draft integration:
@@ -2261,6 +2292,7 @@ Canonical contracts:
 - **Density/accessibility contract:** compact grouped rows, internal tray scroll at >5 rows or >320px, neutral status for available/unreferenced rows, and accessible confirmation/focus-return/live-announcement behavior on Smart Builder mapping surfaces.
 - **Enrichment terminology contract:** guided UI uses **Enrichment input** labels while generated DSL keeps canonical enrichment expressions (`external("alias")`, `get(external("alias"), "path")`).
 - **Array handoff contract:** deep-array authoring actions (`array.map`, `array.filter`, `array.find`, `array.array`, `array.merge`) must hand off to `ArrayBuilder`; scalar Smart Builder does not author nested deep-array internals.
+- **FS-104 reusable item-recipe boundary:** `objectFields` reuses the same item-template/Smart Builder-backed scalar authoring contract as `map`, `filterMap`, and merge branches. Collection-mode semantics (parent reference, ordered keys, inclusion predicate) remain collection-layer concerns; item field semantics remain item-layer concerns.
 
 #### Component hierarchy (Target View / ArrayBuilder) — FS-043, updated FS-051
 
@@ -2274,10 +2306,10 @@ ArrayBuilder
 ├── ValidationSummaryRow (pinned; hidden when all counts are zero)
 ├── Scrollable content:
 │   [Builder mode]
-│   ├── ArrayModeSelector (4 cards: map / filterMap / buildFromValues / mergeArrayBranches)
+│   ├── ArrayModeSelector (5 cards: map / filterMap / buildFromValues / objectFields / mergeArrayBranches)
 │   ├── CollectionEditorSlot (mode-specific: MapCollectionEditor / FilterMapCollectionEditor /
-│   │   BuildFromValuesEditor / MergeBranchesEditor)
-│   └── ItemTemplateEditor (shown for map, filterMap, mergeArrayBranches)
+│   │   BuildFromValuesEditor / ObjectFieldsCollectionEditor / MergeBranchesEditor)
+│   └── ItemTemplateEditor (shown for map, filterMap, objectFields, mergeArrayBranches)
 │       └── NestedArrayPanel (recursive, depth-limited at nestingDepth >= 2)
 │   [Editor mode]
 │   ├── Unrecognized expression banner (amber, when isFromUnrecognized)

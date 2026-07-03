@@ -28,6 +28,7 @@ const MODE_LABELS: Record<ArrayBuilderMode, string> = {
   map: 'Map source array',
   filterMap: 'Filter + Map',
   buildFromValues: 'Build from values',
+  objectFields: 'Build from object fields',
   mergeArrayBranches: 'Merge array branches',
   customExpression: 'Custom expression',
 };

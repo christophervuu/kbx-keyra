@@ -5,7 +5,7 @@ import type { EvaluationContext } from '../../../src/engine/dsl/types.js';
 import { registerAllFunctions } from '../../../src/engine/functions/index.js';
 import { createRegistry } from '../../../src/engine/registry/function-registry.js';
 
-function createContext(sourceData: unknown): EvaluationContext {
+function createContext(sourceData: unknown, externalSources: Readonly<Record<string, unknown>> = {}): EvaluationContext {
   const registry = createRegistry();
   registerAllFunctions(registry);
 
@@ -13,7 +13,7 @@ function createContext(sourceData: unknown): EvaluationContext {
     sourceData,
     scopeStack: [],
     constants: {},
-    externalSources: {},
+    externalSources,
     registry,
     options: {},
     evaluate,
@@ -29,8 +29,8 @@ function createContext(sourceData: unknown): EvaluationContext {
   return context;
 }
 
-function run(expression: string, sourceData: unknown) {
-  const context = createContext(sourceData);
+function run(expression: string, sourceData: unknown, externalSources: Readonly<Record<string, unknown>> = {}) {
+  const context = createContext(sourceData, externalSources);
   const parsed = parse(expression, { registry: context.registry });
   expect(parsed.success).toBe(true);
   expect(parsed.ast).not.toBeNull();
@@ -40,6 +40,22 @@ function run(expression: string, sourceData: unknown) {
     context,
   };
 }
+
+const OBJECT_FIELDS_PRIMARY_EXPRESSION =
+  'map(filter(map(array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), {"day": item(""), "value": get(source("DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen"), "beginTime": item("value.BeginTime")})';
+
+const OBJECT_FIELDS_ENRICHMENT_EXPRESSION =
+  'map(filter(map(array("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"), {"day": item(""), "value": get(get(external("hours"), "DeliveryWeeklyOperation"), item(""))}), not(isNull(item("value")))), {"operationDayValue": item("day"), "isOpen": item("value.IsOpen"), "beginTime": item("value.BeginTime")})';
+
+const WEEKLY_OBJECT = {
+  Sunday: { BeginTime: '09:00', IsOpen: true },
+  Monday: { BeginTime: '10:00', IsOpen: false },
+  Tuesday: { BeginTime: '11:00', IsOpen: true },
+  Wednesday: { BeginTime: '12:00', IsOpen: true },
+  Thursday: { BeginTime: '13:00', IsOpen: true },
+  Friday: { BeginTime: '14:00', IsOpen: true },
+  Saturday: { BeginTime: '15:00', IsOpen: true },
+};
 
 describe('array functions integration and composition', () => {
   describe('scope stack critical behavior', () => {
@@ -295,6 +311,68 @@ describe('array functions integration and composition', () => {
       expect(joinMap.value).toBe('Alpha,Beta');
       expect(countFilter.value).toBe(2);
       expect(arrayFromComputed.value).toEqual(['A1', 'B1']);
+    });
+  });
+
+  describe('canonical objectFields expression coverage', () => {
+    it('returns seven ordered items and retains IsOpen: false for primary parent source', () => {
+      const { result } = run(OBJECT_FIELDS_PRIMARY_EXPRESSION, {
+        DeliveryWeeklyOperation: WEEKLY_OBJECT,
+      });
+
+      expect(result.value).toEqual([
+        { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+        { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+        { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+        { operationDayValue: 'Wednesday', isOpen: true, beginTime: '12:00' },
+        { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+        { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+        { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+      ]);
+    });
+
+    it('skips missing configured child key and yields six ordered outputs', () => {
+      const { result } = run(OBJECT_FIELDS_PRIMARY_EXPRESSION, {
+        DeliveryWeeklyOperation: {
+          ...WEEKLY_OBJECT,
+          Wednesday: null,
+        },
+      });
+
+      expect(result.value).toEqual([
+        { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+        { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+        { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+        { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+        { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+        { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+      ]);
+    });
+
+    it('returns empty array when primary parent object is missing/null', () => {
+      const missingParent = run(OBJECT_FIELDS_PRIMARY_EXPRESSION, {}).result;
+      const nullParent = run(OBJECT_FIELDS_PRIMARY_EXPRESSION, { DeliveryWeeklyOperation: null }).result;
+
+      expect(missingParent.value).toEqual([]);
+      expect(nullParent.value).toEqual([]);
+    });
+
+    it('supports enrichment-backed parent expression with same canonical semantics', () => {
+      const { result } = run(OBJECT_FIELDS_ENRICHMENT_EXPRESSION, {}, {
+        hours: {
+          DeliveryWeeklyOperation: WEEKLY_OBJECT,
+        },
+      });
+
+      expect(result.value).toEqual([
+        { operationDayValue: 'Sunday', isOpen: true, beginTime: '09:00' },
+        { operationDayValue: 'Monday', isOpen: false, beginTime: '10:00' },
+        { operationDayValue: 'Tuesday', isOpen: true, beginTime: '11:00' },
+        { operationDayValue: 'Wednesday', isOpen: true, beginTime: '12:00' },
+        { operationDayValue: 'Thursday', isOpen: true, beginTime: '13:00' },
+        { operationDayValue: 'Friday', isOpen: true, beginTime: '14:00' },
+        { operationDayValue: 'Saturday', isOpen: true, beginTime: '15:00' },
+      ]);
     });
   });
 

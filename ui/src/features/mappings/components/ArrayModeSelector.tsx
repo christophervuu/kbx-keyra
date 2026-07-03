@@ -1,11 +1,12 @@
 /**
  * ArrayModeSelector.tsx — FS-043 T-04 / FS-051 T-01
  *
- * Mode picker for the Array Builder. Presents five mode cards:
+ * Mode picker for the Array Builder. Presents guided mode cards:
  *   - Map source array
  *   - Filter + map
  *   - Split text into items
  *   - Build from values
+ *   - Build from object fields
  *   - Merge branches
  *
  * FS-051 T-01: Removed "Custom expression" card and "Advanced" separator.
@@ -14,7 +15,7 @@
  * Fires onSelectMode when a card is clicked or activated via keyboard.
  */
 
-import { ChevronDown, ChevronRight, Filter, GitMerge, Layers, List, Scissors } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronRight, Filter, GitMerge, Layers, List, Scissors } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import type { ArrayBuilderMode } from '../lib/array-builder-state';
@@ -66,6 +67,12 @@ const MODE_OPTIONS: ModeOption[] = [
     label: 'Build from values',
     description: 'Construct array entries from individual fields',
     icon: <Layers size={16} aria-hidden="true" />,
+  },
+  {
+    mode: 'objectFields',
+    label: 'Build from object fields',
+    description: 'Build items from selected child properties of an object',
+    icon: <Calendar size={16} aria-hidden="true" />,
   },
   {
     mode: 'mergeArrayBranches',

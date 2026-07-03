@@ -6,8 +6,9 @@
  *
  * Pattern detection order (per spec note):
  *   1. merge(...)                     → Merge Array Branches mode
- *   2. map(filter(source(...), ...), ...) → Filter + Map mode
- *   3. map(source(...), ...)           → Map mode
+ *   2. map(filter(filter(map(array(...), ...), ...), ...), ...) → Object Fields mode
+ *   3. map(filter(source(...), ...), ...) → Filter + Map mode
+ *   4. map(source(...), ...)           → Map mode
  *   4. array(...) / filter(array(...), ...) → Build from Values mode
  *   5. fallback                        → Custom Expression mode
  *
@@ -102,6 +103,15 @@ function extractCollectionSourcePath(node: AstNode): string {
     if (node.name === 'item') return `__item__:${node.arguments[0].value}`;
   }
   return '';
+}
+
+function isItemCallWithLiteral(node: AstNode, value: string): boolean {
+  return (
+    isCall(node, 'item')
+    && node.arguments.length === 1
+    && node.arguments[0]?.type === 'StringLiteral'
+    && node.arguments[0].value === value
+  );
 }
 
 /**
@@ -463,6 +473,137 @@ function decomposeMapOrFilterMap(
   };
 }
 
+function tryDecomposeObjectFieldsParent(
+  node: AstNode,
+): { input: { kind: 'primary' } | { kind: 'enrichment'; alias: string }; objectPath: string } | null {
+  if (isSourceCall(node)) {
+    return {
+      input: { kind: 'primary' },
+      objectPath: extractSourcePath(node),
+    };
+  }
+
+  if (isCall(node, 'external') && node.arguments.length === 1 && node.arguments[0]?.type === 'StringLiteral') {
+    return {
+      input: { kind: 'enrichment', alias: node.arguments[0].value },
+      objectPath: '',
+    };
+  }
+
+  if (
+    isCall(node, 'get')
+    && node.arguments.length === 2
+    && isCall(node.arguments[0]!, 'external')
+    && node.arguments[0]!.arguments.length === 1
+    && node.arguments[0]!.arguments[0]?.type === 'StringLiteral'
+    && node.arguments[1]?.type === 'StringLiteral'
+  ) {
+    return {
+      input: { kind: 'enrichment', alias: node.arguments[0]!.arguments[0].value },
+      objectPath: node.arguments[1].value,
+    };
+  }
+
+  return null;
+}
+
+function tryDecomposeObjectFieldsCandidateMap(node: AstNode): {
+  orderedChildKeys: readonly string[];
+  parent: { input: { kind: 'primary' } | { kind: 'enrichment'; alias: string }; objectPath: string };
+} | null {
+  if (!isCall(node, 'map') || node.arguments.length !== 2) return null;
+  const keysArrayNode = node.arguments[0]!;
+  const candidateTemplateNode = node.arguments[1]!;
+
+  if (!isCall(keysArrayNode, 'array')) return null;
+  const orderedChildKeys: string[] = [];
+  for (const arg of keysArrayNode.arguments) {
+    if (arg.type !== 'StringLiteral') return null;
+    orderedChildKeys.push(arg.value);
+  }
+  if (orderedChildKeys.length === 0) return null;
+
+  if (candidateTemplateNode.type !== 'ObjectTemplate') return null;
+  if (candidateTemplateNode.properties.length !== 2) return null;
+
+  const [dayProp, valueProp] = candidateTemplateNode.properties;
+  if (!dayProp || !valueProp) return null;
+  if (dayProp.key !== 'day' || valueProp.key !== 'value') return null;
+  if (!isItemCallWithLiteral(dayProp.value, '')) return null;
+
+  if (!isCall(valueProp.value, 'get') || valueProp.value.arguments.length !== 2) return null;
+  const parentExprNode = valueProp.value.arguments[0]!;
+  const keyExprNode = valueProp.value.arguments[1]!;
+  if (!isItemCallWithLiteral(keyExprNode, '')) return null;
+
+  const parent = tryDecomposeObjectFieldsParent(parentExprNode);
+  if (parent === null) return null;
+
+  return { orderedChildKeys, parent };
+}
+
+function tryDecomposeObjectFieldsMandatoryFilter(node: AstNode): {
+  orderedChildKeys: readonly string[];
+  parent: { input: { kind: 'primary' } | { kind: 'enrichment'; alias: string }; objectPath: string };
+} | null {
+  if (!isCall(node, 'filter') || node.arguments.length !== 2) return null;
+  const candidateMapNode = node.arguments[0]!;
+  const predicateNode = node.arguments[1]!;
+
+  if (
+    !isCall(predicateNode, 'not')
+    || predicateNode.arguments.length !== 1
+    || !isCall(predicateNode.arguments[0]!, 'isNull')
+    || predicateNode.arguments[0]!.arguments.length !== 1
+    || !isItemCallWithLiteral(predicateNode.arguments[0]!.arguments[0]!, 'value')
+  ) {
+    return null;
+  }
+
+  return tryDecomposeObjectFieldsCandidateMap(candidateMapNode);
+}
+
+function tryDecomposeObjectFields(
+  node: Extract<AstNode, { type: 'FunctionCall' }>,
+): DecomposeArrayResult | null {
+  if (!isCall(node, 'map') || node.arguments.length !== 2) return null;
+
+  const firstArg = node.arguments[0]!;
+  const templateArg = node.arguments[1]!;
+
+  let orderedChildKeys: readonly string[] | null = null;
+  let parent: { input: { kind: 'primary' } | { kind: 'enrichment'; alias: string }; objectPath: string } | null = null;
+  let inclusionPredicate: FilterPredicateState | undefined;
+
+  const mandatoryOnly = tryDecomposeObjectFieldsMandatoryFilter(firstArg);
+  if (mandatoryOnly !== null) {
+    orderedChildKeys = mandatoryOnly.orderedChildKeys;
+    parent = mandatoryOnly.parent;
+  } else if (isCall(firstArg, 'filter') && firstArg.arguments.length === 2) {
+    const mandatoryFilterNode = firstArg.arguments[0]!;
+    const additionalPredicateNode = firstArg.arguments[1]!;
+    const mandatory = tryDecomposeObjectFieldsMandatoryFilter(mandatoryFilterNode);
+    if (mandatory !== null) {
+      orderedChildKeys = mandatory.orderedChildKeys;
+      parent = mandatory.parent;
+      inclusionPredicate = decomposeFilterPredicate(additionalPredicateNode);
+    }
+  }
+
+  if (orderedChildKeys === null || parent === null) return null;
+
+  const itemTemplate = decomposeItemTemplate(templateArg);
+  const collectionState: CollectionState = {
+    mode: 'objectFields',
+    parent,
+    orderedChildKeys,
+    missingBehavior: 'skip-null-or-absent',
+    ...(inclusionPredicate !== undefined && { inclusionPredicate }),
+  };
+
+  return buildState(collectionState, itemTemplate);
+}
+
 /**
  * Attempts to decompose a merge(...) node into Merge Array Branches mode.
  * Each argument must be a map(source(...), {...}) call.
@@ -648,6 +789,9 @@ export function decomposeArrayExpression(expression: string): DecomposeArrayResu
 
   // 2 & 3. Map / Filter+Map
   if (isCall(ast, 'map')) {
+    const objectFieldsResult = tryDecomposeObjectFields(ast);
+    if (objectFieldsResult !== null) return objectFieldsResult;
+
     const mapResult = decomposeMapOrFilterMap(ast);
     if (mapResult.success) return mapResult;
     // map() was recognized but inner structure failed — fall through to custom

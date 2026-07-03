@@ -30,8 +30,8 @@
 import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronUp, GitMerge, List } from 'lucide-react';
 
-import { evaluateExpression } from '@/lib/engine';
-import type { ArrayBuilderMode } from '../lib/array-builder-state';
+import { evaluateExpression, resolvePath } from '@/lib/engine';
+import type { ArrayBuilderMode, ObjectFieldsCollectionState } from '../lib/array-builder-state';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -56,6 +56,17 @@ export interface ArrayResultPreviewProps {
   readonly mode: ArrayBuilderMode;
   /** Current DSL expression — used for merge branch sub-evaluation. */
   readonly expression: string;
+  /** Optional objectFields state for object-fields preview summaries. */
+  readonly objectFieldsState?: ObjectFieldsCollectionState | null;
+}
+
+interface ObjectFieldsPreviewSummary {
+  readonly configuredCount: number;
+  readonly includedCount: number;
+  readonly skippedCount: number;
+  readonly generatedCount: number;
+  readonly outputOrder: readonly string[];
+  readonly parentMissing: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +153,69 @@ function evaluateBranchCounts(
   }
 }
 
+function deriveObjectFieldsSummary(
+  sourceData: unknown,
+  result: unknown,
+  objectFieldsState: ObjectFieldsCollectionState | null | undefined,
+): ObjectFieldsPreviewSummary | null {
+  if (!objectFieldsState) return null;
+
+  const configuredCount = objectFieldsState.orderedChildKeys.length;
+  const generatedCount = Array.isArray(result) ? result.length : 0;
+
+  if (configuredCount === 0) {
+    return {
+      configuredCount: 0,
+      includedCount: 0,
+      skippedCount: 0,
+      generatedCount,
+      outputOrder: [],
+      parentMissing: false,
+    };
+  }
+
+  if (objectFieldsState.parent.input.kind !== 'primary') {
+    const includedCount = Math.min(configuredCount, generatedCount);
+    return {
+      configuredCount,
+      includedCount,
+      skippedCount: configuredCount - includedCount,
+      generatedCount,
+      outputOrder: objectFieldsState.orderedChildKeys.slice(0, includedCount),
+      parentMissing: false,
+    };
+  }
+
+  const parentPath = objectFieldsState.parent.objectPath.trim();
+  const parentValue = parentPath ? resolvePath(sourceData, parentPath) : null;
+  if (parentValue === null || parentValue === undefined || typeof parentValue !== 'object' || Array.isArray(parentValue)) {
+    return {
+      configuredCount,
+      includedCount: 0,
+      skippedCount: configuredCount,
+      generatedCount,
+      outputOrder: [],
+      parentMissing: true,
+    };
+  }
+
+  const objectRecord = parentValue as Record<string, unknown>;
+  const includedKeys: string[] = [];
+  for (const key of objectFieldsState.orderedChildKeys) {
+    const value = objectRecord[key];
+    if (value !== null && value !== undefined) includedKeys.push(key);
+  }
+
+  return {
+    configuredCount,
+    includedCount: includedKeys.length,
+    skippedCount: configuredCount - includedKeys.length,
+    generatedCount,
+    outputOrder: includedKeys,
+    parentMissing: false,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -218,8 +292,13 @@ export function ArrayResultPreview({
   sourceData,
   mode,
   expression,
+  objectFieldsState,
 }: ArrayResultPreviewProps) {
   const [expanded, setExpanded] = useState(false);
+  const objectFieldsSummary = useMemo(
+    () => (mode === 'objectFields' ? deriveObjectFieldsSummary(sourceData, result, objectFieldsState) : null),
+    [mode, objectFieldsState, result, sourceData],
+  );
 
   // No source data
   if (sourceData === null || sourceData === undefined) {
@@ -273,7 +352,9 @@ export function ArrayResultPreview({
   // Empty array
   if (Array.isArray(result) && result.length === 0) {
     const hint =
-      mode === 'filterMap'
+      mode === 'objectFields' && objectFieldsSummary?.parentMissing
+        ? 'Parent object is missing in source data; configured fields were skipped.'
+        : mode === 'filterMap'
         ? 'Filter condition excluded all elements.'
         : mode === 'buildFromValues'
           ? 'No value entries produced output.'
@@ -282,6 +363,19 @@ export function ArrayResultPreview({
             : 'The source array is empty.';
     return (
       <div data-testid="array-preview-empty" className="space-y-1">
+        {objectFieldsSummary && (
+          <div
+            data-testid="array-preview-objectfields-summary"
+            className="rounded border border-slate-700 bg-slate-900/50 px-2 py-1.5 text-[10px] text-slate-300"
+          >
+            <div>
+              configured: <span data-testid="array-preview-of-configured">{objectFieldsSummary.configuredCount}</span> • included: <span data-testid="array-preview-of-included">{objectFieldsSummary.includedCount}</span> • skipped: <span data-testid="array-preview-of-skipped">{objectFieldsSummary.skippedCount}</span> • generated: <span data-testid="array-preview-of-generated">{objectFieldsSummary.generatedCount}</span>
+            </div>
+            <div data-testid="array-preview-of-order" className="mt-0.5 text-slate-400">
+              output order: {objectFieldsSummary.outputOrder.length > 0 ? objectFieldsSummary.outputOrder.join(', ') : '(none)'}
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <span className="font-mono text-zinc-400">[]</span>
           <span className="text-[10px] text-zinc-500">Empty array</span>
@@ -307,6 +401,20 @@ export function ArrayResultPreview({
 
   return (
     <div data-testid="array-preview-result" className="space-y-2">
+      {objectFieldsSummary && (
+        <div
+          data-testid="array-preview-objectfields-summary"
+          className="rounded border border-slate-700 bg-slate-900/50 px-2 py-1.5 text-[10px] text-slate-300"
+        >
+          <div>
+            configured: <span data-testid="array-preview-of-configured">{objectFieldsSummary.configuredCount}</span> • included: <span data-testid="array-preview-of-included">{objectFieldsSummary.includedCount}</span> • skipped: <span data-testid="array-preview-of-skipped">{objectFieldsSummary.skippedCount}</span> • generated: <span data-testid="array-preview-of-generated">{objectFieldsSummary.generatedCount}</span>
+          </div>
+          <div data-testid="array-preview-of-order" className="mt-0.5 text-slate-400">
+            output order: {objectFieldsSummary.outputOrder.length > 0 ? objectFieldsSummary.outputOrder.join(', ') : '(none)'}
+          </div>
+        </div>
+      )}
+
       {/* Header: item count badge + merge branch summary */}
       <div className="flex flex-wrap items-center gap-2">
         <ItemCountBadge count={totalCount} />

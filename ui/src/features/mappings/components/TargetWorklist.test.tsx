@@ -202,6 +202,29 @@ describe('TargetWorklist', () => {
     expect(lastCall.visibleTargetPaths).toEqual(expect.arrayContaining(['firstName', 'lastName', 'age']));
   });
 
+  it('does not repeatedly emit unchanged visible scope across parent rerenders', () => {
+    const onVisibleScopeChange = vi.fn();
+    const { rerender } = render(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        onVisibleScopeChange={onVisibleScopeChange}
+      />,
+    );
+
+    expect(onVisibleScopeChange).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TargetWorklist
+        {...DEFAULT_PROPS}
+        nodes={FLAT_NODES}
+        onVisibleScopeChange={onVisibleScopeChange}
+      />,
+    );
+
+    expect(onVisibleScopeChange).toHaveBeenCalledTimes(1);
+  });
+
   it('highlights the selected field', () => {
     render(
       <TargetWorklist {...DEFAULT_PROPS} nodes={FLAT_NODES} selectedPath="lastName" />,
