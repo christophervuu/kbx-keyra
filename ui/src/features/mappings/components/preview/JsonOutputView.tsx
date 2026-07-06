@@ -196,7 +196,6 @@ function JsonNode({
                 hasActiveSearch={hasActiveSearch}
                 searchExpandedPaths={searchExpandedPaths}
               />
-              {childIsLast ? '' : ','}
               {'\n'}
             </span>
           );
@@ -306,7 +305,6 @@ function JsonNode({
                 searchExpandedPaths={searchExpandedPaths}
                 parentHighlighted={childHighlighted}
               />
-              {childIsLast ? '' : ','}
               {'\n'}
             </span>
           );

@@ -67,6 +67,12 @@ function isConfiguredStaticValue(value: unknown): boolean {
   return false;
 }
 
+function isArgumentExplicitlySet(value: BuilderArgumentValue): boolean {
+  if (value.kind === 'input') return value.inputId.trim().length > 0;
+  if (value.kind === 'expression') return value.expression.trim().length > 0;
+  return isConfiguredStaticValue(value.value);
+}
+
 interface ValueMapProjectTableOption {
   readonly tableId: string;
   readonly label: string;
@@ -237,6 +243,7 @@ export function SmartBuilderPanel({
   const [parameterEditorStepIndex, setParameterEditorStepIndex] = useState<number | null>(null);
   const [parameterEditorStepScope, setParameterEditorStepScope] = useState<'value-step' | 'result-step' | null>(null);
   const [openParameterDropdownId, setOpenParameterDropdownId] = useState<string | null>(null);
+  const fixedValueInputRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null);
   const [activeConditionSlot, setActiveConditionSlot] = useState<ConditionSlotKey | null>(null);
   const [stepPickerScope, setStepPickerScope] = useState<'result' | { readonly kind: 'direct' } | { readonly kind: 'concat-part'; readonly partIndex: number }>('result');
   const [openConcatPartMenuIndex, setOpenConcatPartMenuIndex] = useState<number | null>(null);
@@ -286,6 +293,20 @@ export function SmartBuilderPanel({
       };
     }
   }, [hydration]);
+
+  const isFixedValueUnset = hydration.kind === 'guided'
+    && hydration.draft.composition?.kind === 'direct'
+    && hydration.draft.composition.value?.kind === 'static'
+    && !isArgumentExplicitlySet(hydration.draft.composition.value);
+
+  useEffect(() => {
+    if (!isFixedValueUnset) return;
+    const focusId = requestAnimationFrame(() => {
+      fixedValueInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(focusId);
+  }, [isFixedValueUnset]);
+
   void activeActionId;
   void sourceSampleData;
   void enrichmentSampleData;
@@ -686,7 +707,7 @@ export function SmartBuilderPanel({
 
   const mappingMethodId = (() => {
     const composition = hydration.draft.composition;
-    if (!composition) return hydration.draft.inputs.length === 0 ? 'base.direct' : 'base.none';
+    if (!composition) return 'base.none';
     if (composition.kind === 'direct') {
       if (composition.value?.kind === 'static') return 'base.fixed';
       if (composition.value?.kind === 'expression' && parseConstantNameFromExpression(composition.value.expression)) {
@@ -964,7 +985,7 @@ export function SmartBuilderPanel({
     return hydration.draft.inputs.map((input) => input.label).join(', ');
   })();
 
-  const shouldRenderMethodPreview = mappingMethodId !== 'base.direct';
+  const shouldRenderMethodPreview = mappingMethodId !== 'base.direct' && mappingMethodId !== 'base.fixed';
   const showFinalTransformations = mappingMethodId !== 'base.direct';
   const valueMapComposition = hydration.draft.composition?.kind === 'valueMap'
     ? hydration.draft.composition
@@ -1053,42 +1074,9 @@ export function SmartBuilderPanel({
   })();
 
   const showBuildOutput = (() => {
-    const composition = hydration.draft.composition;
-    if (!composition) return hydration.draft.inputs.length > 0;
-
-    const hasInputId = (inputId: string) => hydration.draft.inputs.some((input) => input.id === inputId);
-
-    if (composition.kind === 'direct') {
-      if (composition.value?.kind === 'input') {
-        return hasInputId(composition.value.inputId);
-      }
-      if (composition.value?.kind === 'static') {
-        return isConfiguredStaticValue(composition.value.value);
-      }
-      if (composition.value?.kind === 'expression') {
-        return composition.value.expression.trim().length > 0;
-      }
-      return hasInputId(composition.inputId);
-    }
-
-    if (composition.kind === 'default') {
-      return hasInputId(composition.inputId);
-    }
-
-    if (composition.kind === 'advancedExpression') {
-      return composition.expression.trim().length > 0;
-    }
-
     return true;
   })();
-  const showInitialStartGuidance = hydration.draft.inputs.length === 0 && !showBuildOutput;
-  const fixedValueStarter = (() => {
-    const composition = hydration.draft.composition;
-    if (composition?.kind !== 'direct') return null;
-    if (composition.value?.kind !== 'static') return null;
-    if (isConfiguredStaticValue(composition.value.value)) return null;
-    return composition.value.value;
-  })();
+  const showInitialStartGuidance = hydration.draft.inputs.length === 0;
 
   const effectivePickerMode = pickerMode ?? (isMethodNeedsAction ? 'base' : null);
   const activePickerActions =
@@ -1770,83 +1758,13 @@ export function SmartBuilderPanel({
             onRemoveInput={onInputRemove}
             onToggleAddInput={() => setShowAddInput((prev) => !prev)}
             showBuilderEmptyGuidance={showInitialStartGuidance}
-            onUseFixedValue={() => onApplyAction?.('base.fixed', { fixedValue: '' })}
           />
-
-          {fixedValueStarter !== null && (
-            <div
-              className="mt-2 rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2"
-              data-testid="smart-fixed-value-starter"
-            >
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Set fixed value</p>
-              {(targetType === 'number' || targetType === 'integer') ? (
-                <input
-                  type="number"
-                  data-testid="smart-fixed-value-starter-input"
-                  className="mt-2 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
-                  value={typeof fixedValueStarter === 'number' ? String(fixedValueStarter) : ''}
-                  placeholder="Enter fixed value"
-                  onChange={(event) => {
-                    const raw = event.target.value;
-                    const next = raw === '' ? '' : Number(raw);
-                    onApplyAction?.('base.fixed', { fixedValue: next });
-                  }}
-                />
-              ) : targetType === 'boolean' ? (
-                <select
-                  data-testid="smart-fixed-value-starter-boolean"
-                  className="mt-2 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
-                  value={typeof fixedValueStarter === 'boolean' ? (fixedValueStarter ? 'true' : 'false') : ''}
-                  onChange={(event) => {
-                    const raw = event.target.value;
-                    const next = raw === 'true' ? true : raw === 'false' ? false : '';
-                    onApplyAction?.('base.fixed', { fixedValue: next });
-                  }}
-                >
-                  <option value="">Select fixed value</option>
-                  <option value="true">True</option>
-                  <option value="false">False</option>
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  data-testid="smart-fixed-value-starter-input"
-                  className="mt-2 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
-                  value={typeof fixedValueStarter === 'string' ? fixedValueStarter : ''}
-                  placeholder="Enter fixed value"
-                  onChange={(event) => {
-                    onApplyAction?.('base.fixed', { fixedValue: event.target.value });
-                  }}
-                />
-              )}
-            </div>
-          )}
 
           <div className="mt-2" data-testid="smart-add-input-section">
             {showAddInput && (
               <div className="mt-2 rounded border border-slate-700 bg-slate-900/30 px-2.5 py-2" data-testid="smart-add-input-options">
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Add input</p>
                 <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                data-testid="smart-add-static"
-                className="rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200 hover:border-slate-500"
-                onClick={() => {
-                  onApplyAction?.('base.fixed', { fixedValue: '' });
-                }}
-              >
-                Fixed value
-              </button>
-              <button
-                type="button"
-                data-testid="smart-add-constant"
-                className="rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200 hover:border-slate-500"
-                onClick={() => {
-                  onApplyAction?.('base.constant', { constantName: 'DEFAULT_CONSTANT' });
-                }}
-              >
-                Constant
-              </button>
               <button
                 type="button"
                 data-testid="smart-add-enrichment"
@@ -1863,29 +1781,6 @@ export function SmartBuilderPanel({
                 }}
               >
                 Enrichment input
-              </button>
-              <button
-                type="button"
-                data-testid="smart-add-expression"
-                className="rounded border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200 hover:border-slate-500"
-                onClick={() => {
-                  const input = hydration.draft.inputs.find((entry) => entry.sourceKind === 'expression' && entry.rawExpression === 'source("path")');
-                  if (input) {
-                    onInputToggle?.(input);
-                    return;
-                  }
-
-                  onStageField?.({
-                    path: 'expression',
-                    kind: 'expression',
-                    label: 'Expression input',
-                    rawExpression: 'source("path")',
-                    valueType: 'unknown',
-                    expression: 'source("path")',
-                  });
-                }}
-              >
-                Expression fallback
               </button>
                   {hasArrayScope && (
                     <>
@@ -1949,7 +1844,7 @@ export function SmartBuilderPanel({
 
             <div className="flex items-center justify-between" data-testid="smart-recipe-base-row">
               <p className="text-[11px] uppercase tracking-wide text-slate-500">Logic</p>
-              {!isMethodNeedsAction && hydration.draft.inputs.length > 0 && (
+              {!isMethodNeedsAction && (
               <button
                 type="button"
                 data-testid="smart-recipe-change-base"
@@ -1971,16 +1866,18 @@ export function SmartBuilderPanel({
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Fixed value</p>
                 {(targetType === 'number' || targetType === 'integer') ? (
                   <input
+                    ref={(node) => {
+                      fixedValueInputRef.current = node;
+                    }}
                     type="number"
                     data-testid="smart-fixed-value-input"
                     className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
                     value={
                       typeof hydration.draft.composition.value.value === 'number'
                         ? String(hydration.draft.composition.value.value)
-                        : hydration.draft.composition.value.value === ''
-                          ? ''
-                          : '0'
+                        : ''
                     }
+                    aria-label={`Fixed value for ${targetPath}`}
                     onChange={(event) => {
                       const raw = event.target.value;
                       const next = raw === '' ? '' : Number(raw);
@@ -1989,18 +1886,41 @@ export function SmartBuilderPanel({
                   />
                 ) : targetType === 'boolean' ? (
                   <select
+                    ref={(node) => {
+                      fixedValueInputRef.current = node;
+                    }}
                     data-testid="smart-fixed-value-boolean"
                     className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
-                    value={hydration.draft.composition.value.value === false ? 'false' : 'true'}
+                    value={typeof hydration.draft.composition.value.value === 'boolean'
+                      ? (hydration.draft.composition.value.value ? 'true' : 'false')
+                      : ''}
+                    aria-label={`Fixed value for ${targetPath}`}
                     onChange={(event) => {
-                      onApplyAction?.('base.fixed', { fixedValue: event.target.value === 'true' });
+                      const raw = event.target.value;
+                      const next = raw === 'true' ? true : raw === 'false' ? false : '';
+                      onApplyAction?.('base.fixed', { fixedValue: next });
                     }}
                   >
+                    <option value="">Select fixed value</option>
                     <option value="true">True</option>
                     <option value="false">False</option>
                   </select>
+                ) : targetType === 'null' ? (
+                  <button
+                    type="button"
+                    data-testid="smart-fixed-value-use-null"
+                    className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+                    onClick={() => {
+                      onApplyAction?.('base.fixed', { fixedValue: null, fixedValueExplicitlySet: true });
+                    }}
+                  >
+                    Use null
+                  </button>
                 ) : (
                   <input
+                    ref={(node) => {
+                      fixedValueInputRef.current = node;
+                    }}
                     type="text"
                     data-testid="smart-fixed-value-input"
                     className="h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
@@ -2010,10 +1930,23 @@ export function SmartBuilderPanel({
                         : ''
                     }
                     placeholder="Enter fixed value"
+                    aria-label={`Fixed value for ${targetPath}`}
                     onChange={(event) => {
                       onApplyAction?.('base.fixed', { fixedValue: event.target.value });
                     }}
                   />
+                )}
+                {targetType === 'string' && (
+                  <button
+                    type="button"
+                    data-testid="smart-fixed-value-use-empty-string"
+                    className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-200 hover:border-slate-500"
+                    onClick={() => {
+                      onApplyAction?.('base.fixed', { fixedValue: '', fixedValueExplicitlySet: true });
+                    }}
+                  >
+                    Use empty string
+                  </button>
                 )}
               </div>
             )}

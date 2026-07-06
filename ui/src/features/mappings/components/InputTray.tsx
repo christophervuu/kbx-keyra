@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ConfirmDialog } from './ConfirmDialog';
-
 import type {
   BuilderInput,
   BuilderInputUsage,
@@ -15,7 +14,6 @@ interface InputTrayProps {
   readonly onRemoveInput?: (inputId: string) => void;
   readonly onToggleAddInput?: () => void;
   readonly showBuilderEmptyGuidance?: boolean;
-  readonly onUseFixedValue?: () => void;
 }
 
 const TYPE_BADGES: Record<BuilderInput['valueType'], { short: string; tone: string; label: string }> = {
@@ -122,7 +120,6 @@ export function InputTray({
   onRemoveInput,
   onToggleAddInput,
   showBuilderEmptyGuidance = false,
-  onUseFixedValue,
 }: InputTrayProps) {
   const [pendingReferencedRemove, setPendingReferencedRemove] = useState<{
     readonly inputId: string;
@@ -238,16 +235,6 @@ export function InputTray({
               <p className="mt-1 text-xs text-slate-400">
                 Select a field from Input Fields or add another value.
               </p>
-              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="smart-builder-empty-actions">
-                <button
-                  type="button"
-                  data-testid="smart-empty-use-fixed-value"
-                  className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                  onClick={() => onUseFixedValue?.()}
-                >
-                  Use fixed value
-                </button>
-              </div>
               <p className="mt-2 text-[11px] text-slate-500" data-testid="smart-builder-empty-advanced-note">
                 More complex logic can be created in Advanced DSL.
               </p>

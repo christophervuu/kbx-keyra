@@ -54,4 +54,17 @@ describe('JsonOutputView', () => {
 
     expect(screen.getByTestId('output-search-no-results')).toHaveTextContent('No matching output nodes');
   });
+
+  it('does not render duplicate commas between sibling properties', () => {
+    render(
+      <JsonOutputView
+        renderableOutput={buildRenderableOutput({
+          organizationCode: 'recycling',
+          locationCode: 'test',
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText('Execution output').textContent).not.toContain(',,');
+  });
 });

@@ -1423,6 +1423,7 @@ describe('applySmartActionToDraft', () => {
     expect(next.composition).toEqual({
       kind: 'direct',
       inputId: 'a',
+      fixedValueExplicitlySet: true,
       value: { kind: 'static', value: 'ACTIVE' },
     });
     expect(next.expression).toBe('"ACTIVE"');

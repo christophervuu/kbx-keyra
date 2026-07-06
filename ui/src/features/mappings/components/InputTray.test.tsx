@@ -26,12 +26,10 @@ describe('InputTray', () => {
   });
 
   it('renders combined smart builder guidance in tray empty state when enabled', () => {
-    const onUseFixedValue = vi.fn();
     render(
       <InputTray
         inputs={[]}
         showBuilderEmptyGuidance
-        onUseFixedValue={onUseFixedValue}
       />,
     );
 
@@ -39,8 +37,7 @@ describe('InputTray', () => {
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('Select a field from Input Fields or add another value.');
     expect(screen.getByTestId('smart-builder-empty-advanced-note')).toHaveTextContent('More complex logic can be created in Advanced DSL.');
 
-    fireEvent.click(screen.getByTestId('smart-empty-use-fixed-value'));
-    expect(onUseFixedValue).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('smart-empty-use-fixed-value')).not.toBeInTheDocument();
   });
 
   it('renders Add Input in tray header and toggles via callback', () => {

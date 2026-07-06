@@ -856,6 +856,7 @@ export function applySmartActionToDraft(
     readonly valueMapNoMatchMode?: ValueTableNoMatchMode;
     readonly valueMapFallbackValue?: ValueTablePrimitiveValue;
     readonly fixedValue?: unknown;
+    readonly fixedValueExplicitlySet?: boolean;
     readonly constantName?: string;
     readonly concatParts?: readonly BuilderArgumentValue[];
     readonly concatMove?: {
@@ -1185,14 +1186,29 @@ export function applySmartActionToDraft(
         && draft.composition.value?.kind === 'static'
         ? draft.composition.value.value
         : '';
+      const currentFixedValueExplicitlySet = draft.composition?.kind === 'direct'
+        ? draft.composition.fixedValueExplicitlySet === true
+        : false;
+
+      const nextFixedValue = options?.fixedValue ?? currentFixedValue;
+      const derivedExplicitState = (() => {
+        if (typeof nextFixedValue === 'string') return nextFixedValue.length > 0;
+        if (typeof nextFixedValue === 'number') return Number.isFinite(nextFixedValue);
+        if (typeof nextFixedValue === 'boolean') return true;
+        if (nextFixedValue === null) return true;
+        return false;
+      })();
+
       nextDraft = {
         ...draft,
         composition: {
           kind: 'direct',
           inputId: draft.inputs[0]?.id ?? 'input-fixed',
+          fixedValueExplicitlySet: options?.fixedValueExplicitlySet
+            ?? (options?.fixedValue !== undefined ? derivedExplicitState : currentFixedValueExplicitlySet),
           value: {
             kind: 'static',
-            value: options?.fixedValue ?? currentFixedValue,
+            value: nextFixedValue,
           },
         },
       };
@@ -4422,7 +4438,14 @@ export default function MappingEditor() {
                         ? 'Trim spaces'
                         : actionId === 'text.phoneDigits'
                           ? 'Normalize phone digits'
-                          : actionId;
+                  : actionId;
+
+          const fixedSelectedUnset = actionId === 'base.fixed'
+            && nextDraftCleared.composition?.kind === 'direct'
+            && nextDraftCleared.composition.value?.kind === 'static'
+            && !(nextDraftCleared.composition.fixedValueExplicitlySet === true)
+            && typeof nextDraftCleared.composition.value.value === 'string'
+            && nextDraftCleared.composition.value.value.length === 0;
 
           const targetSessionKey = buildSmartTargetSessionKey(mappingId, selectedTargetPath);
           setSmartActionMetaByTarget((prev) => ({
@@ -4430,7 +4453,9 @@ export default function MappingEditor() {
             [targetSessionKey]: {
               ...(prev[targetSessionKey] ?? { activeActionId: null, announcement: null }),
               activeActionId: actionId,
-              announcement: `Applied ${actionLabel}. Draft saved.`,
+              announcement: fixedSelectedUnset
+                ? 'Fixed value selected. Enter a value.'
+                : `Applied ${actionLabel}. Draft saved.`,
             },
           }));
         }}

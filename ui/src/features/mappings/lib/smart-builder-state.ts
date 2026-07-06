@@ -150,7 +150,12 @@ export interface BuilderProjectValueMapSelection {
 }
 
 export type BuilderComposition =
-  | { readonly kind: 'direct'; readonly inputId: string; readonly value?: BuilderArgumentValue }
+  | {
+      readonly kind: 'direct';
+      readonly inputId: string;
+      readonly value?: BuilderArgumentValue;
+      readonly fixedValueExplicitlySet?: boolean;
+    }
   | {
       readonly kind: 'concat';
       readonly inputIds?: readonly string[];
@@ -1006,6 +1011,14 @@ function isArgumentMissing(
   return false;
 }
 
+function isConfiguredStaticValue(value: unknown, explicitlySet = false): boolean {
+  if (typeof value === 'string') return value.length > 0 || explicitlySet;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (value === null) return explicitlySet;
+  return false;
+}
+
 function evaluateSmartBuilderRecipeStatus(input: {
   draft: SmartBuilderDraft;
   expression: string;
@@ -1026,6 +1039,13 @@ function evaluateSmartBuilderRecipeStatus(input: {
     }
     case 'direct': {
       if (composition.value) {
+        if (composition.value.kind === 'static') {
+          if (!isConfiguredStaticValue(composition.value.value, composition.fixedValueExplicitlySet === true)) {
+            reasons.push('Select a fixed value.');
+          }
+          break;
+        }
+
         if (isArgumentMissing(input.draft, composition.value)) {
           reasons.push('Select a value for direct mapping.');
         }

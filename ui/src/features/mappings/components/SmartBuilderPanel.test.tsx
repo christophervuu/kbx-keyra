@@ -59,11 +59,10 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-builder-panel')).toBeInTheDocument();
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('No inputs selected yet.');
     expect(screen.getByTestId('smart-builder-empty-state')).toHaveTextContent('Select a field from Input Fields or add another value.');
-    expect(screen.getByTestId('smart-empty-use-fixed-value')).toBeInTheDocument();
-    expect(screen.queryByTestId('smart-empty-use-constant')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-empty-use-fixed-value')).not.toBeInTheDocument();
     expect(screen.getByTestId('smart-builder-empty-advanced-note')).toHaveTextContent('More complex logic can be created in Advanced DSL.');
     expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
-    expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-mapping-recipe')).toBeInTheDocument();
     expect(screen.getByTestId('smart-add-input-toggle')).toBeInTheDocument();
     expect(screen.queryByText('Smart Builder')).not.toBeInTheDocument();
     expect(screen.queryByText(/^Base$/)).not.toBeInTheDocument();
@@ -101,7 +100,7 @@ describe('SmartBuilderPanel', () => {
     expect(screen.getByTestId('smart-recipe-base-label')).toHaveTextContent('Use one value');
   });
 
-  it('hides Build Output and returns to initial start state when inputs are removed', () => {
+  it('keeps Build Output visible and indicates direct input is still required when inputs are removed', () => {
     const draft = {
       ...createEmptySmartBuilderDraft({
         targetPath: 'customer.firstName',
@@ -120,7 +119,8 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('smart-mapping-recipe')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-recipe-base-empty-direct')).toHaveTextContent('Select an input to continue.');
     expect(screen.getByTestId('smart-builder-empty-state')).toBeInTheDocument();
     expect(screen.getByTestId('smart-input-tray-empty')).toBeInTheDocument();
   });
@@ -299,9 +299,9 @@ describe('SmartBuilderPanel', () => {
     expect(onApplyAction).not.toHaveBeenCalled();
   });
 
-  it('routes fixed/constant quick actions to recipe-local base actions and stages enrichment/expression', () => {
-    const onApplyAction = vi.fn();
+  it('keeps Add Input menu focused on reusable input references', () => {
     const onStageField = vi.fn();
+    const onInputToggle = vi.fn();
     const draft = createEmptySmartBuilderDraft({
       targetPath: 'customer.code',
       targetType: 'string',
@@ -313,24 +313,22 @@ describe('SmartBuilderPanel', () => {
         targetPath="customer.code"
         targetType="string"
         hydration={{ kind: 'guided', draft }}
-        onApplyAction={onApplyAction}
         onStageField={onStageField}
+        onInputToggle={onInputToggle}
       />,
     );
 
     fireEvent.click(screen.getByTestId('smart-add-input-toggle'));
-    fireEvent.click(screen.getByTestId('smart-add-static'));
-    fireEvent.click(screen.getByTestId('smart-add-constant'));
     fireEvent.click(screen.getByTestId('smart-add-enrichment'));
-    fireEvent.click(screen.getByTestId('smart-add-expression'));
 
-    expect(onApplyAction).toHaveBeenCalledWith('base.fixed', { fixedValue: '' });
-    expect(onApplyAction).toHaveBeenCalledWith('base.constant', { constantName: 'DEFAULT_CONSTANT' });
+    expect(screen.queryByTestId('smart-add-static')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-add-constant')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('smart-add-expression')).not.toBeInTheDocument();
     expect(onStageField).toHaveBeenCalledWith(expect.objectContaining({ kind: 'enrichment' }));
-    expect(onStageField).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expression' }));
+    expect(onInputToggle).not.toHaveBeenCalled();
   });
 
-  it('keeps Build Output hidden and shows fixed value starter input when fixed value is selected but not configured', () => {
+  it('keeps Build Output visible and shows fixed value editor in-place when fixed value is selected but not configured', async () => {
     const onApplyAction = vi.fn();
     const draft = {
       ...createEmptySmartBuilderDraft({
@@ -354,12 +352,74 @@ describe('SmartBuilderPanel', () => {
       />,
     );
 
-    expect(screen.queryByTestId('smart-mapping-recipe')).not.toBeInTheDocument();
-    expect(screen.getByTestId('smart-builder-empty-state')).toBeInTheDocument();
-    expect(screen.getByTestId('smart-fixed-value-starter')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-mapping-recipe')).toBeInTheDocument();
+    expect(screen.getByTestId('smart-fixed-value-section')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('smart-fixed-value-input')).toHaveFocus();
+    });
 
-    fireEvent.change(screen.getByTestId('smart-fixed-value-starter-input'), { target: { value: 'CAD' } });
+    fireEvent.change(screen.getByTestId('smart-fixed-value-input'), { target: { value: 'CAD' } });
     expect(onApplyAction).toHaveBeenCalledWith('base.fixed', { fixedValue: 'CAD' });
+  });
+
+  it('supports explicit empty string selection for string fixed values', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.code',
+        targetType: 'string',
+        isRequired: false,
+      }),
+      composition: {
+        kind: 'direct' as const,
+        inputId: 'fixed-input',
+        value: { kind: 'static' as const, value: '' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.code"
+        targetType="string"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('smart-fixed-value-use-empty-string'));
+    expect(onApplyAction).toHaveBeenCalledWith('base.fixed', {
+      fixedValue: '',
+      fixedValueExplicitlySet: true,
+    });
+  });
+
+  it('keeps boolean fixed value unset until user explicitly chooses true/false', () => {
+    const onApplyAction = vi.fn();
+    const draft = {
+      ...createEmptySmartBuilderDraft({
+        targetPath: 'customer.isActive',
+        targetType: 'boolean',
+        isRequired: false,
+      }),
+      composition: {
+        kind: 'direct' as const,
+        inputId: 'fixed-input',
+        value: { kind: 'static' as const, value: '' },
+      },
+    };
+
+    render(
+      <SmartBuilderPanel
+        targetPath="customer.isActive"
+        targetType="boolean"
+        hydration={{ kind: 'guided', draft }}
+        onApplyAction={onApplyAction}
+      />,
+    );
+
+    expect(screen.getByTestId('smart-fixed-value-boolean')).toHaveValue('');
+    fireEvent.change(screen.getByTestId('smart-fixed-value-boolean'), { target: { value: 'false' } });
+    expect(onApplyAction).toHaveBeenCalledWith('base.fixed', { fixedValue: false });
   });
 
   it('renders editable fixed value input for base.fixed composition', () => {
@@ -387,6 +447,7 @@ describe('SmartBuilderPanel', () => {
     );
 
     expect(screen.getByTestId('smart-fixed-value-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('smart-recipe-base-preview')).not.toBeInTheDocument();
     const input = screen.getByTestId('smart-fixed-value-input');
     expect(input).toHaveValue('USD');
 
